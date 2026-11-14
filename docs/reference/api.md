@@ -20,6 +20,7 @@ lookup surfaces for this checkout.
 | `<flux/effect.h>`     | Iff `-Deffect=true`  | Image-domain effects (blur, shadow). See [effect reference](effect.md). |
 | `<glyph/glyph.h>`     | Iff `-Dglyph=true`   | Sibling library: shaping, glyph atlas, text measure/draw.          |
 | `<vista/vista.h>`     | Iff `-Dvista=true`   | Sibling library: glTF/GLB loading, animation, materials.           |
+| `<reticle/reticle.h>` | Iff `-Dreticle=true` | Document compiler: SVG parse, flat shape IR, paint and CPU rasterize. |
 
 `<flux/core.h>` and `<flux/math.h>` do **not** include `<vulkan/vulkan.h>`.
 Include `<flux/vulkan.h>` at the seam where you hand flux a `VkSurfaceKHR`
@@ -491,11 +492,11 @@ submit-and-end, nothing recorded is pending. Required reading for
 ## Library versioning
 
 Every library in the stack (`libflux`, `libglyph`, `libvista`,
-`liblens`, `libiris`, `libprism`, `libtransit`) releases as a unit and shares
-one version: `meson.project_version()`. Each library exposes the same
-four accessors under its own prefix (`flux_*`, `lens_*`, `iris_*`,
-`prism_*`, `transit_*`, `glyph_*`, `vista_*`) — one versioning scheme, learn once,
-apply to every library the consumer links.
+`liblens`, `libiris`, `libprism`, `libreticle`, `libtransit`) releases as a
+unit and shares one version: `meson.project_version()`. Each library exposes
+the same four accessors under its own prefix (`flux_*`, `lens_*`, `iris_*`,
+`prism_*`, `reticle_*`, `transit_*`, `glyph_*`, `vista_*`) — one versioning
+scheme, learn once, apply to every library the consumer links.
 
 | Macro / accessor                | Returns                                                     |
 |---------------------------------|-------------------------------------------------------------|
@@ -505,13 +506,14 @@ apply to every library the consumer links.
 | `<prefix>_version_string()`     | `"M.m.p"` string for logging.                               |
 | `<prefix>_version_check(M, m, p)` | True iff this library is at least `M.m.p`.                |
 
-The lockstep is **machine-enforced**: `./tools/gate check lockstep`
-(CI step) parses every library's macros and fails the build when any of
-them differs from `meson.project_version()`, and bans hard-coded version
-string literals (they always drift — vista shipped a
-hard-coded "0.0.29" against 0.0.36 headers; transit sat at 0.0.1 for seven
-months). Bumping the release version therefore means touching every
-library's macros in one commit — the intended discipline.
+The lockstep is **machine-enforced at two levels**. `test_version_lockstep`
+compiles every library against version numbers injected by
+`meson.project_version()` and exercises the runtime accessors.
+`tools/check_versions.py` (`meson test --suite lint`) compares Meson, the Cargo
+workspace, the umbrella header, and every public header. Bumping the release
+version therefore means touching every surface in one commit — the intended
+discipline. Hard-coded version strings still fail the accessor test (vista once
+shipped "0.0.29" against 0.0.36 headers; transit sat at 0.0.1 for seven months).
 
 ## Related
 

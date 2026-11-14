@@ -22,7 +22,7 @@
  *
  * Headless CPU canvas; skips if no shaping backend is compiled in.
  */
-#include "test_helpers.h"
+#include "optics_test.h"
 #include <flux/canvas.h>
 #include <flux/canvas_cpu.h>
 
@@ -76,8 +76,8 @@ int main(void) {
         g_codepoints[i] = 0x4E00u + i;
 
     glyph_ctx *t = nullptr;
-    EXPECT(glyph_create(&(glyph_desc){.device = nullptr, .scale = 1.0f}, &t) == FLUX_OK);
-    EXPECT(t != nullptr);
+    OT_EXPECT(glyph_create(&(glyph_desc){.device = nullptr, .scale = 1.0f}, &t) == FLUX_OK);
+    OT_EXPECT(t != nullptr);
 
     /* Skip when no shaping backend, or when no CJK face is installed: the
      * oversize working set below is made of U+4E00.. glyphs, so a Latin-only
@@ -86,25 +86,26 @@ int main(void) {
     glyph_metrics cjk = glyph_measure(t, "\xE4\xB8\x80", 1, nullptr);
     if (probe.width <= 0.0f || cjk.width <= 0.0f) {
         fprintf(stderr, "text_soak: no shaping backend or CJK face; skipping\n");
-        TEST_SUMMARY();
+        glyph_release(t);
+        OT_SKIP("no shaping backend or CJK face");
     }
 
     flux_canvas *c = nullptr;
-    EXPECT(flux_canvas_create_cpu(256, 128, 1.0f, &c) == FLUX_OK);
+    OT_EXPECT(flux_canvas_create_cpu(256, 128, 1.0f, &c) == FLUX_OK);
 
     /* --- Phase 1: oversize working set (forces evictions, maybe pages). */
     for (uint32_t round = 0; round < 3; round++) {
         flux_color bg = flux_color_rgba_premul(0, 0, 0, 255);
-        EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
-                                                             .clear_color = &bg}) == FLUX_OK);
+        OT_EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                                .clear_color = &bg}) == FLUX_OK);
         draw_window(t, c, 0, DISTINCT_GLYPHS, 16.0f);
-        EXPECT(flux_canvas_end(c) == FLUX_OK);
+        OT_EXPECT(flux_canvas_end(c) == FLUX_OK);
     }
     glyph_stats s1;
     glyph_get_stats(t, &s1);
-    EXPECT(s1.glyph_count <= s1.glyph_max_cap / 2); /* pinned at ceiling */
-    EXPECT(s1.glyph_evictions > 0);                 /* oversize set evicted */
-    EXPECT(s1.glyph_grows <= 7);                    /* 256→16384 = 6 doublings */
+    OT_EXPECT(s1.glyph_count <= s1.glyph_max_cap / 2); /* pinned at ceiling */
+    OT_EXPECT(s1.glyph_evictions > 0);                 /* oversize set evicted */
+    OT_EXPECT(s1.glyph_grows <= 7);                    /* 256→16384 = 6 doublings */
 
     /* --- Phase 2: steady replay of a resident working set. Phase 1 may
      *     have evicted this window's entries (the oversize burst cycled
@@ -114,44 +115,44 @@ int main(void) {
      *     storm would add 256 misses per frame (64 x 256 = 16384). */
     for (int frame = 0; frame < 64; frame++) {
         flux_color bg = flux_color_rgba_premul(0, 0, 0, 255);
-        EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
-                                                             .clear_color = &bg}) == FLUX_OK);
+        OT_EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                                .clear_color = &bg}) == FLUX_OK);
         draw_window(t, c, 100, 256, 16.0f);
-        EXPECT(flux_canvas_end(c) == FLUX_OK);
+        OT_EXPECT(flux_canvas_end(c) == FLUX_OK);
     }
     glyph_stats s2;
     glyph_get_stats(t, &s2);
-    EXPECT(s2.glyph_hits > s1.glyph_hits); /* replay hit the cache */
+    OT_EXPECT(s2.glyph_hits > s1.glyph_hits); /* replay hit the cache */
     uint64_t new_misses = s2.glyph_misses - s1.glyph_misses;
-    EXPECT(new_misses < 512); /* one re-raster pass, no storm */
+    OT_EXPECT(new_misses < 512); /* one re-raster pass, no storm */
 
     /* --- Phase 3: two identical churn windows must land on identical
      *      counters (high-water steady state; no per-frame growth). */
     glyph_stats wa, wb;
     for (int frame = 0; frame < 8; frame++) {
         flux_color bg = flux_color_rgba_premul(0, 0, 0, 255);
-        EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
-                                                             .clear_color = &bg}) == FLUX_OK);
+        OT_EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                                .clear_color = &bg}) == FLUX_OK);
         draw_window(t, c, 0, 1024, 16.0f);
-        EXPECT(flux_canvas_end(c) == FLUX_OK);
+        OT_EXPECT(flux_canvas_end(c) == FLUX_OK);
     }
     glyph_get_stats(t, &wa);
     for (int frame = 0; frame < 8; frame++) {
         flux_color bg = flux_color_rgba_premul(0, 0, 0, 255);
-        EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
-                                                             .clear_color = &bg}) == FLUX_OK);
+        OT_EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                                .clear_color = &bg}) == FLUX_OK);
         draw_window(t, c, 0, 1024, 16.0f);
-        EXPECT(flux_canvas_end(c) == FLUX_OK);
+        OT_EXPECT(flux_canvas_end(c) == FLUX_OK);
     }
     glyph_get_stats(t, &wb);
-    EXPECT(wb.glyph_count == wa.glyph_count); /* no creep */
-    EXPECT(wb.atlas_pages == wa.atlas_pages); /* no page growth per frame */
+    OT_EXPECT(wb.glyph_count == wa.glyph_count); /* no creep */
+    OT_EXPECT(wb.atlas_pages == wa.atlas_pages); /* no page growth per frame */
     /* A working set that fits the page budget must not storm-clear:
      * after the phase-1 oversize burst, clears must not climb again
      * while replaying resident content. */
-    EXPECT(wb.atlas_clears <= wa.atlas_clears);
+    OT_EXPECT(wb.atlas_clears <= wa.atlas_clears);
 
     flux_canvas_release(c);
     glyph_release(t);
-    TEST_SUMMARY();
+    return OT_REPORT();
 }

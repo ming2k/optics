@@ -14,7 +14,8 @@
 #if defined(FLUX_TEXT_HAVE_FTHB)
 #include <glyph/glyph.h>
 #endif
-#include "test_helpers.h"
+#include "flux_test.h"
+#include "optics_test.h"
 
 #include <pthread.h>
 #include <stdatomic.h>
@@ -65,7 +66,7 @@ static const void *test_resource_resolve(void *user, flux_display_list_resource_
 
 static void draw_display_list(flux_canvas *canvas, void *user) {
     const display_list_case *c = user;
-    EXPECT(flux_canvas_submit_display_list(canvas, c->list) == FLUX_OK);
+    OT_EXPECT(flux_canvas_submit_display_list(canvas, c->list) == FLUX_OK);
 }
 
 static flux_result render_frame(flux_surface *s, flux_canvas *canvas, draw_fn draw, void *user) {
@@ -261,14 +262,14 @@ static void draw_opaque_image(flux_canvas *canvas, void *user) {
 
 static void record_rotated_image(flux_canvas *canvas, void *user) {
     image_record_case *tc = user;
-    EXPECT(flux_canvas_cache_begin(canvas));
+    OT_EXPECT(flux_canvas_cache_begin(canvas));
     draw_rotated_image(canvas, &tc->image);
     tc->record = flux_canvas_cache_end(canvas);
-    EXPECT(tc->record.slot != nullptr);
+    OT_EXPECT(tc->record.slot != nullptr);
 }
 
 static void replay_record(flux_canvas *canvas, void *user) {
-    EXPECT(flux_canvas_cache_replay(canvas, *(flux_canvas_cache_entry *)user));
+    OT_EXPECT(flux_canvas_cache_replay(canvas, *(flux_canvas_cache_entry *)user));
 }
 
 #if defined(FLUX_TEXT_HAVE_FTHB)
@@ -304,10 +305,10 @@ static bool region_has_ink(const uint8_t *px, uint32_t x0, uint32_t y0, uint32_t
 #endif
 
 int main(void) {
-    flux_device *d = test_helpers_make_headless_device();
+    flux_device *d = flux_test_make_headless_device();
     if (!d) {
         fprintf(stderr, "test_canvas_render: no Vulkan device; skipping\n");
-        TEST_SUMMARY();
+        OT_SKIP("no Vulkan device");
     }
 
     flux_surface *s = nullptr;
@@ -315,17 +316,17 @@ int main(void) {
         flux_surface_desc sd = FLUX_SURFACE_DESC_INIT;
         sd.width = W;
         sd.height = H;
-        EXPECT(flux_surface_create(d, &sd, &s) == FLUX_OK);
+        OT_EXPECT(flux_surface_create(d, &sd, &s) == FLUX_OK);
     }
     flux_canvas *canvas = nullptr;
     {
         flux_canvas_desc cd = FLUX_CANVAS_DESC_INIT;
         cd.surface = s;
-        EXPECT(flux_canvas_create(&cd, &canvas) == FLUX_OK);
+        OT_EXPECT(flux_canvas_create(&cd, &canvas) == FLUX_OK);
     }
 
     flux_arena arena;
-    EXPECT(flux_arena_init(&arena, 64 * 1024, nullptr) == FLUX_OK);
+    OT_EXPECT(flux_arena_init(&arena, 64 * 1024, nullptr) == FLUX_OK);
 
     static uint8_t px[BYTES];
 
@@ -337,14 +338,14 @@ int main(void) {
     {
         uint64_t submits = flux_canvas_submit_calls(canvas);
         uint64_t draws = flux_canvas_recorded_draws(canvas);
-        EXPECT(render_frame(s, canvas, draw_batchable_rects, nullptr) == FLUX_OK);
-        EXPECT(flux_canvas_submit_calls(canvas) - submits == 64);
-        EXPECT(flux_canvas_recorded_draws(canvas) - draws == 2);
+        OT_EXPECT(render_frame(s, canvas, draw_batchable_rects, nullptr) == FLUX_OK);
+        OT_EXPECT(flux_canvas_submit_calls(canvas) - submits == 64);
+        OT_EXPECT(flux_canvas_recorded_draws(canvas) - draws == 2);
 
         memset(px, 0xCD, BYTES);
-        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
-        EXPECT(px_at(px, 4, 4)[2] > 180);   /* first blue tile */
-        EXPECT(px_at(px, 60, 60)[0] > 180); /* last red tile */
+        OT_EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+        OT_EXPECT(px_at(px, 4, 4)[2] > 180);   /* first blue tile */
+        OT_EXPECT(px_at(px, 60, 60)[0] > 180); /* last red tile */
     }
 
     /* --- point-field batching (the wavora stage workload): 256 small dots
@@ -353,47 +354,47 @@ int main(void) {
     {
         uint64_t submits = flux_canvas_submit_calls(canvas);
         uint64_t draws = flux_canvas_recorded_draws(canvas);
-        EXPECT(render_frame(s, canvas, draw_point_field, nullptr) == FLUX_OK);
-        EXPECT(flux_canvas_submit_calls(canvas) - submits == 256);
-        EXPECT(flux_canvas_recorded_draws(canvas) - draws == 2);
+        OT_EXPECT(render_frame(s, canvas, draw_point_field, nullptr) == FLUX_OK);
+        OT_EXPECT(flux_canvas_submit_calls(canvas) - submits == 256);
+        OT_EXPECT(flux_canvas_recorded_draws(canvas) - draws == 2);
 
         memset(px, 0xCD, BYTES);
-        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
-        EXPECT(px_at(px, 4, 4)[1] > 150);     /* i=0 green: centre (4,4)  */
-        EXPECT(px_at(px, 12, 4)[0] > 150);    /* i=1 red: centre (12,4)   */
-        EXPECT(px_at(px, 4, H - 4)[1] > 150); /* i=240 green: centre(4,124)*/
+        OT_EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+        OT_EXPECT(px_at(px, 4, 4)[1] > 150);     /* i=0 green: centre (4,4)  */
+        OT_EXPECT(px_at(px, 12, 4)[0] > 150);    /* i=1 red: centre (12,4)   */
+        OT_EXPECT(px_at(px, 4, H - 4)[1] > 150); /* i=240 green: centre(4,124)*/
     }
 
     /* --- true no-stencil pass: normal solid pipelines remain valid while
      * dynamic rendering binds no stencil attachment. This also exercises the
      * independent VK_FORMAT_UNDEFINED pipeline variant under validation. --- */
     {
-        EXPECT(render_frame_no_stencil(s, canvas, draw_batchable_rects, nullptr) == FLUX_OK);
+        OT_EXPECT(render_frame_no_stencil(s, canvas, draw_batchable_rects, nullptr) == FLUX_OK);
         memset(px, 0xCD, BYTES);
-        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
-        EXPECT(px_at(px, 4, 4)[2] > 180);
-        EXPECT(px_at(px, 60, 60)[0] > 180);
-        EXPECT(px_at(px, W - 2, H - 2)[0] < 20);
+        OT_EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+        OT_EXPECT(px_at(px, 4, 4)[2] > 180);
+        OT_EXPECT(px_at(px, 60, 60)[0] > 180);
+        OT_EXPECT(px_at(px, W - 2, H - 2)[0] < 20);
     }
 
     /* With device analytic coverage backend (ADR-0120), even-odd fills no longer
      * require a stencil attachment and succeed in a no-stencil pass (INV-COV-02). */
     {
         flux_path *p = nullptr;
-        EXPECT(flux_path_create(&p, &arena) == FLUX_OK);
+        OT_EXPECT(flux_path_create(&p, &arena) == FLUX_OK);
         flux_path_add_rect(p, (flux_rect){16, 16, 64, 64});
-        EXPECT(render_frame_no_stencil(s, canvas, draw_even_odd_path, p) == FLUX_OK);
+        OT_EXPECT(render_frame_no_stencil(s, canvas, draw_even_odd_path, p) == FLUX_OK);
         memset(px, 0xCD, BYTES);
-        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
-        EXPECT(px_at(px, 32, 32)[0] > 200);
+        OT_EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+        OT_EXPECT(px_at(px, 32, 32)[0] > 200);
         flux_arena_reset(&arena);
     }
 
     /* --- linear gradient: red → blue across x --- */
     {
-        EXPECT(render_frame(s, canvas, draw_linear_gradient, nullptr) == FLUX_OK);
+        OT_EXPECT(render_frame(s, canvas, draw_linear_gradient, nullptr) == FLUX_OK);
         memset(px, 0xCD, BYTES);
-        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+        OT_EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
 
         const uint8_t *left = px_at(px, 2, H / 2);
         const uint8_t *mid = px_at(px, W / 2, H / 2);
@@ -403,30 +404,30 @@ int main(void) {
          * sRGB-encodes to ~38 (gamma-space interpolation gave ~5); the
          * midpoint is 0.5 linear per channel -> ~187, not 128. Dither adds
          * ±1 LSB on top of the reference values. */
-        EXPECT(left[0] > 220 && left[2] > 30 && left[2] < 48);    /* red end */
-        EXPECT(right[2] > 220 && right[0] > 30 && right[0] < 48); /* blue end */
-        EXPECT(mid[0] > 183 && mid[0] < 192 && mid[2] > 183 && mid[2] < 192);
-        EXPECT(left[0] > mid[0] && mid[0] > right[0]);
-        EXPECT(right[2] > mid[2] && mid[2] > left[2]);
+        OT_EXPECT(left[0] > 220 && left[2] > 30 && left[2] < 48);    /* red end */
+        OT_EXPECT(right[2] > 220 && right[0] > 30 && right[0] < 48); /* blue end */
+        OT_EXPECT(mid[0] > 183 && mid[0] < 192 && mid[2] > 183 && mid[2] < 192);
+        OT_EXPECT(left[0] > mid[0] && mid[0] > right[0]);
+        OT_EXPECT(right[2] > mid[2] && mid[2] > left[2]);
     }
 
     /* --- stroke: 8px horizontal line through the centre --- */
     {
         flux_path *p = nullptr;
-        EXPECT(flux_path_create(&p, &arena) == FLUX_OK);
+        OT_EXPECT(flux_path_create(&p, &arena) == FLUX_OK);
         flux_path_move_to(p, 16.0f, H / 2.0f);
         flux_path_line_to(p, W - 16.0f, H / 2.0f);
 
-        EXPECT(render_frame(s, canvas, draw_stroke, p) == FLUX_OK);
+        OT_EXPECT(render_frame(s, canvas, draw_stroke, p) == FLUX_OK);
         memset(px, 0xCD, BYTES);
-        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+        OT_EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
 
         /* On the line: white. 8 px above it: background. Before the
          * butt cap at x=16: background. */
-        EXPECT(px_at(px, W / 2, H / 2)[0] == 255);
-        EXPECT(px_at(px, W / 2, H / 2 - 8)[0] < 20);
-        EXPECT(px_at(px, W / 2, H / 2 + 8)[0] < 20);
-        EXPECT(px_at(px, 8, H / 2)[0] < 20);
+        OT_EXPECT(px_at(px, W / 2, H / 2)[0] == 255);
+        OT_EXPECT(px_at(px, W / 2, H / 2 - 8)[0] < 20);
+        OT_EXPECT(px_at(px, W / 2, H / 2 + 8)[0] < 20);
+        OT_EXPECT(px_at(px, 8, H / 2)[0] < 20);
     }
 
     /* --- multi-subpath stroke: two separate lines in one path --- *
@@ -436,20 +437,20 @@ int main(void) {
      * subpath). */
     {
         flux_path *p = nullptr;
-        EXPECT(flux_path_create(&p, &arena) == FLUX_OK);
+        OT_EXPECT(flux_path_create(&p, &arena) == FLUX_OK);
         flux_path_move_to(p, 16.0f, H / 2.0f - 24.0f); /* subpath 1 */
         flux_path_line_to(p, W - 16.0f, H / 2.0f - 24.0f);
         flux_path_move_to(p, 16.0f, H / 2.0f + 24.0f); /* subpath 2 */
         flux_path_line_to(p, W - 16.0f, H / 2.0f + 24.0f);
 
-        EXPECT(render_frame(s, canvas, draw_stroke, p) == FLUX_OK);
+        OT_EXPECT(render_frame(s, canvas, draw_stroke, p) == FLUX_OK);
         memset(px, 0xCD, BYTES);
-        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+        OT_EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
 
         /* Both lines must be white; the gap between them background. */
-        EXPECT(px_at(px, W / 2, H / 2 - 24)[0] == 255); /* subpath 1 */
-        EXPECT(px_at(px, W / 2, H / 2 + 24)[0] == 255); /* subpath 2 */
-        EXPECT(px_at(px, W / 2, H / 2)[0] < 20);        /* gap */
+        OT_EXPECT(px_at(px, W / 2, H / 2 - 24)[0] == 255); /* subpath 1 */
+        OT_EXPECT(px_at(px, W / 2, H / 2 + 24)[0] == 255); /* subpath 2 */
+        OT_EXPECT(px_at(px, W / 2, H / 2)[0] < 20);        /* gap */
     }
 
     /* --- donut fill: outer circle + reverse-wound inner hole --- */
@@ -458,7 +459,7 @@ int main(void) {
         const float r_out = 48.0f, r_in = 20.0f;
 
         flux_path *p = nullptr;
-        EXPECT(flux_path_create(&p, &arena) == FLUX_OK);
+        OT_EXPECT(flux_path_create(&p, &arena) == FLUX_OK);
         flux_path_add_circle(p, cx, cy, r_out);
         /* Inner contour wound opposite to flux_path_add_circle's
          * direction → a hole per ADR-0011. */
@@ -469,21 +470,21 @@ int main(void) {
         }
         flux_path_close(p);
 
-        EXPECT(render_frame(s, canvas, draw_donut, p) == FLUX_OK);
+        OT_EXPECT(render_frame(s, canvas, draw_donut, p) == FLUX_OK);
         memset(px, 0xCD, BYTES);
-        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+        OT_EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
 
         /* Centre of the hole: background. Ring interior (between the
          * radii, four directions): white. Outside the outer circle:
          * background. ADR-0069: the output dither costs up to 1 LSB, so
          * full-white reads back as 254/255, not exactly 255. */
-        EXPECT(px_at(px, W / 2, H / 2)[0] < 20);
+        OT_EXPECT(px_at(px, W / 2, H / 2)[0] < 20);
         uint32_t ring = (uint32_t)((r_in + r_out) / 2.0f);
-        EXPECT(px_at(px, W / 2 + ring, H / 2)[0] >= 253);
-        EXPECT(px_at(px, W / 2 - ring, H / 2)[0] >= 253);
-        EXPECT(px_at(px, W / 2, H / 2 + ring)[0] >= 253);
-        EXPECT(px_at(px, W / 2, H / 2 - ring)[0] >= 253);
-        EXPECT(px_at(px, 2, 2)[0] < 20);
+        OT_EXPECT(px_at(px, W / 2 + ring, H / 2)[0] >= 253);
+        OT_EXPECT(px_at(px, W / 2 - ring, H / 2)[0] >= 253);
+        OT_EXPECT(px_at(px, W / 2, H / 2 + ring)[0] >= 253);
+        OT_EXPECT(px_at(px, W / 2, H / 2 - ring)[0] >= 253);
+        OT_EXPECT(px_at(px, 2, 2)[0] < 20);
     }
 
     /* --- self-intersecting pentagram: stencil-then-cover (ADR-0014).
@@ -499,7 +500,7 @@ int main(void) {
             v[i] = (flux_point){cx + R * cosf(a), cy + R * sinf(a)};
         }
         flux_path *p = nullptr;
-        EXPECT(flux_path_create(&p, &arena) == FLUX_OK);
+        OT_EXPECT(flux_path_create(&p, &arena) == FLUX_OK);
         flux_path_move_to(p, v[0].x, v[0].y);
         for (int i = 1; i < 5; ++i) {
             int k = (i * 2) % 5; /* 0 → 2 → 4 → 1 → 3 → close */
@@ -507,30 +508,30 @@ int main(void) {
         }
         flux_path_close(p);
 
-        EXPECT(render_frame(s, canvas, draw_donut, p) == FLUX_OK);
+        OT_EXPECT(render_frame(s, canvas, draw_donut, p) == FLUX_OK);
         memset(px, 0xCD, BYTES);
-        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+        OT_EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
 
         /* Centre (inside the inner pentagon, winding count 2): filled. */
-        EXPECT(px_at(px, W / 2, H / 2)[0] == 255);
+        OT_EXPECT(px_at(px, W / 2, H / 2)[0] == 255);
         /* Inside the top point's spike (winding 1): filled. */
         uint32_t spike_y = (uint32_t)(cy - R) + 6;
-        EXPECT(px_at(px, W / 2, spike_y)[0] == 255);
+        OT_EXPECT(px_at(px, W / 2, spike_y)[0] == 255);
         /* Notch bisector between the top and upper-right spikes
          * (angle -54°, radius 0.7R; the boundary there is the inner
          * vertex at ~0.38R): outside the star body, background. */
-        EXPECT(px_at(px, (uint32_t)(cx + 0.7f * R * 0.5878f),
-                     (uint32_t)(cy - 0.7f * R * 0.8090f))[0] < 20);
+        OT_EXPECT(px_at(px, (uint32_t)(cx + 0.7f * R * 0.5878f),
+                        (uint32_t)(cy - 0.7f * R * 0.8090f))[0] < 20);
         /* Far corner: background. */
-        EXPECT(px_at(px, 2, 2)[0] < 20);
+        OT_EXPECT(px_at(px, 2, 2)[0] < 20);
 
         /* The cover pass must zero the stencil it used: a SECOND fill
          * in a later frame must not be corrupted by leftover counts. */
-        EXPECT(render_frame(s, canvas, draw_donut, p) == FLUX_OK);
+        OT_EXPECT(render_frame(s, canvas, draw_donut, p) == FLUX_OK);
         memset(px, 0xCD, BYTES);
-        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
-        EXPECT(px_at(px, W / 2, H / 2)[0] == 255);
-        EXPECT(px_at(px, 2, 2)[0] < 20);
+        OT_EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+        OT_EXPECT(px_at(px, W / 2, H / 2)[0] == 255);
+        OT_EXPECT(px_at(px, 2, 2)[0] < 20);
     }
 
     /* --- affine image transform + paint opacity --- */
@@ -551,14 +552,14 @@ int main(void) {
         idesc.format = FLUX_FORMAT_RGBA8_UNORM;
         idesc.initial_data = image_px;
         flux_image *image = nullptr;
-        EXPECT(flux_image_create(d, &idesc, &image) == FLUX_OK);
-        EXPECT(flux_image_size_bytes(image) == 2u * 2u * 4u);
+        OT_EXPECT(flux_image_create(d, &idesc, &image) == FLUX_OK);
+        OT_EXPECT(flux_image_size_bytes(image) == 2u * 2u * 4u);
 
         /* ADR-0090 pinned-content budget: the list owns the image bytes, and a
          * budget smaller than one image refuses publication instead of
          * silently pinning it. */
         flux_encoder *enc = nullptr;
-        EXPECT(flux_encoder_create(nullptr, &enc) == FLUX_OK);
+        OT_EXPECT(flux_encoder_create(nullptr, &enc) == FLUX_OK);
         flux_brush image_brush = {
             .kind = FLUX_BRUSH_IMAGE_PATTERN,
             .blend = FLUX_BLEND_SRC_OVER,
@@ -568,26 +569,26 @@ int main(void) {
         flux_geometry image_geom = flux_geom_rect((flux_rect){0, 0, 2, 2});
         flux_encoder_draw_geometry(enc, &image_geom, &image_brush);
         flux_display_list *image_list = nullptr;
-        EXPECT(flux_encoder_finish(enc, &image_list) == FLUX_OK);
+        OT_EXPECT(flux_encoder_finish(enc, &image_list) == FLUX_OK);
         flux_encoder_destroy(enc);
-        EXPECT(flux_display_list_retained_bytes(image_list) == 16u);
+        OT_EXPECT(flux_display_list_retained_bytes(image_list) == 16u);
         flux_display_list_release(image_list);
 
-        EXPECT(flux_encoder_create(&(flux_encoder_desc){.max_retained_bytes = 8u}, &enc) ==
-               FLUX_OK);
+        OT_EXPECT(flux_encoder_create(&(flux_encoder_desc){.max_retained_bytes = 8u}, &enc) ==
+                  FLUX_OK);
         flux_encoder_draw_geometry(enc, &image_geom, &image_brush);
-        EXPECT(flux_encoder_status(enc) == FLUX_ERROR_OUT_OF_MEMORY);
-        EXPECT(flux_encoder_finish(enc, &image_list) == FLUX_ERROR_OUT_OF_MEMORY);
-        EXPECT(image_list == nullptr);
+        OT_EXPECT(flux_encoder_status(enc) == FLUX_ERROR_OUT_OF_MEMORY);
+        OT_EXPECT(flux_encoder_finish(enc, &image_list) == FLUX_ERROR_OUT_OF_MEMORY);
+        OT_EXPECT(image_list == nullptr);
         flux_encoder_destroy(enc);
 
         /* ADR-0090 immutable snapshot: a list recorded against a snapshot
          * keeps the old pixels after the original image is updated. */
         flux_image *snapshot = nullptr;
-        EXPECT(flux_image_snapshot(image, &snapshot) == FLUX_OK);
-        EXPECT(snapshot != nullptr);
+        OT_EXPECT(flux_image_snapshot(image, &snapshot) == FLUX_OK);
+        OT_EXPECT(snapshot != nullptr);
         flux_encoder *snapshot_enc = nullptr;
-        EXPECT(flux_encoder_create(nullptr, &snapshot_enc) == FLUX_OK);
+        OT_EXPECT(flux_encoder_create(nullptr, &snapshot_enc) == FLUX_OK);
         flux_encoder_draw_geometry(
             snapshot_enc, &image_geom,
             &(flux_brush){
@@ -597,14 +598,14 @@ int main(void) {
                 .image = {.image = snapshot, .tint = flux_color_rgba_premul(255, 255, 255, 255)},
             });
         flux_display_list *old_list = nullptr;
-        EXPECT(flux_encoder_finish(snapshot_enc, &old_list) == FLUX_OK);
+        OT_EXPECT(flux_encoder_finish(snapshot_enc, &old_list) == FLUX_OK);
         flux_encoder_destroy(snapshot_enc);
 
         uint32_t blue_px[4] = {0xFFFF0000u, 0xFFFF0000u, 0xFFFF0000u, 0xFFFF0000u};
-        EXPECT(flux_image_update_region(image, 0, 0, 2, 2, blue_px, sizeof blue_px) == FLUX_OK);
+        OT_EXPECT(flux_image_update_region(image, 0, 0, 2, 2, blue_px, sizeof blue_px) == FLUX_OK);
 
         flux_encoder *new_enc = nullptr;
-        EXPECT(flux_encoder_create(nullptr, &new_enc) == FLUX_OK);
+        OT_EXPECT(flux_encoder_create(nullptr, &new_enc) == FLUX_OK);
         flux_encoder_draw_geometry(
             new_enc, &image_geom,
             &(flux_brush){
@@ -614,7 +615,7 @@ int main(void) {
                 .image = {.image = image, .tint = flux_color_rgba_premul(255, 255, 255, 255)},
             });
         flux_display_list *new_list = nullptr;
-        EXPECT(flux_encoder_finish(new_enc, &new_list) == FLUX_OK);
+        OT_EXPECT(flux_encoder_finish(new_enc, &new_list) == FLUX_OK);
         flux_encoder_destroy(new_enc);
 
         flux_geometry full = flux_geom_rect((flux_rect){0, 0, (float)W, (float)H});
@@ -622,7 +623,7 @@ int main(void) {
         display_list_case old_case = {.list = old_list};
         /* Scale the 2x2 source over the output so both colours are visible. */
         flux_encoder *scale_enc = nullptr;
-        EXPECT(flux_encoder_create(nullptr, &scale_enc) == FLUX_OK);
+        OT_EXPECT(flux_encoder_create(nullptr, &scale_enc) == FLUX_OK);
         flux_encoder_scale(scale_enc, (float)W / 2.0f, (float)H / 2.0f);
         flux_encoder_draw_geometry(
             scale_enc, &image_geom,
@@ -633,16 +634,16 @@ int main(void) {
                 .image = {.image = snapshot, .tint = flux_color_rgba_premul(255, 255, 255, 255)},
             });
         flux_display_list *scaled_old = nullptr;
-        EXPECT(flux_encoder_finish(scale_enc, &scaled_old) == FLUX_OK);
+        OT_EXPECT(flux_encoder_finish(scale_enc, &scaled_old) == FLUX_OK);
         flux_encoder_destroy(scale_enc);
         old_case.list = scaled_old;
-        EXPECT(render_frame(s, canvas, draw_display_list, &old_case) == FLUX_OK);
-        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
-        EXPECT(px_at(px, 32, 32)[0] > 200 && px_at(px, 32, 32)[1] < 40);
-        EXPECT(px_at(px, 96, 32)[1] > 200 && px_at(px, 96, 32)[0] < 40);
+        OT_EXPECT(render_frame(s, canvas, draw_display_list, &old_case) == FLUX_OK);
+        OT_EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+        OT_EXPECT(px_at(px, 32, 32)[0] > 200 && px_at(px, 32, 32)[1] < 40);
+        OT_EXPECT(px_at(px, 96, 32)[1] > 200 && px_at(px, 96, 32)[0] < 40);
 
         flux_encoder *scale_new_enc = nullptr;
-        EXPECT(flux_encoder_create(nullptr, &scale_new_enc) == FLUX_OK);
+        OT_EXPECT(flux_encoder_create(nullptr, &scale_new_enc) == FLUX_OK);
         flux_encoder_scale(scale_new_enc, (float)W / 2.0f, (float)H / 2.0f);
         flux_encoder_draw_geometry(
             scale_new_enc, &image_geom,
@@ -653,13 +654,13 @@ int main(void) {
                 .image = {.image = image, .tint = flux_color_rgba_premul(255, 255, 255, 255)},
             });
         flux_display_list *scaled_new = nullptr;
-        EXPECT(flux_encoder_finish(scale_new_enc, &scaled_new) == FLUX_OK);
+        OT_EXPECT(flux_encoder_finish(scale_new_enc, &scaled_new) == FLUX_OK);
         flux_encoder_destroy(scale_new_enc);
         display_list_case new_case = {.list = scaled_new};
-        EXPECT(render_frame(s, canvas, draw_display_list, &new_case) == FLUX_OK);
-        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
-        EXPECT(px_at(px, 32, 32)[2] > 200 && px_at(px, 32, 32)[0] < 40);
-        EXPECT(px_at(px, 96, 96)[2] > 200 && px_at(px, 96, 96)[0] < 40);
+        OT_EXPECT(render_frame(s, canvas, draw_display_list, &new_case) == FLUX_OK);
+        OT_EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+        OT_EXPECT(px_at(px, 32, 32)[2] > 200 && px_at(px, 32, 32)[0] < 40);
+        OT_EXPECT(px_at(px, 96, 96)[2] > 200 && px_at(px, 96, 96)[0] < 40);
 
         flux_display_list_release(old_list);
         flux_display_list_release(new_list);
@@ -668,7 +669,8 @@ int main(void) {
         flux_image_release(snapshot);
 
         /* Restore the quadrant fixture for the transform tests below. */
-        EXPECT(flux_image_update_region(image, 0, 0, 2, 2, image_px, sizeof image_px) == FLUX_OK);
+        OT_EXPECT(flux_image_update_region(image, 0, 0, 2, 2, image_px, sizeof image_px) ==
+                  FLUX_OK);
 
         /* Color-managed images share their immutable color state across a
          * snapshot/COW split instead of refusing the update. */
@@ -686,39 +688,39 @@ int main(void) {
             .initial_data = image_px,
         };
         flux_image *color_image = nullptr;
-        EXPECT(flux_image_create(d, &color_image_desc, &color_image) == FLUX_OK);
+        OT_EXPECT(flux_image_create(d, &color_image_desc, &color_image) == FLUX_OK);
         flux_image *color_snapshot = nullptr;
-        EXPECT(flux_image_snapshot(color_image, &color_snapshot) == FLUX_OK);
-        EXPECT(flux_image_update_region(color_image, 0, 0, 2, 2, blue_px, sizeof blue_px) ==
-               FLUX_OK);
+        OT_EXPECT(flux_image_snapshot(color_image, &color_snapshot) == FLUX_OK);
+        OT_EXPECT(flux_image_update_region(color_image, 0, 0, 2, 2, blue_px, sizeof blue_px) ==
+                  FLUX_OK);
         flux_image_release(color_snapshot);
         flux_image_release(color_image);
 
         /* DisplayList serialization carries the image as a caller-owned ID,
          * then rebinds it through the resolver on load (ADR-0157). */
         flux_encoder *wire_enc = nullptr;
-        EXPECT(flux_encoder_create(nullptr, &wire_enc) == FLUX_OK);
+        OT_EXPECT(flux_encoder_create(nullptr, &wire_enc) == FLUX_OK);
         flux_encoder_draw_geometry(
             wire_enc, &(flux_geometry){.kind = FLUX_GEOM_RECT, .rect = {.rect = {0, 0, 2, 2}}},
             &image_brush);
         flux_display_list *wire_list = nullptr;
-        EXPECT(flux_encoder_finish(wire_enc, &wire_list) == FLUX_OK);
+        OT_EXPECT(flux_encoder_finish(wire_enc, &wire_list) == FLUX_OK);
         flux_encoder_destroy(wire_enc);
         uint8_t *wire = nullptr;
         size_t wire_size = 0;
         flux_display_list_serialize_opts sopts = FLUX_DISPLAY_LIST_SERIALIZE_OPTS_INIT;
         sopts.resource_id = test_resource_id;
         sopts.user = image;
-        EXPECT(flux_display_list_serialize(wire_list, &sopts, &wire, &wire_size) == FLUX_OK);
+        OT_EXPECT(flux_display_list_serialize(wire_list, &sopts, &wire, &wire_size) == FLUX_OK);
         flux_display_list_deserialize_opts dopts = FLUX_DISPLAY_LIST_DESERIALIZE_OPTS_INIT;
         dopts.resolve = test_resource_resolve;
         dopts.user = image;
         flux_display_list *wire_loaded = nullptr;
-        EXPECT(flux_display_list_deserialize(wire, wire_size, &dopts, &wire_loaded) == FLUX_OK);
+        OT_EXPECT(flux_display_list_deserialize(wire, wire_size, &dopts, &wire_loaded) == FLUX_OK);
         display_list_case wire_case = {.list = wire_loaded};
-        EXPECT(render_frame(s, canvas, draw_display_list, &wire_case) == FLUX_OK);
-        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
-        EXPECT(px_at(px, 32, 32)[3] == 255);
+        OT_EXPECT(render_frame(s, canvas, draw_display_list, &wire_case) == FLUX_OK);
+        OT_EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+        OT_EXPECT(px_at(px, 32, 32)[3] == 255);
         flux_display_list_serialized_free(wire);
         flux_display_list_release(wire_loaded);
         flux_display_list_release(wire_list);
@@ -729,7 +731,7 @@ int main(void) {
         sdesc.address_u = FLUX_ADDRESS_CLAMP_TO_EDGE;
         sdesc.address_v = FLUX_ADDRESS_CLAMP_TO_EDGE;
         flux_sampler *nearest = nullptr;
-        EXPECT(flux_sampler_create(d, &sdesc, &nearest) == FLUX_OK);
+        OT_EXPECT(flux_sampler_create(d, &sdesc, &nearest) == FLUX_OK);
 
         image_record_case tc = {
             .image =
@@ -740,30 +742,30 @@ int main(void) {
                 },
             .record = FLUX_CANVAS_CACHE_ENTRY_INIT,
         };
-        EXPECT(render_frame(s, canvas, draw_combined_image, &tc.image) == FLUX_OK);
-        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
-        EXPECT(px_at(px, 48, 48)[0] > 245);
-        EXPECT(px_at(px, 80, 80)[0] > 245);
-        EXPECT(px_at(px, 80, 80)[1] < 8 && px_at(px, 80, 80)[2] < 8);
-        EXPECT(px_at(px, 24, 64)[0] < 8);
-        EXPECT(px_at(px, 33, 33)[0] < 8);
-        EXPECT(render_frame(s, canvas, draw_round_image, &tc.image) == FLUX_OK);
+        OT_EXPECT(render_frame(s, canvas, draw_combined_image, &tc.image) == FLUX_OK);
+        OT_EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+        OT_EXPECT(px_at(px, 48, 48)[0] > 245);
+        OT_EXPECT(px_at(px, 80, 80)[0] > 245);
+        OT_EXPECT(px_at(px, 80, 80)[1] < 8 && px_at(px, 80, 80)[2] < 8);
+        OT_EXPECT(px_at(px, 24, 64)[0] < 8);
+        OT_EXPECT(px_at(px, 33, 33)[0] < 8);
+        OT_EXPECT(render_frame(s, canvas, draw_round_image, &tc.image) == FLUX_OK);
         memset(px, 0xCD, BYTES);
-        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
-        EXPECT(px_at(px, 64, 64)[0] > 80); /* image centre survives */
-        EXPECT(px_at(px, 33, 33)[0] < 8);  /* square corner is clipped */
+        OT_EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+        OT_EXPECT(px_at(px, 64, 64)[0] > 80); /* image centre survives */
+        OT_EXPECT(px_at(px, 33, 33)[0] < 8);  /* square corner is clipped */
 
-        EXPECT(render_frame(s, canvas, draw_image_through_independent_round_clip, &tc.image) ==
-               FLUX_OK);
+        OT_EXPECT(render_frame(s, canvas, draw_image_through_independent_round_clip, &tc.image) ==
+                  FLUX_OK);
         memset(px, 0xCD, BYTES);
-        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
-        EXPECT(px_at(px, 64, 64)[0] > 40); /* destination content survives */
-        EXPECT(px_at(px, 24, 64)[0] < 8);  /* inside dst, outside shared clip */
-        EXPECT(px_at(px, 33, 33)[0] < 8);  /* shared clip has analytic corners */
+        OT_EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+        OT_EXPECT(px_at(px, 64, 64)[0] > 40); /* destination content survives */
+        OT_EXPECT(px_at(px, 24, 64)[0] < 8);  /* inside dst, outside shared clip */
+        OT_EXPECT(px_at(px, 33, 33)[0] < 8);  /* shared clip has analytic corners */
 
-        EXPECT(render_frame(s, canvas, record_rotated_image, &tc) == FLUX_OK);
+        OT_EXPECT(render_frame(s, canvas, record_rotated_image, &tc) == FLUX_OK);
         memset(px, 0xCD, BYTES);
-        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+        OT_EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
 
         const uint8_t *top_right = px_at(px, 72, 48);    /* source top-left: red */
         const uint8_t *bottom_right = px_at(px, 72, 80); /* source top-right: green */
@@ -773,14 +775,14 @@ int main(void) {
          * the lit channels are 0.502 linear over black, which sRGB-encodes
          * to ~188 (gamma-space blending gave 128). ±4 absorbs the output
          * dither and quantisation. */
-        EXPECT(top_right[0] > 184 && top_right[0] < 192 && top_right[1] < 8 && top_right[2] < 8);
-        EXPECT(bottom_right[0] < 8 && bottom_right[1] > 184 && bottom_right[1] < 192 &&
-               bottom_right[2] < 8);
-        EXPECT(bottom_left[0] < 8 && bottom_left[1] < 8 && bottom_left[2] > 184 &&
-               bottom_left[2] < 192);
-        EXPECT(top_left[0] > 184 && top_left[0] < 192 && top_left[1] > 184 && top_left[1] < 192 &&
-               top_left[2] > 184 && top_left[2] < 192);
-        EXPECT(px_at(px, 40, 64)[0] < 8); /* outside the rotated 32×64 quad */
+        OT_EXPECT(top_right[0] > 184 && top_right[0] < 192 && top_right[1] < 8 && top_right[2] < 8);
+        OT_EXPECT(bottom_right[0] < 8 && bottom_right[1] > 184 && bottom_right[1] < 192 &&
+                  bottom_right[2] < 8);
+        OT_EXPECT(bottom_left[0] < 8 && bottom_left[1] < 8 && bottom_left[2] > 184 &&
+                  bottom_left[2] < 192);
+        OT_EXPECT(top_left[0] > 184 && top_left[0] < 192 && top_left[1] > 184 &&
+                  top_left[1] < 192 && top_left[2] > 184 && top_left[2] < 192);
+        OT_EXPECT(px_at(px, 40, 64)[0] < 8); /* outside the rotated 32×64 quad */
 
         /* A display-list segment owns both referenced bindless resources.
          * Drop the caller's image and custom-sampler references, then replay:
@@ -789,10 +791,10 @@ int main(void) {
         memcpy(live, px, sizeof live);
         flux_sampler_release(nearest);
         flux_image_release(image);
-        EXPECT(render_frame(s, canvas, replay_record, &tc.record) == FLUX_OK);
+        OT_EXPECT(render_frame(s, canvas, replay_record, &tc.record) == FLUX_OK);
         memset(px, 0xCD, BYTES);
-        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
-        EXPECT(memcmp(live, px, sizeof live) == 0);
+        OT_EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+        OT_EXPECT(memcmp(live, px, sizeof live) == 0);
         flux_canvas_cache_release(canvas, tc.record);
     }
 
@@ -805,18 +807,18 @@ int main(void) {
         idesc.format = FLUX_FORMAT_RGBA8_UNORM;
         idesc.initial_data = xrgb_px;
         flux_image *image = nullptr;
-        EXPECT(flux_image_create(d, &idesc, &image) == FLUX_OK);
-        EXPECT(render_frame_no_stencil(s, canvas, draw_opaque_image, image) == FLUX_OK);
+        OT_EXPECT(flux_image_create(d, &idesc, &image) == FLUX_OK);
+        OT_EXPECT(render_frame_no_stencil(s, canvas, draw_opaque_image, image) == FLUX_OK);
         memset(px, 0xCD, BYTES);
-        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+        OT_EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
         const uint8_t *centre = px_at(px, W / 2, H / 2);
         /* ADR-0069: the UNORM texel is sRGB-decoded on sampling and
          * re-encoded at output; the round trip is the identity up to the
          * ±1 LSB output dither and quantisation. */
-        EXPECT(centre[0] >= 35 && centre[0] <= 39);
-        EXPECT(centre[1] >= 111 && centre[1] <= 115);
-        EXPECT(centre[2] >= 209 && centre[2] <= 213);
-        EXPECT(centre[3] == 255);
+        OT_EXPECT(centre[0] >= 35 && centre[0] <= 39);
+        OT_EXPECT(centre[1] >= 111 && centre[1] <= 115);
+        OT_EXPECT(centre[2] >= 209 && centre[2] <= 213);
+        OT_EXPECT(centre[3] == 255);
         flux_image_release(image);
     }
 
@@ -836,7 +838,7 @@ int main(void) {
         idesc.format = FLUX_FORMAT_R8_UNORM;
         idesc.initial_data = atlas_px;
         flux_image *atlas = nullptr;
-        EXPECT(flux_image_create(d, &idesc, &atlas) == FLUX_OK);
+        OT_EXPECT(flux_image_create(d, &idesc, &atlas) == FLUX_OK);
 
         flux_sampler_desc sdesc = FLUX_SAMPLER_DESC_INIT;
         sdesc.min_filter = FLUX_FILTER_NEAREST;
@@ -844,7 +846,7 @@ int main(void) {
         sdesc.address_u = FLUX_ADDRESS_CLAMP_TO_EDGE;
         sdesc.address_v = FLUX_ADDRESS_CLAMP_TO_EDGE;
         flux_sampler *nearest = nullptr;
-        EXPECT(flux_sampler_create(d, &sdesc, &nearest) == FLUX_OK);
+        OT_EXPECT(flux_sampler_create(d, &sdesc, &nearest) == FLUX_OK);
 
         flux_glyph_quad quads[2] = {
             {.sx = 16,
@@ -872,24 +874,24 @@ int main(void) {
         run.quads = quads;
         run.quad_count = 2;
 
-        EXPECT(render_frame(s, canvas, draw_glyph_run, &run) == FLUX_OK);
+        OT_EXPECT(render_frame(s, canvas, draw_glyph_run, &run) == FLUX_OK);
         memset(px, 0xCD, BYTES);
-        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+        OT_EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
 
         /* Quad A centre: full coverage × red tint = pure red. */
         const uint8_t *a = px_at(px, 28, 28);
-        EXPECT(a[0] > 240 && a[1] < 12 && a[2] < 12);
+        OT_EXPECT(a[0] > 240 && a[1] < 12 && a[2] < 12);
 
         /* Quad B centre: quarter coverage × white tint. ADR-0069: coverage
          * scales in linear light — 64/255 ≈ 0.251 linear over black, which
          * sRGB-encodes to ~137 (gamma-space blending gave ~64). */
         const uint8_t *b = px_at(px, 84, 28);
-        EXPECT(b[0] > 128 && b[0] < 148);
-        EXPECT(b[1] > 128 && b[1] < 148);
+        OT_EXPECT(b[0] > 128 && b[0] < 148);
+        OT_EXPECT(b[1] > 128 && b[1] < 148);
 
         /* Between the quads and outside them: background. */
-        EXPECT(px_at(px, 56, 28)[0] < 20);
-        EXPECT(px_at(px, 28, 60)[0] < 20);
+        OT_EXPECT(px_at(px, 56, 28)[0] < 20);
+        OT_EXPECT(px_at(px, 28, 60)[0] < 20);
 
         flux_sampler_release(nearest);
         flux_image_release(atlas);
@@ -904,8 +906,8 @@ int main(void) {
     {
         glyph_ctx *text = nullptr;
         glyph_desc td = {.device = d, .scale = 1.0f};
-        EXPECT(glyph_create(&td, &text) == FLUX_OK);
-        EXPECT(text != nullptr);
+        OT_EXPECT(glyph_create(&td, &text) == FLUX_OK);
+        OT_EXPECT(text != nullptr);
 
         text_family_case cases[3] = {
             {text, &arena, FLUX_TEXT_FAMILY_SANS, 12.0f},
@@ -922,13 +924,13 @@ int main(void) {
                 .family = cases[i].family,
             };
             glyph_metrics m = glyph_measure(text, text_s, strlen(text_s), &style);
-            EXPECT(m.width > 0.0f);
-            EXPECT(m.height > 0.0f);
+            OT_EXPECT(m.width > 0.0f);
+            OT_EXPECT(m.height > 0.0f);
 
-            EXPECT(render_frame(s, canvas, draw_text_family, &cases[i]) == FLUX_OK);
+            OT_EXPECT(render_frame(s, canvas, draw_text_family, &cases[i]) == FLUX_OK);
             memset(px, 0xCD, BYTES);
-            EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
-            EXPECT(region_has_ink(px, 10, (uint32_t)cases[i].y, 120, (uint32_t)cases[i].y + 32));
+            OT_EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+            OT_EXPECT(region_has_ink(px, 10, (uint32_t)cases[i].y, 120, (uint32_t)cases[i].y + 32));
         }
 
         glyph_release(text);
@@ -936,16 +938,16 @@ int main(void) {
 #endif
 
     /* ADR-0091: Vulkan GPU isolated opacity group verification */
-    EXPECT(render_frame(s, canvas, draw_save_layer_opacity_group, nullptr) == FLUX_OK);
+    OT_EXPECT(render_frame(s, canvas, draw_save_layer_opacity_group, nullptr) == FLUX_OK);
     memset(px, 0, BYTES);
-    EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+    OT_EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
     const uint8_t *px_single = px_at(px, 12, 16);
     const uint8_t *px_overlap = px_at(px, 24, 16);
-    EXPECT(abs((int)px_single[0] - 188) <= 4);
-    EXPECT(abs((int)px_overlap[0] - 188) <= 4);
-    EXPECT(abs((int)px_single[0] - (int)px_overlap[0]) <= 2);
-    EXPECT(px_single[3] == 255);
-    EXPECT(px_overlap[3] == 255);
+    OT_EXPECT(abs((int)px_single[0] - 188) <= 4);
+    OT_EXPECT(abs((int)px_overlap[0] - 188) <= 4);
+    OT_EXPECT(abs((int)px_single[0] - (int)px_overlap[0]) <= 2);
+    OT_EXPECT(px_single[3] == 255);
+    OT_EXPECT(px_overlap[3] == 255);
 
     /* ADR-0090: snapshot and content update serialize on the image version
      * lock; a concurrent snapshot must never observe a half-swapped handle. */
@@ -957,19 +959,20 @@ int main(void) {
         idesc.format = FLUX_FORMAT_RGBA8_UNORM;
         idesc.initial_data = source;
         flux_image *image = nullptr;
-        EXPECT(flux_image_create(d, &idesc, &image) == FLUX_OK);
+        OT_EXPECT(flux_image_create(d, &idesc, &image) == FLUX_OK);
         snapshot_stress stress = {.image = image};
         atomic_init(&stress.stop, false);
         atomic_init(&stress.failures, 0u);
         pthread_t thread;
-        EXPECT(pthread_create(&thread, nullptr, snapshot_worker, &stress) == 0);
+        OT_EXPECT(pthread_create(&thread, nullptr, snapshot_worker, &stress) == 0);
         for (uint32_t i = 0; i < 200; ++i) {
             source[0] = 0xFF000000u | i;
-            EXPECT(flux_image_update_region(image, 0, 0, 2, 2, source, sizeof source) == FLUX_OK);
+            OT_EXPECT(flux_image_update_region(image, 0, 0, 2, 2, source, sizeof source) ==
+                      FLUX_OK);
         }
         atomic_store_explicit(&stress.stop, true, memory_order_relaxed);
         pthread_join(thread, nullptr);
-        EXPECT(atomic_load_explicit(&stress.failures, memory_order_relaxed) == 0u);
+        OT_EXPECT(atomic_load_explicit(&stress.failures, memory_order_relaxed) == 0u);
         flux_image_release(image);
     }
 
@@ -977,5 +980,5 @@ int main(void) {
     flux_canvas_release(canvas);
     flux_surface_release(s);
     flux_device_release(d);
-    TEST_SUMMARY();
+    return OT_REPORT();
 }

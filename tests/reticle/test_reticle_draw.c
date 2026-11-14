@@ -7,7 +7,7 @@
  * plane reads BGRA, and a silent swap produces a cursor with red and blue
  * exchanged — visible only in the one place nobody screenshots. */
 
-#include "test_helpers.h"
+#include "optics_test.h"
 
 #include <flux/canvas_cpu.h>
 #include <reticle/reticle.h>
@@ -40,21 +40,21 @@ static void monochrome_takes_the_theme_colour(void) {
     if (!doc)
         return;
     reticle_pixmap pixmap = {};
-    CHECK(reticle_rasterize(
-              &(reticle_rasterize_opts){
-                  .document = doc,
-                  .width = 8,
-                  .height = 8,
-                  .format = RETICLE_PIXELS_RGBA8_PREMUL,
-                  .paint = RETICLE_PAINT_MONOCHROME,
-                  .color = flux_color_rgba(0, 255, 0, 255),
-              },
-              &pixmap) == FLUX_OK);
+    OT_EXPECT(reticle_rasterize(
+                  &(reticle_rasterize_opts){
+                      .document = doc,
+                      .width = 8,
+                      .height = 8,
+                      .format = RETICLE_PIXELS_RGBA8_PREMUL,
+                      .paint = RETICLE_PAINT_MONOCHROME,
+                      .color = flux_color_rgba(0, 255, 0, 255),
+                  },
+                  &pixmap) == FLUX_OK);
     if (pixmap.pixels) {
         const uint8_t *p = pixel(&pixmap, 4, 4);
         /* Premultiplied RGBA: fully opaque green. The document said red; the
          * monochrome mode must ignore it. */
-        CHECK(p[0] == 0 && p[1] == 255 && p[2] == 0 && p[3] == 255);
+        OT_EXPECT(p[0] == 0 && p[1] == 255 && p[2] == 0 && p[3] == 255);
     }
     reticle_pixmap_deinit(&pixmap);
     reticle_release(doc);
@@ -65,19 +65,19 @@ static void theme_mode_keeps_document_colours(void) {
     if (!doc)
         return;
     reticle_pixmap pixmap = {};
-    CHECK(reticle_rasterize(
-              &(reticle_rasterize_opts){
-                  .document = doc,
-                  .width = 8,
-                  .height = 8,
-                  .format = RETICLE_PIXELS_RGBA8_PREMUL,
-                  .paint = RETICLE_PAINT_THEME,
-                  .color = flux_color_rgba(0, 255, 0, 255),
-              },
-              &pixmap) == FLUX_OK);
+    OT_EXPECT(reticle_rasterize(
+                  &(reticle_rasterize_opts){
+                      .document = doc,
+                      .width = 8,
+                      .height = 8,
+                      .format = RETICLE_PIXELS_RGBA8_PREMUL,
+                      .paint = RETICLE_PAINT_THEME,
+                      .color = flux_color_rgba(0, 255, 0, 255),
+                  },
+                  &pixmap) == FLUX_OK);
     if (pixmap.pixels) {
         const uint8_t *p = pixel(&pixmap, 4, 4);
-        CHECK(p[0] == 255 && p[1] == 0 && p[2] == 0 && p[3] == 255);
+        OT_EXPECT(p[0] == 255 && p[1] == 0 && p[2] == 0 && p[3] == 255);
     }
     reticle_pixmap_deinit(&pixmap);
     reticle_release(doc);
@@ -98,14 +98,14 @@ static void bgra_swaps_only_the_chroma(void) {
         .format = RETICLE_PIXELS_RGBA8_PREMUL,
         .paint = RETICLE_PAINT_THEME,
     };
-    CHECK(reticle_rasterize(&opts, &rgba) == FLUX_OK);
+    OT_EXPECT(reticle_rasterize(&opts, &rgba) == FLUX_OK);
     opts.format = RETICLE_PIXELS_BGRA8_PREMUL;
-    CHECK(reticle_rasterize(&opts, &bgra) == FLUX_OK);
+    OT_EXPECT(reticle_rasterize(&opts, &bgra) == FLUX_OK);
     if (rgba.pixels && bgra.pixels) {
-        CHECK(rgba.width == bgra.width && rgba.height == bgra.height);
+        OT_EXPECT(rgba.width == bgra.width && rgba.height == bgra.height);
         const uint8_t *a = pixel(&rgba, 4, 4);
         const uint8_t *b = pixel(&bgra, 4, 4);
-        CHECK(b[0] == a[2] && b[1] == a[1] && b[2] == a[0] && b[3] == a[3]);
+        OT_EXPECT(b[0] == a[2] && b[1] == a[1] && b[2] == a[0] && b[3] == a[3]);
     }
     reticle_pixmap_deinit(&rgba);
     reticle_pixmap_deinit(&bgra);
@@ -117,20 +117,20 @@ static void coverage_is_single_channel(void) {
     if (!doc)
         return;
     reticle_pixmap pixmap = {};
-    CHECK(reticle_rasterize(
-              &(reticle_rasterize_opts){
-                  .document = doc,
-                  .width = 8,
-                  .height = 8,
-                  .format = RETICLE_PIXELS_COVERAGE,
-                  .paint = RETICLE_PAINT_MONOCHROME,
-                  .color = flux_color_rgba(255, 255, 255, 255),
-              },
-              &pixmap) == FLUX_OK);
+    OT_EXPECT(reticle_rasterize(
+                  &(reticle_rasterize_opts){
+                      .document = doc,
+                      .width = 8,
+                      .height = 8,
+                      .format = RETICLE_PIXELS_COVERAGE,
+                      .paint = RETICLE_PAINT_MONOCHROME,
+                      .color = flux_color_rgba(255, 255, 255, 255),
+                  },
+                  &pixmap) == FLUX_OK);
     if (pixmap.pixels) {
-        CHECK(pixmap.stride == pixmap.width);
+        OT_EXPECT(pixmap.stride == pixmap.width);
         /* Interior coverage is full; the mask is what a coverage cache keys on. */
-        CHECK(pixmap.pixels[4 * pixmap.stride + 4] == 255);
+        OT_EXPECT(pixmap.pixels[4 * pixmap.stride + 4] == 255);
     }
     reticle_pixmap_deinit(&pixmap);
     reticle_release(doc);
@@ -143,23 +143,23 @@ static void contain_preserves_aspect_and_centres(void) {
     if (!doc)
         return;
     reticle_pixmap pixmap = {};
-    CHECK(reticle_rasterize(
-              &(reticle_rasterize_opts){
-                  .document = doc,
-                  .width = 8,
-                  .height = 8,
-                  .format = RETICLE_PIXELS_COVERAGE,
-                  .paint = RETICLE_PAINT_MONOCHROME,
-                  .color = flux_color_rgba(255, 255, 255, 255),
-              },
-              &pixmap) == FLUX_OK);
+    OT_EXPECT(reticle_rasterize(
+                  &(reticle_rasterize_opts){
+                      .document = doc,
+                      .width = 8,
+                      .height = 8,
+                      .format = RETICLE_PIXELS_COVERAGE,
+                      .paint = RETICLE_PAINT_MONOCHROME,
+                      .color = flux_color_rgba(255, 255, 255, 255),
+                  },
+                  &pixmap) == FLUX_OK);
     if (pixmap.pixels) {
         const uint8_t *top = pixmap.pixels;
         const uint8_t *middle = pixmap.pixels + (size_t)4 * pixmap.stride;
-        CHECK(top[0] == 0);
+        OT_EXPECT(top[0] == 0);
         /* The white unit square fills the left half of the drawn band. */
-        CHECK(middle[0] > 200);
-        CHECK(middle[pixmap.width - 1] < 40);
+        OT_EXPECT(middle[0] > 200);
+        OT_EXPECT(middle[pixmap.width - 1] < 40);
     }
     reticle_pixmap_deinit(&pixmap);
     reticle_release(doc);
@@ -170,31 +170,31 @@ static void draw_requires_exactly_one_destination(void) {
     if (!doc)
         return;
     /* Neither: a caller mistake that must not silently no-op. */
-    CHECK(reticle_draw(&(reticle_draw_opts){
-              .document = doc,
-              .bounds = {0.0f, 0.0f, 8.0f, 8.0f},
-          }) == FLUX_ERROR_INVALID_ARGUMENT);
+    OT_EXPECT(reticle_draw(&(reticle_draw_opts){
+                  .document = doc,
+                  .bounds = {0.0f, 0.0f, 8.0f, 8.0f},
+              }) == FLUX_ERROR_INVALID_ARGUMENT);
     /* Both: ambiguous, refused. */
     flux_canvas *canvas = nullptr;
     if (flux_canvas_create_cpu(8, 8, 1.0f, &canvas) == FLUX_OK) {
         flux_encoder *encoder = nullptr;
         if (flux_encoder_create(&(flux_encoder_desc){}, &encoder) == FLUX_OK) {
-            CHECK(reticle_draw(&(reticle_draw_opts){
-                      .document = doc,
-                      .canvas = canvas,
-                      .encoder = encoder,
-                      .bounds = {0.0f, 0.0f, 8.0f, 8.0f},
-                  }) == FLUX_ERROR_INVALID_ARGUMENT);
+            OT_EXPECT(reticle_draw(&(reticle_draw_opts){
+                          .document = doc,
+                          .canvas = canvas,
+                          .encoder = encoder,
+                          .bounds = {0.0f, 0.0f, 8.0f, 8.0f},
+                      }) == FLUX_ERROR_INVALID_ARGUMENT);
             flux_encoder_destroy(encoder);
         }
         flux_canvas_release(canvas);
     }
     /* A zero-extent box has no meaning. */
-    CHECK(reticle_draw(&(reticle_draw_opts){
-              .document = doc,
-              .canvas = nullptr,
-              .bounds = {0.0f, 0.0f, 0.0f, 8.0f},
-          }) == FLUX_ERROR_INVALID_ARGUMENT);
+    OT_EXPECT(reticle_draw(&(reticle_draw_opts){
+                  .document = doc,
+                  .canvas = nullptr,
+                  .bounds = {0.0f, 0.0f, 0.0f, 8.0f},
+              }) == FLUX_ERROR_INVALID_ARGUMENT);
     reticle_release(doc);
 }
 
@@ -207,15 +207,15 @@ static void encoder_recording_replays_identically(void) {
         return;
 
     reticle_pixmap immediate = {};
-    CHECK(reticle_rasterize(
-              &(reticle_rasterize_opts){
-                  .document = doc,
-                  .width = 16,
-                  .height = 16,
-                  .format = RETICLE_PIXELS_RGBA8_PREMUL,
-                  .paint = RETICLE_PAINT_THEME,
-              },
-              &immediate) == FLUX_OK);
+    OT_EXPECT(reticle_rasterize(
+                  &(reticle_rasterize_opts){
+                      .document = doc,
+                      .width = 16,
+                      .height = 16,
+                      .format = RETICLE_PIXELS_RGBA8_PREMUL,
+                      .paint = RETICLE_PAINT_THEME,
+                  },
+                  &immediate) == FLUX_OK);
 
     flux_encoder *encoder = nullptr;
     flux_canvas *canvas = nullptr;
@@ -229,14 +229,14 @@ static void encoder_recording_replays_identically(void) {
         reticle_release(doc);
         return;
     }
-    CHECK(reticle_draw(&(reticle_draw_opts){
-              .document = doc,
-              .encoder = encoder,
-              .bounds = {0.0f, 0.0f, 16.0f, 16.0f},
-              .paint = RETICLE_PAINT_THEME,
-          }) == FLUX_OK);
+    OT_EXPECT(reticle_draw(&(reticle_draw_opts){
+                  .document = doc,
+                  .encoder = encoder,
+                  .bounds = {0.0f, 0.0f, 16.0f, 16.0f},
+                  .paint = RETICLE_PAINT_THEME,
+              }) == FLUX_OK);
     flux_display_list *list = nullptr;
-    CHECK(flux_encoder_finish(encoder, &list) == FLUX_OK);
+    OT_EXPECT(flux_encoder_finish(encoder, &list) == FLUX_OK);
     flux_encoder_destroy(encoder);
 
     if (list) {
@@ -246,12 +246,12 @@ static void encoder_recording_replays_identically(void) {
             .clear_color = &transparent,
         };
         if (flux_canvas_begin(canvas, &pass) == FLUX_OK) {
-            CHECK(flux_canvas_submit_display_list(canvas, list) == FLUX_OK);
-            CHECK(flux_canvas_end(canvas) == FLUX_OK);
+            OT_EXPECT(flux_canvas_submit_display_list(canvas, list) == FLUX_OK);
+            OT_EXPECT(flux_canvas_end(canvas) == FLUX_OK);
             uint32_t w = 0, h = 0, stride = 0;
             const uint8_t *pixels = flux_canvas_cpu_pixels(canvas, &w, &h, &stride);
             if (pixels && immediate.pixels) {
-                CHECK(w == immediate.width && h == immediate.height);
+                OT_EXPECT(w == immediate.width && h == immediate.height);
                 size_t same = 0;
                 for (uint32_t y = 0; y < h; ++y) {
                     const uint8_t *a = pixels + (size_t)y * stride;
@@ -259,7 +259,7 @@ static void encoder_recording_replays_identically(void) {
                     for (uint32_t x = 0; x < w * 4u; ++x)
                         same += a[x] == b[x];
                 }
-                CHECK(same == (size_t)w * h * 4u);
+                OT_EXPECT(same == (size_t)w * h * 4u);
             }
         }
         flux_display_list_release(list);
@@ -280,19 +280,19 @@ static void global_opacity_multiplies_the_silhouette(void) {
     }
     /* Halving is observable in the recorded command stream only through the
      * paint, so this asserts the call is accepted and produces commands. */
-    CHECK(reticle_draw(&(reticle_draw_opts){
-              .document = doc,
-              .encoder = encoder,
-              .bounds = {0.0f, 0.0f, 8.0f, 8.0f},
-              .paint = RETICLE_PAINT_MONOCHROME,
-              .color = flux_color_rgba(255, 255, 255, 255),
-              .opacity = 0.5f,
-          }) == FLUX_OK);
+    OT_EXPECT(reticle_draw(&(reticle_draw_opts){
+                  .document = doc,
+                  .encoder = encoder,
+                  .bounds = {0.0f, 0.0f, 8.0f, 8.0f},
+                  .paint = RETICLE_PAINT_MONOCHROME,
+                  .color = flux_color_rgba(255, 255, 255, 255),
+                  .opacity = 0.5f,
+              }) == FLUX_OK);
     flux_display_list *list = nullptr;
-    CHECK(flux_encoder_finish(encoder, &list) == FLUX_OK);
+    OT_EXPECT(flux_encoder_finish(encoder, &list) == FLUX_OK);
     flux_encoder_destroy(encoder);
     if (list) {
-        CHECK(flux_display_list_command_count(list) > 0);
+        OT_EXPECT(flux_display_list_command_count(list) > 0);
         flux_display_list_release(list);
     }
     reticle_release(doc);
@@ -305,31 +305,7 @@ static void empty_document_draws_cleanly(void) {
     if (!doc)
         return;
     reticle_pixmap pixmap = {};
-    CHECK(reticle_rasterize(
-              &(reticle_rasterize_opts){
-                  .document = doc,
-                  .width = 4,
-                  .height = 4,
-                  .format = RETICLE_PIXELS_RGBA8_PREMUL,
-                  .paint = RETICLE_PAINT_THEME,
-              },
-              &pixmap) == FLUX_OK);
-    if (pixmap.pixels) {
-        /* Fully transparent: the clear colour, untouched. */
-        for (uint32_t i = 0; i < pixmap.width * pixmap.height; ++i)
-            CHECK(pixmap.pixels[i * 4 + 3] == 0);
-    }
-    reticle_pixmap_deinit(&pixmap);
-    reticle_release(doc);
-}
-
-static void pixmap_deinit_is_idempotent(void) {
-    reticle_pixmap pixmap = {};
-    reticle_pixmap_deinit(&pixmap);
-    CHECK(pixmap.pixels == nullptr);
-    reticle_document *doc = load(SQUARE);
-    if (doc) {
-        CHECK(reticle_rasterize(
+    OT_EXPECT(reticle_rasterize(
                   &(reticle_rasterize_opts){
                       .document = doc,
                       .width = 4,
@@ -338,11 +314,35 @@ static void pixmap_deinit_is_idempotent(void) {
                       .paint = RETICLE_PAINT_THEME,
                   },
                   &pixmap) == FLUX_OK);
-        CHECK(pixmap.pixels != nullptr);
+    if (pixmap.pixels) {
+        /* Fully transparent: the clear colour, untouched. */
+        for (uint32_t i = 0; i < pixmap.width * pixmap.height; ++i)
+            OT_EXPECT(pixmap.pixels[i * 4 + 3] == 0);
+    }
+    reticle_pixmap_deinit(&pixmap);
+    reticle_release(doc);
+}
+
+static void pixmap_deinit_is_idempotent(void) {
+    reticle_pixmap pixmap = {};
+    reticle_pixmap_deinit(&pixmap);
+    OT_EXPECT(pixmap.pixels == nullptr);
+    reticle_document *doc = load(SQUARE);
+    if (doc) {
+        OT_EXPECT(reticle_rasterize(
+                      &(reticle_rasterize_opts){
+                          .document = doc,
+                          .width = 4,
+                          .height = 4,
+                          .format = RETICLE_PIXELS_RGBA8_PREMUL,
+                          .paint = RETICLE_PAINT_THEME,
+                      },
+                      &pixmap) == FLUX_OK);
+        OT_EXPECT(pixmap.pixels != nullptr);
         reticle_pixmap_deinit(&pixmap);
-        CHECK(pixmap.pixels == nullptr);
+        OT_EXPECT(pixmap.pixels == nullptr);
         reticle_pixmap_deinit(&pixmap);
-        CHECK(pixmap.pixels == nullptr);
+        OT_EXPECT(pixmap.pixels == nullptr);
         reticle_release(doc);
     }
 }
@@ -399,19 +399,19 @@ static void element_opacity_reaches_the_pixels(void) {
     };
     for (size_t i = 0; i < sizeof CASES / sizeof CASES[0]; ++i) {
         reticle_document *doc = load(CASES[i].svg);
-        CHECK(doc != nullptr);
+        OT_EXPECT(doc != nullptr);
         if (!doc)
             continue;
         reticle_pixmap pixmap = {};
-        CHECK(reticle_rasterize(
-                  &(reticle_rasterize_opts){
-                      .document = doc,
-                      .width = 8,
-                      .height = 8,
-                      .format = RETICLE_PIXELS_RGBA8_PREMUL,
-                      .paint = RETICLE_PAINT_THEME,
-                  },
-                  &pixmap) == FLUX_OK);
+        OT_EXPECT(reticle_rasterize(
+                      &(reticle_rasterize_opts){
+                          .document = doc,
+                          .width = 8,
+                          .height = 8,
+                          .format = RETICLE_PIXELS_RGBA8_PREMUL,
+                          .paint = RETICLE_PAINT_THEME,
+                      },
+                      &pixmap) == FLUX_OK);
         if (pixmap.pixels) {
             const uint8_t *p = pixel(&pixmap, 4, 4);
             /* 0.5 -> 128, 0.25 -> 64. Antialiasing does not touch an interior
@@ -419,7 +419,7 @@ static void element_opacity_reaches_the_pixels(void) {
             const uint8_t expected = i == 2 ? 64 : 128;
             if (p[3] != expected)
                 fprintf(stderr, "FAIL %s: alpha %u != %u\n", CASES[i].label, p[3], expected);
-            CHECK(p[3] == expected);
+            OT_EXPECT(p[3] == expected);
         }
         reticle_pixmap_deinit(&pixmap);
         reticle_release(doc);
@@ -443,7 +443,7 @@ static void stroke_width_scales_exactly_once(void) {
         const double expected = (double)px / 8.0; /* 1 user unit = px/8 device px */
         if (!(fabs(measured - expected) <= 0.06))
             fprintf(stderr, "FAIL %upx: stroke %.3f != %.3f\n", px, measured, expected);
-        CHECK(fabs(measured - expected) <= 0.06);
+        OT_EXPECT(fabs(measured - expected) <= 0.06);
     }
 }
 
@@ -478,7 +478,7 @@ static void stroke_override_is_in_destination_units(void) {
         const double measured = mass / ((double)pixmap.width * 255.0);
         if (!(fabs(measured - 4.0) <= 0.15))
             fprintf(stderr, "FAIL override @%upx: %.3f != 4\n", px, measured);
-        CHECK(fabs(measured - 4.0) <= 0.15);
+        OT_EXPECT(fabs(measured - 4.0) <= 0.15);
         reticle_pixmap_deinit(&pixmap);
     }
     reticle_release(doc);
@@ -498,5 +498,5 @@ int main(void) {
     stroke_override_is_in_destination_units();
     empty_document_draws_cleanly();
     pixmap_deinit_is_idempotent();
-    TEST_REPORT();
+    return OT_REPORT();
 }

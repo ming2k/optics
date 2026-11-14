@@ -7,7 +7,7 @@
  * - Font atlas explicit synchronization query
  */
 
-#include "test_helpers.h"
+#include "optics_test.h"
 #include <flux/canvas.h>
 #include <flux/canvas_helpers.h>
 #include <flux/core.h>
@@ -18,53 +18,53 @@ static void test_flux_init_macro(void) {
     /* Lowercase struct form */
     flux_buffer_desc b1 = FLUX_INIT(buffer_desc, .size = 1024, .usage = FLUX_BUFFER_USAGE_VERTEX,
                                     .location = FLUX_BUFFER_HOST_VISIBLE);
-    EXPECT(b1.type == FLUX_TYPE_BUFFER_DESC);
-    EXPECT(b1.next == nullptr);
-    EXPECT(b1.size == 1024);
-    EXPECT(b1.usage == FLUX_BUFFER_USAGE_VERTEX);
+    OT_EXPECT(b1.type == FLUX_TYPE_BUFFER_DESC);
+    OT_EXPECT(b1.next == nullptr);
+    OT_EXPECT(b1.size == 1024);
+    OT_EXPECT(b1.usage == FLUX_BUFFER_USAGE_VERTEX);
 
     /* Uppercase descriptor form */
     flux_target_desc t1 = FLUX_INIT(TARGET_DESC, .width = 800, .height = 600,
                                     .usage = FLUX_TARGET_COLOR, .format = FLUX_FORMAT_RGBA8_UNORM);
-    EXPECT(t1.type == FLUX_TYPE_TARGET_DESC);
-    EXPECT(t1.next == nullptr);
-    EXPECT(t1.width == 800);
-    EXPECT(t1.height == 600);
+    OT_EXPECT(t1.type == FLUX_TYPE_TARGET_DESC);
+    OT_EXPECT(t1.next == nullptr);
+    OT_EXPECT(t1.width == 800);
+    OT_EXPECT(t1.height == 600);
 
     /* CPU target desc */
     flux_cpu_target_desc ct1 =
         FLUX_INIT(CPU_TARGET_DESC, .width = 64, .height = 64, .format = FLUX_FORMAT_RGBA8_UNORM);
-    EXPECT(ct1.type == FLUX_TYPE_CPU_TARGET_DESC);
-    EXPECT(ct1.next == nullptr);
-    EXPECT(ct1.width == 64);
+    OT_EXPECT(ct1.type == FLUX_TYPE_CPU_TARGET_DESC);
+    OT_EXPECT(ct1.next == nullptr);
+    OT_EXPECT(ct1.width == 64);
 }
 
 static void test_arena_lifecycle(void) {
     flux_arena a;
     flux_result r = flux_arena_init(&a, 4096, nullptr);
-    EXPECT(r == FLUX_OK);
-    EXPECT(a.capacity == 4096);
-    EXPECT(a.used == 0);
+    OT_EXPECT(r == FLUX_OK);
+    OT_EXPECT(a.capacity == 4096);
+    OT_EXPECT(a.used == 0);
 
     void *p = flux_arena_alloc(&a, 128);
-    EXPECT(p != nullptr);
-    EXPECT(a.used >= 128);
+    OT_EXPECT(p != nullptr);
+    OT_EXPECT(a.used >= 128);
 
     flux_arena_reset(&a);
-    EXPECT(a.used == 0);
+    OT_EXPECT(a.used == 0);
 
     /* Test path create on arena */
     flux_path *path = nullptr;
     r = flux_path_create(&path, &a);
-    EXPECT(r == FLUX_OK);
-    EXPECT(path != nullptr);
+    OT_EXPECT(r == FLUX_OK);
+    OT_EXPECT(path != nullptr);
     flux_path_move_to(path, 0.0f, 0.0f);
     flux_path_line_to(path, 10.0f, 10.0f);
     flux_path_reset(path);
 
     /* Deinit */
     flux_arena_deinit(&a);
-    EXPECT(a.base == nullptr);
+    OT_EXPECT(a.base == nullptr);
 }
 
 static void test_cpu_target_and_canvas_polymorphism(void) {
@@ -73,14 +73,14 @@ static void test_cpu_target_and_canvas_polymorphism(void) {
         FLUX_INIT(CPU_TARGET_DESC, .width = 64, .height = 64, .format = FLUX_FORMAT_RGBA8_UNORM);
     flux_target *target = nullptr;
     flux_result r = flux_target_create_cpu(&t_desc, &target);
-    EXPECT(r == FLUX_OK);
-    EXPECT(target != nullptr);
-    EXPECT(flux_target_width(target) == 64);
-    EXPECT(flux_target_height(target) == 64);
+    OT_EXPECT(r == FLUX_OK);
+    OT_EXPECT(target != nullptr);
+    OT_EXPECT(flux_target_width(target) == 64);
+    OT_EXPECT(flux_target_height(target) == 64);
 
     /* Retain and release */
     flux_target *retained = flux_target_retain(target);
-    EXPECT(retained == target);
+    OT_EXPECT(retained == target);
     flux_target_release(retained);
 
     /* 2. Create CPU Canvas */
@@ -88,12 +88,12 @@ static void test_cpu_target_and_canvas_polymorphism(void) {
                                         .width = 64, .height = 64, .scale = 1.0f);
     flux_canvas *canvas = nullptr;
     r = flux_canvas_create(&c_desc, &canvas);
-    EXPECT(r == FLUX_OK);
-    EXPECT(canvas != nullptr);
+    OT_EXPECT(r == FLUX_OK);
+    OT_EXPECT(canvas != nullptr);
 
     /* Canvas retain and release check */
     flux_canvas *c_retained = flux_canvas_retain(canvas);
-    EXPECT(c_retained == canvas);
+    OT_EXPECT(c_retained == canvas);
     flux_canvas_release(c_retained);
 
     /* 3. Polymorphic Target-Driven pass bracket */
@@ -103,7 +103,7 @@ static void test_cpu_target_and_canvas_polymorphism(void) {
                     .type = FLUX_TYPE_CANVAS_PASS_DESC,
                     .clear_color = &clear,
                     .attachment = {.kind = FLUX_CANVAS_ATTACHMENT_TARGET, .target = target}});
-    EXPECT(r == FLUX_OK);
+    OT_EXPECT(r == FLUX_OK);
 
     /* 4. Use inline canvas helpers from <flux/canvas_helpers.h> */
     flux_rect rect = {4.0f, 4.0f, 24.0f, 24.0f};
@@ -115,15 +115,15 @@ static void test_cpu_target_and_canvas_polymorphism(void) {
     flux_canvas_fill_rrect(canvas, rrect, 4.0f, rrect_color);
 
     r = flux_canvas_end(canvas);
-    EXPECT(r == FLUX_OK);
+    OT_EXPECT(r == FLUX_OK);
 
     /* 5. Extract pixels */
     uint32_t w = 0, h = 0, stride = 0;
     const uint8_t *px = flux_target_cpu_pixels(target, &w, &h, &stride);
-    EXPECT(px != nullptr);
-    EXPECT(w == 64);
-    EXPECT(h == 64);
-    EXPECT(stride >= 64 * 4);
+    OT_EXPECT(px != nullptr);
+    OT_EXPECT(w == 64);
+    OT_EXPECT(h == 64);
+    OT_EXPECT(stride >= 64 * 4);
 
     /* 6. Release resources */
     flux_canvas_release(canvas);
@@ -140,15 +140,15 @@ static void test_text_lifecycle_and_atlas_sync(void) {
     if (r == FLUX_OK && text) {
         /* Retain / release */
         glyph_ctx *retained = glyph_retain(text);
-        EXPECT(retained == text);
+        OT_EXPECT(retained == text);
         glyph_release(retained);
 
         /* Query atlas sync */
         bool pending = glyph_has_pending_uploads(text);
-        EXPECT(!pending);
+        OT_EXPECT(!pending);
 
         flux_result fr = glyph_flush_atlas(text, nullptr);
-        EXPECT(fr == FLUX_OK);
+        OT_EXPECT(fr == FLUX_OK);
 
         glyph_release(text);
     }
@@ -156,28 +156,28 @@ static void test_text_lifecycle_and_atlas_sync(void) {
 
 static void test_adr0088_clean_break(void) {
     /* 1. Geometry Tagged Union size check */
-    EXPECT(sizeof(flux_geometry) <= 48);
+    OT_EXPECT(sizeof(flux_geometry) <= 48);
 
     /* 2. Brush and geometry construction */
     flux_brush solid_b = flux_brush_solid(flux_color_rgba_premul(255, 0, 0, 255));
-    EXPECT(solid_b.kind == FLUX_BRUSH_SOLID);
-    EXPECT(solid_b.opacity == 1.0f);
+    OT_EXPECT(solid_b.kind == FLUX_BRUSH_SOLID);
+    OT_EXPECT(solid_b.opacity == 1.0f);
 
     flux_geometry r_geom = flux_geom_rect((flux_rect){10.0f, 10.0f, 50.0f, 50.0f});
-    EXPECT(r_geom.kind == FLUX_GEOM_RECT);
+    OT_EXPECT(r_geom.kind == FLUX_GEOM_RECT);
 
     flux_geometry sq_geom =
         flux_geom_squircle((flux_rect){0.0f, 0.0f, 100.0f, 100.0f}, 16.0f, 0.8f);
-    EXPECT(sq_geom.kind == FLUX_GEOM_SQUIRCLE);
-    EXPECT(sq_geom.squircle.curvature == 0.8f);
+    OT_EXPECT(sq_geom.kind == FLUX_GEOM_SQUIRCLE);
+    OT_EXPECT(sq_geom.squircle.curvature == 0.8f);
 
     /* 3. Encoder and DisplayList pure CPU recording */
     flux_arena arena;
-    EXPECT(flux_arena_init(&arena, 16384, nullptr) == FLUX_OK);
+    OT_EXPECT(flux_arena_init(&arena, 16384, nullptr) == FLUX_OK);
 
     flux_encoder *enc = nullptr;
-    EXPECT(flux_encoder_create(nullptr, &enc) == FLUX_OK);
-    EXPECT(enc != nullptr);
+    OT_EXPECT(flux_encoder_create(nullptr, &enc) == FLUX_OK);
+    OT_EXPECT(enc != nullptr);
 
     flux_encoder_save(enc);
     flux_encoder_translate(enc, 10.0f, 10.0f);
@@ -188,10 +188,10 @@ static void test_adr0088_clean_break(void) {
     flux_encoder_restore(enc);
 
     flux_display_list *dl = nullptr;
-    EXPECT(flux_encoder_finish(enc, &dl) == FLUX_OK);
-    EXPECT(flux_display_list_command_count(dl) > 0);
-    EXPECT(flux_display_list_size(dl) > 0);
-    EXPECT(dl != nullptr);
+    OT_EXPECT(flux_encoder_finish(enc, &dl) == FLUX_OK);
+    OT_EXPECT(flux_display_list_command_count(dl) > 0);
+    OT_EXPECT(flux_display_list_size(dl) > 0);
+    OT_EXPECT(dl != nullptr);
 
     flux_encoder_destroy(enc);
 
@@ -199,20 +199,20 @@ static void test_adr0088_clean_break(void) {
     flux_cpu_target_desc t_desc =
         FLUX_INIT(CPU_TARGET_DESC, .width = 128, .height = 128, .format = FLUX_FORMAT_RGBA8_UNORM);
     flux_target *target = nullptr;
-    EXPECT(flux_target_create_cpu(&t_desc, &target) == FLUX_OK);
+    OT_EXPECT(flux_target_create_cpu(&t_desc, &target) == FLUX_OK);
 
     flux_canvas_desc c_desc = FLUX_INIT(CANVAS_DESC, .backend = FLUX_CANVAS_BACKEND_CPU);
     flux_canvas *c = nullptr;
-    EXPECT(flux_canvas_create(&c_desc, &c) == FLUX_OK);
+    OT_EXPECT(flux_canvas_create(&c_desc, &c) == FLUX_OK);
 
     flux_color clear = 0;
-    EXPECT(flux_canvas_begin(
-               c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
-                                           .clear_color = &clear,
-                                           .attachment = {.kind = FLUX_CANVAS_ATTACHMENT_TARGET,
-                                                          .target = target}}) == FLUX_OK);
-    EXPECT(flux_canvas_submit_display_list(c, dl) == FLUX_OK);
-    EXPECT(flux_canvas_end(c) == FLUX_OK);
+    OT_EXPECT(flux_canvas_begin(
+                  c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                              .clear_color = &clear,
+                                              .attachment = {.kind = FLUX_CANVAS_ATTACHMENT_TARGET,
+                                                             .target = target}}) == FLUX_OK);
+    OT_EXPECT(flux_canvas_submit_display_list(c, dl) == FLUX_OK);
+    OT_EXPECT(flux_canvas_end(c) == FLUX_OK);
 
     flux_display_list_release(dl);
     flux_canvas_release(c);
@@ -222,11 +222,11 @@ static void test_adr0088_clean_break(void) {
 
 static void test_adr0090_display_list_immutable_capture(void) {
     flux_arena caller_arena;
-    EXPECT(flux_arena_init(&caller_arena, 8192, nullptr) == FLUX_OK);
+    OT_EXPECT(flux_arena_init(&caller_arena, 8192, nullptr) == FLUX_OK);
 
     /* Allocate path in caller's transient arena */
     flux_path *path = nullptr;
-    EXPECT(flux_path_create(&path, &caller_arena) == FLUX_OK);
+    OT_EXPECT(flux_path_create(&path, &caller_arena) == FLUX_OK);
     flux_path_move_to(path, 10.0f, 10.0f);
     flux_path_line_to(path, 50.0f, 10.0f);
     flux_path_line_to(path, 50.0f, 50.0f);
@@ -234,9 +234,9 @@ static void test_adr0090_display_list_immutable_capture(void) {
 
     /* Record into encoder */
     flux_arena enc_arena;
-    EXPECT(flux_arena_init(&enc_arena, 8192, nullptr) == FLUX_OK);
+    OT_EXPECT(flux_arena_init(&enc_arena, 8192, nullptr) == FLUX_OK);
     flux_encoder *enc = nullptr;
-    EXPECT(flux_encoder_create(nullptr, &enc) == FLUX_OK);
+    OT_EXPECT(flux_encoder_create(nullptr, &enc) == FLUX_OK);
 
     flux_geometry p_geom = {.kind = FLUX_GEOM_PATH, .path = {.path = path}};
     flux_brush solid_b = flux_brush_solid(flux_color_rgba_premul(0, 255, 0, 255));
@@ -244,9 +244,9 @@ static void test_adr0090_display_list_immutable_capture(void) {
 
     /* Finish into display list */
     flux_display_list *dl = nullptr;
-    EXPECT(flux_encoder_finish(enc, &dl) == FLUX_OK);
-    EXPECT(flux_display_list_command_count(dl) == 1);
-    EXPECT(flux_display_list_size(dl) > 0);
+    OT_EXPECT(flux_encoder_finish(enc, &dl) == FLUX_OK);
+    OT_EXPECT(flux_display_list_command_count(dl) == 1);
+    OT_EXPECT(flux_display_list_size(dl) > 0);
 
     /* Now destroy encoder, reset encoder arena, and completely reset/destroy caller's path and
      * arena */
@@ -259,28 +259,28 @@ static void test_adr0090_display_list_immutable_capture(void) {
     flux_cpu_target_desc t_desc =
         FLUX_INIT(CPU_TARGET_DESC, .width = 64, .height = 64, .format = FLUX_FORMAT_RGBA8_UNORM);
     flux_target *target = nullptr;
-    EXPECT(flux_target_create_cpu(&t_desc, &target) == FLUX_OK);
+    OT_EXPECT(flux_target_create_cpu(&t_desc, &target) == FLUX_OK);
 
     flux_canvas_desc c_desc = FLUX_INIT(CANVAS_DESC, .backend = FLUX_CANVAS_BACKEND_CPU);
     flux_canvas *c = nullptr;
-    EXPECT(flux_canvas_create(&c_desc, &c) == FLUX_OK);
+    OT_EXPECT(flux_canvas_create(&c_desc, &c) == FLUX_OK);
 
     flux_color clear = 0;
-    EXPECT(flux_canvas_begin(
-               c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
-                                           .clear_color = &clear,
-                                           .attachment = {.kind = FLUX_CANVAS_ATTACHMENT_TARGET,
-                                                          .target = target}}) == FLUX_OK);
-    EXPECT(flux_canvas_submit_display_list(c, dl) == FLUX_OK);
-    EXPECT(flux_canvas_end(c) == FLUX_OK);
+    OT_EXPECT(flux_canvas_begin(
+                  c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                              .clear_color = &clear,
+                                              .attachment = {.kind = FLUX_CANVAS_ATTACHMENT_TARGET,
+                                                             .target = target}}) == FLUX_OK);
+    OT_EXPECT(flux_canvas_submit_display_list(c, dl) == FLUX_OK);
+    OT_EXPECT(flux_canvas_end(c) == FLUX_OK);
 
     /* Verify pixels at (30, 20) inside the triangle are rendered green */
     uint32_t w = 0, h = 0, stride = 0;
     const uint8_t *px = flux_target_cpu_pixels(target, &w, &h, &stride);
-    EXPECT(px != nullptr);
+    OT_EXPECT(px != nullptr);
     const uint8_t *sample = &px[(20 * w + 30) * 4];
-    EXPECT(sample[1] > 200); /* green channel */
-    EXPECT(sample[3] > 200); /* alpha channel */
+    OT_EXPECT(sample[1] > 200); /* green channel */
+    OT_EXPECT(sample[3] > 200); /* alpha channel */
 
     flux_display_list_release(dl);
     flux_canvas_release(c);
@@ -291,18 +291,18 @@ static void test_adr0091_save_layer_opacity_group(void) {
     flux_cpu_target_desc t_desc =
         FLUX_INIT(CPU_TARGET_DESC, .width = 64, .height = 64, .format = FLUX_FORMAT_RGBA8_UNORM);
     flux_target *target = nullptr;
-    EXPECT(flux_target_create_cpu(&t_desc, &target) == FLUX_OK);
+    OT_EXPECT(flux_target_create_cpu(&t_desc, &target) == FLUX_OK);
 
     flux_canvas_desc c_desc = FLUX_INIT(CANVAS_DESC, .backend = FLUX_CANVAS_BACKEND_CPU);
     flux_canvas *c = nullptr;
-    EXPECT(flux_canvas_create(&c_desc, &c) == FLUX_OK);
+    OT_EXPECT(flux_canvas_create(&c_desc, &c) == FLUX_OK);
 
     flux_color clear = 0;
-    EXPECT(flux_canvas_begin(
-               c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
-                                           .clear_color = &clear,
-                                           .attachment = {.kind = FLUX_CANVAS_ATTACHMENT_TARGET,
-                                                          .target = target}}) == FLUX_OK);
+    OT_EXPECT(flux_canvas_begin(
+                  c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                              .clear_color = &clear,
+                                              .attachment = {.kind = FLUX_CANVAS_ATTACHMENT_TARGET,
+                                                             .target = target}}) == FLUX_OK);
 
     /* Opacity Group with 0.5 opacity:
      * Draw two overlapping fully-opaque red rectangles.
@@ -314,11 +314,11 @@ static void test_adr0091_save_layer_opacity_group(void) {
     flux_canvas_fill_rect_color(c, (flux_rect){20.0f, 8.0f, 24.0f, 24.0f}, red);
     flux_canvas_restore(c);
 
-    EXPECT(flux_canvas_end(c) == FLUX_OK);
+    OT_EXPECT(flux_canvas_end(c) == FLUX_OK);
 
     uint32_t w = 0, h = 0, stride = 0;
     const uint8_t *px = flux_target_cpu_pixels(target, &w, &h, &stride);
-    EXPECT(px != nullptr);
+    OT_EXPECT(px != nullptr);
 
     /* Non-overlapping pixel at (12, 16): Rect 1 only */
     const uint8_t *px_single = &px[(16 * w + 12) * 4];
@@ -327,10 +327,10 @@ static void test_adr0091_save_layer_opacity_group(void) {
 
     /* In a true Opacity Group, both pixels MUST have identical alpha and color (~128),
      * NOT the double-blend artifact (191) of immediate opacity */
-    EXPECT(abs((int)px_single[3] - 128) <= 4);
-    EXPECT(abs((int)px_overlap[3] - 128) <= 4);
-    EXPECT(abs((int)px_single[3] - (int)px_overlap[3]) <= 2);
-    EXPECT(abs((int)px_single[0] - (int)px_overlap[0]) <= 2);
+    OT_EXPECT(abs((int)px_single[3] - 128) <= 4);
+    OT_EXPECT(abs((int)px_overlap[3] - 128) <= 4);
+    OT_EXPECT(abs((int)px_single[3] - (int)px_overlap[3]) <= 2);
+    OT_EXPECT(abs((int)px_single[0] - (int)px_overlap[0]) <= 2);
 
     flux_canvas_release(c);
     flux_target_release(target);
@@ -340,39 +340,39 @@ static void test_adr0091_squircle_distinct_geometry(void) {
     flux_cpu_target_desc t_desc =
         FLUX_INIT(CPU_TARGET_DESC, .width = 64, .height = 64, .format = FLUX_FORMAT_RGBA8_UNORM);
     flux_target *t_sq = nullptr;
-    EXPECT(flux_target_create_cpu(&t_desc, &t_sq) == FLUX_OK);
+    OT_EXPECT(flux_target_create_cpu(&t_desc, &t_sq) == FLUX_OK);
 
     flux_target *t_rr = nullptr;
-    EXPECT(flux_target_create_cpu(&t_desc, &t_rr) == FLUX_OK);
+    OT_EXPECT(flux_target_create_cpu(&t_desc, &t_rr) == FLUX_OK);
 
     flux_canvas_desc c_desc = FLUX_INIT(CANVAS_DESC, .backend = FLUX_CANVAS_BACKEND_CPU);
     flux_canvas *c = nullptr;
-    EXPECT(flux_canvas_create(&c_desc, &c) == FLUX_OK);
+    OT_EXPECT(flux_canvas_create(&c_desc, &c) == FLUX_OK);
 
     flux_color clear = 0;
     flux_color white = flux_color_rgba_premul(255, 255, 255, 255);
     flux_rect box = {4.0f, 4.0f, 56.0f, 56.0f};
 
     /* Draw squircle */
-    EXPECT(flux_canvas_begin(
-               c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
-                                           .clear_color = &clear,
-                                           .attachment = {.kind = FLUX_CANVAS_ATTACHMENT_TARGET,
-                                                          .target = t_sq}}) == FLUX_OK);
+    OT_EXPECT(flux_canvas_begin(
+                  c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                              .clear_color = &clear,
+                                              .attachment = {.kind = FLUX_CANVAS_ATTACHMENT_TARGET,
+                                                             .target = t_sq}}) == FLUX_OK);
     flux_geometry g_sq = flux_geom_squircle(box, 16.0f, 1.0f);
     flux_brush b = flux_brush_solid(white);
     flux_canvas_draw_geometry(c, &g_sq, &b);
-    EXPECT(flux_canvas_end(c) == FLUX_OK);
+    OT_EXPECT(flux_canvas_end(c) == FLUX_OK);
 
     /* Draw rrect */
-    EXPECT(flux_canvas_begin(
-               c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
-                                           .clear_color = &clear,
-                                           .attachment = {.kind = FLUX_CANVAS_ATTACHMENT_TARGET,
-                                                          .target = t_rr}}) == FLUX_OK);
+    OT_EXPECT(flux_canvas_begin(
+                  c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                              .clear_color = &clear,
+                                              .attachment = {.kind = FLUX_CANVAS_ATTACHMENT_TARGET,
+                                                             .target = t_rr}}) == FLUX_OK);
     flux_geometry g_rr = flux_geom_rrect(box, 16.0f);
     flux_canvas_draw_geometry(c, &g_rr, &b);
-    EXPECT(flux_canvas_end(c) == FLUX_OK);
+    OT_EXPECT(flux_canvas_end(c) == FLUX_OK);
 
     uint32_t w = 0, h = 0, stride = 0;
     const uint8_t *px_sq = flux_target_cpu_pixels(t_sq, &w, &h, &stride);
@@ -390,7 +390,7 @@ static void test_adr0091_squircle_distinct_geometry(void) {
         if (diff_detected)
             break;
     }
-    EXPECT(diff_detected);
+    OT_EXPECT(diff_detected);
 
     flux_canvas_release(c);
     flux_target_release(t_sq);
@@ -400,12 +400,12 @@ static void test_adr0091_squircle_distinct_geometry(void) {
 static void test_adr0092_text_atlas_epoch_tracking(void) {
     glyph_desc desc = {.scale = 1.0f};
     glyph_ctx *text = nullptr;
-    EXPECT(glyph_create(&desc, &text) == FLUX_OK);
+    OT_EXPECT(glyph_create(&desc, &text) == FLUX_OK);
 
     uint64_t epoch0 = glyph_get_atlas_epoch(text, nullptr);
-    EXPECT(glyph_flush_atlas(text, nullptr) == FLUX_OK);
+    OT_EXPECT(glyph_flush_atlas(text, nullptr) == FLUX_OK);
     uint64_t epoch1 = glyph_get_atlas_epoch(text, nullptr);
-    EXPECT(epoch1 > epoch0);
+    OT_EXPECT(epoch1 > epoch0);
 
     glyph_release(text);
 }
@@ -414,57 +414,57 @@ static void test_adr0093_target_exclusive_borrow_and_readback(void) {
     flux_cpu_target_desc t_desc =
         FLUX_INIT(CPU_TARGET_DESC, .width = 32, .height = 32, .format = FLUX_FORMAT_RGBA8_UNORM);
     flux_target *target = nullptr;
-    EXPECT(flux_target_create_cpu(&t_desc, &target) == FLUX_OK);
+    OT_EXPECT(flux_target_create_cpu(&t_desc, &target) == FLUX_OK);
 
     flux_canvas_desc c_desc =
         FLUX_INIT(CANVAS_DESC, .backend = FLUX_CANVAS_BACKEND_CPU, .width = 32, .height = 32);
     flux_canvas *c1 = nullptr;
-    EXPECT(flux_canvas_create(&c_desc, &c1) == FLUX_OK);
+    OT_EXPECT(flux_canvas_create(&c_desc, &c1) == FLUX_OK);
     flux_canvas *c2 = nullptr;
-    EXPECT(flux_canvas_create(&c_desc, &c2) == FLUX_OK);
+    OT_EXPECT(flux_canvas_create(&c_desc, &c2) == FLUX_OK);
 
     /* 1. Begin on target with c1 */
     flux_color red = flux_color_rgba_premul(255, 0, 0, 255);
-    EXPECT(flux_canvas_begin(
-               c1, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
-                                            .clear_color = &red,
-                                            .attachment = {.kind = FLUX_CANVAS_ATTACHMENT_TARGET,
-                                                           .target = target}}) == FLUX_OK);
+    OT_EXPECT(flux_canvas_begin(
+                  c1, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                               .clear_color = &red,
+                                               .attachment = {.kind = FLUX_CANVAS_ATTACHMENT_TARGET,
+                                                              .target = target}}) == FLUX_OK);
 
     /* 2. Overlapping begin on the same target with c2 MUST fail with INVALID_STATE (ADR-0093) */
-    EXPECT(flux_canvas_begin(
-               c2, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
-                                            .clear_color = &red,
-                                            .attachment = {.kind = FLUX_CANVAS_ATTACHMENT_TARGET,
-                                                           .target = target}}) ==
-           FLUX_ERROR_INVALID_STATE);
+    OT_EXPECT(flux_canvas_begin(
+                  c2, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                               .clear_color = &red,
+                                               .attachment = {.kind = FLUX_CANVAS_ATTACHMENT_TARGET,
+                                                              .target = target}}) ==
+              FLUX_ERROR_INVALID_STATE);
 
     /* 3. Readback of target pixels during active session MUST return nullptr */
     uint32_t w = 0, h = 0, stride = 0;
-    EXPECT(flux_target_cpu_pixels(target, &w, &h, &stride) == nullptr);
+    OT_EXPECT(flux_target_cpu_pixels(target, &w, &h, &stride) == nullptr);
 
     /* 4. Canvas readback while recording MUST return nullptr */
-    EXPECT(flux_canvas_read_pixels(c1, &w, &h, &stride) == nullptr);
+    OT_EXPECT(flux_canvas_read_pixels(c1, &w, &h, &stride) == nullptr);
 
     /* 5. End session cleanly on c1 */
-    EXPECT(flux_canvas_end(c1) == FLUX_OK);
+    OT_EXPECT(flux_canvas_end(c1) == FLUX_OK);
 
     /* 6. Target readback is now safe and exposed */
     const uint8_t *px = flux_target_cpu_pixels(target, &w, &h, &stride);
-    EXPECT(px != nullptr);
-    EXPECT(px[0] == 255); /* Red clear color */
+    OT_EXPECT(px != nullptr);
+    OT_EXPECT(px[0] == 255); /* Red clear color */
 
     /* 7. Target can now be bound to c2 */
     flux_color blue = flux_color_rgba_premul(0, 0, 255, 255);
-    EXPECT(flux_canvas_begin(
-               c2, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
-                                            .clear_color = &blue,
-                                            .attachment = {.kind = FLUX_CANVAS_ATTACHMENT_TARGET,
-                                                           .target = target}}) == FLUX_OK);
-    EXPECT(flux_canvas_end(c2) == FLUX_OK);
+    OT_EXPECT(flux_canvas_begin(
+                  c2, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                               .clear_color = &blue,
+                                               .attachment = {.kind = FLUX_CANVAS_ATTACHMENT_TARGET,
+                                                              .target = target}}) == FLUX_OK);
+    OT_EXPECT(flux_canvas_end(c2) == FLUX_OK);
     px = flux_target_cpu_pixels(target, &w, &h, &stride);
-    EXPECT(px != nullptr);
-    EXPECT(px[2] == 255); /* Blue clear color */
+    OT_EXPECT(px != nullptr);
+    OT_EXPECT(px[2] == 255); /* Blue clear color */
 
     flux_canvas_release(c1);
     flux_canvas_release(c2);
@@ -483,6 +483,6 @@ int main(void) {
     test_adr0092_text_atlas_epoch_tracking();
     test_adr0093_target_exclusive_borrow_and_readback();
 
-    TEST_SUMMARY();
-    return g_test_failed ? 1 : 0;
+    return OT_REPORT();
+    return OT_FAILURES() ? 1 : 0;
 }

@@ -2,7 +2,8 @@
  * must not be hoverable/clickable: the render clips them, hit-testing
  * must clip identically. */
 
-#include "test_helpers.h"
+#include "lens_test.h"
+#include "optics_test.h"
 #include <flux/canvas_cpu.h>
 #include <lens/lens.h>
 #include <string.h>
@@ -19,7 +20,7 @@ static const char *ROW_LABELS[20] = {"row-0",  "row-1",  "row-2",  "row-3",  "ro
  * it becomes visible at that spot and works. */
 static void test_scroll_clips_hit_testing(void) {
     lens *ui = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
 
     bool clicked = false;
     bool hovered = false;
@@ -33,8 +34,8 @@ static void test_scroll_clips_hit_testing(void) {
             clicked = true;
     }
     lens_scroll_end(ui);
-    test_end(ui);
-    CHECK(!clicked);
+    lens_test_end(ui);
+    OT_EXPECT(!clicked);
 
     /* Frame 2: press+release at y=200 — inside a folded button's rect,
      * far below the viewport. */
@@ -52,8 +53,8 @@ static void test_scroll_clips_hit_testing(void) {
             hovered = lens_get_response(ui).hovered;
     }
     lens_scroll_end(ui);
-    test_end(ui);
-    CHECK(!clicked);
+    lens_test_end(ui);
+    OT_EXPECT(!clicked);
     in = IN0;
     in.cursor = (flux_point){30.0f, 200.0f};
     in.mouse_released[LENS_MOUSE_LEFT] = true;
@@ -65,8 +66,8 @@ static void test_scroll_clips_hit_testing(void) {
             clicked = true;
     }
     lens_scroll_end(ui);
-    test_end(ui);
-    CHECK(!clicked);
+    lens_test_end(ui);
+    OT_EXPECT(!clicked);
     (void)hovered;
 
     /* Scroll to the bottom, then the same point hits the visible row. */
@@ -80,7 +81,7 @@ static void test_scroll_clips_hit_testing(void) {
         for (int i = 0; i < 20; ++i)
             (void)lens_button(ui, &(lens_button_opts){.label = ROW_LABELS[i]});
         lens_scroll_end(ui);
-        test_end(ui);
+        lens_test_end(ui);
     }
     in = IN0;
     in.cursor = (flux_point){30.0f, 30.0f};
@@ -91,7 +92,7 @@ static void test_scroll_clips_hit_testing(void) {
     for (int i = 0; i < 20; ++i)
         (void)lens_button(ui, &(lens_button_opts){.label = ROW_LABELS[i]});
     lens_scroll_end(ui);
-    test_end(ui);
+    lens_test_end(ui);
     in = IN0;
     in.cursor = (flux_point){30.0f, 30.0f};
     in.mouse_released[LENS_MOUSE_LEFT] = true;
@@ -103,13 +104,13 @@ static void test_scroll_clips_hit_testing(void) {
             clicked = true;
     }
     lens_scroll_end(ui);
-    test_end(ui);
-    CHECK(clicked);
+    lens_test_end(ui);
+    OT_EXPECT(clicked);
 
     lens_release(ui);
 }
 
 int main(void) {
     test_scroll_clips_hit_testing();
-    return TEST_REPORT();
+    return OT_REPORT();
 }

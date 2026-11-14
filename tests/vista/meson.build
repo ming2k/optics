@@ -2,22 +2,18 @@
 if opt_vista
   test_glb_parse = executable('test_glb_parse',
     'test_glb_parse.c',
-    dependencies : [test_helpers_dep, vista_dep],
+    dependencies : [vista_dep, optics_test_dep, m_dep],
   )
-  test('glb_parse', test_glb_parse, suite : 'vista')
-
-  test_scene_graph_animation = executable('test_scene_graph_animation',
-    'test_scene_graph_animation.c',
-    dependencies : [test_helpers_dep, vista_dep],
-  )
-  test('scene_graph_animation', test_scene_graph_animation, suite : 'vista')
+  test('glb_parse', test_glb_parse, suite : 'unit')
 
   bench_sg_worlds = executable('bench_sg_worlds',
     'bench_sg_worlds.c',
     include_directories : include_directories('../flux/bench'),
-    dependencies : [test_helpers_dep, vista_dep, flux_dep],
+    dependencies : [flux_test_support_dep, vista_dep, flux_dep],
   )
-  test('sg_worlds', bench_sg_worlds, suite : 'bench', is_parallel : false)
+  test('bench_sg_worlds', bench_sg_worlds, suite : 'bench', is_parallel : false)
+
+  subdir('integration')
 
   if get_option('fuzz')
     subdir('fuzz')

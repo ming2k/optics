@@ -16,9 +16,19 @@ Format all C sources in-place using standard `clang-format`:
 ### Running Tests & Quality Verification
 Optics uses the native Meson test runner. Quality checks are integrated directly as test suites:
 ```bash
-meson test -C build                    # Run all test suites
-meson test -C build --suite unit       # Unit tests
-meson test -C build --suite lint       # Code quality & contract checks
+meson test -C build --suite unit          # CPU-only unit layer
+meson test -C build --suite integration   # Vulkan/font/environment seams
+meson test -C build --suite e2e           # public-API end-to-end layer
+meson test -C build --suite lint          # tree-level checks, including test layering
+```
+
+### Tree-Level Gates
+These run in the Meson `lint` suite and can also be invoked directly:
+
+```bash
+python3 tools/check_versions.py        # Meson/C headers/Cargo lockstep
+python3 tools/check_library_purity.py  # no stdout in libs, no materials in flux
+python3 tools/check_doc_links.py       # relative links + public/dev firewall
 ```
 
 ### Wayland Listener Slot Contract (ADR-0145)
@@ -35,6 +45,10 @@ python3 tools/check_listeners.py
 tools/
 ├── format.sh               # Fast in-place code formatting wrapper
 ├── check_listeners.py      # Wayland listener-slot safety check (ADR-0145)
+├── check_test_layers.py    # Test-pyramid taxonomy guardrail (ADR-0162)
+├── check_versions.py       # Meson/C/Cargo version lockstep
+├── check_library_purity.py # stdout + material-boundary checks
+├── check_doc_links.py      # relative links + public/dev firewall
 ├── README.md               # Tooling documentation
 │
 ├── ci/                     # CI Runners & Platform Emulation

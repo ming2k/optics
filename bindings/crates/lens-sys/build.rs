@@ -1,6 +1,6 @@
 //! Build script for `lens-sys`.
 //!
-//! Strategy mirrors flux-rs (out-of-tree, openssl-sys convention):
+//! Strategy mirrors `flux-sys` (out-of-tree, openssl-sys convention):
 //!   1. Locate liblens via pkg-config. Two modes:
 //!        - Installed (default): the standard pkg-config database finds
 //!          `lens.pc` after `meson install` into a prefix on

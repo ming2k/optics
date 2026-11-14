@@ -1,12 +1,13 @@
 /* test_datagrid.c — verification for high-performance interactive data grid pattern. */
 
-#include "test_helpers.h"
+#include "lens_test.h"
+#include "optics_test.h"
 #include <lens/patterns.h>
 
 int main(void) {
     lens *ui = nullptr;
-    CHECK(lens_create(nullptr, &ui) == FLUX_OK);
-    CHECK(ui != nullptr);
+    OT_EXPECT(lens_create(nullptr, &ui) == FLUX_OK);
+    OT_EXPECT(ui != nullptr);
 
     lens_datagrid_col cols[3] = {
         {.title = "ID", .width = 80.0f, .sortable = true, .resizable = true},
@@ -31,8 +32,8 @@ int main(void) {
     /* Frame 1: Neutral layout pass */
     lens_begin(ui, &in);
     lens_datagrid_action a = lens_datagrid(ui, "my_grid", cols, 3, cells, 4, &selected, &opts);
-    CHECK(a.kind == LENS_DATAGRID_ACTION_NONE);
-    test_end(ui);
+    OT_EXPECT(a.kind == LENS_DATAGRID_ACTION_NONE);
+    lens_test_end(ui);
 
     /* Frame 2: Click on column header 1 ("Name") to trigger sort */
     in.cursor = (flux_point){120.0f, 16.0f};
@@ -40,7 +41,7 @@ int main(void) {
     in.mouse_pressed[LENS_MOUSE_LEFT] = true;
     lens_begin(ui, &in);
     a = lens_datagrid(ui, "my_grid", cols, 3, cells, 4, &selected, &opts);
-    test_end(ui);
+    lens_test_end(ui);
 
     /* Release click on column 1 */
     in.mouse_down[LENS_MOUSE_LEFT] = false;
@@ -48,10 +49,10 @@ int main(void) {
     in.mouse_released[LENS_MOUSE_LEFT] = true;
     lens_begin(ui, &in);
     a = lens_datagrid(ui, "my_grid", cols, 3, cells, 4, &selected, &opts);
-    CHECK(a.kind == LENS_DATAGRID_ACTION_SORT_CHANGED);
-    CHECK(a.col_index == 1);
-    CHECK(a.sort_dir == LENS_SORT_ASC);
-    test_end(ui);
+    OT_EXPECT(a.kind == LENS_DATAGRID_ACTION_SORT_CHANGED);
+    OT_EXPECT(a.col_index == 1);
+    OT_EXPECT(a.sort_dir == LENS_SORT_ASC);
+    lens_test_end(ui);
 
     /* Click again to toggle sort to DESC */
     in.mouse_down[LENS_MOUSE_LEFT] = true;
@@ -59,17 +60,17 @@ int main(void) {
     in.mouse_released[LENS_MOUSE_LEFT] = false;
     lens_begin(ui, &in);
     lens_datagrid(ui, "my_grid", cols, 3, cells, 4, &selected, &opts);
-    test_end(ui);
+    lens_test_end(ui);
 
     in.mouse_down[LENS_MOUSE_LEFT] = false;
     in.mouse_pressed[LENS_MOUSE_LEFT] = false;
     in.mouse_released[LENS_MOUSE_LEFT] = true;
     lens_begin(ui, &in);
     a = lens_datagrid(ui, "my_grid", cols, 3, cells, 4, &selected, &opts);
-    CHECK(a.kind == LENS_DATAGRID_ACTION_SORT_CHANGED);
-    CHECK(a.col_index == 1);
-    CHECK(a.sort_dir == LENS_SORT_DESC);
-    test_end(ui);
+    OT_EXPECT(a.kind == LENS_DATAGRID_ACTION_SORT_CHANGED);
+    OT_EXPECT(a.col_index == 1);
+    OT_EXPECT(a.sort_dir == LENS_SORT_DESC);
+    lens_test_end(ui);
 
     /* Frame 3: Click on row 2 */
     in.cursor = (flux_point){50.0f, 32.0f + 28.0f * 2.0f + 10.0f};
@@ -78,18 +79,18 @@ int main(void) {
     in.mouse_released[LENS_MOUSE_LEFT] = false;
     lens_begin(ui, &in);
     a = lens_datagrid(ui, "my_grid", cols, 3, cells, 4, &selected, &opts);
-    test_end(ui);
+    lens_test_end(ui);
 
     in.mouse_down[LENS_MOUSE_LEFT] = false;
     in.mouse_pressed[LENS_MOUSE_LEFT] = false;
     in.mouse_released[LENS_MOUSE_LEFT] = true;
     lens_begin(ui, &in);
     a = lens_datagrid(ui, "my_grid", cols, 3, cells, 4, &selected, &opts);
-    CHECK(a.kind == LENS_DATAGRID_ACTION_ROW_CLICKED);
-    CHECK(a.row_index == 2);
-    CHECK(selected == 2);
-    test_end(ui);
+    OT_EXPECT(a.kind == LENS_DATAGRID_ACTION_ROW_CLICKED);
+    OT_EXPECT(a.row_index == 2);
+    OT_EXPECT(selected == 2);
+    lens_test_end(ui);
 
     lens_release(ui);
-    return TEST_REPORT();
+    return OT_REPORT();
 }

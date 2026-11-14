@@ -1,13 +1,14 @@
 /* test_radio.c — radio appearance checkbox mutual exclusion. */
 
-#include "test_helpers.h"
+#include "lens_test.h"
+#include "optics_test.h"
 #include <lens/lens.h>
 
 static const lens_input IN0 = {.display_size = {400, 200}, .dt_seconds = 0.016f};
 
 static void test_radio_focus_selects(void) {
     lens *ui = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
 
     bool opt_a = false;
     bool opt_b = false;
@@ -20,7 +21,7 @@ static void test_radio_focus_selects(void) {
     lens_checkbox(ui, &(lens_checkbox_opts){
                           .label = "B", .value = &opt_b, .appearance = LENS_CHECKBOX_RADIO});
     lens_close(ui);
-    test_end(ui);
+    lens_test_end(ui);
 
     /* frame 2: focus radio B and press Return */
     lens_input in = IN0;
@@ -37,17 +38,17 @@ static void test_radio_focus_selects(void) {
                                                              .appearance = LENS_CHECKBOX_RADIO})
                          .changed;
     lens_close(ui);
-    test_end(ui);
+    lens_test_end(ui);
 
-    CHECK(changed_b == true);
-    CHECK(opt_b == true);
+    OT_EXPECT(changed_b == true);
+    OT_EXPECT(opt_b == true);
 
     lens_release(ui);
 }
 
 static void test_radio_no_change_when_disabled(void) {
     lens *ui = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
 
     bool opt_a = false;
 
@@ -61,10 +62,10 @@ static void test_radio_no_change_when_disabled(void) {
                                                            .appearance = LENS_CHECKBOX_RADIO,
                                                            .box = {.disabled = true}})
                        .changed;
-    test_end(ui);
+    lens_test_end(ui);
 
-    CHECK(changed == false);
-    CHECK(opt_a == false);
+    OT_EXPECT(changed == false);
+    OT_EXPECT(opt_a == false);
 
     lens_release(ui);
 }
@@ -72,5 +73,5 @@ static void test_radio_no_change_when_disabled(void) {
 int main(void) {
     test_radio_focus_selects();
     test_radio_no_change_when_disabled();
-    return TEST_REPORT();
+    return OT_REPORT();
 }

@@ -3,7 +3,8 @@
  */
 
 #include "../../libs/lens/src/internal.h"
-#include "test_helpers.h"
+#include "lens_test.h"
+#include "optics_test.h"
 #include <lens/lens.h>
 
 static const lens_input IN0 = {.display_size = {200, 100}, .dt_seconds = 0.016f};
@@ -33,22 +34,22 @@ static int has_icon_cmd(const lens_node *n, int32_t id) {
 int main(void) {
     /* Registration: ids continue where the built-in enum ends. */
     lens_icon_id stroke = lens_icon_register_svg(SVG_STROKE);
-    CHECK((int)stroke >= (int)LENS_ICON_COUNT);
+    OT_EXPECT((int)stroke >= (int)LENS_ICON_COUNT);
     lens_icon_id fill = lens_icon_register_svg(SVG_FILL);
-    CHECK((int)fill == (int)stroke + 1);
+    OT_EXPECT((int)fill == (int)stroke + 1);
 
     /* Malformed or empty input is rejected, never crashes. */
-    CHECK((int)lens_icon_register_svg(NULL) == (int)LENS_ICON_INVALID);
-    CHECK((int)lens_icon_register_svg("") == (int)LENS_ICON_INVALID);
-    CHECK((int)lens_icon_register_svg("this is not svg <<<") == (int)LENS_ICON_INVALID);
-    CHECK((int)lens_icon_register_svg("<html><body/></html>") == (int)LENS_ICON_INVALID);
-    CHECK((int)lens_icon_register_svg("<svg viewBox=\"0 0 24 24\"></svg>") ==
-          (int)LENS_ICON_INVALID);
-    CHECK((int)lens_icon_register_svg("<svg><circle cx=\"1\" cy=\"1\" r=\"1\"/></svg>") >=
-          (int)LENS_ICON_COUNT);
+    OT_EXPECT((int)lens_icon_register_svg(NULL) == (int)LENS_ICON_INVALID);
+    OT_EXPECT((int)lens_icon_register_svg("") == (int)LENS_ICON_INVALID);
+    OT_EXPECT((int)lens_icon_register_svg("this is not svg <<<") == (int)LENS_ICON_INVALID);
+    OT_EXPECT((int)lens_icon_register_svg("<html><body/></html>") == (int)LENS_ICON_INVALID);
+    OT_EXPECT((int)lens_icon_register_svg("<svg viewBox=\"0 0 24 24\"></svg>") ==
+              (int)LENS_ICON_INVALID);
+    OT_EXPECT((int)lens_icon_register_svg("<svg><circle cx=\"1\" cy=\"1\" r=\"1\"/></svg>") >=
+              (int)LENS_ICON_COUNT);
 
     lens *ui = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
 
     /* Runtime ids work through every icon widget, alongside a built-in. */
     lens_begin(ui, &IN0);
@@ -56,41 +57,41 @@ int main(void) {
     lens_icon(ui, &(lens_icon_opts){.id = LENS_ICON_SEARCH, .size = 16.0f});
     lens_button(ui, &(lens_button_opts){.icon = fill});
     lens_selectable(ui, &(lens_selectable_opts){.icon = stroke, .label = "row", .selected = false});
-    test_end(ui);
-    CHECK(!lens_overflowed(ui));
+    lens_test_end(ui);
+    OT_EXPECT(!lens_overflowed(ui));
 
     lens_node *child = lens_node_first_child(lens_root(ui));
-    CHECK(has_icon_cmd(child, (int32_t)stroke));
+    OT_EXPECT(has_icon_cmd(child, (int32_t)stroke));
     child = lens_node_next_sibling(child);
-    CHECK(has_icon_cmd(child, (int32_t)LENS_ICON_SEARCH));
+    OT_EXPECT(has_icon_cmd(child, (int32_t)LENS_ICON_SEARCH));
     child = lens_node_next_sibling(child);
-    CHECK(has_icon_cmd(child, (int32_t)fill));
+    OT_EXPECT(has_icon_cmd(child, (int32_t)fill));
     child = lens_node_next_sibling(child);
-    CHECK(has_icon_cmd(child, (int32_t)stroke));
+    OT_EXPECT(has_icon_cmd(child, (int32_t)stroke));
 
     /* The no-icon sentinel must stay icon-less even though LENS_ICON_COUNT
      * is now a valid runtime id (the first registration took it). */
     lens_begin(ui, &IN0);
     lens_selectable(ui, &(lens_selectable_opts){.label = "plain", .selected = false});
-    test_end(ui);
+    lens_test_end(ui);
     lens_node *row = lens_node_first_child(lens_root(ui));
-    CHECK(row && row->cmd_count == 1 && row->cmds[0].kind == LENS_DRAW_TEXT);
+    OT_EXPECT(row && row->cmd_count == 1 && row->cmds[0].kind == LENS_DRAW_TEXT);
 
     /* Unknown and invalid ids draw nothing and do not crash. */
     lens_begin(ui, &IN0);
     lens_icon(ui, &(lens_icon_opts){.id = LENS_ICON_INVALID, .size = 16.0f});
     lens_icon(ui, &(lens_icon_opts){.id = (lens_icon_id)(fill + 1000), .size = 16.0f});
-    test_end(ui);
-    CHECK(!lens_overflowed(ui));
-    CHECK(lens_node_first_child(lens_root(ui)) == NULL);
+    lens_test_end(ui);
+    OT_EXPECT(!lens_overflowed(ui));
+    OT_EXPECT(lens_node_first_child(lens_root(ui)) == NULL);
 
     /* Flood the per-frame arena */
     lens_begin(ui, &IN0);
     for (int i = 0; i < 8000; i++)
         lens_icon(ui, &(lens_icon_opts){.id = stroke, .size = 16.0f});
-    test_end(ui);
-    CHECK(lens_overflowed(ui));
+    lens_test_end(ui);
+    OT_EXPECT(lens_overflowed(ui));
 
     lens_release(ui);
-    return TEST_REPORT();
+    return OT_REPORT();
 }

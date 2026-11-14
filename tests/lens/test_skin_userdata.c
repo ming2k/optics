@@ -1,6 +1,7 @@
 /* test_skin_userdata.c — the closure-slot skin registration. */
 
-#include "test_helpers.h"
+#include "lens_test.h"
+#include "optics_test.h"
 
 #include <lens/lens.h>
 
@@ -28,7 +29,7 @@ static void plain_skin(lens *ui, lens_node *n, const lens_widget_record *rec) {
 
 int main(void) {
     lens *ui = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
     plain_emissions = 0;
 
     /* Frame 1: userdata skin receives its pointer per emission. */
@@ -36,36 +37,36 @@ int main(void) {
     lens_set_skin_userdata(ui, LENS_WIDGET_BUTTON, spring_skin, &spring);
     lens_begin(ui, NULL);
     lens_button(ui, &(lens_button_opts){.label = "Click"});
-    test_end(ui);
-    CHECK(spring.emissions >= 1);
-    CHECK(spring.indicator >= 1.0f);
+    lens_test_end(ui);
+    OT_EXPECT(spring.emissions >= 1);
+    OT_EXPECT(spring.indicator >= 1.0f);
 
     /* The userdata pointer is stable across frames (stored verbatim). */
     int before = spring.emissions;
     lens_begin(ui, NULL);
     lens_button(ui, &(lens_button_opts){.label = "Click"});
-    test_end(ui);
-    CHECK(spring.emissions > before);
+    lens_test_end(ui);
+    OT_EXPECT(spring.emissions > before);
 
     /* Plain registration supersedes the userdata form for that kind. */
     lens_set_skin(ui, LENS_WIDGET_BUTTON, plain_skin);
     lens_begin(ui, NULL);
     lens_button(ui, &(lens_button_opts){.label = "Click"});
-    test_end(ui);
-    CHECK(plain_emissions >= 1);
+    lens_test_end(ui);
+    OT_EXPECT(plain_emissions >= 1);
     int frozen = spring.emissions;
-    CHECK(frozen >= 1);
+    OT_EXPECT(frozen >= 1);
 
     /* NULL restores the built-in default for both forms. */
     lens_set_skin(ui, LENS_WIDGET_BUTTON, NULL);
     lens_set_skin_userdata(ui, LENS_WIDGET_BUTTON, NULL, NULL);
     lens_begin(ui, NULL);
     lens_button(ui, &(lens_button_opts){.label = "Click"});
-    test_end(ui);
-    CHECK(plain_emissions == 1); /* no more plain-skin emissions */
-    CHECK(spring.emissions == frozen);
+    lens_test_end(ui);
+    OT_EXPECT(plain_emissions == 1); /* no more plain-skin emissions */
+    OT_EXPECT(spring.emissions == frozen);
 
     lens_release(ui);
-    printf("skin_userdata: %d checks, %d failures\n", g_checks, g_fails);
-    return g_fails ? 1 : 0;
+    printf("skin_userdata: %d checks, %d failures\n", OT_CHECKS(), OT_FAILURES());
+    return OT_FAILURES() ? 1 : 0;
 }

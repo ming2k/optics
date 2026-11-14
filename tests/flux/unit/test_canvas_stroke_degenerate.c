@@ -11,7 +11,7 @@
  * subpath through the CPU canvas and asserts ink lands in BOTH regions.
  */
 #include "../../../libs/flux/src/canvas/internal.h"
-#include "test_helpers.h"
+#include "optics_test.h"
 #include <flux/canvas_cpu.h>
 
 #include <string.h>
@@ -29,16 +29,16 @@ static bool any_ink(const uint8_t *fb, int x0, int y0, int x1, int y1) {
 
 int main(void) {
     flux_arena arena;
-    EXPECT(flux_arena_init(&arena, 1u << 16, nullptr) == FLUX_OK);
+    OT_EXPECT(flux_arena_init(&arena, 1u << 16, nullptr) == FLUX_OK);
 
     flux_canvas *c = nullptr;
-    EXPECT(flux_canvas_create_cpu(W, H, 1.0f, &c) == FLUX_OK);
-    EXPECT(c != nullptr);
+    OT_EXPECT(flux_canvas_create_cpu(W, H, 1.0f, &c) == FLUX_OK);
+    OT_EXPECT(c != nullptr);
 
     /* Circle centred (36,48) r=24 as four cubics, a trailing zero-length
      * cubic, close; then the "handle" as a separate subpath at (64..84). */
     flux_path *p = nullptr;
-    EXPECT(flux_path_create(&p, &arena) == FLUX_OK);
+    OT_EXPECT(flux_path_create(&p, &arena) == FLUX_OK);
     const float k = 24.0f * 0.5522847498f; /* circle-to-cubic constant */
     flux_path_move_to(p, 60.0f, 48.0f);
     flux_path_cubic_to(p, 60.0f, 48.0f + k, 36.0f + k, 72.0f, 36.0f, 72.0f);
@@ -55,21 +55,21 @@ int main(void) {
     flux_stroke_style stroke_stroke = {.width = 3.0f};
 
     flux_color clear = flux_color_rgba_premul(0, 0, 0, 255);
-    EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
-                                                         .clear_color = &clear}) == FLUX_OK);
+    OT_EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                            .clear_color = &clear}) == FLUX_OK);
     flux_canvas_stroke_path(c, p, &stroke_stroke, &stroke);
-    EXPECT(flux_canvas_end(c) == FLUX_OK);
+    OT_EXPECT(flux_canvas_end(c) == FLUX_OK);
 
     uint32_t w = 0, h = 0, stride = 0;
     const uint8_t *fb = flux_canvas_cpu_pixels(c, &w, &h, &stride);
-    EXPECT(fb != nullptr && w == W && h == H && stride == W * 4);
-    EXPECT(stride == (uint32_t)W * 4);
+    OT_EXPECT(fb != nullptr && w == W && h == H && stride == W * 4);
+    OT_EXPECT(stride == (uint32_t)W * 4);
 
-    EXPECT(any_ink(fb, 34, 22, 39, 27));  /* circle top edge        */
-    EXPECT(any_ink(fb, 70, 70, 80, 80));  /* handle diagonal        */
-    EXPECT(!any_ink(fb, 44, 44, 49, 49)); /* circle interior empty  */
+    OT_EXPECT(any_ink(fb, 34, 22, 39, 27));  /* circle top edge        */
+    OT_EXPECT(any_ink(fb, 70, 70, 80, 80));  /* handle diagonal        */
+    OT_EXPECT(!any_ink(fb, 44, 44, 49, 49)); /* circle interior empty  */
 
     flux_canvas_release(c);
     flux_arena_deinit(&arena);
-    TEST_SUMMARY();
+    return OT_REPORT();
 }

@@ -17,7 +17,7 @@
  * `fill_path` — a regression that flips it back fails here.
  */
 #include "../../../libs/flux/src/canvas/internal.h"
-#include "test_helpers.h"
+#include "optics_test.h"
 #include <flux/flux.h>
 
 #include <string.h>
@@ -240,7 +240,7 @@ int main(void) {
             {0.0f, 10.0f},
         };
         run_fill(p, 4);
-        EXPECT(g_submitted_vertex_count == 3 * (4 - 2));
+        OT_EXPECT(g_submitted_vertex_count == 3 * (4 - 2));
     }
 
     /* --- same square, opposite winding — fill_path reverses --- */
@@ -252,7 +252,7 @@ int main(void) {
             {10.0f, 0.0f},
         };
         run_fill(p, 4);
-        EXPECT(g_submitted_vertex_count == 3 * (4 - 2));
+        OT_EXPECT(g_submitted_vertex_count == 3 * (4 - 2));
     }
 
     /* --- concave L (six vertices, four triangles) --- */
@@ -262,7 +262,7 @@ int main(void) {
             {10.0f, 10.0f}, {10.0f, 20.0f}, {0.0f, 20.0f},
         };
         run_fill(p, 6);
-        EXPECT(g_submitted_vertex_count == 3 * (6 - 2));
+        OT_EXPECT(g_submitted_vertex_count == 3 * (6 - 2));
     }
 
     /* --- round-rect-shaped arc, exercises a denser path --- */
@@ -279,7 +279,7 @@ int main(void) {
         p[n++] = (flux_point){0.0f, 90.0f};
         p[n++] = (flux_point){0.0f, 10.0f};
         run_fill(p, n);
-        EXPECT(g_submitted_vertex_count == 3 * (n - 2));
+        OT_EXPECT(g_submitted_vertex_count == 3 * (n - 2));
     }
 
     /* --- donut: small hole-in-solid via bridge merge --- */
@@ -291,7 +291,7 @@ int main(void) {
         run_fill_scripted();
         /* outer(32) + hole(16) + 2 bridge points = 50 merged vertices
          * → 48 triangles when the ear clip completes. */
-        EXPECT(g_submitted_vertex_count == 3 * (32 + 16 + 2 - 2));
+        OT_EXPECT(g_submitted_vertex_count == 3 * (32 + 16 + 2 - 2));
     }
 
     /* --- regression: hole listed BEFORE its outer, near-full scratch.
@@ -306,7 +306,7 @@ int main(void) {
         script_circle(0, 0, 100.0f, 1040, true); /* outer at  1000  */
         run_fill_scripted();
         /* 1040 + 1000 + 2 = 2042 merged vertices → 2040 triangles. */
-        EXPECT(g_submitted_vertex_count == 3 * (1040 + 1000 + 2 - 2));
+        OT_EXPECT(g_submitted_vertex_count == 3 * (1040 + 1000 + 2 - 2));
     }
 
     /* --- signed_area sign convention is what the reversal expects --- */
@@ -318,7 +318,7 @@ int main(void) {
             {1.0f, 1.0f},
             {0.0f, 1.0f},
         };
-        EXPECT(signed_area(ccw, 4) < 0.0f);
+        OT_EXPECT(signed_area(ccw, 4) < 0.0f);
 
         flux_point cw[] = {
             {0.0f, 0.0f},
@@ -326,8 +326,8 @@ int main(void) {
             {1.0f, 1.0f},
             {1.0f, 0.0f},
         };
-        EXPECT(signed_area(cw, 4) > 0.0f);
+        OT_EXPECT(signed_area(cw, 4) > 0.0f);
     }
 
-    TEST_SUMMARY();
+    return OT_REPORT();
 }

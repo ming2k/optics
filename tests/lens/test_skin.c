@@ -2,7 +2,8 @@
  * Tests dispatch and replacement for all 11 orthogonal widget kinds. */
 
 #include "../../libs/lens/src/internal.h"
-#include "test_helpers.h"
+#include "lens_test.h"
+#include "optics_test.h"
 #include <lens/lens.h>
 
 static const lens_input IN0 = {.display_size = {400, 300}, .dt_seconds = 0.016f};
@@ -34,8 +35,8 @@ static void check_null_override(const char *label, build_fn plain, build_fn skin
                                 bool explicit_default, lens_widget_kind kind) {
     lens *a = NULL;
     lens *b = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &a) == FLUX_OK);
-    CHECK(lens_create(&(lens_desc){0}, &b) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){0}, &a) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){0}, &b) == FLUX_OK);
     if (explicit_default)
         lens_set_skin(b, kind, lens_default_skin(kind));
 
@@ -45,13 +46,13 @@ static void check_null_override(const char *label, build_fn plain, build_fn skin
             in.cursor = (flux_point){20, 20};
         lens_begin(a, &in);
         plain(a, false);
-        test_end(a);
+        lens_test_end(a);
         lens_begin(b, &in);
         skinned_null(b, true);
-        test_end(b);
+        lens_test_end(b);
     }
 
-    CHECK(cmds_equal(find_widget(a, label), find_widget(b, label)));
+    OT_EXPECT(cmds_equal(find_widget(a, label), find_widget(b, label)));
     lens_release(a);
     lens_release(b);
 }
@@ -100,14 +101,14 @@ static void underline_skin(lens *ui, lens_node *node, const lens_widget_record *
 
 static void test_custom_skin_record_and_output(void) {
     lens *ui = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
     lens_theme t = lens_get_theme(ui);
 
     lens_begin(ui, &IN0);
     lens_selectable(ui, &(lens_selectable_opts){.label = "Row", .selected = true});
-    test_end(ui);
+    lens_test_end(ui);
     lens_node *def = find_widget(ui, "Row");
-    CHECK(def != NULL);
+    OT_EXPECT(def != NULL);
     uint32_t def_cmds = def ? def->cmd_count : 0;
 
     lens_input in = IN0;
@@ -115,28 +116,28 @@ static void test_custom_skin_record_and_output(void) {
     lens_set_skin(ui, LENS_WIDGET_SELECTABLE, underline_skin);
     lens_begin(ui, &in);
     lens_selectable(ui, &(lens_selectable_opts){.label = "Row", .selected = true});
-    test_end(ui);
+    lens_test_end(ui);
     lens_set_skin(ui, LENS_WIDGET_SELECTABLE, NULL);
 
-    CHECK(g_seen.kind == LENS_WIDGET_SELECTABLE);
-    CHECK(g_seen.state & LENS_STATE_SELECTED);
-    CHECK(g_seen.state & LENS_STATE_HOVERED);
-    CHECK(g_seen.bounds.w > 0.0f && g_seen.bounds.h > 0.0f);
-    CHECK(g_seen.last_bounds.w > 0.0f);
-    CHECK(g_seen.style.accent == t.color_accent);
-    CHECK(g_seen.style_fields == 0);
-    CHECK(g_seen.content.label != NULL);
-    CHECK(g_seen.hover_t == 1.0f);
+    OT_EXPECT(g_seen.kind == LENS_WIDGET_SELECTABLE);
+    OT_EXPECT(g_seen.state & LENS_STATE_SELECTED);
+    OT_EXPECT(g_seen.state & LENS_STATE_HOVERED);
+    OT_EXPECT(g_seen.bounds.w > 0.0f && g_seen.bounds.h > 0.0f);
+    OT_EXPECT(g_seen.last_bounds.w > 0.0f);
+    OT_EXPECT(g_seen.style.accent == t.color_accent);
+    OT_EXPECT(g_seen.style_fields == 0);
+    OT_EXPECT(g_seen.content.label != NULL);
+    OT_EXPECT(g_seen.hover_t == 1.0f);
 
     lens_node *n = find_widget(ui, "Row");
-    CHECK(n != NULL);
-    CHECK(n && n->cmd_count == 2);
-    CHECK(def_cmds >= 2);
+    OT_EXPECT(n != NULL);
+    OT_EXPECT(n && n->cmd_count == 2);
+    OT_EXPECT(def_cmds >= 2);
     if (n && n->cmd_count == 2) {
-        CHECK(n->cmds[0].kind == LENS_DRAW_RECT);
-        CHECK(n->cmds[0].color == t.color_accent);
-        CHECK_NEAR(n->cmds[0].rel.h, 2.0f, 0.0f);
-        CHECK(n->cmds[1].kind == LENS_DRAW_TEXT);
+        OT_EXPECT(n->cmds[0].kind == LENS_DRAW_RECT);
+        OT_EXPECT(n->cmds[0].color == t.color_accent);
+        OT_EXPECT_NEAR(n->cmds[0].rel.h, 2.0f, 0.0f);
+        OT_EXPECT(n->cmds[1].kind == LENS_DRAW_TEXT);
     }
 
     lens_release(ui);
@@ -157,38 +158,38 @@ static void hollow_button_skin(lens *ui, lens_node *node, const lens_widget_reco
 
 static void test_context_skin_override(void) {
     lens *ui = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
 
     lens_begin(ui, &IN0);
     lens_button(ui, &(lens_button_opts){.label = "OK"});
-    test_end(ui);
+    lens_test_end(ui);
     lens_node *n = find_widget(ui, "OK");
-    CHECK(n != NULL);
+    OT_EXPECT(n != NULL);
     uint32_t default_cmds = n ? n->cmd_count : 0;
-    CHECK(default_cmds >= 2);
+    OT_EXPECT(default_cmds >= 2);
 
     lens_set_skin(ui, LENS_WIDGET_BUTTON, flat_button_skin);
     g_context_skin_ran = false;
     lens_begin(ui, &IN0);
     lens_button(ui, &(lens_button_opts){.label = "OK"});
-    test_end(ui);
-    CHECK(g_context_skin_ran);
-    CHECK(n && n->cmd_count == 1);
-    CHECK(n && n->cmds[0].kind == LENS_DRAW_RECT);
+    lens_test_end(ui);
+    OT_EXPECT(g_context_skin_ran);
+    OT_EXPECT(n && n->cmd_count == 1);
+    OT_EXPECT(n && n->cmds[0].kind == LENS_DRAW_RECT);
 
     lens_set_skin(ui, LENS_WIDGET_BUTTON, hollow_button_skin);
     lens_begin(ui, &IN0);
     lens_button(ui, &(lens_button_opts){.label = "OK"});
-    test_end(ui);
-    CHECK(n && n->cmd_count == 1);
-    CHECK(n && n->cmds[0].kind == LENS_DRAW_BORDER);
+    lens_test_end(ui);
+    OT_EXPECT(n && n->cmd_count == 1);
+    OT_EXPECT(n && n->cmds[0].kind == LENS_DRAW_BORDER);
 
     lens_set_skin(ui, LENS_WIDGET_BUTTON, NULL);
     lens_begin(ui, &IN0);
     lens_button(ui, &(lens_button_opts){.label = "OK"});
-    test_end(ui);
-    CHECK(n && n->cmd_count == default_cmds);
-    CHECK(n && n->cmds[0].kind == LENS_DRAW_RECT);
+    lens_test_end(ui);
+    OT_EXPECT(n && n->cmd_count == default_cmds);
+    OT_EXPECT(n && n->cmds[0].kind == LENS_DRAW_RECT);
 
     lens_release(ui);
 }
@@ -237,33 +238,33 @@ static void build_textedit(lens *ui) {
 static void check_kind(const char *name, lens_widget_kind kind, probe_build_fn build,
                        lens_node *(*find)(lens *ui)) {
     lens *ui = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
 
     lens_begin(ui, &IN0);
     build(ui);
-    test_end(ui);
+    lens_test_end(ui);
     lens_begin(ui, &IN0);
     build(ui);
-    test_end(ui);
+    lens_test_end(ui);
     lens_node *n = find(ui);
-    CHECK(n != NULL);
+    OT_EXPECT(n != NULL);
     uint32_t default_cmds = n ? n->cmd_count : 0;
 
     lens_set_skin(ui, kind, probe_skin);
     g_probe_ran = false;
     lens_begin(ui, &IN0);
     build(ui);
-    test_end(ui);
-    CHECK(g_probe_ran);
-    CHECK(g_probe_seen.kind == kind);
-    CHECK(n && n->cmd_count == 1);
-    CHECK(n && n->cmds[0].kind == LENS_DRAW_BORDER);
+    lens_test_end(ui);
+    OT_EXPECT(g_probe_ran);
+    OT_EXPECT(g_probe_seen.kind == kind);
+    OT_EXPECT(n && n->cmd_count == 1);
+    OT_EXPECT(n && n->cmds[0].kind == LENS_DRAW_BORDER);
 
     lens_set_skin(ui, kind, NULL);
     lens_begin(ui, &IN0);
     build(ui);
-    test_end(ui);
-    CHECK(n && n->cmd_count == default_cmds);
+    lens_test_end(ui);
+    OT_EXPECT(n && n->cmd_count == default_cmds);
     lens_release(ui);
 }
 
@@ -292,5 +293,5 @@ int main(void) {
     test_custom_skin_record_and_output();
     test_context_skin_override();
     test_every_kind_dispatches_and_is_replaceable();
-    return TEST_REPORT();
+    return OT_REPORT();
 }

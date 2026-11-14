@@ -5,7 +5,8 @@
  * reference rasterizer (coverage_raster.c) to float precision on the S0 corpus,
  * and carries continuous coverage > 16 distinct levels (INV-COV-02).
  */
-#include "test_helpers.h"
+#include "flux_test.h"
+#include "optics_test.h"
 
 #include "../../../libs/flux/src/canvas/canvas_tile.h"
 #include "../../../libs/flux/src/canvas/internal.h"
@@ -33,7 +34,7 @@ static void compare_tile_vs_cpu(const char *label, const flux_point *pts,
                                 flux_fill_rule rule, float ox, float oy, int min_levels) {
     float *cpu_cov = malloc((size_t)W * H * sizeof(float));
     float *tile_cov = malloc((size_t)W * H * sizeof(float));
-    EXPECT(cpu_cov && tile_cov);
+    OT_EXPECT(cpu_cov && tile_cov);
     if (!cpu_cov || !tile_cov) {
         free(cpu_cov);
         free(tile_cov);
@@ -41,14 +42,14 @@ static void compare_tile_vs_cpu(const char *label, const flux_point *pts,
     }
 
     /* 1. CPU reference rasterizer */
-    EXPECT(canvas_coverage_rasterize(pts, cons, ncons, rule, ox, oy, W, H, cpu_cov) == FLUX_OK);
+    OT_EXPECT(canvas_coverage_rasterize(pts, cons, ncons, rule, ox, oy, W, H, cpu_cov) == FLUX_OK);
 
     /* 2. Tile-compute rasterizer */
     flux_tile_segment segs[4096];
     flux_rect bounds;
     uint32_t n_segs = canvas_tile_extract_segments(pts, cons, ncons, segs, 4096, &bounds);
-    EXPECT(n_segs > 0);
-    EXPECT(canvas_tile_rasterize(segs, n_segs, rule, ox, oy, W, H, tile_cov) == FLUX_OK);
+    OT_EXPECT(n_segs > 0);
+    OT_EXPECT(canvas_tile_rasterize(segs, n_segs, rule, ox, oy, W, H, tile_cov) == FLUX_OK);
 
     /* 3. Pixel-for-pixel comparison */
     double max_diff = 0.0;
@@ -89,11 +90,11 @@ static void compare_tile_vs_cpu(const char *label, const flux_point *pts,
     }
 
     /* Gate B4 tolerances: agreement to float precision */
-    EXPECT(max_diff <= 1e-4);
-    EXPECT(mean_diff <= 1e-5);
+    OT_EXPECT(max_diff <= 1e-4);
+    OT_EXPECT(mean_diff <= 1e-5);
 
     if (min_levels > 0)
-        EXPECT(distinct_levels >= min_levels);
+        OT_EXPECT(distinct_levels >= min_levels);
 
     free(cpu_cov);
     free(tile_cov);
@@ -147,5 +148,5 @@ int main(void) {
                             0.0f, 17);
     }
 
-    TEST_SUMMARY();
+    return OT_REPORT();
 }

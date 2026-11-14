@@ -1,6 +1,7 @@
 /* test_dnd.c — Drag-and-drop subsystem verification (ADR-0086). */
 
-#include "test_helpers.h"
+#include "lens_test.h"
+#include "optics_test.h"
 #include <lens/lens.h>
 #include <string.h>
 
@@ -32,8 +33,8 @@ int main(void) {
     };
 
     lens *ui = NULL;
-    CHECK(lens_create(&desc, &ui) == FLUX_OK);
-    CHECK(ui != NULL);
+    OT_EXPECT(lens_create(&desc, &ui) == FLUX_OK);
+    OT_EXPECT(ui != NULL);
 
     /* Frame 1: Build layout with two buttons */
     lens_input in = {.display_size = {400, 400}, .dt_seconds = 0.016f};
@@ -45,7 +46,7 @@ int main(void) {
     lens_id dst_id = lens_current_id(ui, "Target");
     lens_button(ui, &(lens_button_opts){.label = "Target", .box.width = 100, .box.height = 40});
     lens_close(ui);
-    test_end(ui);
+    lens_test_end(ui);
 
     /* Frame 2: Mouse press down on source button (x=20, y=20) */
     in.cursor = (flux_point){20, 20};
@@ -62,17 +63,17 @@ int main(void) {
         .actions = 1,
     };
     bool dragged = lens_dnd_source(ui, &sdesc);
-    CHECK(!dragged); /* Not dragged yet (moved distance 0 <= threshold) */
-    CHECK(host.start_drag_calls == 0);
+    OT_EXPECT(!dragged); /* Not dragged yet (moved distance 0 <= threshold) */
+    OT_EXPECT(host.start_drag_calls == 0);
 
     lens_button(ui, &(lens_button_opts){.label = "Target", .box.width = 100, .box.height = 40});
     lens_dnd_drop_info dinfo = {0};
     bool is_target = lens_dnd_drop_target(ui, dst_id, 1, &dinfo);
-    CHECK(!is_target);
-    CHECK(!dinfo.is_hovered);
+    OT_EXPECT(!is_target);
+    OT_EXPECT(!dinfo.is_hovered);
 
     lens_close(ui);
-    test_end(ui);
+    lens_test_end(ui);
 
     /* Frame 3: Pointer moves past drag threshold (x=20, y=40 -> dy = 20 > 4) */
     in.cursor = (flux_point){20, 40};
@@ -83,17 +84,17 @@ int main(void) {
     lens_button(ui, &(lens_button_opts){.label = "Source", .box.width = 100, .box.height = 40});
 
     dragged = lens_dnd_source(ui, &sdesc);
-    CHECK(dragged); /* Drag threshold exceeded! */
-    CHECK(host.start_drag_calls == 1);
-    CHECK(strcmp(host.last_drag_text, "Hello Drag") == 0);
+    OT_EXPECT(dragged); /* Drag threshold exceeded! */
+    OT_EXPECT(host.start_drag_calls == 1);
+    OT_EXPECT(strcmp(host.last_drag_text, "Hello Drag") == 0);
 
     lens_button(ui, &(lens_button_opts){.label = "Target", .box.width = 100, .box.height = 40});
     lens_close(ui);
-    test_end(ui);
+    lens_test_end(ui);
 
     /* Frame 4: Platform delivers drop payload onto destination target */
     lens_node *tnode = lens_find(ui, dst_id);
-    CHECK(tnode != NULL);
+    OT_EXPECT(tnode != NULL);
     flux_rect tb = lens_node_bounds(tnode);
 
     flux_point drop_point = (flux_point){tb.x + 10, tb.y + 10};
@@ -107,22 +108,22 @@ int main(void) {
     lens_button(ui, &(lens_button_opts){.label = "Source", .box.width = 100, .box.height = 40});
 
     dragged = lens_dnd_source(ui, &sdesc);
-    CHECK(!dragged); /* Drag ended on mouse release */
+    OT_EXPECT(!dragged); /* Drag ended on mouse release */
 
     lens_button(ui, &(lens_button_opts){.label = "Target", .box.width = 100, .box.height = 40});
     is_target = lens_dnd_drop_target(ui, dst_id, 1, &dinfo);
-    CHECK(is_target);
-    CHECK(dinfo.is_hovered);
-    CHECK(dinfo.is_dropped);
+    OT_EXPECT(is_target);
+    OT_EXPECT(dinfo.is_hovered);
+    OT_EXPECT(dinfo.is_dropped);
 
     char buf[64] = {0};
     uint32_t len = lens_take_drop(ui, buf, sizeof(buf));
-    CHECK(len == strlen("Dropped Payload"));
-    CHECK(strcmp(buf, "Dropped Payload") == 0);
+    OT_EXPECT(len == strlen("Dropped Payload"));
+    OT_EXPECT(strcmp(buf, "Dropped Payload") == 0);
 
     lens_close(ui);
-    test_end(ui);
+    lens_test_end(ui);
 
     lens_release(ui);
-    return TEST_REPORT();
+    return OT_REPORT();
 }

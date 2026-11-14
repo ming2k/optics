@@ -40,7 +40,7 @@ from an exact path.
 | Material distance fields | Rounded-rect field via the shared snippet; squircle field local to the material | `libs/flux/include/flux/shaders/flux_sdf.slang` (included by `prism/src/shaders/frosted.comp.slang`, `liquid_glass.comp.slang`, `acrylic.comp.slang`, `mica.comp.slang`, `backdrop_frost.comp.slang`) |
 | Baked coverage (opt-in) | Device-resolution icon coverage mask, supersampled at bake time | `libs/lens/src/render/icon_mask.c` |
 | Glyph coverage | FreeType-rasterised coverage atlas (host-resident or device) | `libs/glyph/src/atlas.c` |
-| Icon vector source | SVG path parsing; elliptical arcs converted to cubic Béziers | `libs/lens/src/icon_svg.c` |
+| Icon vector source | SVG path parsing; elliptical arcs converted to cubic Béziers | `libs/reticle/src/path.c` |
 
 ## The curve pipeline, in order
 

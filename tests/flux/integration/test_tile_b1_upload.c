@@ -4,7 +4,8 @@
  * Assert that covers uploaded into the GPU segment SSBO match the CPU
  * flattener's output exactly in segment count and endpoints.
  */
-#include "test_helpers.h"
+#include "flux_test.h"
+#include "optics_test.h"
 
 #include "../../../libs/flux/src/canvas/canvas_tile.h"
 #include "../../../libs/flux/src/canvas/internal.h"
@@ -52,52 +53,52 @@ static void test_shape_b1(flux_device *d, const flux_point *pts, const flux_canv
     flux_rect bounds;
     uint32_t ext_count =
         canvas_tile_extract_segments(pts, cons, ncons, extracted, MAX_TEST_SEGS, &bounds);
-    EXPECT(ext_count == ref_count);
+    OT_EXPECT(ext_count == ref_count);
 
     /* 3. Upload into GPU SSBO */
     flux_buffer *ssbo = nullptr;
-    EXPECT(canvas_tile_upload_segments(d, extracted, ext_count, rule, bounds, &ssbo) == FLUX_OK);
-    EXPECT(ssbo != nullptr);
+    OT_EXPECT(canvas_tile_upload_segments(d, extracted, ext_count, rule, bounds, &ssbo) == FLUX_OK);
+    OT_EXPECT(ssbo != nullptr);
     if (!ssbo)
         return;
 
     /* 4. Verification via GPU Buffer Address and Mapped Readback */
     uint64_t dev_addr = flux_buffer_device_address(ssbo);
-    EXPECT(dev_addr != 0);
+    OT_EXPECT(dev_addr != 0);
 
     const uint8_t *mapped = (const uint8_t *)flux_buffer_mapped(ssbo);
-    EXPECT(mapped != nullptr);
+    OT_EXPECT(mapped != nullptr);
     if (!mapped) {
         flux_buffer_release(ssbo);
         return;
     }
 
     const flux_tile_segment_header *hdr = (const flux_tile_segment_header *)mapped;
-    EXPECT(hdr->segment_count == ref_count);
-    EXPECT(hdr->fill_rule == (rule == FLUX_FILL_EVEN_ODD ? 1u : 0u));
-    EXPECT_NEAR(hdr->bounds_min_x, bounds.x, 1e-5);
-    EXPECT_NEAR(hdr->bounds_min_y, bounds.y, 1e-5);
-    EXPECT_NEAR(hdr->bounds_max_x, bounds.x + bounds.w, 1e-5);
-    EXPECT_NEAR(hdr->bounds_max_y, bounds.y + bounds.h, 1e-5);
+    OT_EXPECT(hdr->segment_count == ref_count);
+    OT_EXPECT(hdr->fill_rule == (rule == FLUX_FILL_EVEN_ODD ? 1u : 0u));
+    OT_EXPECT_NEAR(hdr->bounds_min_x, bounds.x, 1e-5);
+    OT_EXPECT_NEAR(hdr->bounds_min_y, bounds.y, 1e-5);
+    OT_EXPECT_NEAR(hdr->bounds_max_x, bounds.x + bounds.w, 1e-5);
+    OT_EXPECT_NEAR(hdr->bounds_max_y, bounds.y + bounds.h, 1e-5);
 
     const flux_tile_segment *gpu_segs =
         (const flux_tile_segment *)(mapped + sizeof(flux_tile_segment_header));
 
     for (uint32_t i = 0; i < ref_count; ++i) {
-        EXPECT_NEAR(gpu_segs[i].x0, ref_segs[i].x0, 1e-6);
-        EXPECT_NEAR(gpu_segs[i].y0, ref_segs[i].y0, 1e-6);
-        EXPECT_NEAR(gpu_segs[i].x1, ref_segs[i].x1, 1e-6);
-        EXPECT_NEAR(gpu_segs[i].y1, ref_segs[i].y1, 1e-6);
+        OT_EXPECT_NEAR(gpu_segs[i].x0, ref_segs[i].x0, 1e-6);
+        OT_EXPECT_NEAR(gpu_segs[i].y0, ref_segs[i].y0, 1e-6);
+        OT_EXPECT_NEAR(gpu_segs[i].x1, ref_segs[i].x1, 1e-6);
+        OT_EXPECT_NEAR(gpu_segs[i].y1, ref_segs[i].y1, 1e-6);
     }
 
     flux_buffer_release(ssbo);
 }
 
 int main(void) {
-    flux_device *d = test_helpers_make_headless_device();
+    flux_device *d = flux_test_make_headless_device();
     if (!d) {
-        fprintf(stderr, "test_tile_b1_upload: no Vulkan device; skipping\n");
-        return 0;
+        fprintf(stderr, "test_tile_b1_upload: no Vulkan device available; skipping\n");
+        OT_SKIP("no Vulkan device");
     }
 
     /* Case 1: Simple quad */
@@ -110,17 +111,17 @@ int main(void) {
     /* Case 2: Circle through production flattener */
     {
         flux_arena arena;
-        EXPECT(flux_arena_init(&arena, 1u << 18, nullptr) == FLUX_OK);
+        OT_EXPECT(flux_arena_init(&arena, 1u << 18, nullptr) == FLUX_OK);
         flux_path *p = nullptr;
-        EXPECT(flux_path_create(&p, &arena) == FLUX_OK);
+        OT_EXPECT(flux_path_create(&p, &arena) == FLUX_OK);
         flux_path_add_circle(p, 0.0f, 0.0f, 25.0f);
 
         static flux_point pts[FLUX_CANVAS_PATH_SCRATCH_CAP];
         static flux_canvas_contour cons[FLUX_CANVAS_MAX_CONTOURS];
         flatten_multi fm = flatten_path_to_contours(p, 1.0f, pts, FLUX_CANVAS_PATH_SCRATCH_CAP,
                                                     cons, FLUX_CANVAS_MAX_CONTOURS);
-        EXPECT(fm.contour_count == 1);
-        EXPECT(fm.point_count > 16);
+        OT_EXPECT(fm.contour_count == 1);
+        OT_EXPECT(fm.point_count > 16);
 
         test_shape_b1(d, pts, cons, fm.contour_count, FLUX_FILL_NON_ZERO);
         flux_arena_deinit(&arena);
@@ -159,7 +160,7 @@ int main(void) {
     {
         const uint32_t N = 1024;
         flux_point *poly = malloc((size_t)N * sizeof(flux_point));
-        EXPECT(poly != nullptr);
+        OT_EXPECT(poly != nullptr);
         if (poly) {
             for (uint32_t i = 0; i < N; ++i) {
                 double a = (double)i * 2.0 * 3.14159265358979 / (double)N;
@@ -172,5 +173,5 @@ int main(void) {
     }
 
     flux_device_release(d);
-    TEST_SUMMARY();
+    return OT_REPORT();
 }

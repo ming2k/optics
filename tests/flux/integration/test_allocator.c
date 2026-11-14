@@ -9,7 +9,8 @@
  * test it directly; we test that creating and destroying many GPU
  * resources stays bounded in memory and never crashes.
  */
-#include "test_helpers.h"
+#include "flux_test.h"
+#include "optics_test.h"
 #include <flux/flux.h>
 #include <flux/scene.h>
 #include <flux/vulkan.h>
@@ -128,10 +129,10 @@ static void *image_mesh_worker(void *p) {
 }
 
 int main(void) {
-    flux_device *d = test_helpers_make_headless_device();
+    flux_device *d = flux_test_make_headless_device();
     if (!d) {
         fprintf(stderr, "test_allocator: no Vulkan device available; skipping\n");
-        return 0;
+        OT_SKIP("no Vulkan device");
     }
 
     /* --- concurrent first-use publication of the canvas module state --- */
@@ -152,7 +153,7 @@ int main(void) {
             total += args[i].completed;
         }
         test_barrier_destroy(&start);
-        EXPECT(total == N_THREADS);
+        OT_EXPECT(total == N_THREADS);
     }
 
     /* --- single image create/release round-trip --- */
@@ -164,8 +165,8 @@ int main(void) {
             .format = FLUX_FORMAT_RGBA8_UNORM,
         };
         flux_image *img = NULL;
-        EXPECT(flux_image_create(d, &desc, &img) == FLUX_OK);
-        EXPECT(img != NULL);
+        OT_EXPECT(flux_image_create(d, &desc, &img) == FLUX_OK);
+        OT_EXPECT(img != NULL);
         flux_image_release(img);
     }
 
@@ -181,7 +182,7 @@ int main(void) {
                 .format = FLUX_FORMAT_RGBA8_UNORM,
             };
             flux_image *img = NULL;
-            EXPECT(flux_image_create(d, &desc, &img) == FLUX_OK);
+            OT_EXPECT(flux_image_create(d, &desc, &img) == FLUX_OK);
             flux_image_release(img);
         }
     }
@@ -196,7 +197,7 @@ int main(void) {
             .format = FLUX_FORMAT_RGBA8_UNORM,
         };
         for (int i = 0; i < 16; ++i) {
-            EXPECT(flux_image_create(d, &desc, &imgs[i]) == FLUX_OK);
+            OT_EXPECT(flux_image_create(d, &desc, &imgs[i]) == FLUX_OK);
         }
         /* Free even indices, then re-alloc — exercises non-contiguous free list. */
         for (int i = 0; i < 16; i += 2) {
@@ -204,7 +205,7 @@ int main(void) {
             imgs[i] = NULL;
         }
         for (int i = 0; i < 16; i += 2) {
-            EXPECT(flux_image_create(d, &desc, &imgs[i]) == FLUX_OK);
+            OT_EXPECT(flux_image_create(d, &desc, &imgs[i]) == FLUX_OK);
         }
         for (int i = 0; i < 16; ++i)
             flux_image_release(imgs[i]);
@@ -226,7 +227,7 @@ int main(void) {
             flux_image_release(img);
         } else {
             /* Lavapipe sometimes refuses very large images; that's fine. */
-            EXPECT(r == FLUX_ERROR_BACKEND_FAILURE || r == FLUX_ERROR_OUT_OF_MEMORY);
+            OT_EXPECT(r == FLUX_ERROR_BACKEND_FAILURE || r == FLUX_ERROR_OUT_OF_MEMORY);
         }
     }
 
@@ -247,7 +248,7 @@ int main(void) {
         };
         for (int i = 0; i < 64; ++i) {
             flux_mesh *mesh = NULL;
-            EXPECT(flux_mesh_create(d, &mdesc, &mesh) == FLUX_OK);
+            OT_EXPECT(flux_mesh_create(d, &mdesc, &mesh) == FLUX_OK);
             flux_mesh_release(mesh);
         }
     }
@@ -268,7 +269,7 @@ int main(void) {
             pthread_join(threads[i], NULL);
             total += args[i].completed;
         }
-        EXPECT(total == N_THREADS * N_PER);
+        OT_EXPECT(total == N_THREADS * N_PER);
     }
 
     /* --- leak gate + staging-cache steady state: two identical
@@ -286,20 +287,20 @@ int main(void) {
             .format = FLUX_FORMAT_RGBA8_UNORM,
         };
         flux_image *img1 = NULL;
-        EXPECT(flux_image_create(d, &desc, &img1) == FLUX_OK);
+        OT_EXPECT(flux_image_create(d, &desc, &img1) == FLUX_OK);
         flux_memory_stats s1;
         flux_device_memory_stats(d, &s1);
         flux_image_release(img1);
 
         flux_image *img2 = NULL;
-        EXPECT(flux_image_create(d, &desc, &img2) == FLUX_OK);
+        OT_EXPECT(flux_image_create(d, &desc, &img2) == FLUX_OK);
         flux_memory_stats s2;
         flux_device_memory_stats(d, &s2);
-        EXPECT(s2.live_allocations == s1.live_allocations);
-        EXPECT(s2.bytes_in_use == s1.bytes_in_use);
+        OT_EXPECT(s2.live_allocations == s1.live_allocations);
+        OT_EXPECT(s2.bytes_in_use == s1.bytes_in_use);
         flux_image_release(img2);
     }
 
     flux_device_release(d);
-    TEST_SUMMARY();
+    return OT_REPORT();
 }

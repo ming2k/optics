@@ -2,7 +2,8 @@
  * flux_buffer: HOST_VISIBLE map round-trip, GPU_LOCAL with initial
  * upload, device-address request, rejection paths.
  */
-#include "test_helpers.h"
+#include "flux_test.h"
+#include "optics_test.h"
 #include <flux/flux.h>
 #include <flux/vulkan.h>
 
@@ -12,13 +13,13 @@ int main(void) {
     /* --- NULL / wrong-tag rejection (no device) --- */
     {
         flux_buffer *b = nullptr;
-        EXPECT(flux_buffer_create(nullptr, nullptr, &b) == FLUX_ERROR_INVALID_ARGUMENT);
+        OT_EXPECT(flux_buffer_create(nullptr, nullptr, &b) == FLUX_ERROR_INVALID_ARGUMENT);
     }
 
-    flux_device *d = test_helpers_make_headless_device();
+    flux_device *d = flux_test_make_headless_device();
     if (!d) {
         fprintf(stderr, "test_buffer: no Vulkan device; skipping\n");
-        TEST_SUMMARY();
+        OT_SKIP("no Vulkan device");
     }
 
     /* --- HOST_VISIBLE: map round-trip --- */
@@ -35,26 +36,26 @@ int main(void) {
         bd.initial_data = seed;
 
         flux_buffer *b = nullptr;
-        EXPECT(flux_buffer_create(d, &bd, &b) == FLUX_OK);
-        EXPECT(b != nullptr);
+        OT_EXPECT(flux_buffer_create(d, &bd, &b) == FLUX_OK);
+        OT_EXPECT(b != nullptr);
 
-        EXPECT(flux_buffer_size(b) == bd.size);
-        EXPECT(flux_buffer_vk_buffer(b) != VK_NULL_HANDLE);
+        OT_EXPECT(flux_buffer_size(b) == bd.size);
+        OT_EXPECT(flux_buffer_vk_buffer(b) != VK_NULL_HANDLE);
 
         float *mapped = flux_buffer_mapped(b);
-        EXPECT(mapped != nullptr);
+        OT_EXPECT(mapped != nullptr);
         for (size_t i = 0; i < N; ++i) {
-            EXPECT_NEAR(mapped[i], (float)i * 0.5f, 1e-6f);
+            OT_EXPECT_NEAR(mapped[i], (float)i * 0.5f, 1e-6f);
         }
 
         /* Write a new pattern; subsequent map reads should see it. */
         for (size_t i = 0; i < N; ++i)
             mapped[i] = -(float)i;
         for (size_t i = 0; i < N; ++i) {
-            EXPECT_NEAR(mapped[i], -(float)i, 1e-6f);
+            OT_EXPECT_NEAR(mapped[i], -(float)i, 1e-6f);
         }
 
-        EXPECT(flux_buffer_retain(b) == b);
+        OT_EXPECT(flux_buffer_retain(b) == b);
         flux_buffer_release(b);
         flux_buffer_release(b);
     }
@@ -72,10 +73,10 @@ int main(void) {
         bd.initial_data = seed;
 
         flux_buffer *b = nullptr;
-        EXPECT(flux_buffer_create(d, &bd, &b) == FLUX_OK);
-        EXPECT(b != nullptr);
-        EXPECT(flux_buffer_mapped(b) == nullptr); /* GPU_LOCAL is not mappable */
-        EXPECT(flux_buffer_vk_buffer(b) != VK_NULL_HANDLE);
+        OT_EXPECT(flux_buffer_create(d, &bd, &b) == FLUX_OK);
+        OT_EXPECT(b != nullptr);
+        OT_EXPECT(flux_buffer_mapped(b) == nullptr); /* GPU_LOCAL is not mappable */
+        OT_EXPECT(flux_buffer_vk_buffer(b) != VK_NULL_HANDLE);
         flux_buffer_release(b);
     }
 
@@ -88,8 +89,8 @@ int main(void) {
         bd.device_address = true;
 
         flux_buffer *b = nullptr;
-        EXPECT(flux_buffer_create(d, &bd, &b) == FLUX_OK);
-        EXPECT(flux_buffer_device_address(b) != 0);
+        OT_EXPECT(flux_buffer_create(d, &bd, &b) == FLUX_OK);
+        OT_EXPECT(flux_buffer_device_address(b) != 0);
         flux_buffer_release(b);
     }
 
@@ -100,7 +101,7 @@ int main(void) {
         bd.location = FLUX_BUFFER_HOST_VISIBLE;
 
         flux_buffer *b = nullptr;
-        EXPECT(flux_buffer_create(d, &bd, &b) == FLUX_ERROR_INVALID_ARGUMENT);
+        OT_EXPECT(flux_buffer_create(d, &bd, &b) == FLUX_ERROR_INVALID_ARGUMENT);
     }
 
     /* --- wrong sType rejected --- */
@@ -110,17 +111,17 @@ int main(void) {
                                .usage = FLUX_BUFFER_USAGE_UNIFORM,
                                .location = FLUX_BUFFER_HOST_VISIBLE};
         flux_buffer *b = nullptr;
-        EXPECT(flux_buffer_create(d, &bd, &b) == FLUX_ERROR_INVALID_ARGUMENT);
+        OT_EXPECT(flux_buffer_create(d, &bd, &b) == FLUX_ERROR_INVALID_ARGUMENT);
     }
 
     /* --- NULL-safe accessors --- */
-    EXPECT(flux_buffer_mapped(nullptr) == nullptr);
-    EXPECT(flux_buffer_size(nullptr) == 0);
-    EXPECT(flux_buffer_vk_buffer(nullptr) == VK_NULL_HANDLE);
-    EXPECT(flux_buffer_device_address(nullptr) == 0);
-    EXPECT(flux_buffer_retain(nullptr) == nullptr);
+    OT_EXPECT(flux_buffer_mapped(nullptr) == nullptr);
+    OT_EXPECT(flux_buffer_size(nullptr) == 0);
+    OT_EXPECT(flux_buffer_vk_buffer(nullptr) == VK_NULL_HANDLE);
+    OT_EXPECT(flux_buffer_device_address(nullptr) == 0);
+    OT_EXPECT(flux_buffer_retain(nullptr) == nullptr);
     flux_buffer_release(nullptr);
 
     flux_device_release(d);
-    TEST_SUMMARY();
+    return OT_REPORT();
 }

@@ -1,9 +1,9 @@
 /*
- * Observation-plane unit test (ADR-0129).
+ * Observation-plane integration test (ADR-0129).
  *
- * Proves the ledger's own contract in isolation, with no Vulkan device
- * involved beyond the headless device the scope checks need. Each block
- * below is a claim the ADR makes:
+ * Proves the ledger's contract against a live headless device: the rows are
+ * device-scoped even though the assertions themselves are deterministic.
+ * Each block below is a claim the ADR makes:
  *
  *   1. Counting is unconditional: a device with no chained observe opts
  *      still interns rows and reports them.
@@ -19,7 +19,8 @@
  *   6. The report never claims more rows than it wrote without marking the
  *      truncation in `total`.
  */
-#include "test_helpers.h"
+#include "flux_test.h"
+#include "optics_test.h"
 
 #include <flux/flux.h>
 #include <flux/observe.h>
@@ -46,25 +47,25 @@ static void test_counting_is_unconditional(flux_device *d) {
 
     flux_observe_counters before = {};
     flux_result r = flux_observe_read_counters(d, FLUX_SCOPE_CONTEXT, kind, owner, &before);
-    EXPECT(r == FLUX_ERROR_OUT_OF_RANGE); /* never interned yet */
+    OT_EXPECT(r == FLUX_ERROR_OUT_OF_RANGE); /* never interned yet */
 
-    EXPECT(FLUX_OBSERVE_ACQUIRE(d, FLUX_SCOPE_CONTEXT, FLUX_LIFETIME_CONTEXT, kind, owner, 128,
-                                FLUX_SITE_NONE));
+    OT_EXPECT(FLUX_OBSERVE_ACQUIRE(d, FLUX_SCOPE_CONTEXT, FLUX_LIFETIME_CONTEXT, kind, owner, 128,
+                                   FLUX_SITE_NONE));
     flux_observe_counters during = {};
-    EXPECT(flux_observe_read_counters(d, FLUX_SCOPE_CONTEXT, kind, owner, &during) == FLUX_OK);
-    EXPECT(during.live == 1);
-    EXPECT(during.acquire_total == 1);
-    EXPECT(during.bytes_live == 128);
+    OT_EXPECT(flux_observe_read_counters(d, FLUX_SCOPE_CONTEXT, kind, owner, &during) == FLUX_OK);
+    OT_EXPECT(during.live == 1);
+    OT_EXPECT(during.acquire_total == 1);
+    OT_EXPECT(during.bytes_live == 128);
 
     FLUX_OBSERVE_RELEASE(d, FLUX_SCOPE_CONTEXT, kind, owner, 128);
     flux_observe_counters after = {};
-    EXPECT(flux_observe_read_counters(d, FLUX_SCOPE_CONTEXT, kind, owner, &after) == FLUX_OK);
-    EXPECT(after.live == 0);
-    EXPECT(after.bytes_live == 0);
+    OT_EXPECT(flux_observe_read_counters(d, FLUX_SCOPE_CONTEXT, kind, owner, &after) == FLUX_OK);
+    OT_EXPECT(after.live == 0);
+    OT_EXPECT(after.bytes_live == 0);
     /* The history survives the balanced pair: a pair that genuinely
      * happened is distinguishable from one that never did. */
-    EXPECT(after.acquire_total == 1);
-    EXPECT(after.release_total == 1);
+    OT_EXPECT(after.acquire_total == 1);
+    OT_EXPECT(after.release_total == 1);
 }
 
 static void test_peak_survives_drain(flux_device *d) {
@@ -72,19 +73,19 @@ static void test_peak_survives_drain(flux_device *d) {
     const char *owner = "tests/observe";
 
     for (int i = 0; i < 7; ++i)
-        EXPECT(FLUX_OBSERVE_ACQUIRE(d, FLUX_SCOPE_CONTEXT, FLUX_LIFETIME_CONTEXT, kind, owner, 0,
-                                    FLUX_SITE_NONE));
+        OT_EXPECT(FLUX_OBSERVE_ACQUIRE(d, FLUX_SCOPE_CONTEXT, FLUX_LIFETIME_CONTEXT, kind, owner, 0,
+                                       FLUX_SITE_NONE));
     for (int i = 0; i < 7; ++i)
         FLUX_OBSERVE_RELEASE(d, FLUX_SCOPE_CONTEXT, kind, owner, 0);
 
     flux_observe_counters c = {};
-    EXPECT(flux_observe_read_counters(d, FLUX_SCOPE_CONTEXT, kind, owner, &c) == FLUX_OK);
-    EXPECT(c.live == 0);
+    OT_EXPECT(flux_observe_read_counters(d, FLUX_SCOPE_CONTEXT, kind, owner, &c) == FLUX_OK);
+    OT_EXPECT(c.live == 0);
     /* Peak is the whole point: after everything is released, a high-water
      * regression is still visible. A leak and a spike must not look alike. */
-    EXPECT(c.peak == 7);
-    EXPECT(c.acquire_total == 7);
-    EXPECT(c.release_total == 7);
+    OT_EXPECT(c.peak == 7);
+    OT_EXPECT(c.acquire_total == 7);
+    OT_EXPECT(c.release_total == 7);
 }
 
 static void test_unmatched_release_is_counted(flux_device *d) {
@@ -95,25 +96,25 @@ static void test_unmatched_release_is_counted(flux_device *d) {
      * read as balanced forever) and must not underflow. */
     FLUX_OBSERVE_RELEASE(d, FLUX_SCOPE_CONTEXT, kind, owner, 0);
     flux_observe_counters c = {};
-    EXPECT(flux_observe_read_counters(d, FLUX_SCOPE_CONTEXT, kind, owner, &c) ==
-           FLUX_ERROR_OUT_OF_RANGE);
+    OT_EXPECT(flux_observe_read_counters(d, FLUX_SCOPE_CONTEXT, kind, owner, &c) ==
+              FLUX_ERROR_OUT_OF_RANGE);
 
     /* One acquire, two releases: live returns to zero and stops there
      * instead of wrapping to UINT64_MAX. */
-    EXPECT(FLUX_OBSERVE_ACQUIRE(d, FLUX_SCOPE_CONTEXT, FLUX_LIFETIME_CONTEXT, kind, owner, 0,
-                                FLUX_SITE_NONE));
+    OT_EXPECT(FLUX_OBSERVE_ACQUIRE(d, FLUX_SCOPE_CONTEXT, FLUX_LIFETIME_CONTEXT, kind, owner, 0,
+                                   FLUX_SITE_NONE));
     FLUX_OBSERVE_RELEASE(d, FLUX_SCOPE_CONTEXT, kind, owner, 0);
     FLUX_OBSERVE_RELEASE(d, FLUX_SCOPE_CONTEXT, kind, owner, 0);
-    EXPECT(flux_observe_read_counters(d, FLUX_SCOPE_CONTEXT, kind, owner, &c) == FLUX_OK);
-    EXPECT(c.live == 0);
-    EXPECT(c.release_total == 1); /* the second release was refused */
+    OT_EXPECT(flux_observe_read_counters(d, FLUX_SCOPE_CONTEXT, kind, owner, &c) == FLUX_OK);
+    OT_EXPECT(c.live == 0);
+    OT_EXPECT(c.release_total == 1); /* the second release was refused */
 }
 
 static void test_report_shape(flux_device *d) {
     const char *kind = "probe_report";
     const char *owner = "tests/observe";
-    EXPECT(FLUX_OBSERVE_ACQUIRE(d, FLUX_SCOPE_CONTEXT, FLUX_LIFETIME_CONTEXT, kind, owner, 64,
-                                FLUX_SITE_NONE));
+    OT_EXPECT(FLUX_OBSERVE_ACQUIRE(d, FLUX_SCOPE_CONTEXT, FLUX_LIFETIME_CONTEXT, kind, owner, 64,
+                                   FLUX_SITE_NONE));
 
     /* Undersized buffer: count reflects what was written, total reflects
      * what exists. A truncated report must announce itself. */
@@ -124,10 +125,10 @@ static void test_report_shape(flux_device *d) {
                                                              .capacity = 1,
                                                              .scope = FLUX_SCOPE_CONTEXT,
                                                          });
-    EXPECT(small.result == FLUX_OK);
-    EXPECT(small.count <= 1);
-    EXPECT(small.total >= small.count);
-    EXPECT(small.live_total >= 1);
+    OT_EXPECT(small.result == FLUX_OK);
+    OT_EXPECT(small.count <= 1);
+    OT_EXPECT(small.total >= small.count);
+    OT_EXPECT(small.live_total >= 1);
 
     /* Full buffer covers everything the scope holds. */
     flux_observe_entry all[64] = {};
@@ -137,8 +138,8 @@ static void test_report_shape(flux_device *d) {
                                                             .capacity = 64,
                                                             .scope = FLUX_SCOPE_CONTEXT,
                                                         });
-    EXPECT(full.result == FLUX_OK);
-    EXPECT(full.total == full.count);
+    OT_EXPECT(full.result == FLUX_OK);
+    OT_EXPECT(full.total == full.count);
 
     /* include_drained=false filters to the leaking rows only; our probe is
      * one of them. */
@@ -146,21 +147,21 @@ static void test_report_shape(flux_device *d) {
     for (uint32_t i = 0; i < full.count; ++i) {
         if (strcmp(all[i].kind, kind) == 0 && strcmp(all[i].owner, owner) == 0) {
             saw_probe = true;
-            EXPECT(all[i].live == 1);
-            EXPECT(all[i].bytes_live == 64);
-            EXPECT(all[i].lifetime == FLUX_LIFETIME_CONTEXT);
-            EXPECT(all[i].scope == FLUX_SCOPE_CONTEXT);
+            OT_EXPECT(all[i].live == 1);
+            OT_EXPECT(all[i].bytes_live == 64);
+            OT_EXPECT(all[i].lifetime == FLUX_LIFETIME_CONTEXT);
+            OT_EXPECT(all[i].scope == FLUX_SCOPE_CONTEXT);
             /* FLUX_SITE_NONE resolves to nullptr by design: an unclaimed
              * site slot leaves no literal at all, which is what keeps a
              * non-attribution build free of site machinery. A kind that does
              * have a site slot must carry it. */
             flux_observe_counters probe = {};
-            EXPECT(flux_observe_read_counters(d, FLUX_SCOPE_CONTEXT, kind, owner, &probe) ==
-                   FLUX_OK);
-            EXPECT(all[i].site == nullptr); /* probe uses FLUX_SITE_NONE */
+            OT_EXPECT(flux_observe_read_counters(d, FLUX_SCOPE_CONTEXT, kind, owner, &probe) ==
+                      FLUX_OK);
+            OT_EXPECT(all[i].site == nullptr); /* probe uses FLUX_SITE_NONE */
         }
     }
-    EXPECT(saw_probe);
+    OT_EXPECT(saw_probe);
 
     FLUX_OBSERVE_RELEASE(d, FLUX_SCOPE_CONTEXT, kind, owner, 64);
 }
@@ -173,14 +174,14 @@ static void test_invalid_arguments(flux_device *d) {
                                    .entries = &e,
                                    .capacity = 1,
                                });
-    EXPECT(bad_type.result == FLUX_ERROR_INVALID_ARGUMENT);
+    OT_EXPECT(bad_type.result == FLUX_ERROR_INVALID_ARGUMENT);
 
     flux_observe_response no_buffer =
         flux_observe_report(d, &(flux_observe_report_opts){.type = FLUX_TYPE_OBSERVE_REPORT_OPTS});
-    EXPECT(no_buffer.result == FLUX_ERROR_INVALID_ARGUMENT);
+    OT_EXPECT(no_buffer.result == FLUX_ERROR_INVALID_ARGUMENT);
 
-    EXPECT(flux_observe_read_counters(d, FLUX_SCOPE_CONTEXT, nullptr, "x", nullptr) ==
-           FLUX_ERROR_INVALID_ARGUMENT);
+    OT_EXPECT(flux_observe_read_counters(d, FLUX_SCOPE_CONTEXT, nullptr, "x", nullptr) ==
+              FLUX_ERROR_INVALID_ARGUMENT);
 }
 
 /* Interning is bounded. The bound must be observable: once the row table is
@@ -195,7 +196,7 @@ static void test_interning_bound_is_visible(flux_device *d) {
                                  "tests/observe/bound", 0, FLUX_SITE_NONE))
             accepted++;
     }
-    EXPECT(accepted > 0);
+    OT_EXPECT(accepted > 0);
 
     flux_observe_entry rows[128] = {};
     flux_observe_response resp = flux_observe_report(d, &(flux_observe_report_opts){
@@ -204,14 +205,14 @@ static void test_interning_bound_is_visible(flux_device *d) {
                                                             .capacity = 128,
                                                             .scope = FLUX_SCOPE_PROCESS,
                                                         });
-    EXPECT(resp.result == FLUX_OK);
+    OT_EXPECT(resp.result == FLUX_OK);
     /* Either the table had room for every kind (accepted == n) or it
      * refused some and the overflow counter is non-zero. Never both
      * "refused" and "quiet". */
     if (accepted < n) {
-        EXPECT(resp.overflowed_kinds > 0);
+        OT_EXPECT(resp.overflowed_kinds > 0);
     } else {
-        EXPECT(resp.overflowed_kinds == 0);
+        OT_EXPECT(resp.overflowed_kinds == 0);
     }
 
     for (uint32_t i = 0; i < n; ++i)
@@ -222,25 +223,25 @@ static void test_interning_bound_is_visible(flux_device *d) {
  * (no literal), and a claimed slot must map to a real label — otherwise the
  * enum would be decorative and the report's site column permanently empty. */
 static void test_site_vocabulary(void) {
-    EXPECT(flux_site_label(FLUX_SITE_NONE) == nullptr);
-    EXPECT(flux_site_label(FLUX_SITE_COUNT) == nullptr);
+    OT_EXPECT(flux_site_label(FLUX_SITE_NONE) == nullptr);
+    OT_EXPECT(flux_site_label(FLUX_SITE_COUNT) == nullptr);
     const char *host = flux_site_label(FLUX_SITE_HOST_ALLOC);
-    EXPECT(host != nullptr);
-    EXPECT(host && strstr(host, "flux_internal_alloc") != nullptr);
-    EXPECT(flux_site_label(FLUX_SITE_VK_MEMORY) != nullptr);
-    EXPECT(flux_site_label(FLUX_SITE_VK_IMAGE) != nullptr);
-    EXPECT(flux_site_label(FLUX_SITE_VK_BUFFER) != nullptr);
-    EXPECT(flux_site_label(FLUX_SITE_VK_SAMPLER) != nullptr);
-    EXPECT(flux_site_label(FLUX_SITE_VK_PIPELINE) != nullptr);
-    EXPECT(flux_site_label(FLUX_SITE_VK_TARGET) != nullptr);
-    EXPECT(flux_site_label(FLUX_SITE_BINDLESS) != nullptr);
+    OT_EXPECT(host != nullptr);
+    OT_EXPECT(host && strstr(host, "flux_internal_alloc") != nullptr);
+    OT_EXPECT(flux_site_label(FLUX_SITE_VK_MEMORY) != nullptr);
+    OT_EXPECT(flux_site_label(FLUX_SITE_VK_IMAGE) != nullptr);
+    OT_EXPECT(flux_site_label(FLUX_SITE_VK_BUFFER) != nullptr);
+    OT_EXPECT(flux_site_label(FLUX_SITE_VK_SAMPLER) != nullptr);
+    OT_EXPECT(flux_site_label(FLUX_SITE_VK_PIPELINE) != nullptr);
+    OT_EXPECT(flux_site_label(FLUX_SITE_VK_TARGET) != nullptr);
+    OT_EXPECT(flux_site_label(FLUX_SITE_BINDLESS) != nullptr);
 }
 
 int main(void) {
-    flux_device *d = test_helpers_make_headless_device();
+    flux_device *d = flux_test_make_headless_device();
     if (!d) {
         fprintf(stderr, "test_observe: no Vulkan device; skipping\n");
-        TEST_SUMMARY();
+        OT_SKIP("no Vulkan device");
     }
 
     test_site_vocabulary();
@@ -252,5 +253,5 @@ int main(void) {
     test_interning_bound_is_visible(d);
 
     flux_device_release(d);
-    TEST_SUMMARY();
+    return OT_REPORT();
 }

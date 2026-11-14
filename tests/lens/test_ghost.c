@@ -1,6 +1,7 @@
 /* test_ghost.c — leave-animation ghost replay (ADR-0078). */
 
-#include "test_helpers.h"
+#include "lens_test.h"
+#include "optics_test.h"
 #include <flux/canvas_cpu.h>
 #include <lens/lens.h>
 #include <math.h>
@@ -21,8 +22,8 @@ typedef struct fixture {
 static void fixture_open(fixture *f) {
     f->ui = NULL;
     f->canvas = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &f->ui) == FLUX_OK);
-    CHECK(flux_canvas_create_cpu(W, H, 1.0f, &f->canvas) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){0}, &f->ui) == FLUX_OK);
+    OT_EXPECT(flux_canvas_create_cpu(W, H, 1.0f, &f->canvas) == FLUX_OK);
 }
 
 static void fixture_close(fixture *f) {
@@ -33,16 +34,17 @@ static void fixture_close(fixture *f) {
 static void snapshot(const fixture *f, uint8_t *out) {
     uint32_t w = 0, h = 0, stride = 0;
     const uint8_t *fb = flux_canvas_cpu_pixels(f->canvas, &w, &h, &stride);
-    CHECK(fb != NULL && w == W && h == H && stride == W * 4);
+    OT_EXPECT(fb != NULL && w == W && h == H && stride == W * 4);
     memcpy(out, fb, (size_t)h * stride);
 }
 
 static void render_frame(const fixture *f) {
     flux_color clear = flux_color_rgba_premul(0, 0, 0, 255);
-    CHECK(flux_canvas_begin(f->canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
-                                                                .clear_color = &clear}) == FLUX_OK);
-    CHECK(test_snapshot_render(f->ui, f->canvas) == FLUX_OK);
-    CHECK(flux_canvas_end(f->canvas) == FLUX_OK);
+    OT_EXPECT(
+        flux_canvas_begin(f->canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                              .clear_color = &clear}) == FLUX_OK);
+    OT_EXPECT(lens_test_snapshot_render(f->ui, f->canvas) == FLUX_OK);
+    OT_EXPECT(flux_canvas_end(f->canvas) == FLUX_OK);
 }
 
 static void build_with_footer(lens *ui, float progress) {
@@ -52,7 +54,7 @@ static void build_with_footer(lens *ui, float progress) {
     lens_label(ui, &(lens_label_opts){.text = "header##hdr"});
     lens_label(ui, &(lens_label_opts){.text = val_str, .box = {.id = "load"}});
     lens_set_ghost(ui, lens_current_id(ui, "load"), 1.0f);
-    test_end(ui);
+    lens_test_end(ui);
 }
 
 static size_t ink_pixels(const uint8_t *fb) {
@@ -75,16 +77,16 @@ static void test_armed_subtree_ghosts_after_removal(void) {
         render_frame(&f);
     }
     snapshot(&f, with_footer);
-    CHECK(ink_pixels(with_footer) > 0);
+    OT_EXPECT(ink_pixels(with_footer) > 0);
 
     /* Remove the subtree: the armed pin freezes it at full alpha */
     lens_begin(f.ui, &IN0);
     lens_label(f.ui, &(lens_label_opts){.text = "header##hdr"});
     lens_set_ghost(f.ui, lens_current_id(f.ui, "load"), 1.0f); /* refresh pin */
-    test_end(f.ui);
+    lens_test_end(f.ui);
     render_frame(&f);
     snapshot(&f, ghosted);
-    CHECK(memcmp(with_footer, ghosted, sizeof with_footer) == 0);
+    OT_EXPECT(memcmp(with_footer, ghosted, sizeof with_footer) == 0);
 
     /* Stop pinning: after GHOST_MAX_FRAMES frames the ghost is gone
      * and the frame is exactly the header's ink. */
@@ -92,7 +94,7 @@ static void test_armed_subtree_ghosts_after_removal(void) {
     for (int i = 0; i < GHOST_MAX_FRAMES + 10; i++) {
         lens_begin(f.ui, &IN0);
         lens_label(f.ui, &(lens_label_opts){.text = "header##hdr"});
-        test_end(f.ui);
+        lens_test_end(f.ui);
         render_frame(&f);
     }
     snapshot(&f, expired);
@@ -102,12 +104,12 @@ static void test_armed_subtree_ghosts_after_removal(void) {
         for (int i = 0; i < 3; i++) {
             lens_begin(g.ui, &IN0);
             lens_label(g.ui, &(lens_label_opts){.text = "header##hdr"});
-            test_end(g.ui);
+            lens_test_end(g.ui);
             render_frame(&g);
         }
         uint8_t reference[W * H * 4];
         snapshot(&g, reference);
-        CHECK(memcmp(expired, reference, sizeof expired) == 0);
+        OT_EXPECT(memcmp(expired, reference, sizeof expired) == 0);
         fixture_close(&g);
     }
     fixture_close(&f);
@@ -130,7 +132,7 @@ static void test_ghost_alpha_matches_live_opacity_path(void) {
         lens_begin(g.ui, &IN0);
         lens_label(g.ui, &(lens_label_opts){.text = "header##hdr"});
         lens_set_ghost(g.ui, lens_current_id(g.ui, "load"), alpha);
-        test_end(g.ui);
+        lens_test_end(g.ui);
         render_frame(&g);
         snapshot(&g, ghost_shot);
 
@@ -142,7 +144,7 @@ static void test_ghost_alpha_matches_live_opacity_path(void) {
             lens_begin(l.ui, &IN0);
             lens_label(l.ui, &(lens_label_opts){.text = "header##hdr"});
             lens_label(l.ui, &(lens_label_opts){.text = "val=0.50", .box = {.id = "load"}});
-            test_end(l.ui);
+            lens_test_end(l.ui);
             render_frame(&l);
         }
         lens_begin(l.ui, &IN0);
@@ -150,11 +152,11 @@ static void test_ghost_alpha_matches_live_opacity_path(void) {
         lens_set_opacity(l.ui, alpha);
         lens_label(l.ui, &(lens_label_opts){.text = "val=0.50", .box = {.id = "load"}});
         lens_set_opacity(l.ui, 1.0f);
-        test_end(l.ui);
+        lens_test_end(l.ui);
         render_frame(&l);
         snapshot(&l, live_shot);
 
-        CHECK(memcmp(ghost_shot, live_shot, sizeof ghost_shot) == 0);
+        OT_EXPECT(memcmp(ghost_shot, live_shot, sizeof ghost_shot) == 0);
         fixture_close(&g);
         fixture_close(&l);
     }
@@ -176,7 +178,7 @@ static void test_refresh_extends_lifetime(void) {
     lens_begin(f.ui, &IN0);
     lens_label(f.ui, &(lens_label_opts){.text = "header##hdr"});
     lens_set_ghost(f.ui, lens_current_id(f.ui, "load"), 1.0f);
-    test_end(f.ui);
+    lens_test_end(f.ui);
     render_frame(&f);
     snapshot(&f, first);
 
@@ -185,11 +187,11 @@ static void test_refresh_extends_lifetime(void) {
         lens_begin(f.ui, &IN0);
         lens_label(f.ui, &(lens_label_opts){.text = "header##hdr"});
         lens_set_ghost(f.ui, lens_current_id(f.ui, "load"), 1.0f);
-        test_end(f.ui);
+        lens_test_end(f.ui);
         render_frame(&f);
     }
     snapshot(&f, later);
-    CHECK(memcmp(first, later, sizeof first) == 0);
+    OT_EXPECT(memcmp(first, later, sizeof first) == 0);
 
     fixture_close(&f);
 }
@@ -204,14 +206,14 @@ static void test_ghost_never_hit_tests(void) {
         lens_begin(f.ui, &IN0);
         lens_button(f.ui, &(lens_button_opts){.label = "target##btn"});
         lens_set_ghost(f.ui, lens_current_id(f.ui, "target##btn"), 1.0f);
-        test_end(f.ui);
+        lens_test_end(f.ui);
         render_frame(&f);
     }
     lens_input click = IN0;
     click.mouse_pressed[0] = true;
     lens_begin(f.ui, &click);
     lens_set_ghost(f.ui, lens_current_id(f.ui, "target##btn"), 1.0f);
-    test_end(f.ui);
+    lens_test_end(f.ui);
 
     bool clicked = false;
     for (int i = 0; i < 8; i++) {
@@ -222,10 +224,10 @@ static void test_ghost_never_hit_tests(void) {
             in.mouse_released[LENS_MOUSE_LEFT] = true;
         lens_begin(f.ui, &in);
         clicked = lens_button(f.ui, &(lens_button_opts){.label = "target##btn"}).clicked;
-        test_end(f.ui);
+        lens_test_end(f.ui);
         render_frame(&f);
     }
-    CHECK(clicked);
+    OT_EXPECT(clicked);
     fixture_close(&f);
 }
 
@@ -234,5 +236,5 @@ int main(void) {
     test_ghost_alpha_matches_live_opacity_path();
     test_refresh_extends_lifetime();
     test_ghost_never_hit_tests();
-    return TEST_REPORT();
+    return OT_REPORT();
 }

@@ -33,7 +33,8 @@
  * only meaningful at that size; the test refuses to run when the build
  * disagrees, rather than silently rescaling.
  */
-#include "test_helpers.h"
+#include "flux_test.h"
+#include "optics_test.h"
 #include <flux/effect.h>
 #include <flux/flux.h>
 #include <flux/vulkan.h>
@@ -138,27 +139,27 @@ static void render_golden_scene(flux_surface *s, flux_canvas *canvas, flux_image
                                 flux_blur_filter *blur, prism_liquid_glass_filter *glass,
                                 uint8_t *px) {
     flux_frame *frame = nullptr;
-    EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
+    OT_EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
 
     /* Backdrop capture: the same hard vertical edge the layer tests use
      * — sharp structure under the plate, so refraction/lensing errors
      * and blur-seam regressions both become visible. */
     flux_color left = flux_color_rgba(30, 60, 110, 255);
-    EXPECT(flux_canvas_begin(
-               canvas, &(flux_canvas_pass_desc){
-                           .type = FLUX_TYPE_CANVAS_PASS_DESC,
-                           .frame = frame,
-                           .attachment = {.kind = FLUX_CANVAS_ATTACHMENT_IMAGE, .image = target},
-                           .clear_color = &left}) == FLUX_OK);
+    OT_EXPECT(flux_canvas_begin(
+                  canvas, &(flux_canvas_pass_desc){
+                              .type = FLUX_TYPE_CANVAS_PASS_DESC,
+                              .frame = frame,
+                              .attachment = {.kind = FLUX_CANVAS_ATTACHMENT_IMAGE, .image = target},
+                              .clear_color = &left}) == FLUX_OK);
     flux_canvas_fill_rect_color(canvas, (flux_rect){(float)(W / 2), 0.0f, (float)(W / 2), (float)H},
                                 flux_color_rgba_premul(210, 190, 150, 255));
-    EXPECT(flux_canvas_end(canvas) == FLUX_OK);
+    OT_EXPECT(flux_canvas_end(canvas) == FLUX_OK);
 
     flux_effect_blur_desc bd = FLUX_EFFECT_BLUR_DESC_INIT;
     bd.input = target;
     bd.sigma = 2.0f;
     flux_image *blurred = nullptr;
-    EXPECT(flux_blur_filter_apply(blur, frame, &bd, &blurred) == FLUX_OK);
+    OT_EXPECT(flux_blur_filter_apply(blur, frame, &bd, &blurred) == FLUX_OK);
 
     /* Default recipe: PRISM_LIQUID_GLASS_DESC_INIT untouched, neutral
      * group (no shadow), refraction 0 so the plate reads the backdrop
@@ -176,34 +177,34 @@ static void render_golden_scene(flux_surface *s, flux_canvas *canvas, flux_image
     gd.group_count = 1u;
     gd.refraction = 0.0f;
     prism_material_output out = {0};
-    EXPECT(prism_liquid_glass_filter_apply(glass, frame, &gd, &out) == FLUX_OK);
-    EXPECT(out.image != nullptr);
+    OT_EXPECT(prism_liquid_glass_filter_apply(glass, frame, &gd, &out) == FLUX_OK);
+    OT_EXPECT(out.image != nullptr);
 
     flux_color black = flux_color_rgba(0, 0, 0, 255);
-    EXPECT(flux_canvas_begin(canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
-                                                              .frame = frame,
-                                                              .clear_color = &black}) == FLUX_OK);
+    OT_EXPECT(flux_canvas_begin(canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                                 .frame = frame,
+                                                                 .clear_color = &black}) ==
+              FLUX_OK);
     test_draw_material(canvas, out);
-    EXPECT(flux_canvas_end(canvas) == FLUX_OK);
-    EXPECT(flux_frame_submit(frame) == FLUX_OK);
-    EXPECT(flux_frame_present(frame) == FLUX_OK);
+    OT_EXPECT(flux_canvas_end(canvas) == FLUX_OK);
+    OT_EXPECT(flux_frame_submit(frame) == FLUX_OK);
+    OT_EXPECT(flux_frame_present(frame) == FLUX_OK);
     memset(px, 0xCD, BYTES);
-    EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+    OT_EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
 }
 
 int main(void) {
-    flux_device *d = test_helpers_make_headless_device();
+    flux_device *d = flux_test_make_headless_device();
     if (!d) {
         fprintf(stderr, "test_prism_golden: no Vulkan device; skipping\n");
-        TEST_SUMMARY();
-        return 0;
+        OT_SKIP("no Vulkan device");
     }
 
     flux_surface_desc sd = FLUX_SURFACE_DESC_INIT;
     sd.width = W;
     sd.height = H;
     flux_surface *s = nullptr;
-    EXPECT(flux_surface_create(d, &sd, &s) == FLUX_OK);
+    OT_EXPECT(flux_surface_create(d, &sd, &s) == FLUX_OK);
 
     VkFormat sfmt = flux_surface_vk_format(s);
     flux_format target_fmt =
@@ -211,16 +212,16 @@ int main(void) {
 
     flux_canvas_desc cd = {.type = FLUX_TYPE_CANVAS_DESC, .surface = s};
     flux_canvas *canvas = nullptr;
-    EXPECT(flux_canvas_create(&cd, &canvas) == FLUX_OK);
+    OT_EXPECT(flux_canvas_create(&cd, &canvas) == FLUX_OK);
 
     flux_image *target = nullptr;
-    EXPECT(flux_image_create_render_target(d, W, H, target_fmt, &target) == FLUX_OK);
+    OT_EXPECT(flux_image_create_render_target(d, W, H, target_fmt, &target) == FLUX_OK);
 
     flux_blur_filter *blur = nullptr;
-    EXPECT(flux_blur_filter_create(d, &blur) == FLUX_OK);
+    OT_EXPECT(flux_blur_filter_create(d, &blur) == FLUX_OK);
     prism_liquid_glass_filter *glass = nullptr;
-    EXPECT(prism_liquid_glass_filter_create(d, &glass) == FLUX_OK);
-    EXPECT(prism_liquid_glass_filter_warmup(glass, nullptr) == FLUX_OK);
+    OT_EXPECT(prism_liquid_glass_filter_create(d, &glass) == FLUX_OK);
+    OT_EXPECT(prism_liquid_glass_filter_warmup(glass, nullptr) == FLUX_OK);
 
     /* Warm every frame slot with identical renders; the last frame's
      * readback is the sample. Slot-state divergence across the 3 slots
@@ -236,13 +237,13 @@ int main(void) {
      * (opaque black, all channels 0) — the analytic SDF must not bleed
      * past the silhouette (no shadow on the group, no spread). */
     const uint8_t *plate = &px[(32u * W + 32u) * 4u];
-    EXPECT(plate[3] == 255u); /* interior plate is opaque */
+    OT_EXPECT(plate[3] == 255u); /* interior plate is opaque */
 
     const uint8_t *corner_tl = &px[(2u * W + 2u) * 4u];
     const uint8_t *corner_br = &px[((H - 3u) * W + (W - 3u)) * 4u];
     for (int c = 0; c < 3; c++) {
-        EXPECT(corner_tl[c] == 0u);
-        EXPECT(corner_br[c] == 0u);
+        OT_EXPECT(corner_tl[c] == 0u);
+        OT_EXPECT(corner_br[c] == 0u);
     }
 
     /* Interior content step: the material's adaptive tint (smoke/pearl,
@@ -257,30 +258,30 @@ int main(void) {
     {
         double l_l = probe_luma(px, 22, 32, W), l_r = probe_luma(px, 26, 32, W);
         double r_l = probe_luma(px, 34, 32, W), r_r = probe_luma(px, 38, 32, W);
-        EXPECT(l_r - l_l <= 8.0);                             /* left half locally smooth */
-        EXPECT(r_r - r_l <= 8.0);                             /* right half locally smooth */
-        EXPECT((r_l + r_r) * 0.5 > (l_l + l_r) * 0.5 + 20.0); /* step preserved */
+        OT_EXPECT(l_r - l_l <= 8.0);                             /* left half locally smooth */
+        OT_EXPECT(r_r - r_l <= 8.0);                             /* right half locally smooth */
+        OT_EXPECT((r_l + r_r) * 0.5 > (l_l + l_r) * 0.5 + 20.0); /* step preserved */
     }
 
     /* Rim vs plate: the light direction {-0.45,-0.89} lights the top
      * edge. The rim sample (row 18, x=32: inside the body, in the rim
      * band) must be brighter than the plate sample below it. */
     const uint8_t *rim_top = &px[(18u * W + 32u) * 4u];
-    EXPECT(rim_top[0] + rim_top[1] + rim_top[2] > plate[0] + plate[1] + plate[2]);
+    OT_EXPECT(rim_top[0] + rim_top[1] + rim_top[2] > plate[0] + plate[1] + plate[2]);
 
     /* Outside-right alpha: immediately beyond the right silhouette the
      * alpha must be exactly the base's (the glass layer adds nothing). */
     const uint8_t *just_outside = &px[(32u * W + (unsigned)(BODY_X + BODY_W + 3u)) * 4u];
-    EXPECT(just_outside[0] == 0u && just_outside[3] == 255u);
+    OT_EXPECT(just_outside[0] == 0u && just_outside[3] == 255u);
 
     /* ---------------- determinism (same-device bit equality) ---------- */
     static uint8_t px2[BYTES];
     render_golden_scene(s, canvas, target, blur, glass, px2);
-    EXPECT(memcmp(px, px2, BYTES) == 0);
+    OT_EXPECT(memcmp(px, px2, BYTES) == 0);
 
     /* ---------------- tolerance golden ------------------------------- */
     if (getenv("PRISM_GOLDEN_UPDATE")) {
-        EXPECT(golden_save(px, BYTES));
+        OT_EXPECT(golden_save(px, BYTES));
         fprintf(stderr, "test_prism_golden: golden reference written (%s)\n", golden_path());
     } else {
         static uint8_t ref[BYTES];
@@ -291,7 +292,7 @@ int main(void) {
                     "test_prism_golden\n"
                     "  (or run meson test with PRISM_GOLDEN_UPDATE=1 set)\n",
                     golden_path());
-            g_test_failed++;
+            OT_MANUAL_FAIL();
         } else {
             unsigned outliers = 0, over_cap = 0, max_delta = 0;
             unsigned total = W * H;
@@ -313,14 +314,14 @@ int main(void) {
             /* Housekeeping sanity: the committed golden must look like a
              * glass body over the opaque black base, not like an empty
              * frame (guards against regenerating from a broken renderer). */
-            g_test_count++;
+            OT_MANUAL_CHECK();
             if (ref[(32u * W + 32u) * 4u + 3] != 255u || ref[(2u * W + 2u) * 4u + 2] != 0u) {
                 fprintf(stderr, "FAIL test_prism_golden: committed reference fails its own "
                                 "invariants — regenerate it\n");
-                g_test_failed++;
+                OT_MANUAL_FAIL();
             }
-            EXPECT(over_cap == 0u);
-            EXPECT((double)outliers <= (double)total * GOLDEN_OUTLIER_PCT / 100.0);
+            OT_EXPECT(over_cap == 0u);
+            OT_EXPECT((double)outliers <= (double)total * GOLDEN_OUTLIER_PCT / 100.0);
             fprintf(stderr, "test_prism_golden: max_delta=%u outliers=%u/%u (tol=%d, cap=%d)\n",
                     max_delta, outliers, total, GOLDEN_TOLERANCE, GOLDEN_HARD_CAP);
         }
@@ -336,5 +337,5 @@ int main(void) {
     flux_image_release(target);
     flux_surface_release(s);
     flux_device_release(d);
-    TEST_SUMMARY();
+    return OT_REPORT();
 }

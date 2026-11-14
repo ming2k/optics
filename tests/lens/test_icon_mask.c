@@ -19,7 +19,8 @@
  */
 #include "../../../libs/lens/src/internal.h"
 #include "../../../libs/lens/src/render/icon_mask.h"
-#include "test_helpers.h"
+#include "lens_test.h"
+#include "optics_test.h"
 
 /* This test compiles lens's icon_mask.c directly, and that TU now allocates
  * through the lens funnel (ADR-0135), which lives in context.c and is hidden in
@@ -166,77 +167,77 @@ static void check_centred_at_scale(float scale) {
     const float size = 14.0f;
     uint32_t box = 24;
     double cx = 0, cy = 0;
-    CHECK(icon_centroid(LENS_ICON_ALERT_CIRCLE, size, scale, box, &cx, &cy));
+    OT_EXPECT(icon_centroid(LENS_ICON_ALERT_CIRCLE, size, scale, box, &cx, &cy));
     /* The icon node fills `size` logical px at the layout origin; its centre is
      * size*scale/2 in device px, minus half a pixel for pixel-centre indexing. */
     double expect = (double)size * scale * 0.5 - 0.5;
-    CHECK(fabs(cx - expect) < 0.6);
-    CHECK(fabs(cy - expect) < 0.6);
+    OT_EXPECT(fabs(cx - expect) < 0.6);
+    OT_EXPECT(fabs(cy - expect) < 0.6);
 }
 
 int main(void) {
     /* ---- mask cache: baked at device size, keyed by device stroke ---- */
     {
         lens *ui = nullptr;
-        CHECK(lens_create(&(lens_desc){.scale = 1.0f}, &ui) == FLUX_OK);
+        OT_EXPECT(lens_create(&(lens_desc){.scale = 1.0f}, &ui) == FLUX_OK);
 
         float stroke = 2.0f * 20.0f / 24.0f;
         lensi_icon_mask *a = lensi_icon_mask_acquire(ui, LENS_ICON_CHECK, 20u, stroke, 0.0f, 0u,
                                                      LENSI_ICON_MASK_BODY);
-        CHECK(a != nullptr);
+        OT_EXPECT(a != nullptr);
         if (a) {
-            CHECK(a->dev_px == 20u);
-            CHECK(a->w == 20u + 2u * a->halo);
-            CHECK(a->h == a->w);
+            OT_EXPECT(a->dev_px == 20u);
+            OT_EXPECT(a->w == 20u + 2u * a->halo);
+            OT_EXPECT(a->h == a->w);
             /* Device-less lens: the mask lives as host bytes, not an image. */
-            CHECK(a->host != nullptr);
-            CHECK(a->image == nullptr);
+            OT_EXPECT(a->host != nullptr);
+            OT_EXPECT(a->image == nullptr);
             int nonzero = 0;
             for (uint32_t i = 0; i < a->w * a->h; ++i)
                 if (a->host[i])
                     nonzero++;
-            CHECK(nonzero > 0);
+            OT_EXPECT(nonzero > 0);
             /* Full-coverage ink must exist: a stroke thinner than one pixel
              * would top out below 255 and read as a permanently grey glyph. */
             int peak = 0;
             for (uint32_t i = 0; i < a->w * a->h; ++i)
                 if (a->host[i] > peak)
                     peak = a->host[i];
-            CHECK(peak == 255);
+            OT_EXPECT(peak == 255);
         }
 
         /* Same request returns the same entry — no duplicate bakes. */
         lensi_icon_mask *again = lensi_icon_mask_acquire(ui, LENS_ICON_CHECK, 20u, stroke, 0.0f, 0u,
                                                          LENSI_ICON_MASK_BODY);
-        CHECK(again == a);
+        OT_EXPECT(again == a);
 
         /* A different device size is a different entry. */
         lensi_icon_mask *bigger = lensi_icon_mask_acquire(ui, LENS_ICON_CHECK, 24u, stroke, 0.0f,
                                                           0u, LENSI_ICON_MASK_BODY);
-        CHECK(bigger != nullptr && bigger != a);
+        OT_EXPECT(bigger != nullptr && bigger != a);
         if (bigger)
-            CHECK(bigger->dev_px == 24u);
+            OT_EXPECT(bigger->dev_px == 24u);
 
         /* An outline layer is its own entry, and an outline layer with no
          * outline width is meaningless rather than silently a body mask. */
         lensi_icon_mask *outline = lensi_icon_mask_acquire(ui, LENS_ICON_CHECK, 20u, stroke, 1.5f,
                                                            0u, LENSI_ICON_MASK_OUTLINE);
-        CHECK(outline != nullptr && outline != a);
-        CHECK(lensi_icon_mask_acquire(ui, LENS_ICON_CHECK, 20u, stroke, 0.0f, 0u,
-                                      LENSI_ICON_MASK_OUTLINE) == nullptr);
+        OT_EXPECT(outline != nullptr && outline != a);
+        OT_EXPECT(lensi_icon_mask_acquire(ui, LENS_ICON_CHECK, 20u, stroke, 0.0f, 0u,
+                                          LENSI_ICON_MASK_OUTLINE) == nullptr);
 
         /* A body-layer mask never carries the outline, so asking with an outline
          * width must not mint a second entry with byte-identical coverage. */
         lensi_icon_mask *body_dup = lensi_icon_mask_acquire(ui, LENS_ICON_CHECK, 20u, stroke, 1.5f,
                                                             0u, LENSI_ICON_MASK_BODY);
-        CHECK(body_dup == a);
+        OT_EXPECT(body_dup == a);
 
         /* An unknown run index and a zero device size are rejected, so a caller
          * falls back instead of masking nothing. */
-        CHECK(lensi_icon_mask_acquire(ui, LENS_ICON_CHECK, 20u, stroke, 0.0f, 7u,
-                                      LENSI_ICON_MASK_BODY) == nullptr);
-        CHECK(lensi_icon_mask_acquire(ui, LENS_ICON_CHECK, 0u, stroke, 0.0f, 0u,
-                                      LENSI_ICON_MASK_BODY) == nullptr);
+        OT_EXPECT(lensi_icon_mask_acquire(ui, LENS_ICON_CHECK, 20u, stroke, 0.0f, 7u,
+                                          LENSI_ICON_MASK_BODY) == nullptr);
+        OT_EXPECT(lensi_icon_mask_acquire(ui, LENS_ICON_CHECK, 0u, stroke, 0.0f, 0u,
+                                          LENSI_ICON_MASK_BODY) == nullptr);
 
         lens_release(ui); /* must free every cached mask without leaking */
     }
@@ -247,10 +248,10 @@ int main(void) {
          * through the mask path must clear that comfortably. */
         int chevron = icon_partial_levels(LENS_ICON_CHEVRON_RIGHT, 14.0f);
         int circle = icon_partial_levels(LENS_ICON_ALERT_CIRCLE, 14.0f);
-        CHECK(chevron > 3);
-        CHECK(circle > 3);
+        OT_EXPECT(chevron > 3);
+        OT_EXPECT(circle > 3);
         int star = icon_partial_levels(LENS_ICON_STAR_ROUNDED_FILLED, 20.0f);
-        CHECK(star > 3);
+        OT_EXPECT(star > 3);
     }
 
     /* ---- placement is device-grid exact at every scale ---- */
@@ -263,8 +264,8 @@ int main(void) {
     {
         int filled = icon_partial_levels(LENS_ICON_STAR_ROUNDED_FILLED, 16.0f);
         int outline = icon_partial_levels(LENS_ICON_STAR_ROUNDED, 16.0f);
-        CHECK(filled > 0);
-        CHECK(outline > 0);
+        OT_EXPECT(filled > 0);
+        OT_EXPECT(outline > 0);
     }
 
     /* ---- run resolution is the single source of truth ---- *
@@ -298,39 +299,39 @@ int main(void) {
         lensi_icon_run_span spans[LENSI_ICON_MAX_RUNS];
         uint32_t n =
             lensi_icon_run_spans(&desc, LENSI_ICON_RENDER_STROKE, spans, LENSI_ICON_MAX_RUNS);
-        CHECK(n == 3);
+        OT_EXPECT(n == 3);
         if (n == 3) {
-            CHECK(spans[0].first_cmd == 0 && spans[0].count == 3 && !spans[0].fill);
-            CHECK(spans[1].first_cmd == 3 && spans[1].count == 1 && spans[1].fill);
-            CHECK(spans[2].first_cmd == 4 && spans[2].count == 3 && !spans[2].fill);
+            OT_EXPECT(spans[0].first_cmd == 0 && spans[0].count == 3 && !spans[0].fill);
+            OT_EXPECT(spans[1].first_cmd == 3 && spans[1].count == 1 && spans[1].fill);
+            OT_EXPECT(spans[2].first_cmd == 4 && spans[2].count == 3 && !spans[2].fill);
             /* Distinct colours are preserved, not collapsed to the theme. */
             flux_color theme = flux_color_rgba_premul(1, 2, 3, 255);
-            CHECK(lensi_icon_run_color(spans[0].color, theme) != theme);
-            CHECK(lensi_icon_run_color(spans[1].color, theme) != theme);
-            CHECK(lensi_icon_run_color(spans[2].color, theme) != theme);
-            CHECK(lensi_icon_run_color(spans[0].color, theme) !=
-                  lensi_icon_run_color(spans[1].color, theme));
+            OT_EXPECT(lensi_icon_run_color(spans[0].color, theme) != theme);
+            OT_EXPECT(lensi_icon_run_color(spans[1].color, theme) != theme);
+            OT_EXPECT(lensi_icon_run_color(spans[2].color, theme) != theme);
+            OT_EXPECT(lensi_icon_run_color(spans[0].color, theme) !=
+                      lensi_icon_run_color(spans[1].color, theme));
             /* color == 0 means "follow the caller", exactly like a built-in. */
-            CHECK(lensi_icon_run_color(0, theme) == theme);
+            OT_EXPECT(lensi_icon_run_color(0, theme) == theme);
         }
 
         /* A collapsed descriptor (built-in icon) is exactly one span covering the
          * whole stream, painted in the caller's colour. */
         lens_icon_desc collapsed = {.cmds = cmds, .count = 7};
         n = lensi_icon_run_spans(&collapsed, LENSI_ICON_RENDER_FILL, spans, LENSI_ICON_MAX_RUNS);
-        CHECK(n == 1);
+        OT_EXPECT(n == 1);
         if (n == 1) {
-            CHECK(spans[0].first_cmd == 0 && spans[0].count == 7);
-            CHECK(spans[0].fill);       /* fill mode from the icon table */
-            CHECK(spans[0].color == 0); /* follow the caller's colour */
+            OT_EXPECT(spans[0].first_cmd == 0 && spans[0].count == 7);
+            OT_EXPECT(spans[0].fill);       /* fill mode from the icon table */
+            OT_EXPECT(spans[0].color == 0); /* follow the caller's colour */
         }
 
         /* A run table that overruns the command stream is refused outright, so a
          * corrupt descriptor degrades to "no spans" rather than reading OOB. */
         lens_icon_run bad_runs[] = {{.first_cmd = 6, .count = 99, .color = 0, .fill = 0}};
         lens_icon_desc bad = {.cmds = cmds, .count = 7, .runs = bad_runs, .run_count = 1};
-        CHECK(lensi_icon_run_spans(&bad, 0, spans, LENSI_ICON_MAX_RUNS) == 0);
+        OT_EXPECT(lensi_icon_run_spans(&bad, 0, spans, LENSI_ICON_MAX_RUNS) == 0);
     }
 
-    return TEST_REPORT();
+    return OT_REPORT();
 }

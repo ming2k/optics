@@ -10,7 +10,8 @@
  *   - alpha 0 produces a fully transparent output
  *   - flux_effect_reset returns leases; a second shadow works
  */
-#include "test_helpers.h"
+#include "flux_test.h"
+#include "optics_test.h"
 #include <flux/effect.h>
 #include <flux/flux.h>
 #include <flux/vulkan.h>
@@ -120,8 +121,8 @@ typedef struct shadow_record_ctx {
 
 static void record_shadow_and_readback(VkCommandBuffer cmd, void *user) {
     shadow_record_ctx *ctx = user;
-    EXPECT(flux_effect_shadow(cmd, ctx->desc, ctx->out) == FLUX_OK);
-    EXPECT(*ctx->out != nullptr);
+    OT_EXPECT(flux_effect_shadow(cmd, ctx->desc, ctx->out) == FLUX_OK);
+    OT_EXPECT(*ctx->out != nullptr);
 
     VkImage img = flux_image_vk_image(*ctx->out);
     VkImageMemoryBarrier2 b = {
@@ -174,12 +175,13 @@ int main(void) {
     {
         flux_image *out = nullptr;
         flux_effect_shadow_desc d = FLUX_EFFECT_SHADOW_DESC_INIT;
-        EXPECT(flux_effect_shadow(nullptr, &d, &out) == FLUX_ERROR_INVALID_ARGUMENT);
-        EXPECT(out == nullptr);
-        EXPECT(flux_effect_shadow((VkCommandBuffer)1, &d, &out) == FLUX_ERROR_INVALID_ARGUMENT);
-        EXPECT(out == nullptr);
+        OT_EXPECT(flux_effect_shadow(nullptr, &d, &out) == FLUX_ERROR_INVALID_ARGUMENT);
+        OT_EXPECT(out == nullptr);
+        OT_EXPECT(flux_effect_shadow((VkCommandBuffer)1, &d, &out) == FLUX_ERROR_INVALID_ARGUMENT);
+        OT_EXPECT(out == nullptr);
         d.input = (flux_image *)1;
-        EXPECT(flux_effect_shadow((VkCommandBuffer)1, &d, nullptr) == FLUX_ERROR_INVALID_ARGUMENT);
+        OT_EXPECT(flux_effect_shadow((VkCommandBuffer)1, &d, nullptr) ==
+                  FLUX_ERROR_INVALID_ARGUMENT);
     }
     {
         /* Wrong type. */
@@ -187,8 +189,8 @@ int main(void) {
         flux_effect_shadow_desc d = FLUX_EFFECT_SHADOW_DESC_INIT;
         d.input = (flux_image *)1;
         d.type = FLUX_TYPE_EFFECT_BLUR_DESC;
-        EXPECT(flux_effect_shadow((VkCommandBuffer)1, &d, &out) == FLUX_ERROR_INVALID_ARGUMENT);
-        EXPECT(out == nullptr);
+        OT_EXPECT(flux_effect_shadow((VkCommandBuffer)1, &d, &out) == FLUX_ERROR_INVALID_ARGUMENT);
+        OT_EXPECT(out == nullptr);
     }
     {
         /* Non-finite parameters. */
@@ -196,16 +198,16 @@ int main(void) {
         flux_effect_shadow_desc d = FLUX_EFFECT_SHADOW_DESC_INIT;
         d.input = (flux_image *)1;
         d.alpha = (0.0f / 0.0f);
-        EXPECT(flux_effect_shadow((VkCommandBuffer)1, &d, &out) == FLUX_ERROR_INVALID_ARGUMENT);
+        OT_EXPECT(flux_effect_shadow((VkCommandBuffer)1, &d, &out) == FLUX_ERROR_INVALID_ARGUMENT);
         d.alpha = 1.0f;
         d.offset_x = (1.0f / 0.0f);
-        EXPECT(flux_effect_shadow((VkCommandBuffer)1, &d, &out) == FLUX_ERROR_INVALID_ARGUMENT);
+        OT_EXPECT(flux_effect_shadow((VkCommandBuffer)1, &d, &out) == FLUX_ERROR_INVALID_ARGUMENT);
     }
 
-    flux_device *d = test_helpers_make_headless_device();
+    flux_device *d = flux_test_make_headless_device();
     if (!d) {
         fprintf(stderr, "test_effect_shadow: no Vulkan device; skipping\n");
-        TEST_SUMMARY();
+        OT_SKIP("no Vulkan device");
     }
 
     uint8_t *mask_px = malloc(BYTES);
@@ -216,8 +218,8 @@ int main(void) {
     idesc.format = FLUX_FORMAT_RGBA8_UNORM;
     idesc.initial_data = mask_px;
     flux_image *mask = nullptr;
-    EXPECT(flux_image_create(d, &idesc, &mask) == FLUX_OK);
-    EXPECT(mask != nullptr);
+    OT_EXPECT(flux_image_create(d, &idesc, &mask) == FLUX_OK);
+    OT_EXPECT(mask != nullptr);
 
     /* Host-visible destination buffer. */
     VkBuffer dst = VK_NULL_HANDLE;
@@ -229,22 +231,22 @@ int main(void) {
             .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT,
         };
         VkDevice vk = flux_device_vk_device(d);
-        EXPECT(vkCreateBuffer(vk, &bi, nullptr, &dst) == VK_SUCCESS);
+        OT_EXPECT(vkCreateBuffer(vk, &bi, nullptr, &dst) == VK_SUCCESS);
         VkMemoryRequirements mr;
         vkGetBufferMemoryRequirements(vk, dst, &mr);
         VkMemoryAllocateInfo ai = {
             .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
             .allocationSize = mr.size,
-            .memoryTypeIndex = test_helpers_find_memory_type(
-                d, mr.memoryTypeBits,
-                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT),
+            .memoryTypeIndex = flux_test_find_memory_type(d, mr.memoryTypeBits,
+                                                          VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                                              VK_MEMORY_PROPERTY_HOST_COHERENT_BIT),
         };
-        EXPECT(vkAllocateMemory(vk, &ai, nullptr, &dst_mem) == VK_SUCCESS);
-        EXPECT(vkBindBufferMemory(vk, dst, dst_mem, 0) == VK_SUCCESS);
+        OT_EXPECT(vkAllocateMemory(vk, &ai, nullptr, &dst_mem) == VK_SUCCESS);
+        OT_EXPECT(vkBindBufferMemory(vk, dst, dst_mem, 0) == VK_SUCCESS);
     }
     uint8_t *pixels = nullptr;
-    EXPECT(vkMapMemory(flux_device_vk_device(d), dst_mem, 0, BYTES, 0, (void **)&pixels) ==
-           VK_SUCCESS);
+    OT_EXPECT(vkMapMemory(flux_device_vk_device(d), dst_mem, 0, BYTES, 0, (void **)&pixels) ==
+              VK_SUCCESS);
 
     /* --- Case 1: blur 0, offset 0, white tint, alpha 1 = the mask itself
      * (tinted, premultiplied: rgb = a). --- */
@@ -272,7 +274,7 @@ int main(void) {
                     ++mismatches;
             }
         }
-        EXPECT(mismatches == 0);
+        OT_EXPECT(mismatches == 0);
         flux_effect_reset(d);
     }
 
@@ -303,7 +305,7 @@ int main(void) {
                     ++mismatches;
             }
         }
-        EXPECT(mismatches == 0);
+        OT_EXPECT(mismatches == 0);
         flux_effect_reset(d);
     }
 
@@ -334,12 +336,12 @@ int main(void) {
         uint8_t far = pixels[(2 * W + 2) * 4 + 3];
         uint8_t skirt = pixels[(16 * W + 6) * 4 + 3]; /* 2px left of the edge */
         float expect_center = expected_blur_at(16, 16);
-        EXPECT(center >= (uint8_t)(expect_center - 4.0f) &&
-               center <= (uint8_t)(expect_center + 4.0f));
+        OT_EXPECT(center >= (uint8_t)(expect_center - 4.0f) &&
+                  center <= (uint8_t)(expect_center + 4.0f));
         /* The corner is far outside the square but a radius-12 kernel still
          * leaks a faint skirt there (analytic ≈1-2/255); assert near-zero. */
-        EXPECT(far <= 4u);
-        EXPECT(skirt > 0u && skirt < 255u);
+        OT_EXPECT(far <= 4u);
+        OT_EXPECT(skirt > 0u && skirt < 255u);
         flux_effect_reset(d);
     }
 
@@ -363,7 +365,7 @@ int main(void) {
         for (uint32_t i = 3; i < BYTES; i += 4)
             if (pixels[i] != 0)
                 ++nonzero;
-        EXPECT(nonzero == 0);
+        OT_EXPECT(nonzero == 0);
         flux_effect_reset(d);
     }
 
@@ -382,7 +384,7 @@ int main(void) {
             shadow_record_ctx ctx = {.desc = &sd, .out = &out, .dst_buffer = dst};
             run_one_shot(d, record_shadow_and_readback, &ctx);
             vkDeviceWaitIdle(flux_device_vk_device(d));
-            EXPECT(out != nullptr);
+            OT_EXPECT(out != nullptr);
             flux_effect_reset(d);
         }
     }
@@ -392,8 +394,8 @@ int main(void) {
      * and validation/state errors leave no output. --- */
     {
         flux_shadow_filter *filter = nullptr;
-        EXPECT(flux_shadow_filter_create(nullptr, &filter) == FLUX_ERROR_INVALID_ARGUMENT);
-        EXPECT(flux_shadow_filter_create(d, &filter) == FLUX_OK);
+        OT_EXPECT(flux_shadow_filter_create(nullptr, &filter) == FLUX_ERROR_INVALID_ARGUMENT);
+        OT_EXPECT(flux_shadow_filter_create(d, &filter) == FLUX_OK);
 
         /* No frame: null-pass validation. */
         flux_image *out = nullptr;
@@ -404,24 +406,25 @@ int main(void) {
         sd.tint_green = 1.0f;
         sd.tint_blue = 1.0f;
         sd.alpha = 1.0f;
-        EXPECT(flux_shadow_filter_apply(filter, nullptr, &sd, &out) == FLUX_ERROR_INVALID_ARGUMENT);
-        EXPECT(out == nullptr);
+        OT_EXPECT(flux_shadow_filter_apply(filter, nullptr, &sd, &out) ==
+                  FLUX_ERROR_INVALID_ARGUMENT);
+        OT_EXPECT(out == nullptr);
 
         /* Wrong descriptor type is rejected. */
         flux_effect_shadow_desc wrong = sd;
         wrong.type = FLUX_TYPE_EFFECT_BLUR_DESC;
-        EXPECT(flux_shadow_filter_apply(filter, (flux_frame *)1, &wrong, &out) ==
-               FLUX_ERROR_INVALID_ARGUMENT);
-        EXPECT(out == nullptr);
+        OT_EXPECT(flux_shadow_filter_apply(filter, (flux_frame *)1, &wrong, &out) ==
+                  FLUX_ERROR_INVALID_ARGUMENT);
+        OT_EXPECT(out == nullptr);
 
         /* Non-finite parameters are rejected before any dispatch. */
         flux_effect_shadow_desc nan_desc = sd;
         nan_desc.offset_y = (0.0f / 0.0f);
-        EXPECT(flux_shadow_filter_apply(filter, (flux_frame *)1, &nan_desc, &out) ==
-               FLUX_ERROR_INVALID_ARGUMENT);
-        EXPECT(out == nullptr);
+        OT_EXPECT(flux_shadow_filter_apply(filter, (flux_frame *)1, &nan_desc, &out) ==
+                  FLUX_ERROR_INVALID_ARGUMENT);
+        OT_EXPECT(out == nullptr);
 
-        EXPECT(flux_shadow_filter_retain(filter) == filter);
+        OT_EXPECT(flux_shadow_filter_retain(filter) == filter);
         flux_shadow_filter_release(filter);
         flux_shadow_filter_release(filter);
     }
@@ -432,5 +435,5 @@ int main(void) {
     flux_image_release(mask);
     free(mask_px);
     flux_device_release(d);
-    TEST_SUMMARY();
+    return OT_REPORT();
 }

@@ -16,7 +16,8 @@
  *   - the mean absolute channel difference over the frame stays small;
  *   - only a small fraction of pixels may show large (edge) deviation.
  */
-#include "test_helpers.h"
+#include "flux_test.h"
+#include "optics_test.h"
 #include <flux/canvas_cpu.h>
 #include <flux/flux.h>
 #include <flux/vulkan.h>
@@ -104,27 +105,27 @@ static const uint8_t *px_at(const uint8_t *px, uint32_t x, uint32_t y) {
 int main(void) {
     /* ---- CPU oracle ---- */
     flux_canvas *cpu = nullptr;
-    EXPECT(flux_canvas_create_cpu(W, H, 1.0f, &cpu) == FLUX_OK);
-    EXPECT(cpu != nullptr);
+    OT_EXPECT(flux_canvas_create_cpu(W, H, 1.0f, &cpu) == FLUX_OK);
+    OT_EXPECT(cpu != nullptr);
 
     flux_arena arena;
-    EXPECT(flux_arena_init(&arena, 64 * 1024, nullptr) == FLUX_OK);
+    OT_EXPECT(flux_arena_init(&arena, 64 * 1024, nullptr) == FLUX_OK);
 
     flux_color clear = flux_color_rgba(12, 12, 16, 255);
-    EXPECT(flux_canvas_begin(cpu, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
-                                                           .clear_color = &clear}) == FLUX_OK);
+    OT_EXPECT(flux_canvas_begin(cpu, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                              .clear_color = &clear}) == FLUX_OK);
     draw_scene(cpu, &arena);
-    EXPECT(flux_canvas_end(cpu) == FLUX_OK);
+    OT_EXPECT(flux_canvas_end(cpu) == FLUX_OK);
 
     uint32_t cpu_w = 0, cpu_h = 0, cpu_stride = 0;
     const uint8_t *cpu_px = flux_canvas_cpu_pixels(cpu, &cpu_w, &cpu_h, &cpu_stride);
-    EXPECT(cpu_px != nullptr && cpu_w == W && cpu_h == H);
+    OT_EXPECT(cpu_px != nullptr && cpu_w == W && cpu_h == H);
 
     /* ---- GPU ---- */
-    flux_device *d = test_helpers_make_headless_device();
+    flux_device *d = flux_test_make_headless_device();
     if (!d) {
         fprintf(stderr, "test_canvas_consistency: no Vulkan device; skipping\n");
-        TEST_SUMMARY();
+        OT_SKIP("no Vulkan device");
     }
 
     flux_surface *s = nullptr;
@@ -132,27 +133,28 @@ int main(void) {
         flux_surface_desc sd = FLUX_SURFACE_DESC_INIT;
         sd.width = W;
         sd.height = H;
-        EXPECT(flux_surface_create(d, &sd, &s) == FLUX_OK);
+        OT_EXPECT(flux_surface_create(d, &sd, &s) == FLUX_OK);
     }
     flux_canvas *gpu = nullptr;
     {
         flux_canvas_desc cd = FLUX_CANVAS_DESC_INIT;
         cd.surface = s;
-        EXPECT(flux_canvas_create(&cd, &gpu) == FLUX_OK);
+        OT_EXPECT(flux_canvas_create(&cd, &gpu) == FLUX_OK);
     }
 
     static uint8_t gpu_px[BYTES];
     {
         flux_frame *frame = nullptr;
-        EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
-        EXPECT(flux_canvas_begin(gpu, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
-                                                               .frame = frame,
-                                                               .clear_color = &clear}) == FLUX_OK);
+        OT_EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
+        OT_EXPECT(
+            flux_canvas_begin(gpu, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                            .frame = frame,
+                                                            .clear_color = &clear}) == FLUX_OK);
         draw_scene(gpu, &arena);
-        EXPECT(flux_canvas_end(gpu) == FLUX_OK);
-        EXPECT(flux_frame_submit(frame) == FLUX_OK);
-        EXPECT(flux_frame_present(frame) == FLUX_OK);
-        EXPECT(flux_surface_read_pixels(s, gpu_px, BYTES) == FLUX_OK);
+        OT_EXPECT(flux_canvas_end(gpu) == FLUX_OK);
+        OT_EXPECT(flux_frame_submit(frame) == FLUX_OK);
+        OT_EXPECT(flux_frame_present(frame) == FLUX_OK);
+        OT_EXPECT(flux_surface_read_pixels(s, gpu_px, BYTES) == FLUX_OK);
     }
 
     /* ---- Interior probes (CPU value is the reference) ---- */
@@ -174,7 +176,7 @@ int main(void) {
         const uint8_t *got = px_at(gpu_px, probes[i].x, probes[i].y);
         for (int ch = 0; ch < 4; ++ch) {
             int diff = abs((int)got[ch] - (int)ref[ch]);
-            EXPECT(diff <= PROBE_TOL);
+            OT_EXPECT(diff <= PROBE_TOL);
             if (diff > PROBE_TOL)
                 fprintf(stderr, "  probe (%u,%u) ch%d: gpu=%u cpu=%u\n", probes[i].x, probes[i].y,
                         ch, got[ch], ref[ch]);
@@ -201,8 +203,8 @@ int main(void) {
     }
     double mean = sum / (double)(W * H * 4u);
     double edge_frac = (double)edge_pixels / (double)(W * H);
-    EXPECT(mean <= MEAN_TOL);
-    EXPECT(edge_frac <= EDGE_FRAC_MAX);
+    OT_EXPECT(mean <= MEAN_TOL);
+    OT_EXPECT(edge_frac <= EDGE_FRAC_MAX);
     if (mean > MEAN_TOL || edge_frac > EDGE_FRAC_MAX)
         fprintf(stderr, "  mean|diff|=%.4f edge_frac=%.4f (edges=%u)\n", mean, edge_frac,
                 edge_pixels);
@@ -212,5 +214,5 @@ int main(void) {
     flux_device_release(d);
     flux_canvas_release(cpu);
     flux_arena_deinit(&arena);
-    TEST_SUMMARY();
+    return OT_REPORT();
 }

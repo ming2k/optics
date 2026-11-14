@@ -1382,6 +1382,13 @@ flux_result flux_surface_create(flux_device *device, const flux_surface_desc *de
     flux_surface *s = flux_internal_alloc(device, sizeof(*s));
     if (!s)
         return FLUX_ERROR_OUT_OF_MEMORY;
+    /* content_image_destroy() runs before the first content image exists:
+     * flux_surface_create_swapchain() commits by tearing the previous
+     * generation down after registering the new swapchain images. Zeroed
+     * storage would make content.bindless == 0 look like a live handle and
+     * release the slot the new image 0 just allocated, aliasing the content
+     * image and swapchain image 0 (ADR-0149). */
+    s->content.bindless = FLUX_BINDLESS_INVALID;
     atomic_init(&s->ref_count, 1u);
     s->device = flux_device_retain(device);
     s->vk_surface = (VkSurfaceKHR)desc->vk_surface_khr;

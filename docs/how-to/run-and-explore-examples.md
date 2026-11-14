@@ -82,7 +82,22 @@ These examples demonstrate the fundamental rendering primitives in `libs/flux`.
 
 ---
 
-## 4. UI Components, Window Shell & Interactions (`examples/iris/`, `examples/lens/`, `examples/transit/`)
+## 4. Document Compiler (`examples/reticle/`)
+
+`rasterize_svg` is a headless starter for `libreticle`: it parses an SVG
+document once and rasterizes it to a PPM file. No Vulkan device, window, or
+compositor is involved, so it runs on any build host.
+
+```bash
+./build/examples/reticle/rasterize_svg out.ppm
+```
+
+See the [reticle reference](../reference/reticle.md) for the parse/paint
+contracts, flat shape IR, and resource limits.
+
+---
+
+## 5. UI Components, Window Shell & Interactions (`examples/iris/`, `examples/lens/`, `examples/transit/`)
 
 These examples demonstrate user interface state management, window shell integration, and physics-based motion.
 
@@ -140,7 +155,7 @@ These tools run in CI or headless environments without an active GPU or display 
 
 ---
 
-## 5. Command Reference Cheat Sheet
+## 6. Command Reference Cheat Sheet
 
 | Category | Command | Window / Display Required |
 | :--- | :--- | :--- |
@@ -151,6 +166,7 @@ These tools run in CI or headless environments without an active GPU or display 
 | **Image Animation** | `./build/examples/flux/image_animation` | Yes (Vulkan + GLFW) |
 | **glTF 3D Viewer** | `./build/examples/vista/gltf_viewer` | Yes (Vulkan + GLFW) |
 | **Typography** | `./build/examples/glyph/text_hello` | Yes (Vulkan + GLFW) |
+| **SVG Rasterizer** | `./build/examples/reticle/rasterize_svg out.ppm` | **No** (Headless CPU) |
 | **UI Widgets** | `./build/examples/iris/widgets` | Yes (Wayland / Win32 / Cocoa) |
 | **Desktop Shell** | `./build/examples/iris/desktop_demo` | Yes (Wayland / Win32 / Cocoa) |
 | **Drag & Drop** | `./build/examples/iris/dnd_demo` | Yes (Wayland / Win32 / Cocoa) |

@@ -1,6 +1,7 @@
 /* test_record_replay.c — subtree display-list record/replay (ADR-0030). */
 
-#include "test_helpers.h"
+#include "lens_test.h"
+#include "optics_test.h"
 #include <flux/canvas_cpu.h>
 #include <lens/lens.h>
 #include <stdio.h>
@@ -17,8 +18,8 @@ typedef struct {
 } fixture;
 
 static void fixture_open(fixture *f) {
-    CHECK(lens_create(&(lens_desc){0}, &f->ui) == FLUX_OK);
-    CHECK(flux_canvas_create_cpu(W, H, 1.0f, &f->canvas) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){0}, &f->ui) == FLUX_OK);
+    OT_EXPECT(flux_canvas_create_cpu(W, H, 1.0f, &f->canvas) == FLUX_OK);
 }
 
 static void fixture_close(fixture *f) {
@@ -28,16 +29,17 @@ static void fixture_close(fixture *f) {
 
 static void render_frame(fixture *f) {
     flux_color clear = flux_color_rgba_premul(0, 0, 0, 255);
-    CHECK(flux_canvas_begin(f->canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
-                                                                .clear_color = &clear}) == FLUX_OK);
-    CHECK(test_snapshot_render(f->ui, f->canvas) == FLUX_OK);
-    CHECK(flux_canvas_end(f->canvas) == FLUX_OK);
+    OT_EXPECT(
+        flux_canvas_begin(f->canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                              .clear_color = &clear}) == FLUX_OK);
+    OT_EXPECT(lens_test_snapshot_render(f->ui, f->canvas) == FLUX_OK);
+    OT_EXPECT(flux_canvas_end(f->canvas) == FLUX_OK);
 }
 
 static void snapshot(fixture *f, uint8_t *out) {
     uint32_t pw = 0, ph = 0, stride = 0;
     const uint8_t *fb = flux_canvas_cpu_pixels(f->canvas, &pw, &ph, &stride);
-    CHECK(fb != NULL && pw == W && ph == H && stride == W * 4);
+    OT_EXPECT(fb != NULL && pw == W && ph == H && stride == W * 4);
     memcpy(out, fb, (size_t)W * H * 4);
 }
 
@@ -49,7 +51,7 @@ static void build_two_blocks(lens *ui, const lens_input *in, float value) {
     lens_label(ui, &(lens_label_opts){.text = "header##hdr"});
     lens_label(ui, &(lens_label_opts){.text = val_str, .box = {.id = "val_node"}});
     lens_label(ui, &(lens_label_opts){.text = "footer##ftr"});
-    test_end(ui);
+    lens_test_end(ui);
 }
 
 /* Three identical frames: first frame records, subsequent frames replay
@@ -69,13 +71,13 @@ static void test_steady_frame_replays(void) {
     build_two_blocks(f.ui, &IN0, 0.5f);
     render_frame(&f);
     snapshot(&f, frame1);
-    CHECK(memcmp(base, frame1, sizeof base) == 0);
+    OT_EXPECT(memcmp(base, frame1, sizeof base) == 0);
 
     /* Frame 2: still unchanged -> still replaying identical pixels */
     build_two_blocks(f.ui, &IN0, 0.5f);
     render_frame(&f);
     snapshot(&f, frame2);
-    CHECK(memcmp(base, frame2, sizeof base) == 0);
+    OT_EXPECT(memcmp(base, frame2, sizeof base) == 0);
 
     fixture_close(&f);
 }
@@ -97,13 +99,13 @@ static void test_leaf_change_rerecords_sibling_replays(void) {
     build_two_blocks(f.ui, &IN0, 0.75f);
     render_frame(&f);
     snapshot(&f, changed);
-    CHECK(memcmp(base, changed, sizeof base) != 0); /* pixels changed */
+    OT_EXPECT(memcmp(base, changed, sizeof base) != 0); /* pixels changed */
 
     /* Settle on the new value: replays the newly-recorded state */
     build_two_blocks(f.ui, &IN0, 0.75f);
     render_frame(&f);
     snapshot(&f, settled);
-    CHECK(memcmp(changed, settled, sizeof changed) == 0);
+    OT_EXPECT(memcmp(changed, settled, sizeof changed) == 0);
 
     fixture_close(&f);
 }
@@ -145,7 +147,7 @@ static void test_scroll_offset_invalidates_descendant_records(void) {
             lens_label(f.ui, &(lens_label_opts){.text = lbl});
         }
         lens_scroll_end(f.ui);
-        test_end(f.ui);
+        lens_test_end(f.ui);
         render_frame(&f);
     }
 
@@ -162,7 +164,7 @@ static void test_scroll_offset_invalidates_descendant_records(void) {
         lens_label(f.ui, &(lens_label_opts){.text = lbl});
     }
     lens_scroll_end(f.ui);
-    test_end(f.ui);
+    lens_test_end(f.ui);
     render_frame(&f);
 
     fixture_close(&f);
@@ -170,8 +172,8 @@ static void test_scroll_offset_invalidates_descendant_records(void) {
 
 static void test_hidpi_scroll_clip_alignment(void) {
     fixture f;
-    CHECK(lens_create(&(lens_desc){0}, &f.ui) == FLUX_OK);
-    CHECK(flux_canvas_create_cpu(W * 2, H * 2, 2.0f, &f.canvas) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){0}, &f.ui) == FLUX_OK);
+    OT_EXPECT(flux_canvas_create_cpu(W * 2, H * 2, 2.0f, &f.canvas) == FLUX_OK);
     lens_set_scale(f.ui, 2.0f);
 
     const lens_input hidpi_in = {.display_size = {W, H}, .cursor = {50, 50}, .dt_seconds = 0.016f};
@@ -181,17 +183,18 @@ static void test_hidpi_scroll_clip_alignment(void) {
     lens_scroll_begin(f.ui, &(lens_scroll_opts){.box = {.id = "hidpi_scroll"}});
     lens_label(f.ui, &(lens_label_opts){.text = "Visible Label"});
     lens_scroll_end(f.ui);
-    test_end(f.ui);
+    lens_test_end(f.ui);
 
     flux_color clear = flux_color_rgba_premul(0, 0, 0, 255);
-    CHECK(flux_canvas_begin(f.canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
-                                                               .clear_color = &clear}) == FLUX_OK);
-    CHECK(test_snapshot_render(f.ui, f.canvas) == FLUX_OK);
-    CHECK(flux_canvas_end(f.canvas) == FLUX_OK);
+    OT_EXPECT(
+        flux_canvas_begin(f.canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                             .clear_color = &clear}) == FLUX_OK);
+    OT_EXPECT(lens_test_snapshot_render(f.ui, f.canvas) == FLUX_OK);
+    OT_EXPECT(flux_canvas_end(f.canvas) == FLUX_OK);
 
     uint32_t pw = 0, ph = 0, stride = 0;
     const uint8_t *fb = flux_canvas_cpu_pixels(f.canvas, &pw, &ph, &stride);
-    CHECK(fb != NULL && pw == W * 2 && ph == H * 2);
+    OT_EXPECT(fb != NULL && pw == W * 2 && ph == H * 2);
 
     bool found_non_zero = false;
     for (size_t i = 0; i < (size_t)ph * stride; i++) {
@@ -200,7 +203,7 @@ static void test_hidpi_scroll_clip_alignment(void) {
             break;
         }
     }
-    CHECK(found_non_zero == true);
+    OT_EXPECT(found_non_zero == true);
 
     flux_canvas_release(f.canvas);
     lens_release(f.ui);
@@ -220,10 +223,10 @@ static void test_child_removal_invalidates_record(void) {
     lens_begin(f.ui, &IN0);
     lens_label(f.ui, &(lens_label_opts){.text = "header##hdr"});
     lens_label(f.ui, &(lens_label_opts){.text = "val=0.50", .box = {.id = "val_node"}});
-    test_end(f.ui);
+    lens_test_end(f.ui);
     render_frame(&f);
     snapshot(&f, shrunk);
-    CHECK(memcmp(full, shrunk, sizeof full) != 0);
+    OT_EXPECT(memcmp(full, shrunk, sizeof full) != 0);
 
     {
         fixture g;
@@ -232,16 +235,16 @@ static void test_child_removal_invalidates_record(void) {
             lens_begin(g.ui, &IN0);
             lens_label(g.ui, &(lens_label_opts){.text = "header##hdr"});
             lens_label(g.ui, &(lens_label_opts){.text = "val=0.50", .box = {.id = "val_node"}});
-            test_end(g.ui);
+            lens_test_end(g.ui);
             render_frame(&g);
         }
         snapshot(&g, reference);
         fixture_close(&g);
     }
-    CHECK(memcmp(shrunk, reference, sizeof shrunk) == 0);
+    OT_EXPECT(memcmp(shrunk, reference, sizeof shrunk) == 0);
 
     lens_begin(f.ui, &IN0);
-    test_end(f.ui);
+    lens_test_end(f.ui);
     render_frame(&f);
     snapshot(&f, stable);
     bool any_ink = false;
@@ -251,14 +254,14 @@ static void test_child_removal_invalidates_record(void) {
             break;
         }
     }
-    CHECK(!any_ink);
+    OT_EXPECT(!any_ink);
 
     for (int i = 0; i < 3; i++) {
         build_two_blocks(f.ui, &IN0, 0.5f);
         render_frame(&f);
     }
     snapshot(&f, stable);
-    CHECK(memcmp(full, stable, sizeof full) == 0);
+    OT_EXPECT(memcmp(full, stable, sizeof full) == 0);
 
     fixture_close(&f);
 }
@@ -270,5 +273,5 @@ int main(void) {
     test_scroll_offset_invalidates_descendant_records();
     test_hidpi_scroll_clip_alignment();
     test_child_removal_invalidates_record();
-    return TEST_REPORT();
+    return OT_REPORT();
 }

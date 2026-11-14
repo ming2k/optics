@@ -15,7 +15,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "test_helpers.h"
+#include "optics_test.h"
 
 /* Create /tmp/iris-test-XXXXXX/gsettings that exits 1; return the dir path.
  * Caller must clean up (rmdir) the directory. Returns 0 on success. */
@@ -57,7 +57,7 @@ int main(void) {
     /* 1. Build the failing-gsettings sandbox and prepend it to PATH so the
      *    popen("gsettings ...") in theme_linux.c hits our shim. */
     char dir[256];
-    CHECK(make_failing_gsettings(dir, sizeof dir) == 0);
+    OT_EXPECT(make_failing_gsettings(dir, sizeof dir) == 0);
 
     const char *old_path = getenv("PATH");
     char new_path[4096];
@@ -68,30 +68,30 @@ int main(void) {
     iris_color_scheme s;
 
     with_env("dark:Adwaita", &s);
-    CHECK(s == IRIS_COLOR_SCHEME_PREFER_DARK);
+    OT_EXPECT(s == IRIS_COLOR_SCHEME_PREFER_DARK);
 
     with_env("Adwaita:dark", &s);
-    CHECK(s == IRIS_COLOR_SCHEME_PREFER_DARK);
+    OT_EXPECT(s == IRIS_COLOR_SCHEME_PREFER_DARK);
 
     with_env("Adwaita-dark", &s);
-    CHECK(s == IRIS_COLOR_SCHEME_PREFER_DARK);
+    OT_EXPECT(s == IRIS_COLOR_SCHEME_PREFER_DARK);
 
     /* 3. GTK_THEME with no dark marker falls through to the safe default. */
     with_env("Adwaita", &s);
-    CHECK(s == IRIS_COLOR_SCHEME_PREFER_DARK);
+    OT_EXPECT(s == IRIS_COLOR_SCHEME_PREFER_DARK);
 
     /* 4. GTK_THEME unset also falls through to the safe default. */
     with_env(NULL, &s);
-    CHECK(s == IRIS_COLOR_SCHEME_PREFER_DARK);
+    OT_EXPECT(s == IRIS_COLOR_SCHEME_PREFER_DARK);
 
     /* 5. iris_system_prefers_dark is consistent: PREFER_DARK and
      *    NO_PREFERENCE both count as "dark" (the library's safe default). */
-    CHECK(iris_system_prefers_dark() == true);
+    OT_EXPECT(iris_system_prefers_dark() == true);
 
     /* 6. Enum values are exactly the documented discriminants. */
-    CHECK(IRIS_COLOR_SCHEME_NO_PREFERENCE == 0);
-    CHECK(IRIS_COLOR_SCHEME_PREFER_DARK == 1);
-    CHECK(IRIS_COLOR_SCHEME_PREFER_LIGHT == 2);
+    OT_EXPECT(IRIS_COLOR_SCHEME_NO_PREFERENCE == 0);
+    OT_EXPECT(IRIS_COLOR_SCHEME_PREFER_DARK == 1);
+    OT_EXPECT(IRIS_COLOR_SCHEME_PREFER_LIGHT == 2);
 
     /* 7. Live watching is callback-based (no fd/poll surface). Headless we
      *    cannot force a desktop change, so exercise the lifecycle contract:
@@ -102,17 +102,17 @@ int main(void) {
      *        registration and unwatch stops it;
      *      - no callback fires spuriously while we sit idle. */
     iris_color_scheme_unwatch(); /* safe no-op before any watch */
-    CHECK(iris_color_scheme_watch(NULL, NULL) != 0);
+    OT_EXPECT(iris_color_scheme_watch(NULL, NULL) != 0);
 
     watch_calls = 0;
     if (iris_color_scheme_watch(on_scheme_changed, NULL) == 0) {
         /* Re-registration replaces cb/user and keeps watching. */
-        CHECK(iris_color_scheme_watch(on_scheme_changed, NULL) == 0);
+        OT_EXPECT(iris_color_scheme_watch(on_scheme_changed, NULL) == 0);
         iris_color_scheme_unwatch();
         /* After unwatch returns the registration is dead: the callback
          * must not fire, and a second unwatch is a safe no-op. */
         iris_color_scheme_unwatch();
-        CHECK(watch_calls == 0);
+        OT_EXPECT(watch_calls == 0);
     }
     /* -1 path (no libsystemd at build time / no session bus in CI): the
      * startup-only query above already covered the fallback. */
@@ -123,5 +123,5 @@ int main(void) {
     (void)unlink(shim);
     (void)rmdir(dir);
 
-    return TEST_REPORT();
+    return OT_REPORT();
 }

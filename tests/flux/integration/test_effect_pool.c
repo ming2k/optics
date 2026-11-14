@@ -20,7 +20,8 @@
  * ignored bytes would fail (1) by refusing once the entry cap was reached, and
  * a pool that never evicted would grow until allocation failed on a real GPU.
  */
-#include "test_helpers.h"
+#include "flux_test.h"
+#include "optics_test.h"
 #include <flux/effect.h>
 #include <flux/flux.h>
 #include <flux/vulkan.h>
@@ -44,7 +45,7 @@ static void run_one_shot(flux_device *d, flux_image *src, flux_image **out, floa
         .queueFamilyIndex = flux_device_vk_graphics_family(d),
         .flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT,
     };
-    EXPECT(vkCreateCommandPool(vk, &pci, nullptr, &pool) == VK_SUCCESS);
+    OT_EXPECT(vkCreateCommandPool(vk, &pci, nullptr, &pool) == VK_SUCCESS);
 
     VkCommandBuffer cmd = VK_NULL_HANDLE;
     VkCommandBufferAllocateInfo cbi = {
@@ -53,28 +54,28 @@ static void run_one_shot(flux_device *d, flux_image *src, flux_image **out, floa
         .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
         .commandBufferCount = 1,
     };
-    EXPECT(vkAllocateCommandBuffers(vk, &cbi, &cmd) == VK_SUCCESS);
+    OT_EXPECT(vkAllocateCommandBuffers(vk, &cbi, &cmd) == VK_SUCCESS);
     VkCommandBufferBeginInfo bi = {
         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
         .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
     };
-    EXPECT(vkBeginCommandBuffer(cmd, &bi) == VK_SUCCESS);
+    OT_EXPECT(vkBeginCommandBuffer(cmd, &bi) == VK_SUCCESS);
 
     flux_effect_blur_desc desc = FLUX_EFFECT_BLUR_DESC_INIT;
     desc.input = src;
     desc.sigma = sigma;
     flux_result r = flux_effect_blur(cmd, &desc, out);
-    EXPECT(r == FLUX_OK);
+    OT_EXPECT(r == FLUX_OK);
 
-    EXPECT(vkEndCommandBuffer(cmd) == VK_SUCCESS);
+    OT_EXPECT(vkEndCommandBuffer(cmd) == VK_SUCCESS);
     VkSubmitInfo submit = {
         .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
         .commandBufferCount = 1,
         .pCommandBuffers = &cmd,
     };
-    EXPECT(vkQueueSubmit(flux_device_vk_graphics_queue(d), 1, &submit, VK_NULL_HANDLE) ==
-           VK_SUCCESS);
-    EXPECT(vkQueueWaitIdle(flux_device_vk_graphics_queue(d)) == VK_SUCCESS);
+    OT_EXPECT(vkQueueSubmit(flux_device_vk_graphics_queue(d), 1, &submit, VK_NULL_HANDLE) ==
+              VK_SUCCESS);
+    OT_EXPECT(vkQueueWaitIdle(flux_device_vk_graphics_queue(d)) == VK_SUCCESS);
     vkDestroyCommandPool(vk, pool, nullptr);
 }
 
@@ -103,10 +104,10 @@ static flux_image *make_source(flux_device *d, uint32_t w, uint32_t h) {
 }
 
 int main(void) {
-    flux_device *d = test_helpers_make_headless_device();
+    flux_device *d = flux_test_make_headless_device();
     if (!d) {
         fprintf(stderr, "test_effect_pool: no Vulkan device; skipping\n");
-        TEST_SUMMARY();
+        OT_SKIP("no Vulkan device");
     }
 
     /* --- 1. the LRU path completes past any entry cap --------------------- */
@@ -117,12 +118,12 @@ int main(void) {
         uint32_t w = W + i;
         uint32_t h = H + i;
         flux_image *src = make_source(d, w, h);
-        EXPECT(src != nullptr);
+        OT_EXPECT(src != nullptr);
         if (!src)
             continue;
         flux_image *out = nullptr;
         run_one_shot(d, src, &out, 4.0f);
-        EXPECT(out != nullptr);
+        OT_EXPECT(out != nullptr);
         flux_image_release(src);
         /* `out` is pool-owned; resetting is what returns the lease. */
         flux_effect_reset(d);
@@ -131,11 +132,11 @@ int main(void) {
     /* --- 2. repeating one size reuses the pooled entry -------------------- */
     {
         flux_image *src = make_source(d, W, H);
-        EXPECT(src != nullptr);
+        OT_EXPECT(src != nullptr);
         for (int i = 0; i < 8; ++i) {
             flux_image *out = nullptr;
             run_one_shot(d, src, &out, 6.0f);
-            EXPECT(out != nullptr);
+            OT_EXPECT(out != nullptr);
             flux_effect_reset(d);
         }
         flux_image_release(src);
@@ -144,10 +145,10 @@ int main(void) {
     /* --- 3. the device still works after heavy eviction ------------------- */
     {
         flux_image *src = make_source(d, W, H);
-        EXPECT(src != nullptr);
+        OT_EXPECT(src != nullptr);
         flux_image *out = nullptr;
         run_one_shot(d, src, &out, 2.0f);
-        EXPECT(out != nullptr);
+        OT_EXPECT(out != nullptr);
         flux_image_release(src);
         flux_effect_reset(d);
     }
@@ -157,5 +158,5 @@ int main(void) {
     flux_effect_reset(d);
 
     flux_device_release(d);
-    TEST_SUMMARY();
+    return OT_REPORT();
 }

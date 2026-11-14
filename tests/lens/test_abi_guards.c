@@ -7,7 +7,8 @@
  * future regression cannot silently reintroduce an over-read/over-write.
  */
 
-#include "test_helpers.h"
+#include "lens_test.h"
+#include "optics_test.h"
 
 #include <lens/lens.h>
 
@@ -33,15 +34,15 @@ static void test_theme_older_caller_prefix_only(void) {
      * the copy succeeds, the stored theme is normalized, and the stored
      * size reports the library's layout. */
     lens *ui = NULL;
-    CHECK(lens_create(&(lens_desc){.theme = *small}, &ui) == FLUX_OK);
-    CHECK(ui != NULL);
+    OT_EXPECT(lens_create(&(lens_desc){.theme = *small}, &ui) == FLUX_OK);
+    OT_EXPECT(ui != NULL);
 
     lens_theme got = lens_get_theme(ui);
-    CHECK(got.size == sizeof(lens_theme));
+    OT_EXPECT(got.size == sizeof(lens_theme));
     /* Normalization ran: title size derives from font_size, never 0. */
-    CHECK(got.font_size_title > 0.0f);
+    OT_EXPECT(got.font_size_title > 0.0f);
     /* Material normalization ran: default recipes populated. */
-    CHECK(got.materials.foundation.plate_opacity > 0.0f);
+    OT_EXPECT(got.materials.foundation.plate_opacity > 0.0f);
 
     lens_release(ui);
 }
@@ -54,9 +55,9 @@ static void test_theme_newer_caller_clamped(void) {
     t.size = (uint32_t)(sizeof(lens_theme) * 2); /* hostile / newer */
 
     lens *ui = NULL;
-    CHECK(lens_create(&(lens_desc){.theme = t}, &ui) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){.theme = t}, &ui) == FLUX_OK);
     lens_theme got = lens_get_theme(ui);
-    CHECK(got.size == sizeof(lens_theme));
+    OT_EXPECT(got.size == sizeof(lens_theme));
     lens_release(ui);
 }
 
@@ -64,15 +65,15 @@ static void test_theme_newer_caller_clamped(void) {
  * takes the legacy full-struct path; an explicit sizeof() also works. */
 static void test_desc_guard_both_spellings(void) {
     lens *a = NULL, *b = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &a) == FLUX_OK); /* legacy */
-    CHECK(a != NULL);
+    OT_EXPECT(lens_create(&(lens_desc){0}, &a) == FLUX_OK); /* legacy */
+    OT_EXPECT(a != NULL);
     lens_release(a);
 
     lens_desc d = LENS_DESC_INIT;
     d.scale = 2.0f;
-    CHECK(d.size == sizeof(lens_desc));
-    CHECK(lens_create(&d, &b) == FLUX_OK);
-    CHECK(lens_scale(b) == 2.0f);
+    OT_EXPECT(d.size == sizeof(lens_desc));
+    OT_EXPECT(lens_create(&d, &b) == FLUX_OK);
+    OT_EXPECT(lens_scale(b) == 2.0f);
     lens_release(b);
 }
 
@@ -80,17 +81,17 @@ static void test_desc_guard_both_spellings(void) {
  * must not leave the context theme in a torn state. */
 static void test_set_theme_clamps(void) {
     lens *ui = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
 
     lens_theme t = lens_theme_dark();
     t.size = 16; /* caller knows only 16 bytes */
     lens_set_theme(ui, t);
 
     lens_theme got = lens_get_theme(ui);
-    CHECK(got.size == sizeof(lens_theme));
+    OT_EXPECT(got.size == sizeof(lens_theme));
     /* Fields beyond the caller's 16 bytes fall back to normalized
      * defaults, never garbage: font_weight normalizes to 400. */
-    CHECK(got.font_weight >= 100.0f && got.font_weight <= 1000.0f);
+    OT_EXPECT(got.font_weight >= 100.0f && got.font_weight <= 1000.0f);
     lens_release(ui);
 }
 
@@ -99,6 +100,6 @@ int main(void) {
     test_theme_newer_caller_clamped();
     test_desc_guard_both_spellings();
     test_set_theme_clamps();
-    printf("abi_guards: %d checks, %d failures\n", g_checks, g_fails);
-    return g_fails ? 1 : 0;
+    printf("abi_guards: %d checks, %d failures\n", OT_CHECKS(), OT_FAILURES());
+    return OT_FAILURES() ? 1 : 0;
 }

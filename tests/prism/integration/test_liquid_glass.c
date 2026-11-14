@@ -13,7 +13,8 @@
  *   - all clears are recorded before any material dispatch
  *   - a later body's translucent shadow source-overs an earlier body
  */
-#include "test_helpers.h"
+#include "flux_test.h"
+#include "optics_test.h"
 #include <flux/effect.h>
 #include <flux/flux.h>
 #include <flux/vulkan.h>
@@ -35,23 +36,23 @@ static uint32_t render_liquid_glass_frame(flux_surface *surface, flux_canvas *ca
                                           const prism_liquid_glass_group *groups,
                                           uint32_t group_count, uint8_t *pixels) {
     flux_frame *frame = nullptr;
-    EXPECT(flux_surface_begin_frame(surface, nullptr, &frame) == FLUX_OK);
+    OT_EXPECT(flux_surface_begin_frame(surface, nullptr, &frame) == FLUX_OK);
     uint32_t slot = flux_frame_index(frame);
 
     flux_color source = flux_color_rgba(96, 144, 208, 255);
-    EXPECT(flux_canvas_begin(
-               canvas, &(flux_canvas_pass_desc){
-                           .type = FLUX_TYPE_CANVAS_PASS_DESC,
-                           .frame = frame,
-                           .attachment = {.kind = FLUX_CANVAS_ATTACHMENT_IMAGE, .image = target},
-                           .clear_color = &source}) == FLUX_OK);
-    EXPECT(flux_canvas_end(canvas) == FLUX_OK);
+    OT_EXPECT(flux_canvas_begin(
+                  canvas, &(flux_canvas_pass_desc){
+                              .type = FLUX_TYPE_CANVAS_PASS_DESC,
+                              .frame = frame,
+                              .attachment = {.kind = FLUX_CANVAS_ATTACHMENT_IMAGE, .image = target},
+                              .clear_color = &source}) == FLUX_OK);
+    OT_EXPECT(flux_canvas_end(canvas) == FLUX_OK);
 
     flux_effect_blur_desc blur_desc = FLUX_EFFECT_BLUR_DESC_INIT;
     blur_desc.input = target;
     blur_desc.sigma = 2.0f;
     flux_image *blurred = nullptr;
-    EXPECT(flux_blur_filter_apply(blur_filter, frame, &blur_desc, &blurred) == FLUX_OK);
+    OT_EXPECT(flux_blur_filter_apply(blur_filter, frame, &blur_desc, &blurred) == FLUX_OK);
 
     prism_liquid_glass_desc glass_desc = PRISM_LIQUID_GLASS_DESC_INIT;
     glass_desc.input = target;
@@ -60,34 +61,34 @@ static uint32_t render_liquid_glass_frame(flux_surface *surface, flux_canvas *ca
     glass_desc.group_count = group_count;
     glass_desc.refraction = 0.0f;
     prism_material_output glass = {0};
-    EXPECT(prism_liquid_glass_filter_apply(glass_filter, frame, &glass_desc, &glass) == FLUX_OK);
+    OT_EXPECT(prism_liquid_glass_filter_apply(glass_filter, frame, &glass_desc, &glass) == FLUX_OK);
 
     flux_color black = flux_color_rgba(0, 0, 0, 255);
-    EXPECT(flux_canvas_begin(canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
-                                                              .frame = frame,
-                                                              .clear_color = &black}) == FLUX_OK);
+    OT_EXPECT(flux_canvas_begin(canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                                 .frame = frame,
+                                                                 .clear_color = &black}) ==
+              FLUX_OK);
     test_draw_material(canvas, glass);
-    EXPECT(flux_canvas_end(canvas) == FLUX_OK);
-    EXPECT(flux_frame_submit(frame) == FLUX_OK);
-    EXPECT(flux_frame_present(frame) == FLUX_OK);
+    OT_EXPECT(flux_canvas_end(canvas) == FLUX_OK);
+    OT_EXPECT(flux_frame_submit(frame) == FLUX_OK);
+    OT_EXPECT(flux_frame_present(frame) == FLUX_OK);
     memset(pixels, 0xCD, BYTES);
-    EXPECT(flux_surface_read_pixels(surface, pixels, BYTES) == FLUX_OK);
+    OT_EXPECT(flux_surface_read_pixels(surface, pixels, BYTES) == FLUX_OK);
     return slot;
 }
 
 int main(void) {
-    flux_device *d = test_helpers_make_headless_device();
+    flux_device *d = flux_test_make_headless_device();
     if (!d) {
         fprintf(stderr, "test_liquid_glass: no Vulkan device; skipping\n");
-        TEST_SUMMARY();
-        return 0;
+        OT_SKIP("no Vulkan device");
     }
 
     flux_surface_desc sd = FLUX_SURFACE_DESC_INIT;
     sd.width = W;
     sd.height = H;
     flux_surface *s = nullptr;
-    EXPECT(flux_surface_create(d, &sd, &s) == FLUX_OK);
+    OT_EXPECT(flux_surface_create(d, &sd, &s) == FLUX_OK);
 
     VkFormat sfmt = flux_surface_vk_format(s);
     flux_format target_fmt =
@@ -95,45 +96,45 @@ int main(void) {
 
     flux_canvas_desc cd = {.type = FLUX_TYPE_CANVAS_DESC, .surface = s};
     flux_canvas *canvas = nullptr;
-    EXPECT(flux_canvas_create(&cd, &canvas) == FLUX_OK);
+    OT_EXPECT(flux_canvas_create(&cd, &canvas) == FLUX_OK);
 
     flux_image *target = nullptr;
-    EXPECT(flux_image_create_render_target(d, W, H, target_fmt, &target) == FLUX_OK);
+    OT_EXPECT(flux_image_create_render_target(d, W, H, target_fmt, &target) == FLUX_OK);
 
     flux_blur_filter *blur_filter = nullptr;
-    EXPECT(flux_blur_filter_create(d, &blur_filter) == FLUX_OK);
+    OT_EXPECT(flux_blur_filter_create(d, &blur_filter) == FLUX_OK);
     prism_liquid_glass_filter *glass_filter = nullptr;
-    EXPECT(prism_liquid_glass_filter_create(d, &glass_filter) == FLUX_OK);
+    OT_EXPECT(prism_liquid_glass_filter_create(d, &glass_filter) == FLUX_OK);
     /* Pipeline pre-warming contract (ADR-0141) */
-    EXPECT(prism_liquid_glass_filter_warmup(nullptr, nullptr) == FLUX_ERROR_INVALID_ARGUMENT);
-    EXPECT(prism_liquid_glass_filter_warmup(glass_filter, nullptr) == FLUX_OK);
-    EXPECT(prism_liquid_glass_filter_warmup(
-               glass_filter, &(prism_liquid_glass_warmup_opts){.format = FLUX_FORMAT_RGBA8_UNORM,
-                                                               .stats = true}) == FLUX_OK);
+    OT_EXPECT(prism_liquid_glass_filter_warmup(nullptr, nullptr) == FLUX_ERROR_INVALID_ARGUMENT);
+    OT_EXPECT(prism_liquid_glass_filter_warmup(glass_filter, nullptr) == FLUX_OK);
+    OT_EXPECT(prism_liquid_glass_filter_warmup(
+                  glass_filter, &(prism_liquid_glass_warmup_opts){.format = FLUX_FORMAT_RGBA8_UNORM,
+                                                                  .stats = true}) == FLUX_OK);
 
     static uint8_t px[BYTES];
 
     /* --- liquid glass: the analytic rounded SDF masks every optical layer --- */
     {
         flux_frame *frame = nullptr;
-        EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
+        OT_EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
         flux_color black = flux_color_rgba(0, 0, 0, 255);
-        EXPECT(flux_canvas_begin(canvas, &(flux_canvas_pass_desc){
-                                             .type = FLUX_TYPE_CANVAS_PASS_DESC,
-                                             .frame = frame,
-                                             .attachment = {.kind = FLUX_CANVAS_ATTACHMENT_IMAGE,
-                                                            .image = target},
-                                             .clear_color = &black}) == FLUX_OK);
+        OT_EXPECT(flux_canvas_begin(canvas, &(flux_canvas_pass_desc){
+                                                .type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                .frame = frame,
+                                                .attachment = {.kind = FLUX_CANVAS_ATTACHMENT_IMAGE,
+                                                               .image = target},
+                                                .clear_color = &black}) == FLUX_OK);
         flux_canvas_fill_rect_color(canvas,
                                     (flux_rect){(float)(W / 2), 0.0f, (float)(W / 2), (float)H},
                                     flux_color_rgba_premul(255, 255, 255, 255));
-        EXPECT(flux_canvas_end(canvas) == FLUX_OK);
+        OT_EXPECT(flux_canvas_end(canvas) == FLUX_OK);
 
         flux_effect_blur_desc bd = FLUX_EFFECT_BLUR_DESC_INIT;
         bd.input = target;
         bd.sigma = 8.0f;
         flux_image *blurred = nullptr;
-        EXPECT(flux_blur_filter_apply(blur_filter, frame, &bd, &blurred) == FLUX_OK);
+        OT_EXPECT(flux_blur_filter_apply(blur_filter, frame, &bd, &blurred) == FLUX_OK);
 
         prism_liquid_glass_shape body_shapes[1] = {
             {.bounds = {16, 16, 32, 32}, .corner_radius = 16},
@@ -148,35 +149,35 @@ int main(void) {
         gd.group_count = 1;
         gd.refraction = 6.0f;
         prism_material_output glass = {0};
-        EXPECT(prism_liquid_glass_filter_apply(glass_filter, frame, &gd, &glass) == FLUX_OK);
-        EXPECT(glass.image != nullptr);
+        OT_EXPECT(prism_liquid_glass_filter_apply(glass_filter, frame, &gd, &glass) == FLUX_OK);
+        OT_EXPECT(glass.image != nullptr);
 
-        EXPECT(
+        OT_EXPECT(
             flux_canvas_begin(canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
                                                                .frame = frame,
                                                                .clear_color = &black}) == FLUX_OK);
         flux_canvas_draw_image(canvas, target, (flux_rect){0, 0, (float)W, (float)H}, nullptr);
         test_draw_material(canvas, glass);
-        EXPECT(flux_canvas_end(canvas) == FLUX_OK);
-        EXPECT(flux_frame_submit(frame) == FLUX_OK);
-        EXPECT(flux_frame_present(frame) == FLUX_OK);
+        OT_EXPECT(flux_canvas_end(canvas) == FLUX_OK);
+        OT_EXPECT(flux_frame_submit(frame) == FLUX_OK);
+        OT_EXPECT(flux_frame_present(frame) == FLUX_OK);
         memset(px, 0, BYTES);
-        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+        OT_EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
 
         /* The rounded-rect bounding-box corner is outside the SDF and stays
          * exactly sharp/black. The centre crosses the captured hard edge and
          * therefore contains visibly refracted/frosted intermediate values. */
         const uint8_t *dead_corner = &px[(16 * W + 16) * 4];
         const uint8_t *glass_centre = &px[(32 * W + 32) * 4];
-        EXPECT(dead_corner[0] < 5 && dead_corner[1] < 5 && dead_corner[2] < 5);
-        EXPECT(glass_centre[0] > 16 && glass_centre[0] < 245);
+        OT_EXPECT(dead_corner[0] < 5 && dead_corner[1] < 5 && dead_corner[2] < 5);
+        OT_EXPECT(glass_centre[0] > 16 && glass_centre[0] < 245);
     }
 
     /* --- persistent liquid output clears only previous + current footprints --- */
     {
         prism_liquid_glass_filter *persistent_filter = nullptr;
-        EXPECT(prism_liquid_glass_filter_create(d, &persistent_filter) == FLUX_OK);
-        EXPECT(prism_liquid_glass_filter_warmup(persistent_filter, nullptr) == FLUX_OK);
+        OT_EXPECT(prism_liquid_glass_filter_create(d, &persistent_filter) == FLUX_OK);
+        OT_EXPECT(prism_liquid_glass_filter_warmup(persistent_filter, nullptr) == FLUX_OK);
         bool seen[TEST_FRAME_SLOTS] = {false};
 
         prism_liquid_glass_shape left_shapes[1] = {
@@ -188,13 +189,13 @@ int main(void) {
         for (uint32_t i = 0; i < TEST_FRAME_SLOTS; ++i) {
             uint32_t slot = render_liquid_glass_frame(s, canvas, target, blur_filter,
                                                       persistent_filter, &left, 1u, px);
-            EXPECT(slot < TEST_FRAME_SLOTS);
+            OT_EXPECT(slot < TEST_FRAME_SLOTS);
             if (slot < TEST_FRAME_SLOTS)
                 seen[slot] = true;
             const uint8_t *left_centre = &px[(32u * W + 12u) * 4u];
             const uint8_t *right_centre = &px[(32u * W + 52u) * 4u];
-            EXPECT(left_centre[0] > 10u || left_centre[1] > 10u || left_centre[2] > 10u);
-            EXPECT(right_centre[0] < 5u && right_centre[1] < 5u && right_centre[2] < 5u);
+            OT_EXPECT(left_centre[0] > 10u || left_centre[1] > 10u || left_centre[2] > 10u);
+            OT_EXPECT(right_centre[0] < 5u && right_centre[1] < 5u && right_centre[2] < 5u);
         }
         /* Reusing each slot with a disjoint body must remove the old body
          * without clearing the empty middle of the output. */
@@ -208,17 +209,17 @@ int main(void) {
         for (uint32_t i = 0; i < TEST_FRAME_SLOTS; ++i) {
             uint32_t slot = render_liquid_glass_frame(s, canvas, target, blur_filter,
                                                       persistent_filter, &right, 1u, px);
-            EXPECT(slot < TEST_FRAME_SLOTS);
+            OT_EXPECT(slot < TEST_FRAME_SLOTS);
             if (slot < TEST_FRAME_SLOTS && seen[slot])
                 reused_previous_slot = true;
             const uint8_t *old_centre = &px[(32u * W + 12u) * 4u];
             const uint8_t *new_centre = &px[(32u * W + 52u) * 4u];
             const uint8_t *outside = &px[(4u * W + 32u) * 4u];
-            EXPECT(old_centre[0] < 5u && old_centre[1] < 5u && old_centre[2] < 5u);
-            EXPECT(new_centre[0] > 10u || new_centre[1] > 10u || new_centre[2] > 10u);
-            EXPECT(outside[0] < 5u && outside[1] < 5u && outside[2] < 5u);
+            OT_EXPECT(old_centre[0] < 5u && old_centre[1] < 5u && old_centre[2] < 5u);
+            OT_EXPECT(new_centre[0] > 10u || new_centre[1] > 10u || new_centre[2] > 10u);
+            OT_EXPECT(outside[0] < 5u && outside[1] < 5u && outside[2] < 5u);
         }
-        EXPECT(reused_previous_slot);
+        OT_EXPECT(reused_previous_slot);
 
         /* All clear dispatches happen before material dispatches. The second
          * group's padded dispatch region covers x=28 but its SDF does not; an
@@ -244,8 +245,8 @@ int main(void) {
                 overlap_seen[slot] = true;
             const uint8_t *first_only = &px[(32u * W + 28u) * 4u];
             const uint8_t *second_centre = &px[(32u * W + 38u) * 4u];
-            EXPECT(first_only[0] > 10u || first_only[1] > 10u || first_only[2] > 10u);
-            EXPECT(second_centre[0] > 10u || second_centre[1] > 10u || second_centre[2] > 10u);
+            OT_EXPECT(first_only[0] > 10u || first_only[1] > 10u || first_only[2] > 10u);
+            OT_EXPECT(second_centre[0] > 10u || second_centre[1] > 10u || second_centre[2] > 10u);
         }
 
         /* A later body's shadow is source-over material, not a replacement
@@ -271,8 +272,8 @@ int main(void) {
             render_liquid_glass_frame(s, canvas, target, blur_filter, persistent_filter,
                                       shadow_overlap, 2u, px);
             const uint8_t *dock_under_shadow = &px[(40u * W + 32u) * 4u];
-            EXPECT(dock_under_shadow[0] > 10u || dock_under_shadow[1] > 10u ||
-                   dock_under_shadow[2] > 10u);
+            OT_EXPECT(dock_under_shadow[0] > 10u || dock_under_shadow[1] > 10u ||
+                      dock_under_shadow[2] > 10u);
         }
 
         /* An empty group list is the explicit disappearance operation: only
@@ -286,10 +287,10 @@ int main(void) {
                 cleared_reused_slot = true;
             const uint8_t *old_first = &px[(32u * W + 28u) * 4u];
             const uint8_t *old_second = &px[(32u * W + 38u) * 4u];
-            EXPECT(old_first[0] < 5u && old_first[1] < 5u && old_first[2] < 5u);
-            EXPECT(old_second[0] < 5u && old_second[1] < 5u && old_second[2] < 5u);
+            OT_EXPECT(old_first[0] < 5u && old_first[1] < 5u && old_first[2] < 5u);
+            OT_EXPECT(old_second[0] < 5u && old_second[1] < 5u && old_second[2] < 5u);
         }
-        EXPECT(cleared_reused_slot);
+        OT_EXPECT(cleared_reused_slot);
         prism_liquid_glass_filter_release(persistent_filter);
     }
 
@@ -347,9 +348,9 @@ int main(void) {
         }
         /* The two references must be separated before the stacked value can
          * mean anything. */
-        EXPECT(solid_red > faint_red + 30u);
+        OT_EXPECT(solid_red > faint_red + 30u);
         /* Full-opacity over faint == full-opacity: the later body wins. */
-        EXPECT(stacked_red + 4u >= solid_red && stacked_red <= solid_red + 4u);
+        OT_EXPECT(stacked_red + 4u >= solid_red && stacked_red <= solid_red + 4u);
     }
 
     flux_device_wait_idle(d);
@@ -359,5 +360,5 @@ int main(void) {
     flux_canvas_release(canvas);
     flux_surface_release(s);
     flux_device_release(d);
-    TEST_SUMMARY();
+    return OT_REPORT();
 }

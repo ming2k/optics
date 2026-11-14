@@ -18,7 +18,7 @@
  * circles take the analytic SDF pipeline, whose coverage does not depend on the
  * supersample factor at all. A test using them would pass for the wrong reason.
  */
-#include "../test_helpers.h"
+#include "optics_test.h"
 #include <flux/canvas.h>
 #include <flux/canvas_cpu.h>
 #include <flux/canvas_helpers.h>
@@ -92,26 +92,26 @@ int main(void) {
     const uint32_t factors[3] = {1u, 4u, 8u};
     for (int i = 0; i < 3; ++i) {
         flux_canvas *c = bake_canvas(factors[i]);
-        EXPECT(c != nullptr);
+        OT_EXPECT(c != nullptr);
         if (!c)
             continue;
         uint32_t w = 0, h = 0, stride = 0;
         const uint8_t *cov = flux_canvas_cpu_coverage(c, &w, &h, &stride);
-        EXPECT(cov != nullptr);
-        EXPECT(w == CANVAS_W && h == CANVAS_H);
-        EXPECT(stride == CANVAS_W); /* one byte per pixel, tightly packed */
+        OT_EXPECT(cov != nullptr);
+        OT_EXPECT(w == CANVAS_W && h == CANVAS_H);
+        OT_EXPECT(stride == CANVAS_W); /* one byte per pixel, tightly packed */
         if (cov)
             levels[i] = partial_levels(cov, w, h, stride, 1);
         flux_canvas_release(c);
     }
 
     /* 1 sample/px is binary coverage; more samples must strictly buy levels. */
-    EXPECT(levels[0] == 0);
-    EXPECT(levels[1] > levels[0]);
-    EXPECT(levels[2] > levels[1]);
+    OT_EXPECT(levels[0] == 0);
+    OT_EXPECT(levels[1] > levels[0]);
+    OT_EXPECT(levels[2] > levels[1]);
     /* The mask design needs far more than the 4x MSAA budget (which caps at 5
      * levels); 8x8 must comfortably exceed it. */
-    EXPECT(levels[2] > 8);
+    OT_EXPECT(levels[2] > 8);
 
     /* ---- out-of-range factors are rejected, never silently clamped ---- */
     {
@@ -123,31 +123,31 @@ int main(void) {
         flux_canvas_supersample_desc ss = FLUX_CANVAS_SUPERSAMPLE_DESC_INIT;
         ss.supersample = FLUX_CANVAS_SUPERSAMPLE_MAX + 1u;
         d.next = &ss;
-        EXPECT(flux_canvas_create(&d, &c) == FLUX_ERROR_OUT_OF_RANGE);
-        EXPECT(c == nullptr);
-        EXPECT(FLUX_CANVAS_SUPERSAMPLE_MAX == 8u);
+        OT_EXPECT(flux_canvas_create(&d, &c) == FLUX_ERROR_OUT_OF_RANGE);
+        OT_EXPECT(c == nullptr);
+        OT_EXPECT(FLUX_CANVAS_SUPERSAMPLE_MAX == 8u);
 
         /* Direct constructor rejects out-of-range the same way. */
-        EXPECT(flux_canvas_create_cpu_ss(16, 16, 1.0f, FLUX_CANVAS_SUPERSAMPLE_MAX + 1u, &c) ==
-               FLUX_ERROR_OUT_OF_RANGE);
-        EXPECT(c == nullptr);
+        OT_EXPECT(flux_canvas_create_cpu_ss(16, 16, 1.0f, FLUX_CANVAS_SUPERSAMPLE_MAX + 1u, &c) ==
+                  FLUX_ERROR_OUT_OF_RANGE);
+        OT_EXPECT(c == nullptr);
 
         /* Direct constructor succeeds with in-range factors. */
-        EXPECT(flux_canvas_create_cpu_ss(16, 16, 1.0f, 4u, &c) == FLUX_OK);
-        EXPECT(c != nullptr);
+        OT_EXPECT(flux_canvas_create_cpu_ss(16, 16, 1.0f, 4u, &c) == FLUX_OK);
+        OT_EXPECT(c != nullptr);
         flux_canvas_release(c);
     }
 
     /* ---- the coverage plane agrees with the pixel alpha plane ---- */
     {
         flux_canvas *c = bake_canvas(4u);
-        EXPECT(c != nullptr);
+        OT_EXPECT(c != nullptr);
         if (c) {
             uint32_t cw = 0, ch = 0, cs = 0, pw = 0, ph = 0, ps = 0;
             const uint8_t *cov = flux_canvas_cpu_coverage(c, &cw, &ch, &cs);
             const uint8_t *px = flux_canvas_cpu_pixels(c, &pw, &ph, &ps);
-            EXPECT(cov != nullptr && px != nullptr);
-            EXPECT(cw == pw && ch == ph);
+            OT_EXPECT(cov != nullptr && px != nullptr);
+            OT_EXPECT(cw == pw && ch == ph);
             if (cov && px) {
                 int mismatches = 0;
                 for (uint32_t y = 0; y < ch; ++y) {
@@ -162,7 +162,7 @@ int main(void) {
                  * they must agree bit-for-bit; allow a one-step rounding slack
                  * only to keep this from being brittle against future resolve
                  * refactors. */
-                EXPECT(mismatches == 0);
+                OT_EXPECT(mismatches == 0);
             }
             flux_canvas_release(c);
         }
@@ -171,14 +171,14 @@ int main(void) {
     /* ---- a GPU backend has no coverage plane: the slot is optional ---- */
     {
         flux_canvas *c = bake_canvas(0u); /* default factor still resolves */
-        EXPECT(c != nullptr);
+        OT_EXPECT(c != nullptr);
         if (c) {
             uint32_t w = 0, h = 0, s = 0;
-            EXPECT(flux_canvas_cpu_coverage(c, &w, &h, &s) != nullptr);
-            EXPECT(flux_canvas_cpu_coverage(nullptr, &w, &h, &s) == nullptr);
+            OT_EXPECT(flux_canvas_cpu_coverage(c, &w, &h, &s) != nullptr);
+            OT_EXPECT(flux_canvas_cpu_coverage(nullptr, &w, &h, &s) == nullptr);
             flux_canvas_release(c);
         }
     }
 
-    TEST_SUMMARY();
+    return OT_REPORT();
 }

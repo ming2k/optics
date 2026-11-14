@@ -22,7 +22,7 @@
 
 #include "display_pacer.h"
 
-#include "test_helpers.h"
+#include "optics_test.h"
 
 #define NS_PER_MS 1000000LL
 #define NS_PER_S 1000000000LL
@@ -46,18 +46,18 @@ static iris_pace_inputs base_inputs(int64_t now) {
 
 /* Assert the hard postcondition on every decision the pacer can return. */
 static void check_no_spin(const iris_pace_decision *d, int line) {
-    g_checks++;
+    OT_MANUAL_CHECK();
     if (d->action == IRIS_PACE_QUIESCE) {
         /* Quiesced: the caller blocks (wait 0 == "no deadline"). */
         if (d->wait_timeout_ns != 0) {
-            g_fails++;
+            OT_MANUAL_FAIL();
             fprintf(stderr, "FAIL %s:%d: quiesced decision must have wait 0, got %lld\n", __FILE__,
                     line, (long long)d->wait_timeout_ns);
         }
         return;
     }
     if (d->wait_timeout_ns < 1) {
-        g_fails++;
+        OT_MANUAL_FAIL();
         fprintf(stderr, "FAIL %s:%d: non-quiescent budget %lld <= 0 (0ms poll spin)\n", __FILE__,
                 line, (long long)d->wait_timeout_ns);
     }
@@ -72,22 +72,22 @@ static void test_refresh_configuration(void) {
 
     /* The 60 Hz default is only a "refresh rate not learned yet" fallback
      * (INV-PACE-02): it must be replaced the moment the display reports. */
-    CHECK(iris_pacer_refresh_ns(&p) == IRIS_PACE_DEFAULT_REFRESH_NS);
+    OT_EXPECT(iris_pacer_refresh_ns(&p) == IRIS_PACE_DEFAULT_REFRESH_NS);
 
     iris_pacer_set_refresh(&p, HZ120_NS);
-    CHECK(iris_pacer_refresh_ns(&p) == HZ120_NS);
+    OT_EXPECT(iris_pacer_refresh_ns(&p) == HZ120_NS);
 
     /* 0 / negative means "unknown" — keep the last known period. */
     iris_pacer_set_refresh(&p, 0);
-    CHECK(iris_pacer_refresh_ns(&p) == HZ120_NS);
+    OT_EXPECT(iris_pacer_refresh_ns(&p) == HZ120_NS);
     iris_pacer_set_refresh(&p, -1);
-    CHECK(iris_pacer_refresh_ns(&p) == HZ120_NS);
+    OT_EXPECT(iris_pacer_refresh_ns(&p) == HZ120_NS);
 
     /* Garbage cannot drive the pacer into a spin: clamp to the sane band. */
     iris_pacer_set_refresh(&p, 1);
-    CHECK(iris_pacer_refresh_ns(&p) == IRIS_PACE_REFRESH_MIN_NS);
+    OT_EXPECT(iris_pacer_refresh_ns(&p) == IRIS_PACE_REFRESH_MIN_NS);
     iris_pacer_set_refresh(&p, 60LL * NS_PER_S);
-    CHECK(iris_pacer_refresh_ns(&p) == IRIS_PACE_REFRESH_MAX_NS);
+    OT_EXPECT(iris_pacer_refresh_ns(&p) == IRIS_PACE_REFRESH_MAX_NS);
 }
 
 /* One paint per compositor pulse, at whatever refresh the display runs. */
@@ -119,12 +119,12 @@ static void test_pulse_lockstep(void) {
             CHECK_NO_SPIN(d);
 
             if (i == 0) {
-                CHECK(d.action == IRIS_PACE_PAINT);
-                CHECK(d.request_pulse);
+                OT_EXPECT(d.action == IRIS_PACE_PAINT);
+                OT_EXPECT(d.request_pulse);
             } else {
-                CHECK(d.action == IRIS_PACE_PAINT);
+                OT_EXPECT(d.action == IRIS_PACE_PAINT);
                 /* INV-PACE-04: sim time is the pulse time, not "now". */
-                CHECK(d.sim_time_ns == t);
+                OT_EXPECT(d.sim_time_ns == t);
                 paints++;
             }
             if (d.action == IRIS_PACE_SKIP)
@@ -139,13 +139,13 @@ static void test_pulse_lockstep(void) {
             spurious.pulse_pending = true;
             iris_pace_decision s = iris_pacer_tick(&p, &spurious);
             CHECK_NO_SPIN(s);
-            CHECK(s.action == IRIS_PACE_SKIP);
-            CHECK(s.request_pulse);
+            OT_EXPECT(s.action == IRIS_PACE_SKIP);
+            OT_EXPECT(s.request_pulse);
 
             t += refresh;
         }
-        CHECK(paints == 239);
-        CHECK(skips == 0);
+        OT_EXPECT(paints == 239);
+        OT_EXPECT(skips == 0);
     }
 }
 
@@ -173,9 +173,9 @@ static void test_skip_render_storm_never_spins(void) {
 
         iris_pace_decision d = iris_pacer_tick(&p, &in);
         CHECK_NO_SPIN(d);
-        CHECK(d.action != IRIS_PACE_QUIESCE); /* skip-streaming keeps cadence */
-        CHECK(d.request_pulse);
-        CHECK(d.wait_timeout_ns > 0);
+        OT_EXPECT(d.action != IRIS_PACE_QUIESCE); /* skip-streaming keeps cadence */
+        OT_EXPECT(d.request_pulse);
+        OT_EXPECT(d.wait_timeout_ns > 0);
 
         if (d.action == IRIS_PACE_PAINT)
             paints++;
@@ -183,8 +183,8 @@ static void test_skip_render_storm_never_spins(void) {
             skips++;
         t += HZ120_NS;
     }
-    CHECK(paints == 0); /* every declared skip was honoured   */
-    CHECK(skips == 2000);
+    OT_EXPECT(paints == 0); /* every declared skip was honoured   */
+    OT_EXPECT(skips == 2000);
 }
 
 /* A backend with no pulse source must still be display-aligned and spin-free:
@@ -208,14 +208,14 @@ static void test_timer_fallback_is_display_aligned(void) {
 
             iris_pace_decision d = iris_pacer_tick(&p, &in);
             CHECK_NO_SPIN(d);
-            CHECK(d.wait_timeout_ns > 0);
+            OT_EXPECT(d.wait_timeout_ns > 0);
             /* Active cadence with no pulse source: exactly one refresh. */
-            CHECK(d.wait_timeout_ns == iris_pacer_refresh_ns(&p));
+            OT_EXPECT(d.wait_timeout_ns == iris_pacer_refresh_ns(&p));
             if (d.action == IRIS_PACE_PAINT)
                 paints++;
             t += d.wait_timeout_ns;
         }
-        CHECK(paints >= 199);
+        OT_EXPECT(paints >= 199);
     }
 }
 
@@ -251,18 +251,18 @@ static void test_caret_idle_tick(void) {
 
         if (blink_flip) {
             /* Chrome damage is active cadence: a real frame is published. */
-            CHECK(d.action == IRIS_PACE_PAINT);
+            OT_EXPECT(d.action == IRIS_PACE_PAINT);
         } else {
             /* Steady state: the blink clock advances, the GPU sleeps. */
-            CHECK(d.action == IRIS_PACE_SKIP);
-            CHECK(!d.request_pulse); /* caret tick is timer-driven, not pulsed */
-            CHECK(d.wait_timeout_ns > 0);
+            OT_EXPECT(d.action == IRIS_PACE_SKIP);
+            OT_EXPECT(!d.request_pulse); /* caret tick is timer-driven, not pulsed */
+            OT_EXPECT(d.wait_timeout_ns > 0);
             /* Display-aligned: an exact multiple of the refresh period. */
-            CHECK(d.wait_timeout_ns % HZ60_NS == 0);
+            OT_EXPECT(d.wait_timeout_ns % HZ60_NS == 0);
             if (ticks == 0)
                 first_wait = d.wait_timeout_ns;
             else
-                CHECK(d.wait_timeout_ns == first_wait);
+                OT_EXPECT(d.wait_timeout_ns == first_wait);
             ticks++;
         }
         if (d.action == IRIS_PACE_PAINT)
@@ -271,9 +271,9 @@ static void test_caret_idle_tick(void) {
     }
     /* The idle tick is display-aligned: a whole number of 60 Hz refreshes
      * (15 x 16.667 ms ≈ 250 ms), not the literal 250 ms target. */
-    CHECK(first_wait == 15 * HZ60_NS);
-    CHECK(first_wait >= 250 * NS_PER_MS);
-    CHECK(paints == 99);
+    OT_EXPECT(first_wait == 15 * HZ60_NS);
+    OT_EXPECT(first_wait >= 250 * NS_PER_MS);
+    OT_EXPECT(paints == 99);
 }
 
 /* No caret clock and no canvas: nothing is pending, so the loop blocks. This
@@ -292,8 +292,8 @@ static void test_quiet_caret_quiesces(void) {
         in.has_host_content = false;
         in.chrome_damaged = false;
         iris_pace_decision d = iris_pacer_tick(&p, &in);
-        CHECK(d.action == IRIS_PACE_QUIESCE);
-        CHECK(d.wait_timeout_ns == 0);
+        OT_EXPECT(d.action == IRIS_PACE_QUIESCE);
+        OT_EXPECT(d.wait_timeout_ns == 0);
         t += HZ60_NS;
     }
 }
@@ -313,9 +313,9 @@ static void test_caret_clock_never_raises_the_cadence(void) {
     in.chrome_damaged = false;
 
     iris_pace_decision d = iris_pacer_tick(&p, &in);
-    CHECK(d.action == IRIS_PACE_SKIP);
-    CHECK(!d.request_pulse);                  /* never subscribes to the pulse train */
-    CHECK(d.wait_timeout_ns == 15 * HZ60_NS); /* the idle period, not the refresh */
+    OT_EXPECT(d.action == IRIS_PACE_SKIP);
+    OT_EXPECT(!d.request_pulse);                  /* never subscribes to the pulse train */
+    OT_EXPECT(d.wait_timeout_ns == 15 * HZ60_NS); /* the idle period, not the refresh */
 }
 
 /* Nothing pending: drop the subscription and block. */
@@ -325,23 +325,23 @@ static void test_quiescence(void) {
 
     iris_pace_inputs in = base_inputs(1000);
     iris_pace_decision d = iris_pacer_tick(&p, &in);
-    CHECK(d.action == IRIS_PACE_QUIESCE);
-    CHECK(!d.request_pulse);
-    CHECK(d.wait_timeout_ns == 0);
+    OT_EXPECT(d.action == IRIS_PACE_QUIESCE);
+    OT_EXPECT(!d.request_pulse);
+    OT_EXPECT(d.wait_timeout_ns == 0);
 
     /* Stable: repeated ticks stay quiesced. */
     for (int i = 0; i < 10; i++) {
         in.now_ns += 500 * NS_PER_MS;
         d = iris_pacer_tick(&p, &in);
-        CHECK(d.action == IRIS_PACE_QUIESCE);
+        OT_EXPECT(d.action == IRIS_PACE_QUIESCE);
     }
 
     /* Input wakes it back into a display-driven cadence. */
     in.now_ns += NS_PER_MS;
     in.input_active = true;
     d = iris_pacer_tick(&p, &in);
-    CHECK(d.action != IRIS_PACE_QUIESCE);
-    CHECK(d.request_pulse);
+    OT_EXPECT(d.action != IRIS_PACE_QUIESCE);
+    OT_EXPECT(d.request_pulse);
     CHECK_NO_SPIN(d);
 }
 
@@ -359,7 +359,7 @@ static void test_forced_paint_precedence(void) {
     in.pulse_time_ns = 0;
     in.pulse_pending = false;
     iris_pace_decision d = iris_pacer_tick(&p, &in);
-    CHECK(d.action == IRIS_PACE_SKIP);
+    OT_EXPECT(d.action == IRIS_PACE_SKIP);
 
     /* ...but chrome damage outranks the skip. */
     in.now_ns += HZ60_NS;
@@ -367,7 +367,7 @@ static void test_forced_paint_precedence(void) {
     in.pulse_fired = true;
     in.pulse_time_ns = in.now_ns;
     d = iris_pacer_tick(&p, &in);
-    CHECK(d.action == IRIS_PACE_PAINT);
+    OT_EXPECT(d.action == IRIS_PACE_PAINT);
 
     /* ...and so does a discarded swapchain. */
     in.now_ns += HZ60_NS;
@@ -376,7 +376,7 @@ static void test_forced_paint_precedence(void) {
     in.pulse_fired = true;
     in.pulse_time_ns = in.now_ns;
     d = iris_pacer_tick(&p, &in);
-    CHECK(d.action == IRIS_PACE_PAINT);
+    OT_EXPECT(d.action == IRIS_PACE_PAINT);
 
     /* A static declaration plus a live animation request is not static:
      * the host announced its content is about to change. */
@@ -387,12 +387,12 @@ static void test_forced_paint_precedence(void) {
     st.host_static = true;
     st.pulse_fired = true;
     st.pulse_pending = false;
-    CHECK(iris_pacer_tick(&p2, &st).action == IRIS_PACE_SKIP);
+    OT_EXPECT(iris_pacer_tick(&p2, &st).action == IRIS_PACE_SKIP);
     st.now_ns += HZ60_NS;
     st.host_animating = true;
     st.pulse_fired = true;
     st.pulse_time_ns = st.now_ns;
-    CHECK(iris_pacer_tick(&p2, &st).action == IRIS_PACE_PAINT);
+    OT_EXPECT(iris_pacer_tick(&p2, &st).action == IRIS_PACE_PAINT);
 }
 
 /* A lens-only host (no cfg->record) paints on chrome damage and quiesces the
@@ -406,14 +406,14 @@ static void test_lens_only_host(void) {
     in.chrome_damaged = true;
     in.pulse_fired = true;
     in.pulse_pending = false;
-    CHECK(iris_pacer_tick(&p, &in).action == IRIS_PACE_PAINT);
+    OT_EXPECT(iris_pacer_tick(&p, &in).action == IRIS_PACE_PAINT);
 
     in.now_ns += HZ60_NS;
     in.chrome_damaged = false;
     in.pulse_fired = true;
     in.pulse_time_ns = in.now_ns;
     iris_pace_decision d = iris_pacer_tick(&p, &in);
-    CHECK(d.action == IRIS_PACE_QUIESCE);
+    OT_EXPECT(d.action == IRIS_PACE_QUIESCE);
 }
 
 /* The simulation clock never walks backwards, even if a pulse timestamp is
@@ -437,8 +437,8 @@ static void test_sim_clock_monotonic_under_stale_pulses(void) {
 
         iris_pace_decision d = iris_pacer_tick(&p, &in);
         CHECK_NO_SPIN(d);
-        CHECK(d.sim_time_ns >= now); /* sim falls back to now, never older */
-        CHECK(d.sim_time_ns >= last_sim);
+        OT_EXPECT(d.sim_time_ns >= now); /* sim falls back to now, never older */
+        OT_EXPECT(d.sim_time_ns >= last_sim);
         last_sim = d.sim_time_ns;
         now += HZ60_NS;
     }
@@ -463,7 +463,7 @@ static void test_animation_request_survives_skips(void) {
     in.pulse_fired = true;
     in.pulse_time_ns = t;
     in.pulse_pending = false;
-    CHECK(iris_pacer_tick(&p, &in).action == IRIS_PACE_PAINT);
+    OT_EXPECT(iris_pacer_tick(&p, &in).action == IRIS_PACE_PAINT);
     t += HZ120_NS;
 
     /* Frame 2: the paint's request has arrived, but the compositor has not
@@ -477,7 +477,7 @@ static void test_animation_request_survives_skips(void) {
     in.pulse_pending = true;
     iris_pace_decision d = iris_pacer_tick(&p, &in);
     CHECK_NO_SPIN(d);
-    CHECK(d.action == IRIS_PACE_SKIP);
+    OT_EXPECT(d.action == IRIS_PACE_SKIP);
     t += HZ120_NS;
 
     /* Frames 3..N: paint never ran again, so no fresh request arrives. The
@@ -493,9 +493,9 @@ static void test_animation_request_survives_skips(void) {
 
         d = iris_pacer_tick(&p, &skip);
         CHECK_NO_SPIN(d);
-        CHECK(d.action == IRIS_PACE_SKIP);
-        CHECK(d.request_pulse);                    /* still subscribed       */
-        CHECK(d.wait_timeout_ns == p.poll_cap_ns); /* not the idle tick      */
+        OT_EXPECT(d.action == IRIS_PACE_SKIP);
+        OT_EXPECT(d.request_pulse);                    /* still subscribed       */
+        OT_EXPECT(d.wait_timeout_ns == p.poll_cap_ns); /* not the idle tick      */
         t += HZ120_NS;
     }
 
@@ -508,7 +508,7 @@ static void test_animation_request_survives_skips(void) {
     in.pulse_fired = true;
     in.pulse_time_ns = t;
     in.pulse_pending = false;
-    CHECK(iris_pacer_tick(&p, &in).action == IRIS_PACE_PAINT);
+    OT_EXPECT(iris_pacer_tick(&p, &in).action == IRIS_PACE_PAINT);
     t += HZ120_NS;
 
     /* Latch retired and no further request: the animation really did stop, so
@@ -518,8 +518,8 @@ static void test_animation_request_survives_skips(void) {
     in.has_host_content = true;
     d = iris_pacer_tick(&p, &in);
     CHECK_NO_SPIN(d);
-    CHECK(!d.request_pulse);
-    CHECK(d.wait_timeout_ns % HZ120_NS == 0);
+    OT_EXPECT(!d.request_pulse);
+    OT_EXPECT(d.wait_timeout_ns % HZ120_NS == 0);
 }
 
 int main(void) {
@@ -535,5 +535,5 @@ int main(void) {
     test_lens_only_host();
     test_animation_request_survives_skips();
     test_sim_clock_monotonic_under_stale_pulses();
-    return TEST_REPORT();
+    return OT_REPORT();
 }

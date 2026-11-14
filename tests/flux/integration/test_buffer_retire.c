@@ -8,7 +8,8 @@
  * every frame so any inline destruction trips an error on real
  * hardware. Skips if no Vulkan device.
  */
-#include "test_helpers.h"
+#include "flux_test.h"
+#include "optics_test.h"
 #include <flux/flux.h>
 #include <flux/vulkan.h>
 
@@ -63,10 +64,10 @@ static flux_target *make_depth(flux_device *d) {
 }
 
 int main(void) {
-    flux_device *d = test_helpers_make_headless_device();
+    flux_device *d = flux_test_make_headless_device();
     if (!d) {
         fprintf(stderr, "test_buffer_retire: no Vulkan device; skipping\n");
-        TEST_SUMMARY();
+        OT_SKIP("no Vulkan device");
     }
 
     flux_surface *surface = nullptr;
@@ -74,7 +75,7 @@ int main(void) {
         flux_surface_desc desc = FLUX_SURFACE_DESC_INIT;
         desc.width = SURF_W;
         desc.height = SURF_H;
-        EXPECT(flux_surface_create(d, &desc, &surface) == FLUX_OK);
+        OT_EXPECT(flux_surface_create(d, &desc, &surface) == FLUX_OK);
     }
 
     flux_graphics_pipeline *pipeline = nullptr;
@@ -101,7 +102,7 @@ int main(void) {
         desc.depth = FLUX_DEPTH_TEST_AND_WRITE;
         desc.color_format = flux_format_from_vk(flux_surface_vk_format(surface));
         desc.depth_format = FLUX_FORMAT_D32_SFLOAT;
-        EXPECT(flux_graphics_pipeline_create(d, &desc, &pipeline) == FLUX_OK);
+        OT_EXPECT(flux_graphics_pipeline_create(d, &desc, &pipeline) == FLUX_OK);
     }
 
     /* Churn: each frame draws from a fresh vertex buffer into a pass
@@ -110,12 +111,12 @@ int main(void) {
      * flight. Deferred destruction must keep those references valid. */
     for (uint32_t i = 0; i < CHURN_FRAMES; ++i) {
         flux_buffer *vb = make_triangle_vb(d);
-        EXPECT(vb != nullptr);
+        OT_EXPECT(vb != nullptr);
         flux_target *depth = make_depth(d);
-        EXPECT(depth != nullptr);
+        OT_EXPECT(depth != nullptr);
 
         flux_frame *frame = nullptr;
-        EXPECT(flux_surface_begin_frame(surface, nullptr, &frame) == FLUX_OK);
+        OT_EXPECT(flux_surface_begin_frame(surface, nullptr, &frame) == FLUX_OK);
         flux_frame_prepare_target(frame, depth);
         flux_pass_attachment color = {
             .load_op = FLUX_LOAD_CLEAR,
@@ -148,8 +149,8 @@ int main(void) {
         vkCmdDraw(cmd, 3, 1, 0, 0);
 
         flux_frame_end_pass(frame);
-        EXPECT(flux_frame_submit(frame) == FLUX_OK);
-        EXPECT(flux_frame_present(frame) == FLUX_OK);
+        OT_EXPECT(flux_frame_submit(frame) == FLUX_OK);
+        OT_EXPECT(flux_frame_present(frame) == FLUX_OK);
 
         flux_buffer_release(vb);
         flux_target_release(depth);
@@ -158,14 +159,14 @@ int main(void) {
     /* Release-without-frame: zombies parked after the last submission
      * must be destroyed by device teardown (drain path). */
     flux_buffer *stray_buf = make_triangle_vb(d);
-    EXPECT(stray_buf != nullptr);
+    OT_EXPECT(stray_buf != nullptr);
     flux_buffer_release(stray_buf);
     flux_target *stray_depth = make_depth(d);
-    EXPECT(stray_depth != nullptr);
+    OT_EXPECT(stray_depth != nullptr);
     flux_target_release(stray_depth);
 
     flux_graphics_pipeline_release(pipeline);
     flux_surface_release(surface);
     flux_device_release(d);
-    TEST_SUMMARY();
+    return OT_REPORT();
 }

@@ -15,7 +15,7 @@
  * internal header (same pattern as test_canvas_tess.c).
  */
 #include "../../../libs/flux/src/canvas/internal.h"
-#include "test_helpers.h"
+#include "optics_test.h"
 #include <flux/canvas_cpu.h>
 
 #include <string.h>
@@ -28,16 +28,16 @@
 static void render(flux_canvas *c, const flux_path *path, const flux_brush *paint,
                    const flux_stroke_style *stroke, flux_fill_rule rule, uint8_t *out) {
     flux_color clear = flux_color_rgba_premul(0, 0, 0, 255);
-    EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
-                                                         .clear_color = &clear}) == FLUX_OK);
+    OT_EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                            .clear_color = &clear}) == FLUX_OK);
     if (stroke)
         flux_canvas_stroke_path(c, path, stroke, paint);
     else
         flux_canvas_fill_path(c, path, rule, paint);
-    EXPECT(flux_canvas_end(c) == FLUX_OK);
+    OT_EXPECT(flux_canvas_end(c) == FLUX_OK);
     uint32_t w = 0, h = 0, stride = 0;
     const uint8_t *fb = flux_canvas_cpu_pixels(c, &w, &h, &stride);
-    EXPECT(fb != nullptr && w == W && h == H && stride == W * 4);
+    OT_EXPECT(fb != nullptr && w == W && h == H && stride == W * 4);
     memcpy(out, fb, (size_t)h * stride);
 }
 
@@ -50,7 +50,7 @@ static bool frames_equal(const uint8_t *a, const uint8_t *b) {
  * bridging + ear clip. */
 static flux_path *build_icon_path(flux_arena *a) {
     flux_path *p = nullptr;
-    EXPECT(flux_path_create(&p, a) == FLUX_OK);
+    OT_EXPECT(flux_path_create(&p, a) == FLUX_OK);
     flux_path_add_circle(p, 48.0f, 38.0f, 26.0f);
     flux_path_move_to(p, 48.0f, 26.0f);
     flux_path_line_to(p, 62.0f, 38.0f);
@@ -72,7 +72,7 @@ static flux_path *build_icon_path(flux_arena *a) {
  * the {5/2} pentagram have clean spike ears and do NOT stall. */
 static flux_path *build_stalled_star(flux_arena *a) {
     flux_path *p = nullptr;
-    EXPECT(flux_path_create(&p, a) == FLUX_OK);
+    OT_EXPECT(flux_path_create(&p, a) == FLUX_OK);
     const float cx = W / 2.0f, cy = H / 2.0f, r = 40.0f;
     flux_point v[7];
     for (int i = 0; i < 7; ++i) {
@@ -90,7 +90,7 @@ static flux_path *build_stalled_star(flux_arena *a) {
  * the overlap, which is what EVEN_ODD is for. */
 static flux_path *build_overlap(flux_arena *a) {
     flux_path *p = nullptr;
-    EXPECT(flux_path_create(&p, a) == FLUX_OK);
+    OT_EXPECT(flux_path_create(&p, a) == FLUX_OK);
     flux_path_add_rect(p, (flux_rect){16.0f, 16.0f, 40.0f, 40.0f});
     flux_path_add_rect(p, (flux_rect){36.0f, 36.0f, 40.0f, 40.0f});
     return p;
@@ -98,11 +98,11 @@ static flux_path *build_overlap(flux_arena *a) {
 
 int main(void) {
     flux_arena arena;
-    EXPECT(flux_arena_init(&arena, 1u << 16, nullptr) == FLUX_OK);
+    OT_EXPECT(flux_arena_init(&arena, 1u << 16, nullptr) == FLUX_OK);
 
     flux_canvas *c = nullptr;
-    EXPECT(flux_canvas_create_cpu(W, H, 1.0f, &c) == FLUX_OK);
-    EXPECT(c != nullptr);
+    OT_EXPECT(flux_canvas_create_cpu(W, H, 1.0f, &c) == FLUX_OK);
+    OT_EXPECT(c != nullptr);
 
     flux_color white = flux_color_rgba_premul(255, 255, 255, 255);
     uint8_t first[W * H * 4], second[W * H * 4];
@@ -122,26 +122,26 @@ int main(void) {
     flux_path *icon = build_icon_path(&arena);
     flux_brush fill = flux_brush_linear_gradient((flux_point){0, 0}, (flux_point){W, H}, stops, 2);
     fill.blend = FLUX_BLEND_PLUS;
-    EXPECT(c->tess_cache_hits == 0 && c->tess_cache_misses == 0 && c->tess_cache_stores == 0);
+    OT_EXPECT(c->tess_cache_hits == 0 && c->tess_cache_misses == 0 && c->tess_cache_stores == 0);
     render(c, icon, &fill, nullptr, FLUX_FILL_NON_ZERO, first);
-    EXPECT(c->tess_cache_misses == 1);
-    EXPECT(c->tess_cache_stores == 1);
-    EXPECT(c->tess_cache_hits == 0);
+    OT_EXPECT(c->tess_cache_misses == 1);
+    OT_EXPECT(c->tess_cache_stores == 1);
+    OT_EXPECT(c->tess_cache_hits == 0);
     render(c, icon, &fill, nullptr, FLUX_FILL_NON_ZERO, second);
-    EXPECT(c->tess_cache_hits == 1);
-    EXPECT(c->tess_cache_misses == 1); /* no second miss */
-    EXPECT(frames_equal(first, second));
+    OT_EXPECT(c->tess_cache_hits == 1);
+    OT_EXPECT(c->tess_cache_misses == 1); /* no second miss */
+    OT_EXPECT(frames_equal(first, second));
 
     /* ---- pixel_scale change must miss (flatten tolerance input) ---- */
     flux_canvas_set_scale(c, 2.0f);
     render(c, icon, &fill, nullptr, FLUX_FILL_NON_ZERO, second);
-    EXPECT(c->tess_cache_hits == 1);   /* unchanged: no hit */
-    EXPECT(c->tess_cache_misses == 2); /* scale is part of the key */
-    EXPECT(c->tess_cache_stores == 2);
-    EXPECT(!frames_equal(first, second)); /* scaled output really differs */
+    OT_EXPECT(c->tess_cache_hits == 1);   /* unchanged: no hit */
+    OT_EXPECT(c->tess_cache_misses == 2); /* scale is part of the key */
+    OT_EXPECT(c->tess_cache_stores == 2);
+    OT_EXPECT(!frames_equal(first, second)); /* scaled output really differs */
     render(c, icon, &fill, nullptr, FLUX_FILL_NON_ZERO, first);
-    EXPECT(c->tess_cache_hits == 2); /* the scale-2 entry now hits */
-    EXPECT(frames_equal(first, second));
+    OT_EXPECT(c->tess_cache_hits == 2); /* the scale-2 entry now hits */
+    OT_EXPECT(frames_equal(first, second));
     flux_canvas_set_scale(c, 1.0f);
 
     /* ---- Stroke: cached too; stroke_width is part of the key ---- */
@@ -149,36 +149,36 @@ int main(void) {
     flux_stroke_style stroke_stroke = {.width = 3.0f};
     uint64_t stores_before = c->tess_cache_stores;
     render(c, icon, &stroke, &stroke_stroke, FLUX_FILL_NON_ZERO, first);
-    EXPECT(c->tess_cache_stores == stores_before + 1);
+    OT_EXPECT(c->tess_cache_stores == stores_before + 1);
     render(c, icon, &stroke, &stroke_stroke, FLUX_FILL_NON_ZERO, second);
-    EXPECT(frames_equal(first, second));
+    OT_EXPECT(frames_equal(first, second));
 
     stroke_stroke.width = 6.0f;
     uint64_t hits_before = c->tess_cache_hits;
     render(c, icon, &stroke, &stroke_stroke, FLUX_FILL_NON_ZERO, second);
-    EXPECT(c->tess_cache_hits == hits_before); /* width change missed */
-    EXPECT(!frames_equal(first, second));      /* and the wider stroke shows */
+    OT_EXPECT(c->tess_cache_hits == hits_before); /* width change missed */
+    OT_EXPECT(!frames_equal(first, second));      /* and the wider stroke shows */
     render(c, icon, &stroke, &stroke_stroke, FLUX_FILL_NON_ZERO, first);
-    EXPECT(c->tess_cache_hits == hits_before + 1);
-    EXPECT(frames_equal(first, second));
+    OT_EXPECT(c->tess_cache_hits == hits_before + 1);
+    OT_EXPECT(frames_equal(first, second));
 
     /* ---- Stalled fill (self-intersecting): never cached, no pollution ---- */
     flux_path *star = build_stalled_star(&arena);
     uint64_t misses_b = c->tess_cache_misses, stores_b = c->tess_cache_stores;
     render(c, star, &fill, nullptr, FLUX_FILL_NON_ZERO, first);
     render(c, star, &fill, nullptr, FLUX_FILL_NON_ZERO, second);
-    EXPECT(c->tess_cache_misses == misses_b + 2); /* looked up both times… */
-    EXPECT(c->tess_cache_stores == stores_b);     /* …but never stored     */
-    EXPECT(frames_equal(first, second));          /* deterministic output  */
+    OT_EXPECT(c->tess_cache_misses == misses_b + 2); /* looked up both times… */
+    OT_EXPECT(c->tess_cache_stores == stores_b);     /* …but never stored     */
+    OT_EXPECT(frames_equal(first, second));          /* deterministic output  */
 
     /* The icon entry survived the stalled fills and still hits. */
     hits_before = c->tess_cache_hits;
     render(c, icon, &fill, nullptr, FLUX_FILL_NON_ZERO, second);
-    EXPECT(c->tess_cache_hits == hits_before + 1);
+    OT_EXPECT(c->tess_cache_hits == hits_before + 1);
     stroke_stroke.width = 3.0f;
     render(c, icon, &stroke, &stroke_stroke, FLUX_FILL_NON_ZERO, first);
     render(c, icon, &stroke, &stroke_stroke, FLUX_FILL_NON_ZERO, second);
-    EXPECT(frames_equal(first, second));
+    OT_EXPECT(frames_equal(first, second));
 
     /* ---- EVEN_ODD: bypasses the cache entirely ---- */
     flux_path *overlap = build_overlap(&arena);
@@ -189,18 +189,18 @@ int main(void) {
     hits_before = c->tess_cache_hits;
     render(c, overlap, &eo, nullptr, eo_rule, first);
     render(c, overlap, &eo, nullptr, eo_rule, second);
-    EXPECT(c->tess_cache_misses == misses_b); /* not even looked up */
-    EXPECT(c->tess_cache_stores == stores_b);
-    EXPECT(c->tess_cache_hits == hits_before);
-    EXPECT(frames_equal(first, second)); /* deterministic fallback output */
+    OT_EXPECT(c->tess_cache_misses == misses_b); /* not even looked up */
+    OT_EXPECT(c->tess_cache_stores == stores_b);
+    OT_EXPECT(c->tess_cache_hits == hits_before);
+    OT_EXPECT(frames_equal(first, second)); /* deterministic fallback output */
 
     /* …and the cached entries render exactly as before afterwards. */
     render(c, icon, &fill, nullptr, FLUX_FILL_NON_ZERO, second);
     render(c, icon, &fill, nullptr, FLUX_FILL_NON_ZERO, first);
-    EXPECT(frames_equal(first, second));
-    EXPECT(c->tess_cache_hits == hits_before + 2);
+    OT_EXPECT(frames_equal(first, second));
+    OT_EXPECT(c->tess_cache_hits == hits_before + 2);
 
     flux_canvas_release(c);
     flux_arena_deinit(&arena);
-    TEST_SUMMARY();
+    return OT_REPORT();
 }

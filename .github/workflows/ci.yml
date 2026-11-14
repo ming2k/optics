@@ -110,13 +110,24 @@ jobs:
       - name: Compile
         run: meson compile -C build
 
-      - name: Test (Lavapipe via VK_ICD_FILENAMES)
+      # The pyramid runs as named gates. A failure names the layer instead of
+      # disappearing inside one aggregate run.
+      - name: "Test (headless: unit + e2e + lint + tooling)"
+        run: |
+          meson test -C build --print-errorlogs \
+            --suite unit --suite e2e --suite lint --suite tooling
+
+      - name: "Test (integration: Lavapipe via VK_ICD_FILENAMES)"
         env:
           VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+          # The runner has no GPU; Phase B0's device_hardware gate otherwise
+          # deliberately fails on llvmpipe. The software lane reports the
+          # device and still asserts the compute prerequisites.
+          FLUX_ALLOW_SOFTWARE_DEVICE: 1
           # Leak detection & diagnostic hardening are ON: the root meson.build
           # registers the default 'sanitizer' test setup (active under any b_sanitize)
           # that binds LSAN_OPTIONS (tools/config/lsan.supp), abort behaviors, and timeouts.
-        run: meson test -C build --no-suite bench --print-errorlogs
+        run: meson test -C build --suite integration --print-errorlogs
 
   clang-build:
     name: build (clang, ubuntu-24.04)
@@ -159,10 +170,16 @@ jobs:
       - name: Compile
         run: meson compile -C build
 
-      - name: Test
+      - name: "Test (headless: unit + e2e + lint + tooling)"
+        run: |
+          meson test -C build --print-errorlogs \
+            --suite unit --suite e2e --suite lint --suite tooling
+
+      - name: "Test (integration: Lavapipe)"
         env:
           VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
-        run: meson test -C build --no-suite bench --print-errorlogs
+          FLUX_ALLOW_SOFTWARE_DEVICE: 1
+        run: meson test -C build --suite integration --print-errorlogs
 
   bindings:
     name: rust bindings (workspace)
@@ -203,7 +220,6 @@ jobs:
           sudo meson install -C build
 
       - name: cargo fmt + clippy + test
-        working-directory: bindings
         run: |
           cargo fmt --all -- --check
           cargo clippy --workspace --all-targets --locked -- -D warnings
@@ -250,6 +266,5 @@ jobs:
 
       - name: Check workspace on MSRV
         run: |
-          cargo +1.85.0 check --manifest-path bindings/Cargo.toml \
-            --workspace --all-targets --locked
+          cargo +1.85.0 check --workspace --all-targets --locked
           exit $status

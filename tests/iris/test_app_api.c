@@ -10,7 +10,7 @@
  *     contacting the desktop portal.
  */
 
-#include "test_helpers.h"
+#include "optics_test.h"
 #include <iris/iris.h>
 
 static bool host_start(lens *ui, flux_device *device, void *user) {
@@ -40,12 +40,12 @@ int main(void) {
         .record = host_record,
         .user = &user,
     };
-    CHECK(lifecycle_config.start != NULL);
-    CHECK(lifecycle_config.stop != NULL);
-    CHECK(lifecycle_config.record != NULL);
+    OT_EXPECT(lifecycle_config.start != NULL);
+    OT_EXPECT(lifecycle_config.stop != NULL);
+    OT_EXPECT(lifecycle_config.record != NULL);
 
     /* iris_app_run: NULL config is rejected before any backend work. */
-    CHECK(iris_app_run(NULL) != 0);
+    OT_EXPECT(iris_app_run(NULL) != 0);
 
     /* Safe outside a running app; the dispatcher/backend seam treats this
      * exactly like a request made after the window has closed. */
@@ -56,39 +56,39 @@ int main(void) {
     iris_record_mark_static();
 
     /* DnD safety outside a running app (ADR-0086) */
-    CHECK(!iris_dnd_is_active());
+    OT_EXPECT(!iris_dnd_is_active());
     iris_dnd_cancel();
-    CHECK(iris_dnd_start(NULL) != 0);
+    OT_EXPECT(iris_dnd_start(NULL) != 0);
 
     /* Pickers reject NULL buffers / zero capacity before contacting the
      * portal. A valid buffer would open a live desktop picker. */
-    CHECK(iris_pick_file(NULL, NULL, 0) != 0);
+    OT_EXPECT(iris_pick_file(NULL, NULL, 0) != 0);
     char buf[16];
-    CHECK(iris_pick_file(NULL, buf, 0) != 0);
-    CHECK(iris_pick_file(NULL, NULL, sizeof buf) != 0);
+    OT_EXPECT(iris_pick_file(NULL, buf, 0) != 0);
+    OT_EXPECT(iris_pick_file(NULL, NULL, sizeof buf) != 0);
 
     /* Accessibility headless safety and lazy active query (ADR-0103) */
-    CHECK(iris_a11y_update(NULL) != 0);
+    OT_EXPECT(iris_a11y_update(NULL) != 0);
     bool active_before = iris_a11y_is_active();
     (void)active_before;
     iris_a11y_shutdown();
-    CHECK(!iris_a11y_is_active());
-    CHECK(iris_pick_folder(NULL, NULL, 0) != 0);
-    CHECK(iris_pick_folder(NULL, buf, 0) != 0);
-    CHECK(iris_pick_folder(NULL, NULL, sizeof buf) != 0);
-    CHECK(iris_pick_save_path(NULL, NULL, NULL, 0) != 0);
-    CHECK(iris_pick_save_path(NULL, NULL, buf, 0) != 0);
-    CHECK(iris_pick_save_path(NULL, NULL, NULL, sizeof buf) != 0);
-    CHECK(iris_pick_files(NULL, NULL, 0, NULL) != 0);
-    CHECK(iris_pick_files(NULL, buf, 0, NULL) != 0);
-    CHECK(iris_pick_files(NULL, NULL, sizeof buf, NULL) != 0);
+    OT_EXPECT(!iris_a11y_is_active());
+    OT_EXPECT(iris_pick_folder(NULL, NULL, 0) != 0);
+    OT_EXPECT(iris_pick_folder(NULL, buf, 0) != 0);
+    OT_EXPECT(iris_pick_folder(NULL, NULL, sizeof buf) != 0);
+    OT_EXPECT(iris_pick_save_path(NULL, NULL, NULL, 0) != 0);
+    OT_EXPECT(iris_pick_save_path(NULL, NULL, buf, 0) != 0);
+    OT_EXPECT(iris_pick_save_path(NULL, NULL, NULL, sizeof buf) != 0);
+    OT_EXPECT(iris_pick_files(NULL, NULL, 0, NULL) != 0);
+    OT_EXPECT(iris_pick_files(NULL, buf, 0, NULL) != 0);
+    OT_EXPECT(iris_pick_files(NULL, NULL, sizeof buf, NULL) != 0);
 
     /* Activation token creation outside a running app returns -1 (ADR-0099) */
     char tok_buf[64];
-    CHECK(iris_window_create_activation_token(NULL, NULL, 0) != 0);
-    CHECK(iris_window_create_activation_token(NULL, tok_buf, 0) != 0);
-    CHECK(iris_window_create_activation_token(NULL, NULL, sizeof tok_buf) != 0);
-    CHECK(iris_window_create_activation_token("org.example.App", tok_buf, sizeof tok_buf) != 0);
+    OT_EXPECT(iris_window_create_activation_token(NULL, NULL, 0) != 0);
+    OT_EXPECT(iris_window_create_activation_token(NULL, tok_buf, 0) != 0);
+    OT_EXPECT(iris_window_create_activation_token(NULL, NULL, sizeof tok_buf) != 0);
+    OT_EXPECT(iris_window_create_activation_token("org.example.App", tok_buf, sizeof tok_buf) != 0);
 
-    return TEST_REPORT();
+    return OT_REPORT();
 }

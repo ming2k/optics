@@ -120,7 +120,7 @@ class TestContractStaleness(Base):
         )
         violations = fixture.violations()
         self.assertViolation(violations, "'axis'")
-        self.assertViolation(violations, "fix listeners")
+        self.assertViolation(violations, "check_listeners.py --fix")
 
     def test_interface_absent_from_contract_is_reported(self):
         fixture = self.make(

@@ -1,6 +1,7 @@
 /* test_selectable.c — selectable row click + selected-state semantics. */
 
-#include "test_helpers.h"
+#include "lens_test.h"
+#include "optics_test.h"
 #include <flux/canvas_cpu.h>
 #include <lens/lens.h>
 
@@ -16,14 +17,14 @@ static void pixel(const uint8_t *fb, uint32_t stride, uint32_t x, uint32_t y, ui
 
 static void test_selectable_click(void) {
     lens *ui = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
 
     /* Frame 1: establish prev_rect */
     lens_begin(ui, &IN0);
     bool clicked =
         lens_selectable(ui, &(lens_selectable_opts){.label = "Note", .selected = false}).clicked;
-    test_end(ui);
-    CHECK(!clicked);
+    lens_test_end(ui);
+    OT_EXPECT(!clicked);
 
     /* Frame 2: press (no click yet) */
     lens_input in = IN0;
@@ -32,8 +33,8 @@ static void test_selectable_click(void) {
     lens_begin(ui, &in);
     clicked =
         lens_selectable(ui, &(lens_selectable_opts){.label = "Note", .selected = false}).clicked;
-    test_end(ui);
-    CHECK(!clicked);
+    lens_test_end(ui);
+    OT_EXPECT(!clicked);
 
     /* Frame 3: release inside -> click */
     in = IN0;
@@ -42,8 +43,8 @@ static void test_selectable_click(void) {
     lens_begin(ui, &in);
     clicked =
         lens_selectable(ui, &(lens_selectable_opts){.label = "Note", .selected = false}).clicked;
-    test_end(ui);
-    CHECK(clicked);
+    lens_test_end(ui);
+    OT_EXPECT(clicked);
 
     lens_release(ui);
 }
@@ -52,11 +53,11 @@ static void test_selectable_click(void) {
  * disabled selectable never reports a click. */
 static void test_selectable_selected_and_disabled(void) {
     lens *ui = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
 
     lens_begin(ui, &IN0);
     lens_selectable(ui, &(lens_selectable_opts){.label = "Note", .selected = true});
-    test_end(ui);
+    lens_test_end(ui);
 
     lens_input in = IN0;
     in.cursor = (flux_point){20, 12};
@@ -66,15 +67,15 @@ static void test_selectable_selected_and_disabled(void) {
                                                                .selected = true,
                                                                .box = {.disabled = true}})
                        .clicked;
-    test_end(ui);
-    CHECK(!clicked);
+    lens_test_end(ui);
+    OT_EXPECT(!clicked);
 
     lens_release(ui);
 }
 
 static void test_selected_surface_uses_theme(void) {
     lens *ui = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
     lens_theme theme = lens_theme_dark();
     theme.color_active = flux_color_rgba_premul(0, 255, 0, 255);
     theme.color_accent = flux_color_rgba_premul(255, 0, 0, 255);
@@ -85,24 +86,25 @@ static void test_selected_surface_uses_theme(void) {
     lens_begin(ui, &input);
     lens_size(ui, 100.0f, 40.0f);
     lens_selectable(ui, &(lens_selectable_opts){.label = "Selected", .selected = true});
-    test_end(ui);
+    lens_test_end(ui);
 
     flux_canvas *canvas = NULL;
-    CHECK(flux_canvas_create_cpu(100, 40, 1.0f, &canvas) == FLUX_OK);
+    OT_EXPECT(flux_canvas_create_cpu(100, 40, 1.0f, &canvas) == FLUX_OK);
     flux_color black = flux_color_rgba_premul(0, 0, 0, 255);
-    CHECK(flux_canvas_begin(canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
-                                                             .clear_color = &black}) == FLUX_OK);
-    CHECK(test_snapshot_render(ui, canvas) == FLUX_OK);
-    CHECK(flux_canvas_end(canvas) == FLUX_OK);
+    OT_EXPECT(flux_canvas_begin(canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                                 .clear_color = &black}) ==
+              FLUX_OK);
+    OT_EXPECT(lens_test_snapshot_render(ui, canvas) == FLUX_OK);
+    OT_EXPECT(flux_canvas_end(canvas) == FLUX_OK);
 
     uint32_t width = 0, height = 0, stride = 0;
     const uint8_t *fb = flux_canvas_cpu_pixels(canvas, &width, &height, &stride);
-    CHECK(fb != NULL && width == 100 && height == 40);
+    OT_EXPECT(fb != NULL && width == 100 && height == 40);
     uint8_t p[4];
     pixel(fb, stride, 1, 20, p);
-    CHECK(p[0] < 5 && p[1] > 250 && p[2] < 5); /* themed surface, no red rail */
+    OT_EXPECT(p[0] < 5 && p[1] > 250 && p[2] < 5); /* themed surface, no red rail */
     pixel(fb, stride, 1, 1, p);
-    CHECK(p[0] < 5 && p[1] < 5 && p[2] < 5); /* left corner remains rounded */
+    OT_EXPECT(p[0] < 5 && p[1] < 5 && p[2] < 5); /* left corner remains rounded */
 
     flux_canvas_release(canvas);
     lens_release(ui);
@@ -112,5 +114,5 @@ int main(void) {
     test_selectable_click();
     test_selectable_selected_and_disabled();
     test_selected_surface_uses_theme();
-    return TEST_REPORT();
+    return OT_REPORT();
 }

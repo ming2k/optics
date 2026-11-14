@@ -18,10 +18,10 @@ tests = ['test_version', 'test_app_api', 'test_uri', 'test_capability']
 
 foreach t : tests
   exe = executable(t, t + '.c',
-    dependencies        : [iris_dep, m_dep],
+    dependencies        : [iris_dep, m_dep, optics_test_dep],
     include_directories : iris_inc,
   )
-  test(t, exe)
+  test(t, exe, suite : 'unit')
 endforeach
 
 # test_a11y_util compiles a11y_util.c (+ its platform_text.c dependency)
@@ -30,17 +30,17 @@ endforeach
 exe_a11y = executable('test_a11y_util',
   ['test_a11y_util.c', '../../libs/iris/src/a11y_util.c', '../../libs/iris/src/platform_text.c'],
   include_directories : [iris_inc, src_inc],
-  dependencies        : [lens_dep, m_dep],
+  dependencies        : [lens_dep, m_dep, optics_test_dep],
 )
-test('test_a11y_util', exe_a11y)
+test('test_a11y_util', exe_a11y, suite : 'unit')
 
 # test_theme pins the Linux theme_linux.c GTK_THEME/gsettings branch; the
 # Cocoa and Win32 backends answer from the OS instead.
 if host_machine.system() == 'linux'
   exe_theme = executable('test_theme', 'test_theme.c',
-    dependencies : [iris_dep, m_dep],
+    dependencies : [iris_dep, m_dep, optics_test_dep],
   )
-  test('test_theme', exe_theme)
+  test('test_theme', exe_theme, suite : 'unit')
 endif
 
 # test_a11y_prefs: the public preference API against libiris (query always
@@ -49,18 +49,18 @@ endif
 exe_prefs = executable('test_a11y_prefs',
   'test_a11y_prefs.c',
   include_directories : [iris_inc, src_inc],
-  dependencies        : [iris_dep, lens_dep, m_dep],
+  dependencies        : [iris_dep, lens_dep, m_dep, optics_test_dep],
 )
-test('test_a11y_prefs', exe_prefs)
+test('test_a11y_prefs', exe_prefs, suite : 'unit')
 
 # test_platform_text also pins the lens_input buffer sizes the backends
 # stage into (text_utf8/preedit_utf8), so it needs the lens headers.
 exe_ptext = executable('test_platform_text',
   ['test_platform_text.c', '../../libs/iris/src/platform_text.c'],
   include_directories : [iris_inc, src_inc],
-  dependencies        : [lens_dep, m_dep],
+  dependencies        : [lens_dep, m_dep, optics_test_dep],
 )
-test('test_platform_text', exe_ptext)
+test('test_platform_text', exe_ptext, suite : 'unit')
 
 # test_platform_input pins the shared pointer-button mapping and the
 # scroll-channel classification policy (header-only, so nothing to compile
@@ -68,9 +68,9 @@ test('test_platform_text', exe_ptext)
 exe_pinput = executable('test_platform_input',
   ['test_platform_input.c'],
   include_directories : [iris_inc, src_inc],
-  dependencies        : [lens_dep, m_dep],
+  dependencies        : [lens_dep, m_dep, optics_test_dep],
 )
-test('test_platform_input', exe_pinput)
+test('test_platform_input', exe_pinput, suite : 'unit')
 
 # test_event pins the pre-fold event seam (ADR-0107): sequence stamping,
 # PASS/DROP dispositions, host rewrites, and the undroppable rule. event.c
@@ -78,9 +78,9 @@ test('test_platform_input', exe_pinput)
 exe_event = executable('test_event',
   ['test_event.c', '../../libs/iris/src/event.c'],
   include_directories : [iris_inc, src_inc],
-  dependencies        : [lens_dep, m_dep],
+  dependencies        : [lens_dep, m_dep, optics_test_dep],
 )
-test('test_event', exe_event)
+test('test_event', exe_event, suite : 'unit')
 
 # test_display_pacer pins the ADR-0122 cadence contract: display-driven
 # pacing, no client-hardcoded period, and the INV-PACE-03 no-spin guarantee
@@ -91,9 +91,9 @@ test('test_event', exe_event)
 exe_pacer = executable('test_display_pacer',
   ['test_display_pacer.c', '../../libs/iris/src/display_pacer.c'],
   include_directories : [iris_inc, src_inc],
-  dependencies        : [lens_dep, m_dep],
+  dependencies        : [lens_dep, m_dep, optics_test_dep],
 )
-test('test_display_pacer', exe_pacer)
+test('test_display_pacer', exe_pacer, suite : 'unit')
 
 # test_frame_mailbox pins the ADR-0124 lockless triple-buffered snapshot
 # handoff contract: wait-free atomic exchange, monotonic sequence ordering,
@@ -101,6 +101,6 @@ test('test_display_pacer', exe_pacer)
 exe_mailbox = executable('test_frame_mailbox',
   ['test_frame_mailbox.c', '../../libs/iris/src/frame_mailbox.c'],
   include_directories : [iris_inc, src_inc],
-  dependencies        : [lens_dep, m_dep],
+  dependencies        : [lens_dep, m_dep, optics_test_dep],
 )
-test('test_frame_mailbox', exe_mailbox)
+test('test_frame_mailbox', exe_mailbox, suite : 'unit')

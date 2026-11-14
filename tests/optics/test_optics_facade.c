@@ -10,9 +10,9 @@
  *   5. Pure C23 compiler conformance.
  */
 
-#include <assert.h>
+#include "optics_test.h"
+
 #include <optics/optics.h>
-#include <stdio.h>
 
 int main(void) {
     /* 1. Verify Umbrella Facade Version Macros & Lockstep Invariants */
@@ -53,19 +53,19 @@ int main(void) {
 
     /* 2. Verify Layer 0 (Flux) structures and versioning */
     flux_vec2 v = {.x = 10.0f, .y = 20.0f};
-    assert(v.x == 10.0f && v.y == 20.0f);
+    OT_EXPECT(v.x == 10.0f && v.y == 20.0f);
 
     flux_rect r = {.x = 0.0f, .y = 0.0f, .w = 1920.0f, .h = 1080.0f};
-    assert(r.w == 1920.0f && r.h == 1080.0f);
+    OT_EXPECT(r.w == 1920.0f && r.h == 1080.0f);
 
     /* 3. Verify Layer 2 (Transit) header-only motion vocabulary */
     transit_spring spring = {.value = 0.0f, .velocity = 0.0f};
     transit_spring_params params = {.stiffness = 180.0f, .damping = 12.0f};
     float next_val = transit_spring_advance(&spring, 1.0f, params, 0.016f, false);
-    assert(next_val > 0.0f && next_val <= 1.0f);
+    OT_EXPECT(next_val > 0.0f && next_val <= 1.0f);
 
     float eased = transit_ease_in_out_cubic(0.5f);
-    assert(eased == 0.5f);
+    OT_EXPECT(eased == 0.5f);
 
     /* 4. Verify Layer 3 (Lens & Iris) definitions and versions */
     static_assert(LENS_VERSION_MAJOR == 0, "Lens major version mismatch");
@@ -75,9 +75,9 @@ int main(void) {
     int iris_min = 0;
     int iris_pat = 0;
     iris_version(&iris_maj, &iris_min, &iris_pat);
-    assert(iris_maj == 0 && iris_min == 0 && iris_pat == 79);
+    OT_EXPECT(iris_maj == 0 && iris_min == 0 && iris_pat == 79);
 
     /* Diagnostic log must strictly go to stderr (Library Stdout Purity) */
     fprintf(stderr, "test_optics_facade: all umbrella facade checks passed.\n");
-    return 0;
+    return OT_REPORT();
 }

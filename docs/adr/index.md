@@ -195,3 +195,5 @@ silent fallback. Its primitives have landed.
 | 0159 | [Unified Cargo Workspace and Optics Facade Bindings](0159-unified-cargo-workspace-and-optics-facade-bindings.md) | Accepted |
 | 0160 | [Unified Optics C Facade and Umbrella Distribution](0160-unified-optics-c-facade-and-umbrella-distribution.md) | Accepted |
 | 0161 | [Reticle Vector Compiler and Vista Subsystem Boundary](0161-reticle-vector-compiler-and-vista-boundary.md) | Accepted |
+| 0162 | [Layered Test Architecture: One Harness, Three Layers, Public-API E2E](0162-layered-test-architecture-one-harness-three-layers-public-api-e2e.md) | Accepted |
+| 0163 | [Repository-Root Cargo Workspace and a Honest Git-Dependency Boundary](0163-repository-root-cargo-workspace.md) | Accepted |

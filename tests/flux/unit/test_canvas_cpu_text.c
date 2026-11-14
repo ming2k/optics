@@ -7,7 +7,7 @@
  * shaping backend is present the context falls back to measure-only and the
  * test skips (no ink drawn) rather than failing.
  */
-#include "test_helpers.h"
+#include "optics_test.h"
 #include <flux/canvas.h>
 #include <flux/canvas_cpu.h>
 #include <flux/math.h>
@@ -51,7 +51,7 @@ static bool render_size_probe(bool interleaved, uint8_t out[W * H * 4]) {
         return false;
     }
     glyph_draw(text, canvas, nullptr, 4.0f, 4.0f, "sf", 2, &small);
-    EXPECT(flux_canvas_end(canvas) == FLUX_OK);
+    OT_EXPECT(flux_canvas_end(canvas) == FLUX_OK);
 
     uint32_t w = 0, h = 0, stride = 0;
     const uint8_t *pixels = flux_canvas_cpu_pixels(canvas, &w, &h, &stride);
@@ -65,23 +65,25 @@ static bool render_size_probe(bool interleaved, uint8_t out[W * H * 4]) {
 
 int main(void) {
     glyph_ctx *t = nullptr;
-    EXPECT(glyph_create(&(glyph_desc){.device = nullptr, .scale = 1.0f}, &t) == FLUX_OK);
-    EXPECT(t != nullptr);
+    OT_EXPECT(glyph_create(&(glyph_desc){.device = nullptr, .scale = 1.0f}, &t) == FLUX_OK);
+    OT_EXPECT(t != nullptr);
 
     /* Gate on the backend being live: measure returns a width only when
      * FreeType/HarfBuzz are present. If not, skip (no ink to check). */
     glyph_metrics m = glyph_measure(t, "A", 1, nullptr);
-    if (m.width <= 0.0f)
-        TEST_SUMMARY();
+    if (m.width <= 0.0f) {
+        glyph_release(t);
+        OT_SKIP("no shaping backend");
+    }
 
     flux_canvas *c = nullptr;
-    EXPECT(flux_canvas_create_cpu(W, H, 1.0f, &c) == FLUX_OK);
-    EXPECT(c != nullptr);
+    OT_EXPECT(flux_canvas_create_cpu(W, H, 1.0f, &c) == FLUX_OK);
+    OT_EXPECT(c != nullptr);
 
     flux_color black = flux_color_rgba_premul(0, 0, 0, 255);
     flux_color white = flux_color_rgba_premul(255, 255, 255, 255);
-    EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
-                                                         .clear_color = &black}) == FLUX_OK);
+    OT_EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                            .clear_color = &black}) == FLUX_OK);
 
     glyph_style style = {0};
     style.size_px = 24.0f;
@@ -90,11 +92,11 @@ int main(void) {
     glyph_draw_outlined(t, c, nullptr, 72.0f, 8.0f, "Aa", 2, &style,
                         flux_color_rgba_premul(255, 0, 0, 255), 2.0f);
 
-    EXPECT(flux_canvas_end(c) == FLUX_OK);
+    OT_EXPECT(flux_canvas_end(c) == FLUX_OK);
 
     uint32_t w = 0, h = 0, stride = 0;
     const uint8_t *fb = flux_canvas_cpu_pixels(c, &w, &h, &stride);
-    EXPECT(fb != nullptr && w == W && h == H && stride == W * 4);
+    OT_EXPECT(fb != nullptr && w == W && h == H && stride == W * 4);
 
     /* Count lit (non-black) pixels in the band where the text should sit. */
     int lit = 0;
@@ -111,17 +113,17 @@ int main(void) {
     /* A 24px glyph should deposit well over a hundred lit pixels. The exact
      * count is font-dependent, so a loose floor is enough to prove the host
      * atlas path produced ink (vs. the old behaviour of zero). */
-    EXPECT(lit > 100);
+    OT_EXPECT(lit > 100);
     /* The outlined run must retain visible contour pixels after its opaque
      * white foreground is painted over the centre. */
-    EXPECT(outline > 20);
+    OT_EXPECT(outline > 20);
 
     uint8_t cold[W * H * 4], interleaved[W * H * 4];
-    EXPECT(render_size_probe(false, cold));
-    EXPECT(render_size_probe(true, interleaved));
-    EXPECT(memcmp(cold, interleaved, sizeof cold) == 0);
+    OT_EXPECT(render_size_probe(false, cold));
+    OT_EXPECT(render_size_probe(true, interleaved));
+    OT_EXPECT(memcmp(cold, interleaved, sizeof cold) == 0);
 
     flux_canvas_release(c);
     glyph_release(t);
-    TEST_SUMMARY();
+    return OT_REPORT();
 }

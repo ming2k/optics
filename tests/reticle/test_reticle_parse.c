@@ -6,7 +6,7 @@
  * facts: how big the art is, which shapes exist, what metadata came back, and
  * that a malformed document yields nothing rather than something half-built. */
 
-#include "test_helpers.h"
+#include "optics_test.h"
 
 #include <stdlib.h>
 
@@ -23,16 +23,16 @@ static reticle_document *parse(const char *text) {
 static void viewport_from_viewbox(void) {
     reticle_document *doc = parse("<svg viewBox=\"0 0 256 256\"><rect x=\"0\" y=\"0\" width=\"4\" "
                                   "height=\"4\"/></svg>");
-    CHECK(doc != nullptr);
+    OT_EXPECT(doc != nullptr);
     if (!doc) {
         return;
     }
     flux_rect viewport = reticle_viewport(doc);
-    CHECK_NEAR(viewport.x, 0.0f, 1e-6);
-    CHECK_NEAR(viewport.y, 0.0f, 1e-6);
-    CHECK_NEAR(viewport.w, 256.0f, 1e-6);
-    CHECK_NEAR(viewport.h, 256.0f, 1e-6);
-    CHECK(reticle_shape_count(doc) == 1);
+    OT_EXPECT_NEAR(viewport.x, 0.0f, 1e-6);
+    OT_EXPECT_NEAR(viewport.y, 0.0f, 1e-6);
+    OT_EXPECT_NEAR(viewport.w, 256.0f, 1e-6);
+    OT_EXPECT_NEAR(viewport.h, 256.0f, 1e-6);
+    OT_EXPECT(reticle_shape_count(doc) == 1);
     reticle_release(doc);
 }
 
@@ -40,13 +40,13 @@ static void viewport_from_width_height(void) {
     reticle_document *doc =
         parse("<svg width=\"48\" height=\"24\"><rect x=\"0\" y=\"0\" width=\"4\" "
               "height=\"4\"/></svg>");
-    CHECK(doc != nullptr);
+    OT_EXPECT(doc != nullptr);
     if (!doc) {
         return;
     }
     flux_rect viewport = reticle_viewport(doc);
-    CHECK_NEAR(viewport.w, 48.0f, 1e-6);
-    CHECK_NEAR(viewport.h, 24.0f, 1e-6);
+    OT_EXPECT_NEAR(viewport.w, 48.0f, 1e-6);
+    OT_EXPECT_NEAR(viewport.h, 24.0f, 1e-6);
     reticle_release(doc);
 }
 
@@ -54,15 +54,15 @@ static void viewport_falls_back_to_geometry(void) {
     /* Neither viewBox nor width/height: the union of the shapes, so a document
      * that only says "draw this path" still has a usable aspect ratio. */
     reticle_document *doc = parse("<svg><rect x=\"10\" y=\"20\" width=\"30\" height=\"5\"/></svg>");
-    CHECK(doc != nullptr);
+    OT_EXPECT(doc != nullptr);
     if (!doc) {
         return;
     }
     flux_rect viewport = reticle_viewport(doc);
-    CHECK_NEAR(viewport.x, 10.0f, 1e-4);
-    CHECK_NEAR(viewport.y, 20.0f, 1e-4);
-    CHECK_NEAR(viewport.w, 30.0f, 1e-4);
-    CHECK_NEAR(viewport.h, 5.0f, 1e-4);
+    OT_EXPECT_NEAR(viewport.x, 10.0f, 1e-4);
+    OT_EXPECT_NEAR(viewport.y, 20.0f, 1e-4);
+    OT_EXPECT_NEAR(viewport.w, 30.0f, 1e-4);
+    OT_EXPECT_NEAR(viewport.h, 5.0f, 1e-4);
     reticle_release(doc);
 }
 
@@ -73,8 +73,8 @@ static void empty_document_reports_a_usable_box(void) {
     if (!doc)
         return; /* refusing the document outright is also acceptable */
     flux_rect viewport = reticle_viewport(doc);
-    CHECK(viewport.w > 0.0f && viewport.h > 0.0f);
-    CHECK(reticle_shape_count(doc) == 0);
+    OT_EXPECT(viewport.w > 0.0f && viewport.h > 0.0f);
+    OT_EXPECT(reticle_shape_count(doc) == 0);
     reticle_release(doc);
 }
 
@@ -84,15 +84,15 @@ static void metadata_attributes_come_back(void) {
     reticle_document *doc = parse("<svg viewBox=\"0 0 256 256\" data-hotspot-x=\"64\" "
                                   "data-hotspot-y=\"28.5\">"
                                   "<path d=\"M0 0L10 0L10 10Z\"/></svg>");
-    CHECK(doc != nullptr);
+    OT_EXPECT(doc != nullptr);
     if (!doc) {
         return;
     }
-    CHECK_STR(reticle_attribute(doc, "data-hotspot-x"), "64");
-    CHECK_STR(reticle_attribute(doc, "data-hotspot-y"), "28.5");
-    CHECK(reticle_attribute(doc, "data-missing") == nullptr);
+    OT_EXPECT_STR_EQ(reticle_attribute(doc, "data-hotspot-x"), "64");
+    OT_EXPECT_STR_EQ(reticle_attribute(doc, "data-hotspot-y"), "28.5");
+    OT_EXPECT(reticle_attribute(doc, "data-missing") == nullptr);
     /* viewBox is geometry, not metadata; it is read through reticle_viewport. */
-    CHECK(reticle_attribute(doc, "viewBox") == nullptr);
+    OT_EXPECT(reticle_attribute(doc, "viewBox") == nullptr);
     reticle_release(doc);
 }
 
@@ -109,8 +109,8 @@ static void malformed_documents_yield_nothing(void) {
         reticle_document *doc = nullptr;
         flux_result result = reticle_parse(
             &(reticle_parse_opts){.length = RETICLE_LENGTH_MEASURE, .text = bad[i]}, &doc);
-        CHECK(result != FLUX_OK);
-        CHECK(doc == nullptr);
+        OT_EXPECT(result != FLUX_OK);
+        OT_EXPECT(doc == nullptr);
         if (doc)
             reticle_release(doc);
     }
@@ -119,18 +119,18 @@ static void malformed_documents_yield_nothing(void) {
 static void retention_outlives_the_caller(void) {
     reticle_document *doc =
         parse("<svg viewBox=\"0 0 8 8\"><rect width=\"4\" height=\"4\"/></svg>");
-    CHECK(doc != nullptr);
+    OT_EXPECT(doc != nullptr);
     if (!doc) {
         return;
     }
     reticle_document *second = reticle_retain(doc);
-    CHECK(second == doc);
+    OT_EXPECT(second == doc);
     reticle_document *third = reticle_retain(second);
-    CHECK(third == doc);
+    OT_EXPECT(third == doc);
     /* Releasing three of four references must not free; the last one does. */
     reticle_release(third);
     reticle_release(second);
-    CHECK(reticle_shape_count(doc) == 1);
+    OT_EXPECT(reticle_shape_count(doc) == 1);
     reticle_release(doc);
     /* reticle_release(NULL) is a documented no-op. */
     reticle_release(nullptr);
@@ -143,12 +143,12 @@ static void explicit_length_is_honoured(void) {
     reticle_document *doc = nullptr;
     flux_result result =
         reticle_parse(&(reticle_parse_opts){.text = source, .length = strlen(source) - 4}, &doc);
-    CHECK(result == FLUX_OK);
-    CHECK(doc != nullptr);
+    OT_EXPECT(result == FLUX_OK);
+    OT_EXPECT(doc != nullptr);
     if (!doc) {
         return;
     }
-    CHECK(reticle_shape_count(doc) == 1);
+    OT_EXPECT(reticle_shape_count(doc) == 1);
     reticle_release(doc);
 }
 
@@ -159,11 +159,11 @@ static void comments_and_processing_instructions_are_skipped(void) {
                                   "<!-- inside -->"
                                   "<rect width=\"4\" height=\"4\"/>"
                                   "</svg>");
-    CHECK(doc != nullptr);
+    OT_EXPECT(doc != nullptr);
     if (!doc) {
         return;
     }
-    CHECK(reticle_shape_count(doc) == 1);
+    OT_EXPECT(reticle_shape_count(doc) == 1);
     reticle_release(doc);
 }
 
@@ -175,11 +175,11 @@ static void unknown_elements_do_not_break_a_document(void) {
                                   "<rect width=\"4\" height=\"4\"/>"
                                   "<fancy-editor-thing data-x=\"1\"><nested/></fancy-editor-thing>"
                                   "</svg>");
-    CHECK(doc != nullptr);
+    OT_EXPECT(doc != nullptr);
     if (!doc) {
         return;
     }
-    CHECK(reticle_shape_count(doc) == 1);
+    OT_EXPECT(reticle_shape_count(doc) == 1);
     reticle_release(doc);
 }
 
@@ -193,15 +193,15 @@ static void opaque_container_groups_do_not_unbalance_the_style_stack(void) {
                                   "<defs><g></g></defs>"
                                   "<rect width=\"5\" height=\"5\"/>"
                                   "</svg>");
-    CHECK(doc != nullptr);
+    OT_EXPECT(doc != nullptr);
     if (!doc) {
         return;
     }
-    CHECK(reticle_shape_count(doc) == 1);
+    OT_EXPECT(reticle_shape_count(doc) == 1);
     reticle_shape_view shape = {};
-    CHECK(reticle_shape_at(doc, 0, &shape) == FLUX_OK);
-    CHECK(shape.fill.kind == RETICLE_PAINT_SOLID);
-    CHECK((shape.fill.color & 0x00FFFFFFu) == 0x00FF0000u); /* still the root's red */
+    OT_EXPECT(reticle_shape_at(doc, 0, &shape) == FLUX_OK);
+    OT_EXPECT(shape.fill.kind == RETICLE_PAINT_SOLID);
+    OT_EXPECT((shape.fill.color & 0x00FFFFFFu) == 0x00FF0000u); /* still the root's red */
     reticle_release(doc);
 
     /* The same for the other opaque containers that a real icon set nests. */
@@ -225,14 +225,14 @@ static void opaque_container_groups_do_not_unbalance_the_style_stack(void) {
                  "<rect width=\"5\" height=\"5\"/></svg>",
                  containers[i]);
         reticle_document *inner = parse(src);
-        CHECK(inner != nullptr);
+        OT_EXPECT(inner != nullptr);
         if (!inner) {
             continue;
         }
-        CHECK(reticle_shape_count(inner) == 1);
+        OT_EXPECT(reticle_shape_count(inner) == 1);
         reticle_shape_view view = {};
-        CHECK(reticle_shape_at(inner, 0, &view) == FLUX_OK);
-        CHECK((view.fill.color & 0x00FFFFFFu) == 0x00FF0000u);
+        OT_EXPECT(reticle_shape_at(inner, 0, &view) == FLUX_OK);
+        OT_EXPECT((view.fill.color & 0x00FFFFFFu) == 0x00FF0000u);
         reticle_release(inner);
     }
 }
@@ -242,16 +242,16 @@ static void unmatched_close_tags_are_not_a_document(void) {
      * reported success with the document's inherited style destroyed. Broken
      * nesting cannot be rendered faithfully, and "never a partial document" is
      * the contract — so this must fail, not degrade. */
-    CHECK(parse("<svg viewBox=\"0 0 10 10\"></g><rect width=\"5\" height=\"5\"/></svg>") ==
-          nullptr);
+    OT_EXPECT(parse("<svg viewBox=\"0 0 10 10\"></g><rect width=\"5\" height=\"5\"/></svg>") ==
+              nullptr);
     /* The same underflow reached through a self-closing group. */
-    CHECK(parse("<svg viewBox=\"0 0 10 10\"><g/></g><rect width=\"5\" height=\"5\"/></svg>") ==
-          nullptr);
+    OT_EXPECT(parse("<svg viewBox=\"0 0 10 10\"><g/></g><rect width=\"5\" height=\"5\"/></svg>") ==
+              nullptr);
     /* A well-formed document is still accepted. */
     reticle_document *ok =
         parse("<svg viewBox=\"0 0 10 10\"><g></g><rect width=\"5\" height=\"5\"/>"
               "</svg>");
-    CHECK(ok != nullptr);
+    OT_EXPECT(ok != nullptr);
     reticle_release(ok);
 }
 
@@ -276,25 +276,25 @@ static char *span_dup(const char *src, size_t len) {
 
 static bool parse_refuses(const char *src, size_t len) {
     char *buf = span_dup(src, len);
-    CHECK(buf != nullptr);
+    OT_EXPECT(buf != nullptr);
     if (!buf)
         return false;
     reticle_document *doc = nullptr;
     flux_result r = reticle_parse(&(reticle_parse_opts){.text = buf, .length = len}, &doc);
     free(buf);
-    CHECK(doc == nullptr);
+    OT_EXPECT(doc == nullptr);
     return r == FLUX_ERROR_INVALID_ARGUMENT;
 }
 
 static void unterminated_containers_are_refused(void) {
     static const char CDATA[] = "<![CDATA[<svg viewBox=\"0 0 8 8\">";
-    CHECK(parse_refuses(CDATA, sizeof CDATA - 1));
+    OT_EXPECT(parse_refuses(CDATA, sizeof CDATA - 1));
 
     static const char COMMENT[] = "<svg viewBox=\"0 0 8 8\"><!-- unterminated";
-    CHECK(parse_refuses(COMMENT, sizeof COMMENT - 1));
+    OT_EXPECT(parse_refuses(COMMENT, sizeof COMMENT - 1));
 
     static const char PI[] = "<svg viewBox=\"0 0 8 8\"><?xml unterminated";
-    CHECK(parse_refuses(PI, sizeof PI - 1));
+    OT_EXPECT(parse_refuses(PI, sizeof PI - 1));
 
     /* A well-formed container inside an exactly-sized, unterminated span must
      * still be accepted: bounding the search must not turn a valid document
@@ -302,13 +302,13 @@ static void unterminated_containers_are_refused(void) {
     static const char TIGHT[] =
         "<svg viewBox=\"0 0 8 8\"><!--x--><![CDATA[y]]><rect width=\"8\" height=\"8\"/></svg>";
     char *buf = span_dup(TIGHT, sizeof TIGHT - 1);
-    CHECK(buf != nullptr);
+    OT_EXPECT(buf != nullptr);
     if (buf) {
         reticle_document *doc = nullptr;
-        CHECK(reticle_parse(&(reticle_parse_opts){.text = buf, .length = sizeof TIGHT - 1}, &doc) ==
-              FLUX_OK);
+        OT_EXPECT(reticle_parse(&(reticle_parse_opts){.text = buf, .length = sizeof TIGHT - 1},
+                                &doc) == FLUX_OK);
         free(buf);
-        CHECK(doc != nullptr);
+        OT_EXPECT(doc != nullptr);
         if (doc)
             reticle_release(doc);
     }
@@ -328,5 +328,5 @@ int main(void) {
     opaque_container_groups_do_not_unbalance_the_style_stack();
     unmatched_close_tags_are_not_a_document();
     unterminated_containers_are_refused();
-    TEST_REPORT();
+    return OT_REPORT();
 }

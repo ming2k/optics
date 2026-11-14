@@ -4,7 +4,8 @@
  * Assert that per-tile winding computed via two-level prefix sum matches
  * flux_curve_cover_winding on all interior and exterior non-boundary tiles.
  */
-#include "test_helpers.h"
+#include "flux_test.h"
+#include "optics_test.h"
 
 #include "../../../libs/flux/src/canvas/canvas_tile.h"
 #include <flux/curve.h>
@@ -32,7 +33,7 @@ static void verify_backdrop_gate(const flux_curve_seg *curve_segs, uint32_t n_cu
 
     flux_tile_desc *tiles = calloc(total_tiles, sizeof(flux_tile_desc));
     uint32_t *indices = malloc(MAX_INDICES * sizeof(uint32_t));
-    EXPECT(tiles && indices);
+    OT_EXPECT(tiles && indices);
     if (!tiles || !indices) {
         free(tiles);
         free(indices);
@@ -40,9 +41,9 @@ static void verify_backdrop_gate(const flux_curve_seg *curve_segs, uint32_t n_cu
     }
 
     uint32_t total_indices = 0;
-    EXPECT(canvas_tile_bin_segments(segs, n_segs, W, H, tiles, indices, MAX_INDICES,
-                                    &total_indices) == FLUX_OK);
-    EXPECT(canvas_tile_compute_backdrop(segs, n_segs, W, H, tiles) == FLUX_OK);
+    OT_EXPECT(canvas_tile_bin_segments(segs, n_segs, W, H, tiles, indices, MAX_INDICES,
+                                       &total_indices) == FLUX_OK);
+    OT_EXPECT(canvas_tile_compute_backdrop(segs, n_segs, W, H, tiles) == FLUX_OK);
 
     /* Gate B3: per-tile winding matches flux_curve_cover_winding */
     uint32_t checked_tiles = 0;
@@ -55,12 +56,12 @@ static void verify_backdrop_gate(const flux_curve_seg *curve_segs, uint32_t n_cu
             /* Interior solid or exterior empty tiles have no intersecting segments */
             if (tiles[tidx].segment_count == 0) {
                 int32_t ref_w = flux_curve_cover_winding(cover, cx, cy);
-                EXPECT(tiles[tidx].backdrop_winding == ref_w);
+                OT_EXPECT(tiles[tidx].backdrop_winding == ref_w);
                 checked_tiles++;
             }
         }
     }
-    EXPECT(checked_tiles > 0);
+    OT_EXPECT(checked_tiles > 0);
 
     free(tiles);
     free(indices);
@@ -149,5 +150,5 @@ int main(void) {
         verify_backdrop_gate(c_segs, N, t_segs, N);
     }
 
-    TEST_SUMMARY();
+    return OT_REPORT();
 }

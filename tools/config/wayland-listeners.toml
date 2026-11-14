@@ -11,7 +11,7 @@
 # the version this tree binds: a slot left NULL passes today and aborts the
 # process the moment a bind version rises.
 #
-# Regenerate with:  ./tools/gate fix listeners
+# Regenerate with:  python3 tools/check_listeners.py --fix
 # Review the diff. A new event here means a new slot is required in the C
 # table — libwayland abort()s on an unimplemented event.
 

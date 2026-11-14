@@ -12,7 +12,8 @@
  * steady state identical to before the burst. Skips if no Vulkan
  * device.
  */
-#include "test_helpers.h"
+#include "flux_test.h"
+#include "optics_test.h"
 #include <flux/flux.h>
 #include <flux/vulkan.h>
 
@@ -36,10 +37,10 @@ static flux_image *make_image(flux_device *d) {
 }
 
 int main(void) {
-    flux_device *d = test_helpers_make_headless_device();
+    flux_device *d = flux_test_make_headless_device();
     if (!d) {
         fprintf(stderr, "test_retire_backpressure: no Vulkan device; skipping\n");
-        TEST_SUMMARY();
+        OT_SKIP("no Vulkan device");
     }
 
     /* Warm up allocator bookkeeping before taking the two steady-state
@@ -48,7 +49,7 @@ int main(void) {
      * this test exists to exercise. */
     for (uint32_t i = 0; i < 16; ++i) {
         flux_image *img = make_image(d);
-        EXPECT(img != nullptr);
+        OT_EXPECT(img != nullptr);
         flux_image_release(img);
     }
     flux_device_wait_idle(d);
@@ -58,7 +59,7 @@ int main(void) {
      * only stay bounded through the forced-drain backpressure. */
     for (uint32_t i = 0; i < BURST; ++i) {
         flux_image *img = make_image(d);
-        EXPECT(img != nullptr);
+        OT_EXPECT(img != nullptr);
         flux_image_release(img);
     }
     flux_device_wait_idle(d);
@@ -71,26 +72,26 @@ int main(void) {
      * end on the same live set (steady caches only). */
     for (uint32_t i = 0; i < BURST; ++i) {
         flux_image *img = make_image(d);
-        EXPECT(img != nullptr);
+        OT_EXPECT(img != nullptr);
         flux_image_release(img);
     }
     flux_device_wait_idle(d);
     flux_memory_stats b;
     flux_device_memory_stats(d, &b);
 
-    EXPECT(b.live_allocations == a.live_allocations);
-    EXPECT(b.bytes_in_use == a.bytes_in_use);
+    OT_EXPECT(b.live_allocations == a.live_allocations);
+    OT_EXPECT(b.bytes_in_use == a.bytes_in_use);
     /* And the steady state is small: device caches only, not thousands
      * of pinned zombie images (8x8 RGBA8 ≈ 256 B each; even all 64 MiB
      * of staging cache would be far below this bound in count terms). */
-    EXPECT(b.live_allocations < 256);
+    OT_EXPECT(b.live_allocations < 256);
 
     /* The device must still be fully usable afterwards. */
     flux_image *alive = make_image(d);
-    EXPECT(alive != nullptr);
-    EXPECT(flux_image_device(alive) == d);
+    OT_EXPECT(alive != nullptr);
+    OT_EXPECT(flux_image_device(alive) == d);
     flux_image_release(alive);
 
     flux_device_release(d);
-    TEST_SUMMARY();
+    return OT_REPORT();
 }

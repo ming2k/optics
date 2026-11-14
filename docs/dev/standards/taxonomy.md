@@ -50,23 +50,21 @@ Documentation is structured into two distinct surfaces separated by a one-way vi
 
 1. **User Surface**: Addressed to application developers and library consumers. Emphasizes API usage, rendering examples, and high-level principles.
 2. **Engineering Surface**: Addressed to engine contributors, maintainers, and development agents. Emphasizes internal subsystem blueprints, standards, and verification runbooks.
-3. **Audience Firewall (`[INV-DOC-FIREWALL]`)**:
+3. **Audience Boundary**:
    - Public documentation surfaces (`docs/{tutorials,how-to,reference,explanation}/`) **must never contain relative links pointing into the internal maintainer space (`docs/dev/**`)**.
    - Links into `docs/adr/` remain permitted: a public reader may follow an architectural decision record, but not an internal contributor checklist or runbook.
 4. **Reverse Linking Permitted**: Internal developer documents may freely link outward to public reference and how-to guides.
 
-Enforcement is mechanical via `tools/gate check docs` (`tools/guardrails/doc_links.py`).
+Enforcement is mechanical via `tools/check_doc_links.py`
+(`meson test --suite lint`), which rejects missing relative targets and
+public-to-`docs/dev/` links.
 
 ---
 
-## 3. Repository Root Whitelist (`[INV-DOC-ROOT]`)
+## 3. Repository Root Surface
 
-To keep the repository root clean, professional, and clutter-free, only canonical top-level files are permitted at the root:
-- `README.md`
-- `CHANGELOG.md`
-- `CONTRIBUTING.md`
-- `AGENTS.md`
-- `LICENSE`
-- `SECURITY.md`
-
-All other documentation must reside within organized directories under `docs/`.
+The repository root is reserved for build entry points and canonical project
+documents: `meson.build`, `meson_options.txt`, `Cargo.toml`, `Cargo.lock`,
+`README.md`, `CHANGELOG.md`, `AGENTS.md`, and `LICENSE`.
+Contributor procedures and other documentation belong under `docs/`. Scratch
+files belong in a build directory or `/tmp`, never in the tracked tree.

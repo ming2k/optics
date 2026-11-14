@@ -2,7 +2,7 @@
  * Unit tests for profiler telemetry facade (ADR-0138).
  */
 
-#include "test_helpers.h"
+#include "optics_test.h"
 #include <flux/flux.h>
 #include <flux/profile.h>
 #include <stdlib.h>
@@ -13,10 +13,10 @@ int main(void) {
     {
         flux_profile_status st = flux_profile_query(nullptr);
 #if defined(OPTICS_PROFILER_TRACY)
-        EXPECT(st.enabled == true);
+        OT_EXPECT(st.enabled == true);
 #else
-        EXPECT(st.enabled == false);
-        EXPECT(st.connected == false);
+        OT_EXPECT(st.enabled == false);
+        OT_EXPECT(st.connected == false);
 #endif
 
         flux_profile_opts opts = {
@@ -24,10 +24,10 @@ int main(void) {
         };
         flux_profile_status st2 = flux_profile_query(&opts);
 #if defined(OPTICS_PROFILER_TRACY)
-        EXPECT(st2.enabled == true);
+        OT_EXPECT(st2.enabled == true);
 #else
-        EXPECT(st2.enabled == false);
-        EXPECT(st2.connected == false);
+        OT_EXPECT(st2.enabled == false);
+        OT_EXPECT(st2.connected == false);
 #endif
     }
 

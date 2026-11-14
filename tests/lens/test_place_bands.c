@@ -3,7 +3,8 @@
  * above, intra-band by registration), EXACT placement as the persistent
  * chrome mode, and BACKDROP's default hit-transparency. */
 
-#include "test_helpers.h"
+#include "lens_test.h"
+#include "optics_test.h"
 #include <flux/canvas_cpu.h>
 #include <lens/lens.h>
 
@@ -28,7 +29,7 @@ static lens_place_opts exact_at(flux_rect rect, lens_band band, flux_color bg) {
 /* The body always runs — non-transient nodes have no open state. */
 static void test_exact_always_entered(void) {
     lens *ui = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
 
     int body_runs = 0;
     for (int frame = 0; frame < 2; frame++) {
@@ -39,9 +40,9 @@ static void test_exact_always_entered(void) {
             lens_label(ui, &(lens_label_opts){.text = "tile"});
             lens_place_end(ui);
         }
-        test_end(ui);
+        lens_test_end(ui);
     }
-    CHECK(body_runs == 2);
+    OT_EXPECT(body_runs == 2);
 
     lens_release(ui);
 }
@@ -49,7 +50,7 @@ static void test_exact_always_entered(void) {
 /* Placement is exactly at the rect's top-left — no below-anchor drop. */
 static void test_exact_place_at_rect(void) {
     lens *ui = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
 
     lens_place_opts o = exact_at((flux_rect){40, 50, 120, 24}, LENS_BAND_CHROME, 0);
     o.layout.pad = 4.0f;
@@ -65,15 +66,15 @@ static void test_exact_place_at_rect(void) {
             label_rect = lens_get_response(ui).rect;
             lens_place_end(ui);
         }
-        test_end(ui);
+        lens_test_end(ui);
     }
 
     /* The label sits inside the panel, padded by 4 — so it must be at
      * or below y == 50 (the rect's top). The ANCHORED mode would have
      * dropped it to y >= 74 (50 + 24); EXACT keeps it at 50+pad. */
-    CHECK(label_rect.y >= 50.0f);
-    CHECK(label_rect.y < 74.0f);
-    CHECK(label_rect.x >= 40.0f);
+    OT_EXPECT(label_rect.y >= 50.0f);
+    OT_EXPECT(label_rect.y < 74.0f);
+    OT_EXPECT(label_rect.x >= 40.0f);
 
     lens_release(ui);
 }
@@ -84,35 +85,36 @@ static void test_exact_place_at_rect(void) {
  * stable id. */
 static void test_rect_extent_tracks_updates(void) {
     lens *ui = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
 
     lens_begin(ui, &ZERO_IN);
     lens_id id = lens_current_id(ui, "selection");
-    CHECK(place_begin(ui, "selection", exact_at((flux_rect){20, 30, 40, 50}, LENS_BAND_CHROME, 0)));
+    OT_EXPECT(
+        place_begin(ui, "selection", exact_at((flux_rect){20, 30, 40, 50}, LENS_BAND_CHROME, 0)));
     lens_place_end(ui);
-    test_end(ui);
+    lens_test_end(ui);
 
     lens_node *node = lens_find(ui, id);
-    CHECK(node != NULL);
+    OT_EXPECT(node != NULL);
     flux_rect bounds = lens_node_bounds(node);
-    CHECK_NEAR(bounds.x, 20.0f, 0.001f);
-    CHECK_NEAR(bounds.y, 30.0f, 0.001f);
-    CHECK_NEAR(bounds.w, 40.0f, 0.001f);
-    CHECK_NEAR(bounds.h, 50.0f, 0.001f);
+    OT_EXPECT_NEAR(bounds.x, 20.0f, 0.001f);
+    OT_EXPECT_NEAR(bounds.y, 30.0f, 0.001f);
+    OT_EXPECT_NEAR(bounds.w, 40.0f, 0.001f);
+    OT_EXPECT_NEAR(bounds.h, 50.0f, 0.001f);
 
     lens_begin(ui, &ZERO_IN);
-    CHECK(
+    OT_EXPECT(
         place_begin(ui, "selection", exact_at((flux_rect){80, 60, 120, 90}, LENS_BAND_CHROME, 0)));
     lens_place_end(ui);
-    test_end(ui);
+    lens_test_end(ui);
 
     node = lens_find(ui, id);
-    CHECK(node != NULL);
+    OT_EXPECT(node != NULL);
     bounds = lens_node_bounds(node);
-    CHECK_NEAR(bounds.x, 80.0f, 0.001f);
-    CHECK_NEAR(bounds.y, 60.0f, 0.001f);
-    CHECK_NEAR(bounds.w, 120.0f, 0.001f);
-    CHECK_NEAR(bounds.h, 90.0f, 0.001f);
+    OT_EXPECT_NEAR(bounds.x, 80.0f, 0.001f);
+    OT_EXPECT_NEAR(bounds.y, 60.0f, 0.001f);
+    OT_EXPECT_NEAR(bounds.w, 120.0f, 0.001f);
+    OT_EXPECT_NEAR(bounds.h, 90.0f, 0.001f);
 
     lens_release(ui);
 }
@@ -121,14 +123,14 @@ static void test_rect_extent_tracks_updates(void) {
  * no open state to lose. */
 static void test_persistent_not_dismissed(void) {
     lens *ui = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
 
     lens_begin(ui, &ZERO_IN);
     if (place_begin(ui, "wsbar", exact_at((flux_rect){0, 0, 400, 28}, LENS_BAND_CHROME, 0))) {
         lens_label(ui, &(lens_label_opts){.text = "ws1"});
         lens_place_end(ui);
     }
-    test_end(ui);
+    lens_test_end(ui);
 
     lens_input in_esc = ZERO_IN;
     in_esc.key_count = 1;
@@ -140,8 +142,8 @@ static void test_persistent_not_dismissed(void) {
         lens_label(ui, &(lens_label_opts){.text = "ws1"});
         lens_place_end(ui);
     }
-    test_end(ui);
-    CHECK(runs_after_esc == 1); /* Escape did not dismiss it */
+    lens_test_end(ui);
+    OT_EXPECT(runs_after_esc == 1); /* Escape did not dismiss it */
 
     lens_input in_click = ZERO_IN;
     in_click.cursor = (flux_point){200, 200}; /* outside the 0..400,0..28 bar */
@@ -154,8 +156,8 @@ static void test_persistent_not_dismissed(void) {
         lens_label(ui, &(lens_label_opts){.text = "ws1"});
         lens_place_end(ui);
     }
-    test_end(ui);
-    CHECK(runs_after_click == 1); /* click-outside did not dismiss either */
+    lens_test_end(ui);
+    OT_EXPECT(runs_after_click == 1); /* click-outside did not dismiss either */
 
     lens_release(ui);
 }
@@ -166,7 +168,7 @@ static void test_persistent_not_dismissed(void) {
  * not fall through to the window behind it. */
 static void test_chrome_occludes_base(void) {
     lens *ui = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
 
     lens_place_opts cover = exact_at((flux_rect){0, 0, 200, 200}, LENS_BAND_CHROME, 0xff000000u);
     cover.layout.pad = 8.0f;
@@ -179,7 +181,7 @@ static void test_chrome_occludes_base(void) {
         (void)lens_button(ui, &(lens_button_opts){.label = "Top"}).clicked;
         lens_place_end(ui);
     }
-    test_end(ui);
+    lens_test_end(ui);
 
     /* Frame 2: settled geometry. Press inside the chrome area; the base
      * button must NOT report a click. */
@@ -193,8 +195,8 @@ static void test_chrome_occludes_base(void) {
         (void)lens_button(ui, &(lens_button_opts){.label = "Top"}).clicked;
         lens_place_end(ui);
     }
-    test_end(ui);
-    CHECK(base_clicked == false);
+    lens_test_end(ui);
+    OT_EXPECT(base_clicked == false);
 
     lens_release(ui);
 }
@@ -203,7 +205,7 @@ static void test_chrome_occludes_base(void) {
  * node on top of it. */
 static void test_popup_occludes_chrome_contents(void) {
     lens *ui = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
 
     lens_place_opts chrome = exact_at((flux_rect){0, 0, 200, 200}, LENS_BAND_CHROME, 0);
     chrome.layout.pad = 8.0f;
@@ -219,7 +221,7 @@ static void test_popup_occludes_chrome_contents(void) {
         lens_label(ui, &(lens_label_opts){.text = "shade"});
         lens_place_end(ui);
     }
-    test_end(ui);
+    lens_test_end(ui);
 
     /* Frame 2: press over the shared area; the chrome button loses. */
     lens_input in = ZERO_IN;
@@ -236,8 +238,8 @@ static void test_popup_occludes_chrome_contents(void) {
         lens_label(ui, &(lens_label_opts){.text = "shade"});
         lens_place_end(ui);
     }
-    test_end(ui);
-    CHECK(dock_clicked == false);
+    lens_test_end(ui);
+    OT_EXPECT(dock_clicked == false);
 
     lens_release(ui);
 }
@@ -247,7 +249,7 @@ static void test_popup_occludes_chrome_contents(void) {
  * (non-interactive) backdrop gets no hits at all. */
 static void test_backdrop_hit_transparent(void) {
     lens *ui = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
 
     lens_place_opts bd = exact_at((flux_rect){0, 0, 400, 300}, LENS_BAND_BACKDROP, 0);
 
@@ -259,7 +261,7 @@ static void test_backdrop_hit_transparent(void) {
         (void)lens_button(ui, &(lens_button_opts){.label = "Ghost"}).clicked;
         lens_place_end(ui);
     }
-    test_end(ui);
+    lens_test_end(ui);
 
     /* Frame 2/3: press then release over both. The base button (above the
      * backdrop in paint order) still clicks; the backdrop's own button is
@@ -274,7 +276,7 @@ static void test_backdrop_hit_transparent(void) {
         (void)lens_button(ui, &(lens_button_opts){.label = "Ghost"}).clicked;
         lens_place_end(ui);
     }
-    test_end(ui);
+    lens_test_end(ui);
 
     in.mouse_pressed[LENS_MOUSE_LEFT] = false;
     in.mouse_down[LENS_MOUSE_LEFT] = false;
@@ -286,9 +288,9 @@ static void test_backdrop_hit_transparent(void) {
         ghost_clicked = lens_button(ui, &(lens_button_opts){.label = "Ghost"}).clicked;
         lens_place_end(ui);
     }
-    test_end(ui);
-    CHECK(base_clicked == true);   /* BACKDROP does not occlude the base tree */
-    CHECK(ghost_clicked == false); /* default BACKDROP swallows no hits */
+    lens_test_end(ui);
+    OT_EXPECT(base_clicked == true);   /* BACKDROP does not occlude the base tree */
+    OT_EXPECT(ghost_clicked == false); /* default BACKDROP swallows no hits */
 
     lens_release(ui);
 }
@@ -296,7 +298,7 @@ static void test_backdrop_hit_transparent(void) {
 /* The opt-in flag makes a BACKDROP subtree hit-testable. */
 static void test_backdrop_interactive_opt_in(void) {
     lens *ui = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
 
     lens_place_opts bd = exact_at((flux_rect){0, 0, 400, 300}, LENS_BAND_BACKDROP, 0);
     bd.interactive = true;
@@ -306,7 +308,7 @@ static void test_backdrop_interactive_opt_in(void) {
         (void)lens_button(ui, &(lens_button_opts){.label = "Deco"}).clicked;
         lens_place_end(ui);
     }
-    test_end(ui);
+    lens_test_end(ui);
 
     lens_input in = ZERO_IN;
     in.cursor = (flux_point){30, 20};
@@ -317,7 +319,7 @@ static void test_backdrop_interactive_opt_in(void) {
         (void)lens_button(ui, &(lens_button_opts){.label = "Deco"}).clicked;
         lens_place_end(ui);
     }
-    test_end(ui);
+    lens_test_end(ui);
 
     in.mouse_pressed[LENS_MOUSE_LEFT] = false;
     in.mouse_down[LENS_MOUSE_LEFT] = false;
@@ -328,8 +330,8 @@ static void test_backdrop_interactive_opt_in(void) {
         clicked = lens_button(ui, &(lens_button_opts){.label = "Deco"}).clicked;
         lens_place_end(ui);
     }
-    test_end(ui);
-    CHECK(clicked == true);
+    lens_test_end(ui);
+    OT_EXPECT(clicked == true);
 
     lens_release(ui);
 }
@@ -349,10 +351,11 @@ static uint8_t sample(flux_canvas *canvas, uint32_t x, uint32_t y) {
 
 static void render(lens *ui, flux_canvas *canvas) {
     flux_color clear = flux_color_rgba_premul(0, 0, 0, 255);
-    CHECK(flux_canvas_begin(canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
-                                                             .clear_color = &clear}) == FLUX_OK);
-    CHECK(test_snapshot_render(ui, canvas) == FLUX_OK);
-    CHECK(flux_canvas_end(canvas) == FLUX_OK);
+    OT_EXPECT(flux_canvas_begin(canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                                 .clear_color = &clear}) ==
+              FLUX_OK);
+    OT_EXPECT(lens_test_snapshot_render(ui, canvas) == FLUX_OK);
+    OT_EXPECT(flux_canvas_end(canvas) == FLUX_OK);
 }
 
 /* Emission order: BACKDROP under the base tree under CHROME under POPUP
@@ -360,8 +363,8 @@ static void render(lens *ui, flux_canvas *canvas) {
 static void test_band_render_order(void) {
     lens *ui = NULL;
     flux_canvas *canvas = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
-    CHECK(flux_canvas_create_cpu(400, 300, 1.0f, &canvas) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    OT_EXPECT(flux_canvas_create_cpu(400, 300, 1.0f, &canvas) == FLUX_OK);
 
     const flux_color RED = 0xFFFF0000u;
     const flux_color GREEN = 0xFF00FF00u;
@@ -386,16 +389,16 @@ static void test_band_render_order(void) {
         lens_place_end(ui);
     if (place_begin(ui, "tm", exact_at(R, LENS_BAND_TOOLTIP, MAGENTA)))
         lens_place_end(ui);
-    test_end(ui);
+    lens_test_end(ui);
     render(ui, canvas);
-    CHECK(sample(canvas, 50, 50) == 255); /* magenta has R=255... */
+    OT_EXPECT(sample(canvas, 50, 50) == 255); /* magenta has R=255... */
 
     /* ...but so do red and yellow; sample the blue channel instead:
      * magenta B=255, red B=0, yellow B=0, green B=0, blue B=255 — blue
      * and magenta tie on B, so use green: magenta G=0, yellow G=255,
      * green G=255, red G=0, blue G=0. Sample G: TOPMOST magenta → 0. */
     g_px_channel = 1;
-    CHECK(sample(canvas, 50, 50) == 0); /* magenta: TOPMOST beat POPUP yellow */
+    OT_EXPECT(sample(canvas, 50, 50) == 0); /* magenta: TOPMOST beat POPUP yellow */
 
     /* Drop TOPMOST: POPUP yellow now wins (G=255). */
     lens_begin(ui, &ZERO_IN);
@@ -408,9 +411,9 @@ static void test_band_render_order(void) {
         lens_place_end(ui);
     if (place_begin(ui, "pp", exact_at(R, LENS_BAND_POPUP, YELLOW)))
         lens_place_end(ui);
-    test_end(ui);
+    lens_test_end(ui);
     render(ui, canvas);
-    CHECK(sample(canvas, 50, 50) == 255); /* yellow G: POPUP beat CHROME+base */
+    OT_EXPECT(sample(canvas, 50, 50) == 255); /* yellow G: POPUP beat CHROME+base */
 
     /* Drop POPUP too: CHROME blue wins (G=0, B=255). */
     lens_begin(ui, &ZERO_IN);
@@ -421,10 +424,10 @@ static void test_band_render_order(void) {
     lens_close(ui);
     if (place_begin(ui, "ch", exact_at(R, LENS_BAND_CHROME, BLUE)))
         lens_place_end(ui);
-    test_end(ui);
+    lens_test_end(ui);
     render(ui, canvas);
     g_px_channel = 2;
-    CHECK(sample(canvas, 50, 50) == 255); /* blue B: CHROME beat base+BACKDROP */
+    OT_EXPECT(sample(canvas, 50, 50) == 255); /* blue B: CHROME beat base+BACKDROP */
 
     /* Drop CHROME: the base-tree green row beats the BACKDROP. */
     lens_begin(ui, &ZERO_IN);
@@ -433,20 +436,20 @@ static void test_band_render_order(void) {
     lens_size(ui, 100, 100);
     lens_row_begin(ui, &(lens_layout_opts){.bg = GREEN});
     lens_close(ui);
-    test_end(ui);
+    lens_test_end(ui);
     render(ui, canvas);
     g_px_channel = 1;
-    CHECK(sample(canvas, 50, 50) == 255); /* base tree over BACKDROP */
+    OT_EXPECT(sample(canvas, 50, 50) == 255); /* base tree over BACKDROP */
     g_px_channel = 0;
-    CHECK(sample(canvas, 50, 50) == 0); /* green has no red */
+    OT_EXPECT(sample(canvas, 50, 50) == 0); /* green has no red */
 
     /* Drop the base row: only the BACKDROP remains. */
     lens_begin(ui, &ZERO_IN);
     if (place_begin(ui, "bd", exact_at(R, LENS_BAND_BACKDROP, RED)))
         lens_place_end(ui);
-    test_end(ui);
+    lens_test_end(ui);
     render(ui, canvas);
-    CHECK(sample(canvas, 50, 50) == 255); /* BACKDROP still paints, below all */
+    OT_EXPECT(sample(canvas, 50, 50) == 255); /* BACKDROP still paints, below all */
 
     flux_canvas_release(canvas);
     lens_release(ui);
@@ -457,8 +460,8 @@ static void test_band_render_order(void) {
 static void test_intra_band_registration_order(void) {
     lens *ui = NULL;
     flux_canvas *canvas = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
-    CHECK(flux_canvas_create_cpu(400, 300, 1.0f, &canvas) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    OT_EXPECT(flux_canvas_create_cpu(400, 300, 1.0f, &canvas) == FLUX_OK);
 
     const flux_color CYAN = 0xFF00FFFFu;
     const flux_color YELLOW = 0xFFFFFF00u;
@@ -469,13 +472,13 @@ static void test_intra_band_registration_order(void) {
         lens_place_end(ui);
     if (place_begin(ui, "second", exact_at(R, LENS_BAND_POPUP, YELLOW)))
         lens_place_end(ui);
-    test_end(ui);
+    lens_test_end(ui);
     render(ui, canvas);
 
     g_px_channel = 0;
-    CHECK(sample(canvas, 50, 50) == 255); /* both have R... */
+    OT_EXPECT(sample(canvas, 50, 50) == 255); /* both have R... */
     g_px_channel = 2;
-    CHECK(sample(canvas, 50, 50) == 0); /* yellow B=0 beat cyan B=255: later wins */
+    OT_EXPECT(sample(canvas, 50, 50) == 0); /* yellow B=0 beat cyan B=255: later wins */
 
     flux_canvas_release(canvas);
     lens_release(ui);
@@ -488,8 +491,8 @@ static void test_intra_band_registration_order(void) {
 static void test_base_band_request_clamped_to_chrome(void) {
     lens *ui = NULL;
     flux_canvas *canvas = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
-    CHECK(flux_canvas_create_cpu(400, 300, 1.0f, &canvas) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    OT_EXPECT(flux_canvas_create_cpu(400, 300, 1.0f, &canvas) == FLUX_OK);
 
     const flux_color BLUE = 0xFF0000FFu;
     lens_place_opts o = exact_at((flux_rect){0, 0, 200, 200}, LENS_BAND_BASE, BLUE);
@@ -500,10 +503,10 @@ static void test_base_band_request_clamped_to_chrome(void) {
     (void)lens_button(ui, &(lens_button_opts){.label = "Base"}).clicked;
     if (place_begin(ui, "bd-request", o))
         lens_place_end(ui);
-    test_end(ui);
+    lens_test_end(ui);
     render(ui, canvas);
     g_px_channel = 2;
-    CHECK(sample(canvas, 150, 150) == 255); /* paints above the base tree */
+    OT_EXPECT(sample(canvas, 150, 150) == 255); /* paints above the base tree */
 
     /* Frames 2-3: press + release over the base button. It must be
      * occluded exactly as if the node were CHROME. */
@@ -515,7 +518,7 @@ static void test_base_band_request_clamped_to_chrome(void) {
     (void)lens_button(ui, &(lens_button_opts){.label = "Base"}).clicked;
     if (place_begin(ui, "bd-request", o))
         lens_place_end(ui);
-    test_end(ui);
+    lens_test_end(ui);
     in.mouse_pressed[LENS_MOUSE_LEFT] = false;
     in.mouse_down[LENS_MOUSE_LEFT] = false;
     in.mouse_released[LENS_MOUSE_LEFT] = true;
@@ -523,8 +526,8 @@ static void test_base_band_request_clamped_to_chrome(void) {
     bool base_clicked = lens_button(ui, &(lens_button_opts){.label = "Base"}).clicked;
     if (place_begin(ui, "bd-request", o))
         lens_place_end(ui);
-    test_end(ui);
-    CHECK(base_clicked == false); /* and it hit-tests above, too */
+    lens_test_end(ui);
+    OT_EXPECT(base_clicked == false); /* and it hit-tests above, too */
 
     flux_canvas_release(canvas);
     lens_release(ui);
@@ -542,5 +545,5 @@ int main(void) {
     test_band_render_order();
     test_intra_band_registration_order();
     test_base_band_request_clamped_to_chrome();
-    return TEST_REPORT();
+    return OT_REPORT();
 }

@@ -24,7 +24,8 @@
  * which is the direct, falsifiable form of the contract.
  */
 #include "../icc_testkit.h"
-#include "test_helpers.h"
+#include "flux_test.h"
+#include "optics_test.h"
 
 #include <flux/flux.h>
 #include <flux/observe.h>
@@ -138,10 +139,10 @@ static void lane_funnel_contract(flux_device *d) {
                                           .scope = FLUX_SCOPE_DEVICE,
                                       },
                                       &p);
-    EXPECT(r == FLUX_OK);
-    EXPECT(p != nullptr);
+    OT_EXPECT(r == FLUX_OK);
+    OT_EXPECT(p != nullptr);
     /* It must be OUR memory, not libc's. */
-    EXPECT(g_live_bytes == before + 128);
+    OT_EXPECT(g_live_bytes == before + 128);
 
     /* Contract: returned memory is zeroed, even though our allocator does not
      * zero it. */
@@ -149,13 +150,13 @@ static void lane_funnel_contract(flux_device *d) {
     for (size_t i = 0; i < 128; ++i)
         if (((unsigned char *)p)[i] != 0)
             all_zero = false;
-    EXPECT(all_zero);
+    OT_EXPECT(all_zero);
 
     /* The ledger must show the row under the caller's owner, not flux's. */
     flux_observe_counters c = {};
-    EXPECT(flux_observe_read_counters(d, FLUX_SCOPE_DEVICE, "probe", "tests/hostile", &c) ==
-           FLUX_OK);
-    EXPECT(c.live == 1);
+    OT_EXPECT(flux_observe_read_counters(d, FLUX_SCOPE_DEVICE, "probe", "tests/hostile", &c) ==
+              FLUX_OK);
+    OT_EXPECT(c.live == 1);
 
     flux_device_free(d, &(flux_device_free_opts){
                             .type = FLUX_TYPE_DEVICE_FREE_OPTS,
@@ -164,33 +165,33 @@ static void lane_funnel_contract(flux_device *d) {
                             .kind = "probe",
                             .scope = FLUX_SCOPE_DEVICE,
                         });
-    EXPECT(g_live_bytes == before);
-    EXPECT(flux_observe_read_counters(d, FLUX_SCOPE_DEVICE, "probe", "tests/hostile", &c) ==
-               FLUX_OK &&
-           c.live == 0);
+    OT_EXPECT(g_live_bytes == before);
+    OT_EXPECT(flux_observe_read_counters(d, FLUX_SCOPE_DEVICE, "probe", "tests/hostile", &c) ==
+                  FLUX_OK &&
+              c.live == 0);
 }
 
 /* Missing owner/kind is rejected, not defaulted: an unattributable allocation
  * is the defect this contract exists to remove. */
 static void lane_funnel_rejects_unattributed(flux_device *d) {
     void *p = (void *)0x1;
-    EXPECT(flux_device_alloc(d,
-                             &(flux_device_alloc_opts){
-                                 .type = FLUX_TYPE_DEVICE_ALLOC_OPTS,
-                                 .bytes = 16,
-                             },
-                             &p) == FLUX_ERROR_INVALID_ARGUMENT);
-    EXPECT(p == nullptr);
+    OT_EXPECT(flux_device_alloc(d,
+                                &(flux_device_alloc_opts){
+                                    .type = FLUX_TYPE_DEVICE_ALLOC_OPTS,
+                                    .bytes = 16,
+                                },
+                                &p) == FLUX_ERROR_INVALID_ARGUMENT);
+    OT_EXPECT(p == nullptr);
 
-    EXPECT(flux_device_alloc(d, nullptr, &p) == FLUX_ERROR_INVALID_ARGUMENT);
-    EXPECT(flux_device_alloc(d,
-                             &(flux_device_alloc_opts){
-                                 .type = FLUX_TYPE_DEVICE_ALLOC_OPTS,
-                                 .bytes = 0,
-                                 .owner = "x",
-                                 .kind = "y",
-                             },
-                             &p) == FLUX_ERROR_INVALID_ARGUMENT);
+    OT_EXPECT(flux_device_alloc(d, nullptr, &p) == FLUX_ERROR_INVALID_ARGUMENT);
+    OT_EXPECT(flux_device_alloc(d,
+                                &(flux_device_alloc_opts){
+                                    .type = FLUX_TYPE_DEVICE_ALLOC_OPTS,
+                                    .bytes = 0,
+                                    .owner = "x",
+                                    .kind = "y",
+                                },
+                                &p) == FLUX_ERROR_INVALID_ARGUMENT);
 }
 
 /* OOM is reported, not papered over. */
@@ -208,14 +209,14 @@ static void lane_funnel_oom(flux_device *d) {
                                       },
                                       &p);
     g_fail_at = 0;
-    EXPECT(r == FLUX_ERROR_OUT_OF_MEMORY);
-    EXPECT(p == nullptr);
+    OT_EXPECT(r == FLUX_ERROR_OUT_OF_MEMORY);
+    OT_EXPECT(p == nullptr);
     /* A failed allocation must not leave a ledger row behind. */
-    EXPECT(g_live_bytes == before);
+    OT_EXPECT(g_live_bytes == before);
     flux_observe_counters c = {};
-    EXPECT(flux_observe_read_counters(d, FLUX_SCOPE_DEVICE, "oom", "tests/hostile", &c) !=
-               FLUX_OK ||
-           c.live == 0);
+    OT_EXPECT(flux_observe_read_counters(d, FLUX_SCOPE_DEVICE, "oom", "tests/hostile", &c) !=
+                  FLUX_OK ||
+              c.live == 0);
 }
 
 /* --- 2/3. libraries must route through it ----------------------------- */
@@ -232,15 +233,15 @@ static void lane_prism_uses_funnel(flux_device *d) {
     uint64_t frees_before = g_frees;
 
     prism_mica_filter *f = nullptr;
-    EXPECT(prism_mica_filter_create(d, &f) == FLUX_OK);
+    OT_EXPECT(prism_mica_filter_create(d, &f) == FLUX_OK);
     size_t after_create = g_live_bytes;
     /* A filter is a struct plus its frame slots; any growth here is prism's
      * memory arriving through the caller's allocator. */
-    EXPECT(after_create > before);
+    OT_EXPECT(after_create > before);
 
     prism_mica_filter_release(f);
-    EXPECT(g_live_bytes == before);
-    EXPECT(g_frees > frees_before);
+    OT_EXPECT(g_live_bytes == before);
+    OT_EXPECT(g_frees > frees_before);
 }
 
 static void lane_lens_uses_funnel(flux_device *d) {
@@ -262,8 +263,8 @@ static void lane_lens_uses_funnel(flux_device *d) {
     /* The context itself came through the funnel at create time, so the
      * meaningful assertion is that live bytes came back down and the
      * allocator saw traffic. */
-    EXPECT(g_allocs > 0);
-    EXPECT(g_live_bytes <= before);
+    OT_EXPECT(g_allocs > 0);
+    OT_EXPECT(g_live_bytes <= before);
     (void)during;
 }
 
@@ -273,21 +274,21 @@ static void lane_image_snapshot_oom(flux_device *d) {
     idesc.height = 2;
     idesc.format = FLUX_FORMAT_RGBA8_UNORM;
     flux_image *image = nullptr;
-    EXPECT(flux_image_create(d, &idesc, &image) == FLUX_OK);
+    OT_EXPECT(flux_image_create(d, &idesc, &image) == FLUX_OK);
 
     size_t before = g_live_bytes;
     flux_image *snapshot = nullptr;
     g_fail_at = g_alloc_seq + 1;
-    EXPECT(flux_image_snapshot(image, &snapshot) == FLUX_ERROR_OUT_OF_MEMORY);
-    EXPECT(snapshot == nullptr);
+    OT_EXPECT(flux_image_snapshot(image, &snapshot) == FLUX_ERROR_OUT_OF_MEMORY);
+    OT_EXPECT(snapshot == nullptr);
     g_fail_at = 0;
 
     /* The failed snapshot must not poison the source image. */
-    EXPECT(flux_image_snapshot(image, &snapshot) == FLUX_OK);
-    EXPECT(snapshot != nullptr);
+    OT_EXPECT(flux_image_snapshot(image, &snapshot) == FLUX_OK);
+    OT_EXPECT(snapshot != nullptr);
     flux_image_release(snapshot);
     flux_image_release(image);
-    EXPECT(g_live_bytes <= before);
+    OT_EXPECT(g_live_bytes <= before);
 }
 
 static void lane_image_lut_oom(flux_device *d) {
@@ -297,7 +298,7 @@ static void lane_image_lut_oom(flux_device *d) {
     uint8_t profile[16384];
     size_t size = icc_build_profile(profile, "mntr", "XYZ ", pdata, len, defs, 1);
     flux_icc_profile *icc = nullptr;
-    EXPECT(flux_icc_profile_create(profile, size, &icc) == FLUX_OK);
+    OT_EXPECT(flux_icc_profile_create(profile, size, &icc) == FLUX_OK);
 
     flux_image_color_space_desc csd = FLUX_IMAGE_COLOR_SPACE_DESC_INIT;
     csd.icc = icc;
@@ -308,6 +309,16 @@ static void lane_image_lut_oom(flux_device *d) {
     idesc.height = 2;
     idesc.format = FLUX_FORMAT_RGBA8_UNORM;
     idesc.initial_data = pixels;
+
+    /* Warm the one-time construction caches before taking the baseline. The
+     * first successful LUT upload allocates a staging buffer that later
+     * attempts reuse; without this warm-up the OOM sweep below attributes that
+     * one-time cache growth to the lane and reports a phantom leak. */
+    flux_image *warm = nullptr;
+    OT_EXPECT(flux_image_create(d, &idesc, &warm) == FLUX_OK);
+    if (warm)
+        flux_image_release(warm);
+    flux_device_wait_idle(d);
 
     size_t before = g_live_bytes;
     bool published = false;
@@ -320,18 +331,18 @@ static void lane_image_lut_oom(flux_device *d) {
         flux_result r = flux_image_create(d, &idesc, &image);
         g_fail_at = 0;
         if (r == FLUX_OK) {
-            EXPECT(image != nullptr);
+            OT_EXPECT(image != nullptr);
             published = true;
             flux_image_release(image);
         } else {
-            EXPECT(image == nullptr);
-            EXPECT(r == FLUX_ERROR_OUT_OF_MEMORY || r == FLUX_ERROR_BACKEND_FAILURE);
+            OT_EXPECT(image == nullptr);
+            OT_EXPECT(r == FLUX_ERROR_OUT_OF_MEMORY || r == FLUX_ERROR_BACKEND_FAILURE);
         }
     }
-    EXPECT(published);
+    OT_EXPECT(published);
     flux_icc_profile_release(icc);
     flux_device_wait_idle(d);
-    EXPECT(g_live_bytes <= before);
+    OT_EXPECT(g_live_bytes <= before);
 }
 
 static void lane_sampler_buffer_oom(flux_device *d) {
@@ -344,15 +355,15 @@ static void lane_sampler_buffer_oom(flux_device *d) {
             flux_sampler_create(d, &(flux_sampler_desc)FLUX_SAMPLER_DESC_INIT, &sampler);
         g_fail_at = 0;
         if (r == FLUX_OK) {
-            EXPECT(sampler != nullptr);
+            OT_EXPECT(sampler != nullptr);
             sampler_ok = true;
             flux_sampler_release(sampler);
         } else {
-            EXPECT(sampler == nullptr);
-            EXPECT(r == FLUX_ERROR_OUT_OF_MEMORY);
+            OT_EXPECT(sampler == nullptr);
+            OT_EXPECT(r == FLUX_ERROR_OUT_OF_MEMORY);
         }
     }
-    EXPECT(sampler_ok);
+    OT_EXPECT(sampler_ok);
 
     bool buffer_ok = false;
     for (uint64_t offset = 1; offset <= 16 && !buffer_ok; ++offset) {
@@ -365,24 +376,24 @@ static void lane_sampler_buffer_oom(flux_device *d) {
         flux_result r = flux_buffer_create(d, &bd, &buffer);
         g_fail_at = 0;
         if (r == FLUX_OK) {
-            EXPECT(buffer != nullptr);
+            OT_EXPECT(buffer != nullptr);
             buffer_ok = true;
             flux_buffer_release(buffer);
         } else {
-            EXPECT(buffer == nullptr);
-            EXPECT(r == FLUX_ERROR_OUT_OF_MEMORY || r == FLUX_ERROR_BACKEND_FAILURE);
+            OT_EXPECT(buffer == nullptr);
+            OT_EXPECT(r == FLUX_ERROR_OUT_OF_MEMORY || r == FLUX_ERROR_BACKEND_FAILURE);
         }
     }
-    EXPECT(buffer_ok);
+    OT_EXPECT(buffer_ok);
     flux_device_wait_idle(d);
-    EXPECT(g_live_bytes <= before);
+    OT_EXPECT(g_live_bytes <= before);
 }
 
 int main(void) {
     flux_device *d = make_hostile_device();
     if (!d) {
         fprintf(stderr, "test_hostile_allocator: no Vulkan device; skipping\n");
-        TEST_SUMMARY();
+        OT_SKIP("no Vulkan device");
     }
 
     size_t baseline = g_live_bytes;
@@ -408,10 +419,10 @@ int main(void) {
                 "%llu allocs / %llu frees)\n",
                 __FILE__, g_live_bytes, baseline, g_peak_bytes, (unsigned long long)g_allocs,
                 (unsigned long long)g_frees);
-        g_test_failed++;
+        OT_MANUAL_FAIL();
     }
-    g_test_count++;
-    EXPECT(g_violations == 0);
+    OT_MANUAL_CHECK();
+    OT_EXPECT(g_violations == 0);
 
-    TEST_SUMMARY();
+    return OT_REPORT();
 }

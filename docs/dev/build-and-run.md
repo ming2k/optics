@@ -250,7 +250,7 @@ meson setup build-release --buildtype=release -Dexamples=true -Dtests=true
 meson compile -C build-release
 
 # 2. Automated test baseline
-meson test -C build-release --no-suite bench
+meson test -C build-release --no-suite bench --no-suite fuzz
 
 # 3. Interactive smoke pass
 ./build-release/examples/showcase/material_gallery   # Run 30s; cycle keys 1-5, D, F

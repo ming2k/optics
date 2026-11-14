@@ -20,7 +20,8 @@
  * Skipped (with PASS) when VK_EXT_debug_utils is unavailable, because then the
  * library's second gate legitimately suppresses the call.
  */
-#include "test_helpers.h"
+#include "flux_test.h"
+#include "optics_test.h"
 
 #include <flux/flux.h>
 #include <flux/observe.h>
@@ -88,13 +89,13 @@ int main(void) {
         flux_device *d = make_device_without_capability();
         if (!d) {
             fprintf(stderr, "test_pass_labels: no Vulkan device; skipping\n");
-            TEST_SUMMARY();
+            OT_SKIP("no Vulkan device");
         }
         /* Probe debug-utils availability: with the capability off the count is
          * zero regardless, so this half needs no skip. */
         bool recorded = record_one_labelled_pass(d, "probe");
         if (recorded)
-            EXPECT(flux_device_labels_emitted(d) == 0);
+            OT_EXPECT(flux_device_labels_emitted(d) == 0);
         flux_device_release(d);
     }
 
@@ -103,7 +104,7 @@ int main(void) {
         flux_device *d = make_device(FLUX_OBSERVE_PASS_LABELS);
         if (!d) {
             fprintf(stderr, "test_pass_labels: no Vulkan device; skipping\n");
-            TEST_SUMMARY();
+            OT_SKIP("no Vulkan device");
         }
 
         uint64_t before = flux_device_labels_emitted(d);
@@ -114,7 +115,7 @@ int main(void) {
              * from "no pass" and must not pretend to. */
             fprintf(stderr, "test_pass_labels: cannot record an offscreen pass; skipping\n");
             flux_device_release(d);
-            TEST_SUMMARY();
+            OT_SKIP("offscreen pass unavailable");
         }
 
         uint64_t after = flux_device_labels_emitted(d);
@@ -129,7 +130,7 @@ int main(void) {
                             "VK_EXT_debug_utils that is the documented second gate; otherwise it "
                             "is a defect in ADR-0133.\n");
         }
-        EXPECT(after == before + 1u);
+        OT_EXPECT(after == before + 1u);
 
         /* Two passes, two labels: the counter must not be stuck at one. */
         flux_surface_desc sd = FLUX_SURFACE_DESC_INIT;
@@ -152,7 +153,7 @@ int main(void) {
             }
             flux_surface_release(s);
             flux_device_wait_idle(d);
-            EXPECT(flux_device_labels_emitted(d) == base + 2u);
+            OT_EXPECT(flux_device_labels_emitted(d) == base + 2u);
         }
 
         /* A null label must still produce a usable name ("pass"), not a crash
@@ -160,10 +161,10 @@ int main(void) {
         uint64_t before_null = flux_device_labels_emitted(d);
         bool ok_null = record_one_labelled_pass(d, nullptr);
         if (ok_null)
-            EXPECT(flux_device_labels_emitted(d) == before_null + 1u);
+            OT_EXPECT(flux_device_labels_emitted(d) == before_null + 1u);
 
         flux_device_release(d);
     }
 
-    TEST_SUMMARY();
+    return OT_REPORT();
 }

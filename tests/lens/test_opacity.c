@@ -9,7 +9,8 @@
  */
 
 #include "../../libs/lens/src/internal.h"
-#include "test_helpers.h"
+#include "lens_test.h"
+#include "optics_test.h"
 #include <lens/lens.h>
 
 static const lens_input IN0 = {.display_size = {200, 100}, .dt_seconds = 0.016f};
@@ -29,14 +30,14 @@ static const lens_draw_cmd *first_text_cmd(const lens_node *n) {
 
 int main(void) {
     lens *ui = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
 
     /* Default, and the setter clamps into 0..1. */
-    CHECK(lens_opacity(ui) == 1.0f);
+    OT_EXPECT(lens_opacity(ui) == 1.0f);
     lens_set_opacity(ui, 1.7f);
-    CHECK(lens_opacity(ui) == 1.0f);
+    OT_EXPECT(lens_opacity(ui) == 1.0f);
     lens_set_opacity(ui, -0.25f);
-    CHECK(lens_opacity(ui) == 0.0f);
+    OT_EXPECT(lens_opacity(ui) == 0.0f);
     lens_set_opacity(ui, 1.0f);
 
     const float full = (float)alpha_of(lens_get_theme(ui).color_fg);
@@ -47,36 +48,36 @@ int main(void) {
     lens_label(ui, &(lens_label_opts){.text = "dimmed"});
     lens_set_opacity(ui, 1.0f);
     lens_label(ui, &(lens_label_opts){.text = "solid"});
-    test_end(ui);
+    lens_test_end(ui);
 
     lens_node *dimmed = lens_node_first_child(lens_root(ui));
     lens_node *solid = dimmed ? dimmed->next_sibling : NULL;
     const lens_draw_cmd *dim_cmd = first_text_cmd(dimmed);
     const lens_draw_cmd *solid_cmd = first_text_cmd(solid);
-    CHECK(dim_cmd != NULL);
-    CHECK(solid_cmd != NULL);
-    CHECK(alpha_of(dim_cmd->color) == (uint8_t)full);
-    CHECK(dimmed->opacity == 0.5f);
-    CHECK(alpha_of(solid_cmd->color) == (uint8_t)full);
+    OT_EXPECT(dim_cmd != NULL);
+    OT_EXPECT(solid_cmd != NULL);
+    OT_EXPECT(alpha_of(dim_cmd->color) == (uint8_t)full);
+    OT_EXPECT(dimmed->opacity == 0.5f);
+    OT_EXPECT(alpha_of(solid_cmd->color) == (uint8_t)full);
 
     /* Frame 2: the switch reset with lens_begin — no restore needed. */
     lens_begin(ui, &IN0);
     lens_label(ui, &(lens_label_opts){.text = "dimmed"});
     lens_label(ui, &(lens_label_opts){.text = "solid"});
-    test_end(ui);
+    lens_test_end(ui);
     dimmed = lens_node_first_child(lens_root(ui));
     dim_cmd = first_text_cmd(dimmed);
-    CHECK(dim_cmd != NULL);
-    CHECK(alpha_of(dim_cmd->color) == (uint8_t)full);
+    OT_EXPECT(dim_cmd != NULL);
+    OT_EXPECT(alpha_of(dim_cmd->color) == (uint8_t)full);
 
     /* Premultiplied sRGB invariant (ADR-0109): lensi_opacity_color scales all
      * four channels proportionally so R, G, B <= A holds for linear decoding. */
     flux_color white = flux_color_rgba_premul(255, 200, 100, 255);
     flux_color half_white = lensi_opacity_color(white, 0.5f);
-    CHECK(half_white == flux_color_rgba_premul(255, 200, 100, 128));
-    CHECK(lensi_opacity_color(white, 0.0f) == 0u);
-    CHECK(lensi_opacity_color(white, 1.0f) == white);
+    OT_EXPECT(half_white == flux_color_rgba_premul(255, 200, 100, 128));
+    OT_EXPECT(lensi_opacity_color(white, 0.0f) == 0u);
+    OT_EXPECT(lensi_opacity_color(white, 1.0f) == white);
 
     lens_release(ui);
-    return TEST_REPORT();
+    return OT_REPORT();
 }

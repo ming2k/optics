@@ -7,7 +7,8 @@
  * then inspected through the frame's plan.
  */
 #include "../../../libs/flux/src/core/internal.h"
-#include "test_helpers.h"
+#include "flux_test.h"
+#include "optics_test.h"
 #include <flux/flux.h>
 
 #include <string.h>
@@ -50,26 +51,25 @@ static bool node_reads(const flux_render_plan *plan, uint32_t node, const void *
 }
 
 int main(void) {
-    flux_device *d = test_helpers_make_headless_device();
+    flux_device *d = flux_test_make_headless_device();
     if (!d) {
         fprintf(stderr, "test_render_plan_frame: no Vulkan device; skipping\n");
-        TEST_SUMMARY();
-        return 0;
+        OT_SKIP("no Vulkan device");
     }
 
     flux_surface_desc sd = FLUX_SURFACE_DESC_INIT;
     sd.width = W;
     sd.height = H;
     flux_surface *s = nullptr;
-    EXPECT(flux_surface_create(d, &sd, &s) == FLUX_OK);
+    OT_EXPECT(flux_surface_create(d, &sd, &s) == FLUX_OK);
 
     flux_canvas_desc cd = {.type = FLUX_TYPE_CANVAS_DESC, .surface = s};
     flux_canvas *canvas = nullptr;
-    EXPECT(flux_canvas_create(&cd, &canvas) == FLUX_OK);
+    OT_EXPECT(flux_canvas_create(&cd, &canvas) == FLUX_OK);
 
     flux_frame *frame = nullptr;
-    EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
-    EXPECT(frame != nullptr);
+    OT_EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
+    OT_EXPECT(frame != nullptr);
 
     /* An image created while the frame records is a managed upload: the plan
      * must state the write and the staging read. */
@@ -82,11 +82,11 @@ int main(void) {
     id.format = FLUX_FORMAT_RGBA8_UNORM;
     id.initial_data = pixels;
     flux_image *img = nullptr;
-    EXPECT(flux_image_create(d, &id, &img) == FLUX_OK);
-    EXPECT(count_kind(&frame->render_plan, FLUX_RENDER_NODE_UPLOAD) == 1);
+    OT_EXPECT(flux_image_create(d, &id, &img) == FLUX_OK);
+    OT_EXPECT(count_kind(&frame->render_plan, FLUX_RENDER_NODE_UPLOAD) == 1);
 
     const int first_upload = find_kind(&frame->render_plan, FLUX_RENDER_NODE_UPLOAD);
-    EXPECT(first_upload >= 0);
+    OT_EXPECT(first_upload >= 0);
     const flux_render_node *upload = &frame->render_plan.nodes[first_upload];
     bool writes_image = false;
     bool reads_staging = false;
@@ -99,56 +99,57 @@ int main(void) {
             a->resource.handle)
             reads_staging = true;
     }
-    EXPECT(writes_image);
-    EXPECT(reads_staging);
+    OT_EXPECT(writes_image);
+    OT_EXPECT(reads_staging);
 
     /* A second upload to the same image is a second writer: it must order
      * itself after the first, not silently overwrite it. */
-    EXPECT(flux_image_update_region(img, 0, 0, 16, 16, pixels, sizeof(pixels)) == FLUX_OK);
-    EXPECT(count_kind(&frame->render_plan, FLUX_RENDER_NODE_UPLOAD) == 2);
+    OT_EXPECT(flux_image_update_region(img, 0, 0, 16, 16, pixels, sizeof(pixels)) == FLUX_OK);
+    OT_EXPECT(count_kind(&frame->render_plan, FLUX_RENDER_NODE_UPLOAD) == 2);
     int second_upload = -1;
     for (uint32_t i = 0; i < frame->render_plan.node_count; ++i)
         if (frame->render_plan.nodes[i].kind == FLUX_RENDER_NODE_UPLOAD && (int)i != first_upload)
             second_upload = (int)i;
-    EXPECT(second_upload >= 0);
-    EXPECT(node_depends_on(&frame->render_plan, (uint32_t)second_upload, (uint32_t)first_upload));
+    OT_EXPECT(second_upload >= 0);
+    OT_EXPECT(
+        node_depends_on(&frame->render_plan, (uint32_t)second_upload, (uint32_t)first_upload));
 
     /* A Canvas draw samples the uploaded image. The Canvas node must name the
      * producing upload, and the plan must still validate before the pass ends. */
     flux_canvas_pass_desc pd = FLUX_CANVAS_PASS_DESC_INIT;
     pd.frame = frame;
-    EXPECT(flux_canvas_begin(canvas, &pd) == FLUX_OK);
+    OT_EXPECT(flux_canvas_begin(canvas, &pd) == FLUX_OK);
     flux_canvas_draw_image(canvas, img, (flux_rect){0, 0, 16, 16}, nullptr);
     const int canvas_node = find_kind(&frame->render_plan, FLUX_RENDER_NODE_CANVAS);
-    EXPECT(canvas_node >= 0);
-    EXPECT(node_reads(&frame->render_plan, (uint32_t)canvas_node, (const void *)img));
-    EXPECT(node_depends_on(&frame->render_plan, (uint32_t)canvas_node, (uint32_t)second_upload));
+    OT_EXPECT(canvas_node >= 0);
+    OT_EXPECT(node_reads(&frame->render_plan, (uint32_t)canvas_node, (const void *)img));
+    OT_EXPECT(node_depends_on(&frame->render_plan, (uint32_t)canvas_node, (uint32_t)second_upload));
 
     /* A later upload (the second text batch of one pass, for example) is
      * submitted before the frame command buffer, so the Canvas that already
      * sampled this image must be ordered after it rather than reject the
      * write as an unordered overwrite. */
-    EXPECT(flux_image_update_region(img, 0, 0, 16, 16, pixels, sizeof(pixels)) == FLUX_OK);
-    EXPECT(count_kind(&frame->render_plan, FLUX_RENDER_NODE_UPLOAD) == 3);
+    OT_EXPECT(flux_image_update_region(img, 0, 0, 16, 16, pixels, sizeof(pixels)) == FLUX_OK);
+    OT_EXPECT(count_kind(&frame->render_plan, FLUX_RENDER_NODE_UPLOAD) == 3);
     int third_upload = -1;
     for (uint32_t i = 0; i < frame->render_plan.node_count; ++i)
         if (frame->render_plan.nodes[i].kind == FLUX_RENDER_NODE_UPLOAD && (int)i != first_upload &&
             (int)i != second_upload)
             third_upload = (int)i;
-    EXPECT(third_upload >= 0);
-    EXPECT(node_depends_on(&frame->render_plan, (uint32_t)canvas_node, (uint32_t)third_upload));
+    OT_EXPECT(third_upload >= 0);
+    OT_EXPECT(node_depends_on(&frame->render_plan, (uint32_t)canvas_node, (uint32_t)third_upload));
 
-    EXPECT(flux_canvas_end(canvas) == FLUX_OK);
+    OT_EXPECT(flux_canvas_end(canvas) == FLUX_OK);
 
     /* The plan is validated by canvas end and again at submit; a hidden or
      * unordered read would have failed one of those gates above. */
 
-    EXPECT(flux_frame_submit(frame) == FLUX_OK);
-    EXPECT(flux_frame_present(frame) == FLUX_OK);
+    OT_EXPECT(flux_frame_submit(frame) == FLUX_OK);
+    OT_EXPECT(flux_frame_present(frame) == FLUX_OK);
 
     flux_image_release(img);
     flux_canvas_release(canvas);
     flux_surface_release(s);
     flux_device_release(d);
-    TEST_SUMMARY();
+    return OT_REPORT();
 }

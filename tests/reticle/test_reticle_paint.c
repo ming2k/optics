@@ -7,7 +7,7 @@
  * resolved paint, and `currentColor` survives as a distinct kind rather than
  * being frozen to black at parse time. */
 
-#include "test_helpers.h"
+#include "optics_test.h"
 
 #include <reticle/reticle.h>
 
@@ -28,24 +28,24 @@ static void hex3_hex6_hex8(void) {
                       "</svg>",
                       &doc, &shape))
         return;
-    CHECK(shape.fill.kind == RETICLE_PAINT_SOLID);
+    OT_EXPECT(shape.fill.kind == RETICLE_PAINT_SOLID);
     /* Packed straight 0xAARRGGBB. */
-    CHECK(shape.fill.color == 0xFFFF0000u);
+    OT_EXPECT(shape.fill.color == 0xFFFF0000u);
     reticle_release(doc);
 
     if (!single_shape("<svg viewBox=\"0 0 8 8\"><rect width=\"8\" height=\"8\" fill=\"#112233\"/>"
                       "</svg>",
                       &doc, &shape))
         return;
-    CHECK(shape.fill.color == 0xFF112233u);
+    OT_EXPECT(shape.fill.color == 0xFF112233u);
     reticle_release(doc);
 
     if (!single_shape("<svg viewBox=\"0 0 8 8\"><rect width=\"8\" height=\"8\" "
                       "fill=\"#11223344\"/></svg>",
                       &doc, &shape))
         return;
-    CHECK((shape.fill.color >> 24) == 0x44u);
-    CHECK((shape.fill.color & 0xFFFFFFu) == 0x112233u);
+    OT_EXPECT((shape.fill.color >> 24) == 0x44u);
+    OT_EXPECT((shape.fill.color & 0xFFFFFFu) == 0x112233u);
     reticle_release(doc);
 }
 
@@ -56,14 +56,14 @@ static void named_colour_and_rgb_function(void) {
                       "fill=\"rebeccapurple\"/></svg>",
                       &doc, &shape))
         return;
-    CHECK(shape.fill.color == 0xFF663399u);
+    OT_EXPECT(shape.fill.color == 0xFF663399u);
     reticle_release(doc);
 
     if (!single_shape("<svg viewBox=\"0 0 8 8\"><rect width=\"8\" height=\"8\" "
                       "fill=\"rgb(10, 20, 30)\"/></svg>",
                       &doc, &shape))
         return;
-    CHECK(shape.fill.color == 0xFF0A141Eu);
+    OT_EXPECT(shape.fill.color == 0xFF0A141Eu);
     reticle_release(doc);
 }
 
@@ -76,8 +76,8 @@ static void current_color_stays_unresolved(void) {
                       "stroke=\"currentColor\"/></svg>",
                       &doc, &shape))
         return;
-    CHECK(shape.stroke.kind == RETICLE_PAINT_CURRENT_COLOR);
-    CHECK(shape.fill.kind == RETICLE_PAINT_NONE);
+    OT_EXPECT(shape.stroke.kind == RETICLE_PAINT_CURRENT_COLOR);
+    OT_EXPECT(shape.fill.kind == RETICLE_PAINT_NONE);
     reticle_release(doc);
 }
 
@@ -90,8 +90,8 @@ static void explicit_color_attribute_resolves_current_color(void) {
                       "<rect width=\"8\" height=\"8\" fill=\"currentColor\"/></svg>",
                       &doc, &shape))
         return;
-    CHECK(shape.fill.kind == RETICLE_PAINT_SOLID);
-    CHECK(shape.fill.color == 0xFF00FF00u);
+    OT_EXPECT(shape.fill.kind == RETICLE_PAINT_SOLID);
+    OT_EXPECT(shape.fill.color == 0xFF00FF00u);
     reticle_release(doc);
 }
 
@@ -103,8 +103,8 @@ static void fill_and_stroke_opacity_are_separate(void) {
                       "</svg>",
                       &doc, &shape))
         return;
-    CHECK_NEAR(shape.fill.opacity, 0.25f, 1e-3);
-    CHECK_NEAR(shape.stroke.opacity, 0.5f, 1e-3);
+    OT_EXPECT_NEAR(shape.fill.opacity, 0.25f, 1e-3);
+    OT_EXPECT_NEAR(shape.stroke.opacity, 0.5f, 1e-3);
     reticle_release(doc);
 }
 
@@ -118,7 +118,7 @@ static void element_opacity_cascades_through_groups(void) {
                       "<g opacity=\"0.5\"><rect width=\"8\" height=\"8\"/></g></g></svg>",
                       &doc, &shape))
         return;
-    CHECK_NEAR(shape.opacity, 0.25f, 1e-3);
+    OT_EXPECT_NEAR(shape.opacity, 0.25f, 1e-3);
     reticle_release(doc);
 }
 
@@ -130,8 +130,8 @@ static void style_attribute_overrides_presentation_attributes(void) {
                       "style=\"fill:#0000FF;fill-opacity:0.5\"/></svg>",
                       &doc, &shape))
         return;
-    CHECK(shape.fill.color == 0xFF0000FFu);
-    CHECK_NEAR(shape.fill.opacity, 0.5f, 1e-3);
+    OT_EXPECT(shape.fill.color == 0xFF0000FFu);
+    OT_EXPECT_NEAR(shape.fill.opacity, 0.5f, 1e-3);
     reticle_release(doc);
 }
 
@@ -143,9 +143,9 @@ static void stroke_topology_defaults_to_svg_values(void) {
                       "stroke-linejoin=\"bevel\"/></svg>",
                       &doc, &shape))
         return;
-    CHECK_NEAR(shape.stroke_width, 3.0f, 1e-4);
-    CHECK(shape.cap == FLUX_CAP_ROUND);
-    CHECK(shape.join == FLUX_JOIN_BEVEL);
+    OT_EXPECT_NEAR(shape.stroke_width, 3.0f, 1e-4);
+    OT_EXPECT(shape.cap == FLUX_CAP_ROUND);
+    OT_EXPECT(shape.join == FLUX_JOIN_BEVEL);
     reticle_release(doc);
 
     /* Unspecified: butt cap, miter join, width 1 — SVG's initial values, not
@@ -154,9 +154,9 @@ static void stroke_topology_defaults_to_svg_values(void) {
                       "stroke=\"#000\"/></svg>",
                       &doc, &shape))
         return;
-    CHECK_NEAR(shape.stroke_width, 1.0f, 1e-4);
-    CHECK(shape.cap == FLUX_CAP_BUTT);
-    CHECK(shape.join == FLUX_JOIN_MITER);
+    OT_EXPECT_NEAR(shape.stroke_width, 1.0f, 1e-4);
+    OT_EXPECT(shape.cap == FLUX_CAP_BUTT);
+    OT_EXPECT(shape.join == FLUX_JOIN_MITER);
     reticle_release(doc);
 }
 
@@ -167,7 +167,7 @@ static void even_odd_fill_rule_survives(void) {
                       "fill-rule=\"evenodd\"/></svg>",
                       &doc, &shape))
         return;
-    CHECK(shape.fill_rule == FLUX_FILL_EVEN_ODD);
+    OT_EXPECT(shape.fill_rule == FLUX_FILL_EVEN_ODD);
     reticle_release(doc);
 }
 
@@ -185,14 +185,14 @@ static void linear_gradient_bakes_into_user_space(void) {
                       "<rect width=\"100\" height=\"100\" fill=\"url(#g)\"/></svg>",
                       &doc, &shape))
         return;
-    CHECK(shape.fill.kind == RETICLE_PAINT_LINEAR_GRADIENT);
+    OT_EXPECT(shape.fill.kind == RETICLE_PAINT_LINEAR_GRADIENT);
     reticle_gradient_view gradient = {};
-    CHECK(reticle_gradient_at(doc, shape.fill.gradient, &gradient) == FLUX_OK);
-    CHECK(gradient.stop_count == 2);
-    CHECK_NEAR(gradient.start.x, 0.0f, 1e-3);
-    CHECK_NEAR(gradient.end.x, 100.0f, 1e-3);
-    CHECK_NEAR(gradient.stops[0].t, 0.0f, 1e-3);
-    CHECK_NEAR(gradient.stops[1].t, 1.0f, 1e-3);
+    OT_EXPECT(reticle_gradient_at(doc, shape.fill.gradient, &gradient) == FLUX_OK);
+    OT_EXPECT(gradient.stop_count == 2);
+    OT_EXPECT_NEAR(gradient.start.x, 0.0f, 1e-3);
+    OT_EXPECT_NEAR(gradient.end.x, 100.0f, 1e-3);
+    OT_EXPECT_NEAR(gradient.stops[0].t, 0.0f, 1e-3);
+    OT_EXPECT_NEAR(gradient.stops[1].t, 1.0f, 1e-3);
     reticle_release(doc);
 }
 
@@ -212,10 +212,10 @@ static void object_bounding_box_gradient_scales_to_the_shape(void) {
                       &doc, &shape))
         return;
     reticle_gradient_view gradient = {};
-    CHECK(reticle_gradient_at(doc, shape.fill.gradient, &gradient) == FLUX_OK);
-    CHECK_NEAR(gradient.start.x, 20.0f, 1e-3);
-    CHECK_NEAR(gradient.start.y, 30.0f, 1e-3);
-    CHECK_NEAR(gradient.end.x, 70.0f, 1e-3);
+    OT_EXPECT(reticle_gradient_at(doc, shape.fill.gradient, &gradient) == FLUX_OK);
+    OT_EXPECT_NEAR(gradient.start.x, 20.0f, 1e-3);
+    OT_EXPECT_NEAR(gradient.start.y, 30.0f, 1e-3);
+    OT_EXPECT_NEAR(gradient.end.x, 70.0f, 1e-3);
     reticle_release(doc);
 }
 
@@ -236,10 +236,10 @@ static void gradient_inheritance_follows_href(void) {
             &doc, &shape))
         return;
     reticle_gradient_view gradient = {};
-    CHECK(reticle_gradient_at(doc, shape.fill.gradient, &gradient) == FLUX_OK);
-    CHECK(gradient.stop_count == 2);
-    CHECK_NEAR(gradient.start.x, 10.0f, 1e-3);
-    CHECK_NEAR(gradient.end.x, 90.0f, 1e-3);
+    OT_EXPECT(reticle_gradient_at(doc, shape.fill.gradient, &gradient) == FLUX_OK);
+    OT_EXPECT(gradient.stop_count == 2);
+    OT_EXPECT_NEAR(gradient.start.x, 10.0f, 1e-3);
+    OT_EXPECT_NEAR(gradient.end.x, 90.0f, 1e-3);
     reticle_release(doc);
 }
 
@@ -255,11 +255,11 @@ static void radial_gradient_keeps_its_radius(void) {
                       "<rect width=\"100\" height=\"100\" fill=\"url(#r)\"/></svg>",
                       &doc, &shape))
         return;
-    CHECK(shape.fill.kind == RETICLE_PAINT_RADIAL_GRADIENT);
+    OT_EXPECT(shape.fill.kind == RETICLE_PAINT_RADIAL_GRADIENT);
     reticle_gradient_view gradient = {};
-    CHECK(reticle_gradient_at(doc, shape.fill.gradient, &gradient) == FLUX_OK);
-    CHECK_NEAR(gradient.start.x, 50.0f, 1e-3);
-    CHECK_NEAR(gradient.radius, 25.0f, 1e-3);
+    OT_EXPECT(reticle_gradient_at(doc, shape.fill.gradient, &gradient) == FLUX_OK);
+    OT_EXPECT_NEAR(gradient.start.x, 50.0f, 1e-3);
+    OT_EXPECT_NEAR(gradient.radius, 25.0f, 1e-3);
     reticle_release(doc);
 }
 
@@ -272,9 +272,9 @@ static void dangling_gradient_reference_paints_nothing(void) {
                       "fill=\"url(#nope)\"/></svg>",
                       &doc, &shape))
         return;
-    CHECK(shape.fill.kind == RETICLE_PAINT_NONE);
+    OT_EXPECT(shape.fill.kind == RETICLE_PAINT_NONE);
     /* The geometry still exists, so a monochrome consumer can tint it. */
-    CHECK(shape.cmd_count > 0);
+    OT_EXPECT(shape.cmd_count > 0);
     reticle_release(doc);
 }
 
@@ -289,9 +289,9 @@ static void single_stop_gradient_becomes_flat(void) {
                       &doc, &shape))
         return;
     reticle_gradient_view gradient = {};
-    CHECK(reticle_gradient_at(doc, shape.fill.gradient, &gradient) == FLUX_OK);
-    CHECK(gradient.stop_count == 2);
-    CHECK(gradient.stops[0].color == gradient.stops[1].color);
+    OT_EXPECT(reticle_gradient_at(doc, shape.fill.gradient, &gradient) == FLUX_OK);
+    OT_EXPECT(gradient.stop_count == 2);
+    OT_EXPECT(gradient.stops[0].color == gradient.stops[1].color);
     reticle_release(doc);
 }
 
@@ -317,7 +317,7 @@ static void identical_gradients_share_one_entry(void) {
     if (reticle_shape_at(doc, 0, &a) == FLUX_OK && reticle_shape_at(doc, 1, &b) == FLUX_OK) {
         /* Different bounds with objectBoundingBox units would still differ; this
          * gradient is userSpaceOnUse, so the resolution is identical. */
-        CHECK(a.fill.gradient == b.fill.gradient);
+        OT_EXPECT(a.fill.gradient == b.fill.gradient);
     }
     reticle_release(doc);
 }
@@ -339,5 +339,5 @@ int main(void) {
     dangling_gradient_reference_paints_nothing();
     single_stop_gradient_becomes_flat();
     identical_gradients_share_one_entry();
-    TEST_REPORT();
+    return OT_REPORT();
 }

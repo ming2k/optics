@@ -4,7 +4,8 @@
  * passes that batch. Churns create -> draw -> flux_material_release_deferred
  * every frame to prove no in-flight use-after-free or validation error.
  */
-#include "test_helpers.h"
+#include "flux_test.h"
+#include "optics_test.h"
 #include <flux/flux.h>
 #include <flux/scene.h>
 #include <flux/vulkan.h>
@@ -33,10 +34,10 @@ static flux_mesh *make_quad(flux_device *d) {
 }
 
 int main(void) {
-    flux_device *d = test_helpers_make_headless_device();
+    flux_device *d = flux_test_make_headless_device();
     if (!d) {
         fprintf(stderr, "test_material_retire: no Vulkan device; skipping\n");
-        TEST_SUMMARY();
+        OT_SKIP("no Vulkan device");
     }
 
     flux_surface *surface = nullptr;
@@ -44,7 +45,7 @@ int main(void) {
         flux_surface_desc desc = FLUX_SURFACE_DESC_INIT;
         desc.width = SURF_W;
         desc.height = SURF_H;
-        EXPECT(flux_surface_create(d, &desc, &surface) == FLUX_OK);
+        OT_EXPECT(flux_surface_create(d, &desc, &surface) == FLUX_OK);
     }
 
     flux_target *depth = nullptr;
@@ -56,7 +57,7 @@ int main(void) {
             .width = SURF_W,
             .height = SURF_H,
         };
-        EXPECT(flux_target_create(d, &desc, &depth) == FLUX_OK);
+        OT_EXPECT(flux_target_create(d, &desc, &depth) == FLUX_OK);
     }
 
     flux_camera cam;
@@ -64,7 +65,7 @@ int main(void) {
     flux_camera_look_at(&cam, (flux_vec3){0, 0, 4}, (flux_vec3){0, 0, 0}, (flux_vec3){0, 1, 0});
 
     flux_mesh *mesh = make_quad(d);
-    EXPECT(mesh != nullptr);
+    OT_EXPECT(mesh != nullptr);
 
     /* Churn: each frame creates a fresh material, records a draw, submits,
      * and releases the material immediately with flux_material_release_deferred
@@ -78,10 +79,10 @@ int main(void) {
             .color_format = flux_format_from_vk(flux_surface_vk_format(surface)),
             .depth_format = FLUX_FORMAT_D32_SFLOAT,
         };
-        EXPECT(flux_material_create(d, &mdesc, &material) == FLUX_OK);
+        OT_EXPECT(flux_material_create(d, &mdesc, &material) == FLUX_OK);
 
         flux_frame *frame = nullptr;
-        EXPECT(flux_surface_begin_frame(surface, nullptr, &frame) == FLUX_OK);
+        OT_EXPECT(flux_surface_begin_frame(surface, nullptr, &frame) == FLUX_OK);
         flux_frame_prepare_target(frame, depth);
         flux_pass_attachment color = {
             .load_op = FLUX_LOAD_CLEAR,
@@ -106,8 +107,8 @@ int main(void) {
         flux_frame_set_scissor(frame, 0, 0, SURF_W, SURF_H);
         flux_scene_draw_mesh(frame, &cam, flux_mat4_identity(), mesh, material);
         flux_frame_end_pass(frame);
-        EXPECT(flux_frame_submit(frame) == FLUX_OK);
-        EXPECT(flux_frame_present(frame) == FLUX_OK);
+        OT_EXPECT(flux_frame_submit(frame) == FLUX_OK);
+        OT_EXPECT(flux_frame_present(frame) == FLUX_OK);
 
         /* Deferred release while batch is in flight. */
         flux_material_release(material);
@@ -123,7 +124,7 @@ int main(void) {
             .color_format = flux_format_from_vk(flux_surface_vk_format(surface)),
             .depth_format = FLUX_FORMAT_D32_SFLOAT,
         };
-        EXPECT(flux_material_create(d, &mdesc, &material) == FLUX_OK);
+        OT_EXPECT(flux_material_create(d, &mdesc, &material) == FLUX_OK);
         flux_material_release(material);
     }
 
@@ -131,5 +132,5 @@ int main(void) {
     flux_target_release(depth);
     flux_surface_release(surface);
     flux_device_release(d);
-    TEST_SUMMARY();
+    return OT_REPORT();
 }

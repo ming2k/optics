@@ -1,50 +1,51 @@
 /* test_reconcile.c — phase transitions: enter/stable/leave/reap (ADR-0004). */
 
-#include "test_helpers.h"
+#include "lens_test.h"
+#include "optics_test.h"
 #include <lens/lens.h>
 
 int main(void) {
     lens *ui = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
 
     lens_input in = {.display_size = {200, 100}, .dt_seconds = 0.016f};
 
     /* frame 1: button enters */
     lens_begin(ui, &in);
     (void)lens_button(ui, &(lens_button_opts){.label = "A"});
-    test_end(ui);
+    lens_test_end(ui);
     lens_id id = lens_get_response(ui).id;
-    CHECK(id != 0);
+    OT_EXPECT(id != 0);
     lens_node *n = lens_find(ui, id);
-    CHECK(n != NULL);
-    CHECK(lens_node_phase_of(n) == LENS_NODE_ENTERING);
+    OT_EXPECT(n != NULL);
+    OT_EXPECT(lens_node_phase_of(n) == LENS_NODE_ENTERING);
 
     /* frame 2: stable */
     lens_begin(ui, &in);
     (void)lens_button(ui, &(lens_button_opts){.label = "A"});
-    test_end(ui);
+    lens_test_end(ui);
     n = lens_find(ui, id);
-    CHECK(n != NULL);
-    CHECK(lens_node_phase_of(n) == LENS_NODE_STABLE);
+    OT_EXPECT(n != NULL);
+    OT_EXPECT(lens_node_phase_of(n) == LENS_NODE_STABLE);
 
     /* frame 3: leave (not built) */
     lens_begin(ui, &in);
-    test_end(ui);
+    lens_test_end(ui);
     n = lens_find(ui, id);
-    CHECK(n != NULL); /* still in grace window */
-    CHECK(lens_node_phase_of(n) == LENS_NODE_LEAVING);
+    OT_EXPECT(n != NULL); /* still in grace window */
+    OT_EXPECT(lens_node_phase_of(n) == LENS_NODE_LEAVING);
 
     /* stay absent until reaped */
     bool found_before_reap = false;
     for (int f = 0; f < 20; f++) {
         lens_begin(ui, &in);
-        test_end(ui);
+        lens_test_end(ui);
         if (lens_find(ui, id))
             found_before_reap = true;
     }
-    CHECK(found_before_reap);         /* grace kept it for a while */
-    CHECK(lens_find(ui, id) == NULL); /* eventually reaped */
+    OT_EXPECT(found_before_reap);         /* grace kept it for a while */
+    OT_EXPECT(lens_find(ui, id) == NULL); /* eventually reaped */
 
     lens_release(ui);
-    return TEST_REPORT();
+    return OT_REPORT();
 }

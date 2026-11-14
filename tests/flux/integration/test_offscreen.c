@@ -17,7 +17,8 @@
  * compatibility (begin → submit → present runs unchanged), resize
  * invalidation, multi-frame reuse.
  */
-#include "test_helpers.h"
+#include "flux_test.h"
+#include "optics_test.h"
 #include <flux/flux.h>
 #include <flux/vulkan.h>
 
@@ -62,7 +63,7 @@ static flux_result render_frame(flux_surface *s, flux_canvas *canvas) {
                                 flux_color_rgba(255, 255, 255, 255));
     flux_canvas_fill_rect_color(canvas, (flux_rect){W - 12.0f, 4.0f, 8.0f, 8.0f},
                                 flux_color_rgba(0, 64, 255, 255));
-    EXPECT(flux_canvas_end(canvas) == FLUX_OK);
+    OT_EXPECT(flux_canvas_end(canvas) == FLUX_OK);
 
     r = flux_frame_submit(frame);
     if (r != FLUX_OK)
@@ -81,7 +82,7 @@ static flux_result render_solid_frame(flux_surface *s, flux_canvas *canvas, flux
                                                            .clear_color = &color});
     if (r != FLUX_OK)
         return r;
-    EXPECT(flux_canvas_end(canvas) == FLUX_OK);
+    OT_EXPECT(flux_canvas_end(canvas) == FLUX_OK);
     if (capture) {
         r = flux_frame_request_readback(frame);
         if (r != FLUX_OK)
@@ -109,12 +110,12 @@ static flux_result render_pattern_region(flux_surface *s, flux_canvas *canvas,
                                 flux_color_rgba(255, 255, 255, 255));
     flux_canvas_fill_rect_color(canvas, (flux_rect){W - 12.0f, 4.0f, 8.0f, 8.0f},
                                 flux_color_rgba(0, 64, 255, 255));
-    EXPECT(flux_canvas_end(canvas) == FLUX_OK);
+    OT_EXPECT(flux_canvas_end(canvas) == FLUX_OK);
     const flux_readback_region empty = {.x = 1, .y = 1, .width = 0, .height = 1};
     const flux_readback_region outside = {.x = W, .y = 0, .width = 1, .height = 1};
-    EXPECT(flux_frame_request_readback_region(frame, nullptr) == FLUX_ERROR_INVALID_ARGUMENT);
-    EXPECT(flux_frame_request_readback_region(frame, &empty) == FLUX_ERROR_INVALID_ARGUMENT);
-    EXPECT(flux_frame_request_readback_region(frame, &outside) == FLUX_ERROR_OUT_OF_RANGE);
+    OT_EXPECT(flux_frame_request_readback_region(frame, nullptr) == FLUX_ERROR_INVALID_ARGUMENT);
+    OT_EXPECT(flux_frame_request_readback_region(frame, &empty) == FLUX_ERROR_INVALID_ARGUMENT);
+    OT_EXPECT(flux_frame_request_readback_region(frame, &outside) == FLUX_ERROR_OUT_OF_RANGE);
     r = flux_frame_request_readback_region(frame, region);
     if (r != FLUX_OK)
         return r;
@@ -125,10 +126,10 @@ static flux_result render_pattern_region(flux_surface *s, flux_canvas *canvas,
 }
 
 int main(void) {
-    flux_device *d = test_helpers_make_headless_device();
+    flux_device *d = flux_test_make_headless_device();
     if (!d) {
         fprintf(stderr, "test_offscreen: no Vulkan device; skipping\n");
-        TEST_SUMMARY();
+        OT_SKIP("no Vulkan device");
     }
 
     /* --- creation validation --- */
@@ -136,8 +137,8 @@ int main(void) {
         flux_surface_desc sd = FLUX_SURFACE_DESC_INIT; /* no vk_surface_khr */
         flux_surface *s = nullptr;
         /* zero extent must be rejected, not deferred like a minimised window */
-        EXPECT(flux_surface_create(d, &sd, &s) == FLUX_ERROR_INVALID_ARGUMENT);
-        EXPECT(s == nullptr);
+        OT_EXPECT(flux_surface_create(d, &sd, &s) == FLUX_ERROR_INVALID_ARGUMENT);
+        OT_EXPECT(s == nullptr);
     }
 
     flux_surface *s = nullptr;
@@ -145,14 +146,14 @@ int main(void) {
         flux_surface_desc sd = FLUX_SURFACE_DESC_INIT;
         sd.width = W;
         sd.height = H;
-        EXPECT(flux_surface_create(d, &sd, &s) == FLUX_OK);
-        EXPECT(s != nullptr);
+        OT_EXPECT(flux_surface_create(d, &sd, &s) == FLUX_OK);
+        OT_EXPECT(s != nullptr);
 
         flux_surface_info info;
         flux_surface_get_info(s, &info);
-        EXPECT(info.width == W && info.height == H);
-        EXPECT(!info.hdr);
-        EXPECT(flux_surface_vk_swapchain(s) == VK_NULL_HANDLE);
+        OT_EXPECT(info.width == W && info.height == H);
+        OT_EXPECT(!info.hdr);
+        OT_EXPECT(flux_surface_vk_swapchain(s) == VK_NULL_HANDLE);
     }
 
     static uint8_t px[BYTES];
@@ -160,35 +161,35 @@ int main(void) {
     /* --- readback validation --- */
     {
         bool ready = false;
-        EXPECT(flux_surface_read_pixels(nullptr, px, BYTES) == FLUX_ERROR_INVALID_ARGUMENT);
-        EXPECT(flux_surface_read_pixels(s, nullptr, BYTES) == FLUX_ERROR_INVALID_ARGUMENT);
-        EXPECT(flux_surface_read_pixels_ready(s, &ready) == FLUX_ERROR_UNSUPPORTED);
+        OT_EXPECT(flux_surface_read_pixels(nullptr, px, BYTES) == FLUX_ERROR_INVALID_ARGUMENT);
+        OT_EXPECT(flux_surface_read_pixels(s, nullptr, BYTES) == FLUX_ERROR_INVALID_ARGUMENT);
+        OT_EXPECT(flux_surface_read_pixels_ready(s, &ready) == FLUX_ERROR_UNSUPPORTED);
         /* nothing submitted yet */
-        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_ERROR_INVALID_STATE);
+        OT_EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_ERROR_INVALID_STATE);
     }
 
     flux_canvas *canvas = nullptr;
     {
         flux_canvas_desc cd = FLUX_CANVAS_DESC_INIT;
         cd.surface = s;
-        EXPECT(flux_canvas_create(&cd, &canvas) == FLUX_OK);
+        OT_EXPECT(flux_canvas_create(&cd, &canvas) == FLUX_OK);
     }
 
     /* --- frame state machine: recording -> submitted -> presented --- */
     {
         flux_frame *frame = nullptr;
-        EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
+        OT_EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
         flux_transient tr = {0};
-        EXPECT(flux_frame_alloc_transient(frame, 16, 3, &tr) == FLUX_ERROR_INVALID_ARGUMENT);
-        EXPECT(tr.cpu == nullptr);
-        EXPECT(flux_frame_alloc_transient(frame, 16, 512, &tr) == FLUX_ERROR_INVALID_ARGUMENT);
-        EXPECT(flux_frame_alloc_transient(frame, 16, 16, &tr) == FLUX_OK);
-        EXPECT(tr.cpu != nullptr && tr.alignment == 16);
-        EXPECT(flux_frame_present(frame) == FLUX_ERROR_INVALID_STATE);
-        EXPECT(flux_frame_submit(frame) == FLUX_OK);
-        EXPECT(flux_frame_submit(frame) == FLUX_ERROR_INVALID_STATE);
-        EXPECT(flux_frame_present(frame) == FLUX_OK);
-        EXPECT(flux_frame_present(frame) == FLUX_ERROR_INVALID_STATE);
+        OT_EXPECT(flux_frame_alloc_transient(frame, 16, 3, &tr) == FLUX_ERROR_INVALID_ARGUMENT);
+        OT_EXPECT(tr.cpu == nullptr);
+        OT_EXPECT(flux_frame_alloc_transient(frame, 16, 512, &tr) == FLUX_ERROR_INVALID_ARGUMENT);
+        OT_EXPECT(flux_frame_alloc_transient(frame, 16, 16, &tr) == FLUX_OK);
+        OT_EXPECT(tr.cpu != nullptr && tr.alignment == 16);
+        OT_EXPECT(flux_frame_present(frame) == FLUX_ERROR_INVALID_STATE);
+        OT_EXPECT(flux_frame_submit(frame) == FLUX_OK);
+        OT_EXPECT(flux_frame_submit(frame) == FLUX_ERROR_INVALID_STATE);
+        OT_EXPECT(flux_frame_present(frame) == FLUX_OK);
+        OT_EXPECT(flux_frame_present(frame) == FLUX_ERROR_INVALID_STATE);
     }
 
     /* --- frame state machine: abandon releases the slot without ring
@@ -199,28 +200,28 @@ int main(void) {
         flux_frame_abandon(nullptr);
 
         flux_frame *frame = nullptr;
-        EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
+        OT_EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
         flux_frame_abandon(frame);
-        EXPECT(
+        OT_EXPECT(
             flux_canvas_begin(canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
                                                                .frame = frame,
                                                                .clear_color = nullptr}) == FLUX_OK);
-        EXPECT(flux_canvas_end(canvas) == FLUX_OK);
-        EXPECT(flux_frame_submit(frame) == FLUX_OK);
+        OT_EXPECT(flux_canvas_end(canvas) == FLUX_OK);
+        OT_EXPECT(flux_frame_submit(frame) == FLUX_OK);
 
         /* Abandon consumes the submitted frame: both later transitions are
          * single-use and must reject. */
         flux_frame_abandon(frame);
-        EXPECT(flux_frame_present(frame) == FLUX_ERROR_INVALID_STATE);
-        EXPECT(flux_frame_submit(frame) == FLUX_ERROR_INVALID_STATE);
+        OT_EXPECT(flux_frame_present(frame) == FLUX_ERROR_INVALID_STATE);
+        OT_EXPECT(flux_frame_submit(frame) == FLUX_ERROR_INVALID_STATE);
         flux_frame_abandon(frame);
 
         /* The abandoned slot is immediately reusable and still renders the
          * same content: the surface never wedges. */
-        EXPECT(render_frame(s, canvas) == FLUX_OK);
-        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
-        EXPECT(near8(px_at(px, 1, 1)[0], CLEAR_R));
-        EXPECT(px_at(px, W / 2, H / 2)[0] == 255);
+        OT_EXPECT(render_frame(s, canvas) == FLUX_OK);
+        OT_EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+        OT_EXPECT(near8(px_at(px, 1, 1)[0], CLEAR_R));
+        OT_EXPECT(px_at(px, W / 2, H / 2)[0] == 255);
     }
 
     /* --- cross-surface frame ownership: a canvas refuses a frame from a
@@ -231,11 +232,11 @@ int main(void) {
         flux_surface_desc sd = FLUX_SURFACE_DESC_INIT;
         sd.width = W;
         sd.height = H;
-        EXPECT(flux_surface_create(d, &sd, &s2) == FLUX_OK);
+        OT_EXPECT(flux_surface_create(d, &sd, &s2) == FLUX_OK);
 
         flux_frame *foreign = nullptr;
-        EXPECT(flux_surface_begin_frame(s2, nullptr, &foreign) == FLUX_OK);
-        EXPECT(
+        OT_EXPECT(flux_surface_begin_frame(s2, nullptr, &foreign) == FLUX_OK);
+        OT_EXPECT(
             flux_canvas_begin(canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
                                                                .frame = foreign,
                                                                .clear_color = nullptr}) ==
@@ -243,50 +244,50 @@ int main(void) {
         /* The canvas must be untouched by the refused begin: a same-surface
          * frame works immediately after. */
         flux_frame *own = nullptr;
-        EXPECT(flux_surface_begin_frame(s, nullptr, &own) == FLUX_OK);
-        EXPECT(
+        OT_EXPECT(flux_surface_begin_frame(s, nullptr, &own) == FLUX_OK);
+        OT_EXPECT(
             flux_canvas_begin(canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
                                                                .frame = own,
                                                                .clear_color = nullptr}) == FLUX_OK);
-        EXPECT(flux_canvas_end(canvas) == FLUX_OK);
-        EXPECT(flux_frame_submit(own) == FLUX_OK);
-        EXPECT(flux_frame_present(own) == FLUX_OK);
+        OT_EXPECT(flux_canvas_end(canvas) == FLUX_OK);
+        OT_EXPECT(flux_frame_submit(own) == FLUX_OK);
+        OT_EXPECT(flux_frame_present(own) == FLUX_OK);
         /* Finish the foreign frame on its own surface. */
-        EXPECT(flux_frame_submit(foreign) == FLUX_OK);
-        EXPECT(flux_frame_present(foreign) == FLUX_OK);
+        OT_EXPECT(flux_frame_submit(foreign) == FLUX_OK);
+        OT_EXPECT(flux_frame_present(foreign) == FLUX_OK);
         flux_surface_release(s2);
     }
 
     /* --- first frame: clear + centre rect --- */
     {
-        EXPECT(render_frame(s, canvas) == FLUX_OK);
+        OT_EXPECT(render_frame(s, canvas) == FLUX_OK);
 
         /* short buffer rejected after a submit too */
-        EXPECT(flux_surface_read_pixels(s, px, BYTES - 1) == FLUX_ERROR_INVALID_ARGUMENT);
+        OT_EXPECT(flux_surface_read_pixels(s, px, BYTES - 1) == FLUX_ERROR_INVALID_ARGUMENT);
 
         memset(px, 0xCD, BYTES);
-        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+        OT_EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
 
         const uint8_t *corner = px_at(px, 1, 1);
-        EXPECT(near8(corner[0], CLEAR_R));
-        EXPECT(near8(corner[1], CLEAR_G));
-        EXPECT(near8(corner[2], CLEAR_B));
-        EXPECT(corner[3] == 255);
+        OT_EXPECT(near8(corner[0], CLEAR_R));
+        OT_EXPECT(near8(corner[1], CLEAR_G));
+        OT_EXPECT(near8(corner[2], CLEAR_B));
+        OT_EXPECT(corner[3] == 255);
 
         const uint8_t *centre = px_at(px, W / 2, H / 2);
-        EXPECT(centre[0] == 255 && centre[1] == 255 && centre[2] == 255);
+        OT_EXPECT(centre[0] == 255 && centre[1] == 255 && centre[2] == 255);
 
         const uint8_t *blue = px_at(px, W - 8, 8);
-        EXPECT(blue[0] < 5);
-        EXPECT(near8(blue[1], 64));
-        EXPECT(blue[2] > 250);
-        EXPECT(blue[3] == 255);
+        OT_EXPECT(blue[0] < 5);
+        OT_EXPECT(near8(blue[1], 64));
+        OT_EXPECT(blue[2] > 250);
+        OT_EXPECT(blue[3] == 255);
 
         /* just inside each rect edge is white; just outside is clear */
-        EXPECT(px_at(px, W / 4 + 1, H / 2)[0] == 255);
-        EXPECT(near8(px_at(px, W / 4 - 2, H / 2)[0], CLEAR_R));
-        EXPECT(px_at(px, W / 2, H / 4 + 1)[0] == 255);
-        EXPECT(near8(px_at(px, W / 2, H / 4 - 2)[0], CLEAR_R));
+        OT_EXPECT(px_at(px, W / 4 + 1, H / 2)[0] == 255);
+        OT_EXPECT(near8(px_at(px, W / 4 - 2, H / 2)[0], CLEAR_R));
+        OT_EXPECT(px_at(px, W / 2, H / 4 + 1)[0] == 255);
+        OT_EXPECT(near8(px_at(px, W / 2, H / 4 - 2)[0], CLEAR_R));
     }
 
     /* --- Canvas LOAD overlays without discarding the selected image --- */
@@ -296,44 +297,44 @@ int main(void) {
         /* Offscreen surfaces have one image per frame slot. Seed every image
          * before wrapping around to the one selected by the LOAD frame. */
         for (uint32_t i = 0; i < info.image_count; ++i)
-            EXPECT(render_frame(s, canvas) == FLUX_OK);
+            OT_EXPECT(render_frame(s, canvas) == FLUX_OK);
 
         flux_frame *frame = nullptr;
-        EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
-        EXPECT(
+        OT_EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
+        OT_EXPECT(
             flux_canvas_begin(canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
                                                                .frame = frame,
                                                                .clear_color = nullptr}) == FLUX_OK);
         flux_canvas_fill_rect_color(canvas, (flux_rect){2, 2, 8, 8},
                                     flux_color_rgba_premul(0, 255, 0, 255));
-        EXPECT(flux_canvas_end(canvas) == FLUX_OK);
-        EXPECT(flux_frame_submit(frame) == FLUX_OK);
-        EXPECT(flux_frame_present(frame) == FLUX_OK);
+        OT_EXPECT(flux_canvas_end(canvas) == FLUX_OK);
+        OT_EXPECT(flux_frame_submit(frame) == FLUX_OK);
+        OT_EXPECT(flux_frame_present(frame) == FLUX_OK);
         memset(px, 0xCD, BYTES);
-        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+        OT_EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
         const uint8_t *overlay = px_at(px, 5, 5);
-        EXPECT(overlay[0] < 5 && overlay[1] > 250 && overlay[2] < 5);
-        EXPECT(near8(px_at(px, 12, 12)[0], CLEAR_R));
-        EXPECT(px_at(px, W / 2, H / 2)[0] == 255);
+        OT_EXPECT(overlay[0] < 5 && overlay[1] > 250 && overlay[2] < 5);
+        OT_EXPECT(near8(px_at(px, 12, 12)[0], CLEAR_R));
+        OT_EXPECT(px_at(px, W / 2, H / 2)[0] == 255);
     }
 
     /* --- frame ring reuse: render several frames back-to-back --- */
     {
         for (int i = 0; i < 5; ++i)
-            EXPECT(render_frame(s, canvas) == FLUX_OK);
+            OT_EXPECT(render_frame(s, canvas) == FLUX_OK);
         memset(px, 0xCD, BYTES);
-        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
-        EXPECT(px_at(px, W / 2, H / 2)[0] == 255);
-        EXPECT(near8(px_at(px, 1, 1)[0], CLEAR_R));
+        OT_EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+        OT_EXPECT(px_at(px, W / 2, H / 2)[0] == 255);
+        OT_EXPECT(near8(px_at(px, 1, 1)[0], CLEAR_R));
     }
 
     /* --- resize drops old contents, then renders at the new extent --- */
     {
-        EXPECT(flux_surface_resize(s, W, H) == FLUX_OK);
-        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_ERROR_INVALID_STATE);
-        EXPECT(render_frame(s, canvas) == FLUX_OK);
-        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
-        EXPECT(px_at(px, W / 2, H / 2)[0] == 255);
+        OT_EXPECT(flux_surface_resize(s, W, H) == FLUX_OK);
+        OT_EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_ERROR_INVALID_STATE);
+        OT_EXPECT(render_frame(s, canvas) == FLUX_OK);
+        OT_EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+        OT_EXPECT(px_at(px, W / 2, H / 2)[0] == 255);
     }
 
     flux_canvas_release(canvas);
@@ -345,41 +346,42 @@ int main(void) {
         sd.width = W;
         sd.height = H;
         flux_surface *snapshot_surface = nullptr;
-        EXPECT(flux_surface_create(d, &sd, &snapshot_surface) == FLUX_OK);
+        OT_EXPECT(flux_surface_create(d, &sd, &snapshot_surface) == FLUX_OK);
         flux_canvas *snapshot_canvas = nullptr;
         flux_canvas_desc cd = FLUX_CANVAS_DESC_INIT;
         cd.surface = snapshot_surface;
-        EXPECT(flux_canvas_create(&cd, &snapshot_canvas) == FLUX_OK);
+        OT_EXPECT(flux_canvas_create(&cd, &snapshot_canvas) == FLUX_OK);
 
         bool ready = false;
-        EXPECT(flux_surface_prepare_readback(nullptr) == FLUX_ERROR_INVALID_ARGUMENT);
-        EXPECT(flux_surface_prepare_readback(snapshot_surface) == FLUX_OK);
-        EXPECT(flux_surface_prepare_readback(snapshot_surface) == FLUX_OK);
-        EXPECT(flux_frame_request_readback(nullptr) == FLUX_ERROR_INVALID_STATE);
-        EXPECT(flux_surface_read_pixels_ready(snapshot_surface, &ready) ==
-               FLUX_ERROR_INVALID_STATE);
-        EXPECT(render_solid_frame(snapshot_surface, snapshot_canvas,
-                                  flux_color_rgba(220, 10, 20, 255), true) == FLUX_OK);
+        OT_EXPECT(flux_surface_prepare_readback(nullptr) == FLUX_ERROR_INVALID_ARGUMENT);
+        OT_EXPECT(flux_surface_prepare_readback(snapshot_surface) == FLUX_OK);
+        OT_EXPECT(flux_surface_prepare_readback(snapshot_surface) == FLUX_OK);
+        OT_EXPECT(flux_frame_request_readback(nullptr) == FLUX_ERROR_INVALID_STATE);
+        OT_EXPECT(flux_surface_read_pixels_ready(snapshot_surface, &ready) ==
+                  FLUX_ERROR_INVALID_STATE);
+        OT_EXPECT(render_solid_frame(snapshot_surface, snapshot_canvas,
+                                     flux_color_rgba(220, 10, 20, 255), true) == FLUX_OK);
         /* This newer green frame must not mutate the requested red snapshot. */
-        EXPECT(render_solid_frame(snapshot_surface, snapshot_canvas,
-                                  flux_color_rgba(10, 210, 20, 255), false) == FLUX_OK);
+        OT_EXPECT(render_solid_frame(snapshot_surface, snapshot_canvas,
+                                     flux_color_rgba(10, 210, 20, 255), false) == FLUX_OK);
         flux_device_wait_idle(d);
-        EXPECT(flux_surface_read_pixels_ready(snapshot_surface, &ready) == FLUX_OK);
-        EXPECT(ready);
+        OT_EXPECT(flux_surface_read_pixels_ready(snapshot_surface, &ready) == FLUX_OK);
+        OT_EXPECT(ready);
         flux_readback *snapshot = nullptr;
-        EXPECT(flux_surface_take_readback(snapshot_surface, &snapshot) == FLUX_OK);
-        EXPECT(snapshot != nullptr);
+        OT_EXPECT(flux_surface_take_readback(snapshot_surface, &snapshot) == FLUX_OK);
+        OT_EXPECT(snapshot != nullptr);
         flux_readback_region full_region = {0};
         flux_readback_get_region(snapshot, &full_region);
-        EXPECT(full_region.x == 0 && full_region.y == 0);
-        EXPECT(full_region.width == W && full_region.height == H);
-        EXPECT(flux_surface_read_pixels_ready(snapshot_surface, &ready) == FLUX_ERROR_UNSUPPORTED);
+        OT_EXPECT(full_region.x == 0 && full_region.y == 0);
+        OT_EXPECT(full_region.width == W && full_region.height == H);
+        OT_EXPECT(flux_surface_read_pixels_ready(snapshot_surface, &ready) ==
+                  FLUX_ERROR_UNSUPPORTED);
         memset(px, 0xCD, BYTES);
-        EXPECT(flux_readback_read_pixels(snapshot, px, BYTES) == FLUX_OK);
-        EXPECT(near8(px_at(px, 1, 1)[0], 220));
-        EXPECT(near8(px_at(px, 1, 1)[1], 10));
-        EXPECT(near8(px_at(px, 1, 1)[2], 20));
-        EXPECT(px_at(px, 1, 1)[3] == 255);
+        OT_EXPECT(flux_readback_read_pixels(snapshot, px, BYTES) == FLUX_OK);
+        OT_EXPECT(near8(px_at(px, 1, 1)[0], 220));
+        OT_EXPECT(near8(px_at(px, 1, 1)[1], 10));
+        OT_EXPECT(near8(px_at(px, 1, 1)[2], 20));
+        OT_EXPECT(px_at(px, 1, 1)[3] == 255);
         flux_readback_release(snapshot);
 
         flux_canvas_release(snapshot_canvas);
@@ -392,48 +394,48 @@ int main(void) {
         sd.width = W;
         sd.height = H;
         flux_surface *region_surface = nullptr;
-        EXPECT(flux_surface_create(d, &sd, &region_surface) == FLUX_OK);
+        OT_EXPECT(flux_surface_create(d, &sd, &region_surface) == FLUX_OK);
         flux_canvas *region_canvas = nullptr;
         flux_canvas_desc cd = FLUX_CANVAS_DESC_INIT;
         cd.surface = region_surface;
-        EXPECT(flux_canvas_create(&cd, &region_canvas) == FLUX_OK);
+        OT_EXPECT(flux_canvas_create(&cd, &region_canvas) == FLUX_OK);
 
-        EXPECT(flux_surface_prepare_readback_region(nullptr, 12, 12) ==
-               FLUX_ERROR_INVALID_ARGUMENT);
-        EXPECT(flux_surface_prepare_readback_region(region_surface, 0, 12) ==
-               FLUX_ERROR_INVALID_ARGUMENT);
-        EXPECT(flux_surface_prepare_readback_region(region_surface, W + 1, 12) ==
-               FLUX_ERROR_OUT_OF_RANGE);
-        EXPECT(flux_surface_prepare_readback_region(region_surface, 12, 12) == FLUX_OK);
+        OT_EXPECT(flux_surface_prepare_readback_region(nullptr, 12, 12) ==
+                  FLUX_ERROR_INVALID_ARGUMENT);
+        OT_EXPECT(flux_surface_prepare_readback_region(region_surface, 0, 12) ==
+                  FLUX_ERROR_INVALID_ARGUMENT);
+        OT_EXPECT(flux_surface_prepare_readback_region(region_surface, W + 1, 12) ==
+                  FLUX_ERROR_OUT_OF_RANGE);
+        OT_EXPECT(flux_surface_prepare_readback_region(region_surface, 12, 12) == FLUX_OK);
 
         const flux_readback_region wanted = {.x = W - 14, .y = 2, .width = 12, .height = 12};
-        EXPECT(render_pattern_region(region_surface, region_canvas, &wanted) == FLUX_OK);
+        OT_EXPECT(render_pattern_region(region_surface, region_canvas, &wanted) == FLUX_OK);
         flux_device_wait_idle(d);
         bool ready = false;
-        EXPECT(flux_surface_read_pixels_ready(region_surface, &ready) == FLUX_OK);
-        EXPECT(ready);
+        OT_EXPECT(flux_surface_read_pixels_ready(region_surface, &ready) == FLUX_OK);
+        OT_EXPECT(ready);
 
         flux_readback *snapshot = nullptr;
-        EXPECT(flux_surface_take_readback(region_surface, &snapshot) == FLUX_OK);
+        OT_EXPECT(flux_surface_take_readback(region_surface, &snapshot) == FLUX_OK);
         flux_readback_region got = {1, 1, 1, 1};
         flux_readback_get_region(nullptr, &got);
-        EXPECT(got.x == 0 && got.y == 0 && got.width == 0 && got.height == 0);
+        OT_EXPECT(got.x == 0 && got.y == 0 && got.width == 0 && got.height == 0);
         flux_readback_get_region(snapshot, &got);
-        EXPECT(got.x == wanted.x && got.y == wanted.y);
-        EXPECT(got.width == wanted.width && got.height == wanted.height);
+        OT_EXPECT(got.x == wanted.x && got.y == wanted.y);
+        OT_EXPECT(got.width == wanted.width && got.height == wanted.height);
 
         uint8_t crop[12u * 12u * 4u];
-        EXPECT(flux_readback_read_pixels(snapshot, crop, sizeof(crop) - 1) ==
-               FLUX_ERROR_INVALID_ARGUMENT);
+        OT_EXPECT(flux_readback_read_pixels(snapshot, crop, sizeof(crop) - 1) ==
+                  FLUX_ERROR_INVALID_ARGUMENT);
         memset(crop, 0xCD, sizeof(crop));
-        EXPECT(flux_readback_read_pixels(snapshot, crop, sizeof(crop)) == FLUX_OK);
+        OT_EXPECT(flux_readback_read_pixels(snapshot, crop, sizeof(crop)) == FLUX_OK);
         const uint8_t *clear = px_at_width(crop, wanted.width, 0, 0); /* surface 50,2 */
-        EXPECT(near8(clear[0], CLEAR_R) && near8(clear[1], CLEAR_G) && near8(clear[2], CLEAR_B));
+        OT_EXPECT(near8(clear[0], CLEAR_R) && near8(clear[1], CLEAR_G) && near8(clear[2], CLEAR_B));
         const uint8_t *blue = px_at_width(crop, wanted.width, 2, 2); /* surface 52,4 */
-        EXPECT(blue[0] < 5 && near8(blue[1], 64) && blue[2] > 250 && blue[3] == 255);
+        OT_EXPECT(blue[0] < 5 && near8(blue[1], 64) && blue[2] > 250 && blue[3] == 255);
         const uint8_t *outside = px_at_width(crop, wanted.width, 10, 10); /* surface 60,12 */
-        EXPECT(near8(outside[0], CLEAR_R) && near8(outside[1], CLEAR_G) &&
-               near8(outside[2], CLEAR_B));
+        OT_EXPECT(near8(outside[0], CLEAR_R) && near8(outside[1], CLEAR_G) &&
+                  near8(outside[2], CLEAR_B));
         flux_readback_release(snapshot);
 
         flux_canvas_release(region_canvas);
@@ -449,47 +451,47 @@ int main(void) {
         sd.width = W;
         sd.height = H;
         flux_surface *rs = nullptr;
-        EXPECT(flux_surface_create(d, &sd, &rs) == FLUX_OK);
-        EXPECT(rs != nullptr);
-        EXPECT(!flux_surface_exportable(rs));
-        EXPECT(flux_surface_prepare_readback_region(rs, 12, 12) == FLUX_ERROR_UNSUPPORTED);
+        OT_EXPECT(flux_surface_create(d, &sd, &rs) == FLUX_OK);
+        OT_EXPECT(rs != nullptr);
+        OT_EXPECT(!flux_surface_exportable(rs));
+        OT_EXPECT(flux_surface_prepare_readback_region(rs, 12, 12) == FLUX_ERROR_UNSUPPORTED);
         bool ready = false;
-        EXPECT(flux_surface_read_pixels_ready(rs, &ready) == FLUX_ERROR_INVALID_STATE);
+        OT_EXPECT(flux_surface_read_pixels_ready(rs, &ready) == FLUX_ERROR_INVALID_STATE);
 
         flux_canvas *rc = nullptr;
         flux_canvas_desc cd = FLUX_CANVAS_DESC_INIT;
         cd.surface = rs;
-        EXPECT(flux_canvas_create(&cd, &rc) == FLUX_OK);
-        EXPECT(render_frame(rs, rc) == FLUX_OK);
-        EXPECT(flux_surface_read_pixels_ready(rs, &ready) == FLUX_OK);
+        OT_EXPECT(flux_canvas_create(&cd, &rc) == FLUX_OK);
+        OT_EXPECT(render_frame(rs, rc) == FLUX_OK);
+        OT_EXPECT(flux_surface_read_pixels_ready(rs, &ready) == FLUX_OK);
         if (!ready) {
             flux_device_wait_idle(d);
-            EXPECT(flux_surface_read_pixels_ready(rs, &ready) == FLUX_OK);
+            OT_EXPECT(flux_surface_read_pixels_ready(rs, &ready) == FLUX_OK);
         }
-        EXPECT(ready);
+        OT_EXPECT(ready);
         memset(px, 0xCD, BYTES);
-        EXPECT(flux_surface_read_pixels(rs, px, BYTES) == FLUX_OK);
-        EXPECT(px_at(px, W / 2, H / 2)[0] == 255);
-        EXPECT(near8(px_at(px, 1, 1)[0], CLEAR_R));
+        OT_EXPECT(flux_surface_read_pixels(rs, px, BYTES) == FLUX_OK);
+        OT_EXPECT(px_at(px, W / 2, H / 2)[0] == 255);
+        OT_EXPECT(near8(px_at(px, 1, 1)[0], CLEAR_R));
         /* Several queued frames safely share the persistent staging buffer;
          * the latest frame fence covers the last FIFO copy. */
         for (int i = 0; i < 5; ++i)
-            EXPECT(render_frame(rs, rc) == FLUX_OK);
+            OT_EXPECT(render_frame(rs, rc) == FLUX_OK);
         flux_device_wait_idle(d);
         ready = false;
-        EXPECT(flux_surface_read_pixels_ready(rs, &ready) == FLUX_OK);
-        EXPECT(ready);
-        EXPECT(flux_surface_read_pixels(rs, px, BYTES) == FLUX_OK);
-        EXPECT(px_at(px, W / 2, H / 2)[0] == 255);
+        OT_EXPECT(flux_surface_read_pixels_ready(rs, &ready) == FLUX_OK);
+        OT_EXPECT(ready);
+        OT_EXPECT(flux_surface_read_pixels(rs, px, BYTES) == FLUX_OK);
+        OT_EXPECT(px_at(px, W / 2, H / 2)[0] == 255);
         /* Resize retires and recreates persistent staging with the images. */
-        EXPECT(flux_surface_resize(rs, W, H) == FLUX_OK);
-        EXPECT(flux_surface_read_pixels_ready(rs, &ready) == FLUX_ERROR_INVALID_STATE);
-        EXPECT(render_frame(rs, rc) == FLUX_OK);
-        EXPECT(flux_surface_read_pixels(rs, px, BYTES) == FLUX_OK);
-        EXPECT(near8(px_at(px, 1, 1)[0], CLEAR_R));
+        OT_EXPECT(flux_surface_resize(rs, W, H) == FLUX_OK);
+        OT_EXPECT(flux_surface_read_pixels_ready(rs, &ready) == FLUX_ERROR_INVALID_STATE);
+        OT_EXPECT(render_frame(rs, rc) == FLUX_OK);
+        OT_EXPECT(flux_surface_read_pixels(rs, px, BYTES) == FLUX_OK);
+        OT_EXPECT(near8(px_at(px, 1, 1)[0], CLEAR_R));
         /* export still refused: the surface is deliberately not exportable */
         int fd = -1;
-        EXPECT(flux_surface_export_dmabuf(rs, &fd) != FLUX_OK);
+        OT_EXPECT(flux_surface_export_dmabuf(rs, &fd) != FLUX_OK);
 
         flux_canvas_release(rc);
         flux_surface_release(rs);
@@ -509,10 +511,10 @@ int main(void) {
         sd.width = W;
         sd.height = H;
         flux_surface *cs = nullptr;
-        EXPECT(flux_surface_create(d, &sd, &cs) == FLUX_ERROR_INVALID_ARGUMENT);
-        EXPECT(cs == nullptr);
+        OT_EXPECT(flux_surface_create(d, &sd, &cs) == FLUX_ERROR_INVALID_ARGUMENT);
+        OT_EXPECT(cs == nullptr);
     }
 
     flux_device_release(d);
-    TEST_SUMMARY();
+    return OT_REPORT();
 }

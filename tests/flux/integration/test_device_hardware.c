@@ -7,7 +7,8 @@
  * subgroup operations, and deterministic memory visibility) that software
  * emulators cannot prove correct.
  */
-#include "test_helpers.h"
+#include "flux_test.h"
+#include "optics_test.h"
 
 #include <flux/flux.h>
 #include <flux/vulkan.h>
@@ -15,17 +16,17 @@
 #include <string.h>
 
 int main(void) {
-    flux_device *d = test_helpers_make_headless_device();
+    flux_device *d = flux_test_make_headless_device();
     if (!d) {
         fprintf(stderr, "test_device_hardware: no Vulkan device available; skipping\n");
-        return 0;
+        OT_SKIP("no Vulkan device");
     }
 
     VkPhysicalDevice pd = flux_device_vk_physical_device(d);
-    EXPECT(pd != VK_NULL_HANDLE);
+    OT_EXPECT(pd != VK_NULL_HANDLE);
     if (pd == VK_NULL_HANDLE) {
         flux_device_release(d);
-        TEST_SUMMARY();
+        return OT_REPORT();
     }
 
     VkPhysicalDeviceDriverProperties driver_props = {
@@ -64,18 +65,18 @@ int main(void) {
         fprintf(stderr, "  [NOTE] Software Vulkan device explicitly permitted by environment\n");
     } else {
         /* Hardware GPU assertion: neither CPU device type nor llvmpipe driver */
-        EXPECT(props->deviceType != VK_PHYSICAL_DEVICE_TYPE_CPU);
-        EXPECT(driver_props.driverID != VK_DRIVER_ID_MESA_LLVMPIPE);
-        EXPECT(props->deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU ||
-               props->deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU);
+        OT_EXPECT(props->deviceType != VK_PHYSICAL_DEVICE_TYPE_CPU);
+        OT_EXPECT(driver_props.driverID != VK_DRIVER_ID_MESA_LLVMPIPE);
+        OT_EXPECT(props->deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU ||
+                  props->deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU);
     }
 
     /* Compute prerequisites for Phase B (16x16 tile = 256 invocations): */
-    EXPECT(props->limits.maxComputeWorkGroupInvocations >= 256);
-    EXPECT(props->limits.maxComputeWorkGroupSize[0] >= 16);
-    EXPECT(props->limits.maxComputeWorkGroupSize[1] >= 16);
-    EXPECT(subgroup_props.subgroupSize >= 4);
+    OT_EXPECT(props->limits.maxComputeWorkGroupInvocations >= 256);
+    OT_EXPECT(props->limits.maxComputeWorkGroupSize[0] >= 16);
+    OT_EXPECT(props->limits.maxComputeWorkGroupSize[1] >= 16);
+    OT_EXPECT(subgroup_props.subgroupSize >= 4);
 
     flux_device_release(d);
-    TEST_SUMMARY();
+    return OT_REPORT();
 }

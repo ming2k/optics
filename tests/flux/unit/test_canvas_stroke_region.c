@@ -16,7 +16,7 @@
  * outside the tolerance; with a 50%-alpha white over opaque black the reference
  * is 188 and a double blend is 255.
  */
-#include "test_helpers.h"
+#include "optics_test.h"
 
 #include <flux/canvas_cpu.h>
 #include <flux/flux.h>
@@ -103,17 +103,17 @@ static int probe_band(const uint8_t *fb, int ref, float inner_r, float outer_r, 
 
 static void check_annulus(float radius, float half, int min_probed, const char *label) {
     flux_arena arena;
-    EXPECT(flux_arena_init(&arena, 1u << 16, nullptr) == FLUX_OK);
+    OT_EXPECT(flux_arena_init(&arena, 1u << 16, nullptr) == FLUX_OK);
     flux_canvas *c = nullptr;
     int ref = -1;
     const uint8_t *fb = render_circle_stroke(&arena, &c, radius, half * 2.0f, &ref);
-    EXPECT(fb != nullptr);
+    OT_EXPECT(fb != nullptr);
     if (fb) {
-        EXPECT(ref > 0);
+        OT_EXPECT(ref > 0);
         int probed = 0;
         int worst = probe_band(fb, ref, radius - half, radius + half, &probed);
-        EXPECT(probed > min_probed);
-        EXPECT(worst <= TOL);
+        OT_EXPECT(probed > min_probed);
+        OT_EXPECT(worst <= TOL);
         flux_canvas_release(c);
     }
     flux_arena_deinit(&arena);
@@ -121,17 +121,17 @@ static void check_annulus(float radius, float half, int min_probed, const char *
 
 static void check_disc(float radius, float half, int min_probed, const char *label) {
     flux_arena arena;
-    EXPECT(flux_arena_init(&arena, 1u << 16, nullptr) == FLUX_OK);
+    OT_EXPECT(flux_arena_init(&arena, 1u << 16, nullptr) == FLUX_OK);
     flux_canvas *c = nullptr;
     int ref = -1;
     const uint8_t *fb = render_circle_stroke(&arena, &c, radius, half * 2.0f, &ref);
-    EXPECT(fb != nullptr);
+    OT_EXPECT(fb != nullptr);
     if (fb) {
-        EXPECT(ref > 0);
+        OT_EXPECT(ref > 0);
         int probed = 0;
         int worst = probe_band(fb, ref, 0.0f, radius + half, &probed);
-        EXPECT(probed > min_probed);
-        EXPECT(worst <= TOL);
+        OT_EXPECT(probed > min_probed);
+        OT_EXPECT(worst <= TOL);
         flux_canvas_release(c);
     }
     flux_arena_deinit(&arena);
@@ -152,5 +152,5 @@ int main(void) {
     check_disc(6.0f, 10.0f, 300, "disc r=6 half=10 (retrograde)");
     check_disc(2.0f, 12.0f, 300, "disc r=2 half=12 (retrograde)");
 
-    TEST_SUMMARY();
+    return OT_REPORT();
 }

@@ -21,7 +21,7 @@
  */
 #include "coverage_harness.h"
 
-#include "test_helpers.h"
+#include "optics_test.h"
 
 #include <math.h>
 #include <string.h>
@@ -50,7 +50,7 @@ static void test_area_identity(void) {
     flux_curve_cover cover = {segs, n, flux_curve_cover_bounds(segs, n)};
 
     double expect = cov_harness_signed_area(cover);
-    EXPECT_NEAR(expect, 100.0, 1e-3); /* 10 x 10 */
+    OT_EXPECT_NEAR(expect, 100.0, 1e-3); /* 10 x 10 */
 
     /* Every offset keeps the square wholly inside the grid: an offset that
      * pushed it off-grid would legitimately produce the area of only the
@@ -58,19 +58,19 @@ static void test_area_identity(void) {
     const float offsets[3][2] = {{-6.0f, -6.0f}, {-6.37f, -5.81f}, {-5.5f, -6.4f}};
     for (int k = 0; k < 3; ++k) {
         cov_plane pl;
-        EXPECT(cov_plane_init(&pl, W, H));
-        EXPECT(cov_harness_area(cover, offsets[k][0], offsets[k][1], W, H, &pl) == FLUX_OK);
+        OT_EXPECT(cov_plane_init(&pl, W, H));
+        OT_EXPECT(cov_harness_area(cover, offsets[k][0], offsets[k][1], W, H, &pl) == FLUX_OK);
         double sum = 0.0;
         for (size_t i = 0; i < (size_t)W * H; ++i)
             sum += (double)pl.px[i];
         /* Exact arithmetic: the sum of per-pixel areas IS the area. This holds
          * at integer offsets too, where the plane is legitimately binary. */
-        EXPECT_NEAR(sum, expect, 1e-3);
+        OT_EXPECT_NEAR(sum, expect, 1e-3);
         /* A fractional offset must grade the boundary. (The >16-level
          * requirement of INV-COV-02 belongs to the oblique-edge test below: an
          * axis-aligned square has only four edge phases in view.) */
         if (k > 0)
-            EXPECT(cov_harness_levels(&pl) > 2);
+            OT_EXPECT(cov_harness_levels(&pl) > 2);
         cov_plane_free(&pl);
     }
 }
@@ -98,18 +98,18 @@ static void test_area_identity_with_hole(void) {
     flux_curve_cover cover = {all, n + hn, flux_curve_cover_bounds(all, n + hn)};
 
     double expect = cov_harness_signed_area(cover);
-    EXPECT_NEAR(expect, 100.0 - 16.0, 1e-3); /* outer minus hole */
+    OT_EXPECT_NEAR(expect, 100.0 - 16.0, 1e-3); /* outer minus hole */
 
     cov_plane pl;
-    EXPECT(cov_plane_init(&pl, W, H));
-    EXPECT(cov_harness_area(cover, -6.0f, -6.0f, W, H, &pl) == FLUX_OK);
+    OT_EXPECT(cov_plane_init(&pl, W, H));
+    OT_EXPECT(cov_harness_area(cover, -6.0f, -6.0f, W, H, &pl) == FLUX_OK);
     double sum = 0.0;
     for (size_t i = 0; i < (size_t)W * H; ++i)
         sum += (double)pl.px[i];
-    EXPECT_NEAR(sum, expect, 1e-3);
+    OT_EXPECT_NEAR(sum, expect, 1e-3);
     /* The middle of the hole carries no coverage. */
     uint32_t mid = (H / 2) * W + (W / 2);
-    EXPECT_NEAR(pl.px[mid], 0.0, 1e-6);
+    OT_EXPECT_NEAR(pl.px[mid], 0.0, 1e-6);
     cov_plane_free(&pl);
 }
 
@@ -121,29 +121,29 @@ static void test_cross_route_convergence(void) {
     flux_curve_cover cover = {segs, n, flux_curve_cover_bounds(segs, n)};
 
     cov_plane area, ss8, ss32;
-    EXPECT(cov_plane_init(&area, W, H));
-    EXPECT(cov_plane_init(&ss8, W, H));
-    EXPECT(cov_plane_init(&ss32, W, H));
-    EXPECT(cov_harness_area(cover, -6.37f, -5.81f, W, H, &area) == FLUX_OK);
-    EXPECT(cov_harness_supersample(cover, FLUX_CURVE_FILL_NONZERO, -6.37f, -5.81f, W, H, 8, &ss8) ==
-           FLUX_OK);
-    EXPECT(cov_harness_supersample(cover, FLUX_CURVE_FILL_NONZERO, -6.37f, -5.81f, W, H, 32,
-                                   &ss32) == FLUX_OK);
+    OT_EXPECT(cov_plane_init(&area, W, H));
+    OT_EXPECT(cov_plane_init(&ss8, W, H));
+    OT_EXPECT(cov_plane_init(&ss32, W, H));
+    OT_EXPECT(cov_harness_area(cover, -6.37f, -5.81f, W, H, &area) == FLUX_OK);
+    OT_EXPECT(cov_harness_supersample(cover, FLUX_CURVE_FILL_NONZERO, -6.37f, -5.81f, W, H, 8,
+                                      &ss8) == FLUX_OK);
+    OT_EXPECT(cov_harness_supersample(cover, FLUX_CURVE_FILL_NONZERO, -6.37f, -5.81f, W, H, 32,
+                                      &ss32) == FLUX_OK);
 
     cov_report r8, r32;
     cov_harness_compare(&ss8, &area, 0.25f, &r8);
     cov_harness_compare(&ss32, &area, 0.05f, &r32);
     /* Sampling error shrinks with n and is bounded by ~1/(2n) per edge. */
-    EXPECT(r8.mean_abs <= 0.02f);
-    EXPECT(r32.mean_abs <= 0.005f);
-    EXPECT(r32.mean_abs <= r8.mean_abs + 1e-4f);
-    EXPECT(r8.total == W * H);
+    OT_EXPECT(r8.mean_abs <= 0.02f);
+    OT_EXPECT(r32.mean_abs <= 0.005f);
+    OT_EXPECT(r32.mean_abs <= r8.mean_abs + 1e-4f);
+    OT_EXPECT(r8.total == W * H);
     /* The per-row localisation is populated: the row carrying the worst total
      * deviation, and its sign. On a shape this regular the area must be right,
      * so no row may be materially off — that is the property the report exists
      * to expose. */
-    EXPECT(r32.worst_row < H);
-    EXPECT(fabs(r32.worst_row_delta) <= 0.05);
+    OT_EXPECT(r32.worst_row < H);
+    OT_EXPECT(fabs(r32.worst_row_delta) <= 0.05);
 
     cov_plane_free(&area);
     cov_plane_free(&ss8);
@@ -176,21 +176,21 @@ static void test_self_intersection_is_out_of_scope(void) {
     flux_curve_cover cover = {segs, 5, flux_curve_cover_bounds(segs, 5)};
 
     cov_plane area, ss;
-    EXPECT(cov_plane_init(&area, W, H));
-    EXPECT(cov_plane_init(&ss, W, H));
+    OT_EXPECT(cov_plane_init(&area, W, H));
+    OT_EXPECT(cov_plane_init(&ss, W, H));
     /* The area reference must REFUSE this input, not return a small number.
      * Clipping a self-intersecting contour and summing signed areas cancels the
      * lobes and yields ~0 — a yardstick that reports nothing must never be
      * trusted by a gate. */
-    EXPECT(cov_harness_area(cover, -6.0f, -6.0f, W, H, &area) == FLUX_ERROR_UNSUPPORTED);
+    OT_EXPECT(cov_harness_area(cover, -6.0f, -6.0f, W, H, &area) == FLUX_ERROR_UNSUPPORTED);
     /* The supersampled reference is the right tool here, and it reports real
      * coverage: the pentagram paints its lobes at winding >= 1. */
-    EXPECT(cov_harness_supersample(cover, FLUX_CURVE_FILL_NONZERO, -6.0f, -6.0f, W, H, 32, &ss) ==
-           FLUX_OK);
+    OT_EXPECT(cov_harness_supersample(cover, FLUX_CURVE_FILL_NONZERO, -6.0f, -6.0f, W, H, 32,
+                                      &ss) == FLUX_OK);
     double sum_ss = 0.0;
     for (size_t i = 0; i < (size_t)W * H; ++i)
         sum_ss += (double)ss.px[i];
-    EXPECT(sum_ss > 20.0); /* a 10-unit star covers tens of pixels */
+    OT_EXPECT(sum_ss > 20.0); /* a 10-unit star covers tens of pixels */
     fprintf(stderr, "  self-intersecting star: area reference refuses, nonzero coverage %.2f\n",
             sum_ss);
 
@@ -213,20 +213,20 @@ static void test_oblique_edge_levels(void) {
     flux_curve_cover cover = {tri, 4, flux_curve_cover_bounds(tri, 4)};
 
     cov_plane area, ss4;
-    EXPECT(cov_plane_init(&area, W, H));
-    EXPECT(cov_plane_init(&ss4, W, H));
-    EXPECT(cov_harness_area(cover, -8.0f, -8.0f, W, H, &area) == FLUX_OK);
+    OT_EXPECT(cov_plane_init(&area, W, H));
+    OT_EXPECT(cov_plane_init(&ss4, W, H));
+    OT_EXPECT(cov_harness_area(cover, -8.0f, -8.0f, W, H, &area) == FLUX_OK);
     /* 2x2 per pixel is what a 4x sample count gives. */
-    EXPECT(cov_harness_supersample(cover, FLUX_CURVE_FILL_NONZERO, -8.0f, -8.0f, W, H, 2, &ss4) ==
-           FLUX_OK);
+    OT_EXPECT(cov_harness_supersample(cover, FLUX_CURVE_FILL_NONZERO, -8.0f, -8.0f, W, H, 2,
+                                      &ss4) == FLUX_OK);
 
     int levels_area = cov_harness_levels(&area);
     int levels_ss4 = cov_harness_levels(&ss4);
     fprintf(stderr, "  oblique edge: area reference %d levels, 4x sample count %d levels\n",
             levels_area, levels_ss4);
-    EXPECT(levels_area > 16);
-    EXPECT(levels_ss4 <= 8); /* the ceiling ADR-0116 exists to remove */
-    EXPECT(levels_area > levels_ss4);
+    OT_EXPECT(levels_area > 16);
+    OT_EXPECT(levels_ss4 <= 8); /* the ceiling ADR-0116 exists to remove */
+    OT_EXPECT(levels_area > levels_ss4);
 
     cov_plane_free(&area);
     cov_plane_free(&ss4);
@@ -239,17 +239,17 @@ static void test_failure_modes(void) {
     flux_curve_cover cover = {segs, n, flux_curve_cover_bounds(segs, n)};
 
     cov_plane pl;
-    EXPECT(cov_plane_init(&pl, 4, 4));
+    OT_EXPECT(cov_plane_init(&pl, 4, 4));
     /* Null / mismatched plane is an explicit error, not a crash. */
-    EXPECT(cov_harness_area(cover, 0.0f, 0.0f, 4, 4, nullptr) == FLUX_ERROR_INVALID_ARGUMENT);
-    EXPECT(cov_harness_area(cover, 0.0f, 0.0f, 8, 8, &pl) == FLUX_ERROR_INVALID_ARGUMENT);
-    EXPECT(cov_harness_supersample(cover, FLUX_CURVE_FILL_NONZERO, 0.0f, 0.0f, 8, 8, 4, &pl) ==
-           FLUX_ERROR_INVALID_ARGUMENT);
+    OT_EXPECT(cov_harness_area(cover, 0.0f, 0.0f, 4, 4, nullptr) == FLUX_ERROR_INVALID_ARGUMENT);
+    OT_EXPECT(cov_harness_area(cover, 0.0f, 0.0f, 8, 8, &pl) == FLUX_ERROR_INVALID_ARGUMENT);
+    OT_EXPECT(cov_harness_supersample(cover, FLUX_CURVE_FILL_NONZERO, 0.0f, 0.0f, 8, 8, 4, &pl) ==
+              FLUX_ERROR_INVALID_ARGUMENT);
     /* An empty cover is zero coverage, not an error. */
     flux_curve_cover empty = {nullptr, 0, {0.0f, 0.0f, 0.0f, 0.0f}};
-    EXPECT(cov_harness_area(empty, 0.0f, 0.0f, 4, 4, &pl) == FLUX_OK);
+    OT_EXPECT(cov_harness_area(empty, 0.0f, 0.0f, 4, 4, &pl) == FLUX_OK);
     for (size_t i = 0; i < 16; ++i)
-        EXPECT(pl.px[i] == 0.0f);
+        OT_EXPECT(pl.px[i] == 0.0f);
     cov_plane_free(&pl);
 }
 
@@ -260,5 +260,5 @@ int main(void) {
     test_self_intersection_is_out_of_scope();
     test_oblique_edge_levels();
     test_failure_modes();
-    TEST_SUMMARY();
+    return OT_REPORT();
 }

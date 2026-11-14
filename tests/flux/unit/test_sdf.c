@@ -12,7 +12,7 @@
  *     tolerance — this is the check that keeps the two from drifting apart;
  *   - degenerate input stays finite.
  */
-#include "test_helpers.h"
+#include "optics_test.h"
 
 #include <flux/sdf.h>
 
@@ -37,59 +37,59 @@ static float shader_reference(float px, float py, float cx, float cy, float hx, 
 }
 
 static void test_circle(void) {
-    EXPECT_NEAR(flux_sdf_circle((flux_point){3.0f, 0.0f}, 3.0f), 0.0f, 1e-5);
-    EXPECT_NEAR(flux_sdf_circle((flux_point){0.0f, 0.0f}, 3.0f), -3.0f, 1e-5);
-    EXPECT_NEAR(flux_sdf_circle((flux_point){6.0f, 0.0f}, 3.0f), 3.0f, 1e-5);
+    OT_EXPECT_NEAR(flux_sdf_circle((flux_point){3.0f, 0.0f}, 3.0f), 0.0f, 1e-5);
+    OT_EXPECT_NEAR(flux_sdf_circle((flux_point){0.0f, 0.0f}, 3.0f), -3.0f, 1e-5);
+    OT_EXPECT_NEAR(flux_sdf_circle((flux_point){6.0f, 0.0f}, 3.0f), 3.0f, 1e-5);
     /* The field is exact for a circle in every direction. */
-    EXPECT_NEAR(flux_sdf_circle((flux_point){0.0f, -3.0f}, 3.0f), 0.0f, 1e-5);
-    EXPECT_NEAR(flux_sdf_circle((flux_point){0.0f, 5.0f}, 3.0f), 2.0f, 1e-5);
+    OT_EXPECT_NEAR(flux_sdf_circle((flux_point){0.0f, -3.0f}, 3.0f), 0.0f, 1e-5);
+    OT_EXPECT_NEAR(flux_sdf_circle((flux_point){0.0f, 5.0f}, 3.0f), 2.0f, 1e-5);
 }
 
 static void test_round_rect(void) {
     const float hw = 10.0f, hh = 6.0f, r = 3.0f;
     /* Centre: distance to the nearest edge. */
-    EXPECT_NEAR(flux_sdf_round_rect((flux_point){0.0f, 0.0f}, hw, hh, r), -6.0f, 1e-5);
+    OT_EXPECT_NEAR(flux_sdf_round_rect((flux_point){0.0f, 0.0f}, hw, hh, r), -6.0f, 1e-5);
     /* Straight-edge midpoints are exactly on the boundary. */
-    EXPECT_NEAR(flux_sdf_round_rect((flux_point){hw, 0.0f}, hw, hh, r), 0.0f, 1e-5);
-    EXPECT_NEAR(flux_sdf_round_rect((flux_point){0.0f, hh}, hw, hh, r), 0.0f, 1e-5);
-    EXPECT_NEAR(flux_sdf_round_rect((flux_point){0.0f, -hh}, hw, hh, r), 0.0f, 1e-5);
+    OT_EXPECT_NEAR(flux_sdf_round_rect((flux_point){hw, 0.0f}, hw, hh, r), 0.0f, 1e-5);
+    OT_EXPECT_NEAR(flux_sdf_round_rect((flux_point){0.0f, hh}, hw, hh, r), 0.0f, 1e-5);
+    OT_EXPECT_NEAR(flux_sdf_round_rect((flux_point){0.0f, -hh}, hw, hh, r), 0.0f, 1e-5);
     /* Outside an edge, straight out: exactly the extra distance. */
-    EXPECT_NEAR(flux_sdf_round_rect((flux_point){14.0f, 0.0f}, hw, hh, r), 4.0f, 1e-5);
+    OT_EXPECT_NEAR(flux_sdf_round_rect((flux_point){14.0f, 0.0f}, hw, hh, r), 4.0f, 1e-5);
     /* The square corner is cut off: its distance is r*(sqrt(2)-1). */
-    EXPECT_NEAR(flux_sdf_round_rect((flux_point){hw, hh}, hw, hh, r), r * (1.41421356f - 1.0f),
-                1e-5);
+    OT_EXPECT_NEAR(flux_sdf_round_rect((flux_point){hw, hh}, hw, hh, r), r * (1.41421356f - 1.0f),
+                   1e-5);
     /* radius == 0 is a plain box. */
-    EXPECT_NEAR(flux_sdf_round_rect((flux_point){hw, hh}, hw, hh, 0.0f), 0.0f, 1e-5);
+    OT_EXPECT_NEAR(flux_sdf_round_rect((flux_point){hw, hh}, hw, hh, 0.0f), 0.0f, 1e-5);
     /* radius is clamped to the smaller half extent. */
-    EXPECT_NEAR(flux_sdf_round_rect((flux_point){0.0f, 0.0f}, hw, hh, 99.0f),
-                flux_sdf_round_rect((flux_point){0.0f, 0.0f}, hw, hh, hh), 1e-6);
+    OT_EXPECT_NEAR(flux_sdf_round_rect((flux_point){0.0f, 0.0f}, hw, hh, 99.0f),
+                   flux_sdf_round_rect((flux_point){0.0f, 0.0f}, hw, hh, hh), 1e-6);
 }
 
 static void test_ring(void) {
-    EXPECT_NEAR(flux_sdf_ring(0.0f, 2.0f), -2.0f, 1e-6);
-    EXPECT_NEAR(flux_sdf_ring(2.0f, 2.0f), 0.0f, 1e-6);
-    EXPECT_NEAR(flux_sdf_ring(-2.0f, 2.0f), 0.0f, 1e-6);
-    EXPECT_NEAR(flux_sdf_ring(5.0f, 2.0f), 3.0f, 1e-6);
+    OT_EXPECT_NEAR(flux_sdf_ring(0.0f, 2.0f), -2.0f, 1e-6);
+    OT_EXPECT_NEAR(flux_sdf_ring(2.0f, 2.0f), 0.0f, 1e-6);
+    OT_EXPECT_NEAR(flux_sdf_ring(-2.0f, 2.0f), 0.0f, 1e-6);
+    OT_EXPECT_NEAR(flux_sdf_ring(5.0f, 2.0f), 3.0f, 1e-6);
     /* Zero-width border is the filled shape, unchanged. */
-    EXPECT_NEAR(flux_sdf_ring(-7.0f, 0.0f), -7.0f, 1e-6);
-    EXPECT_NEAR(flux_sdf_ring(-7.0f, -1.0f), -7.0f, 1e-6);
+    OT_EXPECT_NEAR(flux_sdf_ring(-7.0f, 0.0f), -7.0f, 1e-6);
+    OT_EXPECT_NEAR(flux_sdf_ring(-7.0f, -1.0f), -7.0f, 1e-6);
 }
 
 static void test_coverage(void) {
-    EXPECT_NEAR(flux_sdf_coverage(0.0f, 1.0f), 0.5f, 1e-5);
-    EXPECT_NEAR(flux_sdf_coverage(-0.5f, 1.0f), 1.0f, 1e-5);
-    EXPECT_NEAR(flux_sdf_coverage(0.5f, 1.0f), 0.0f, 1e-5);
-    EXPECT_NEAR(flux_sdf_coverage(-100.0f, 1.0f), 1.0f, 1e-6);
-    EXPECT_NEAR(flux_sdf_coverage(100.0f, 1.0f), 0.0f, 1e-6);
+    OT_EXPECT_NEAR(flux_sdf_coverage(0.0f, 1.0f), 0.5f, 1e-5);
+    OT_EXPECT_NEAR(flux_sdf_coverage(-0.5f, 1.0f), 1.0f, 1e-5);
+    OT_EXPECT_NEAR(flux_sdf_coverage(0.5f, 1.0f), 0.0f, 1e-5);
+    OT_EXPECT_NEAR(flux_sdf_coverage(-100.0f, 1.0f), 1.0f, 1e-6);
+    OT_EXPECT_NEAR(flux_sdf_coverage(100.0f, 1.0f), 0.0f, 1e-6);
     /* Monotone decreasing in d. */
-    EXPECT(flux_sdf_coverage(-0.2f, 1.0f) > flux_sdf_coverage(0.0f, 1.0f));
-    EXPECT(flux_sdf_coverage(0.0f, 1.0f) > flux_sdf_coverage(0.2f, 1.0f));
+    OT_EXPECT(flux_sdf_coverage(-0.2f, 1.0f) > flux_sdf_coverage(0.0f, 1.0f));
+    OT_EXPECT(flux_sdf_coverage(0.0f, 1.0f) > flux_sdf_coverage(0.2f, 1.0f));
     /* A wider `aa` (a magnified shape) softens the ramp. */
-    EXPECT(flux_sdf_coverage(0.2f, 4.0f) > flux_sdf_coverage(0.2f, 1.0f));
+    OT_EXPECT(flux_sdf_coverage(0.2f, 4.0f) > flux_sdf_coverage(0.2f, 1.0f));
     /* A degenerate `aa` yields a hard edge, not a NaN or a blow-up. */
     float c = flux_sdf_coverage(0.0f, 0.0f);
-    EXPECT(isfinite(c));
-    EXPECT_NEAR(c, 0.5f, 1e-3);
+    OT_EXPECT(isfinite(c));
+    OT_EXPECT_NEAR(c, 0.5f, 1e-3);
 }
 
 /* |grad d| == 1 wherever the field is a true distance: this is what licenses
@@ -123,7 +123,7 @@ static void test_eikonal(void) {
                        flux_sdf_round_rect((flux_point){x, y - h}, hw, hh, r);
             float grad = sqrtf((dx / (2.0f * h)) * (dx / (2.0f * h)) +
                                (dy / (2.0f * h)) * (dy / (2.0f * h)));
-            EXPECT_NEAR(grad, 1.0f, 5e-3f);
+            OT_EXPECT_NEAR(grad, 1.0f, 5e-3f);
         }
     }
 }
@@ -142,24 +142,24 @@ static void test_shader_parity(void) {
             float mine = flux_sdf_ring(
                 flux_sdf_round_rect((flux_point){px - cx, py - cy}, hw, hh, r), hw_arg);
             float ref = shader_reference(px, py, cx, cy, hw, hh, r, hw_arg);
-            EXPECT_NEAR(mine, ref, 1e-5);
+            OT_EXPECT_NEAR(mine, ref, 1e-5);
             /* ...and coverage matches the shader's clamp. */
             float cov_mine = flux_sdf_coverage(mine, 1.0f);
             float cov_ref = 0.5f - ref;
             cov_ref = cov_ref < 0.0f ? 0.0f : (cov_ref > 1.0f ? 1.0f : cov_ref);
-            EXPECT_NEAR(cov_mine, cov_ref, 1e-5);
+            OT_EXPECT_NEAR(cov_mine, cov_ref, 1e-5);
             checked++;
         }
     }
-    EXPECT(checked > 14000);
+    OT_EXPECT(checked > 14000);
 }
 
 static void test_degenerate(void) {
     /* Zero extents, negative extents and NaN-ish radius all stay finite. */
-    EXPECT(isfinite(flux_sdf_round_rect((flux_point){0.0f, 0.0f}, 0.0f, 0.0f, 0.0f)));
-    EXPECT(isfinite(flux_sdf_round_rect((flux_point){1.0f, 1.0f}, -5.0f, -5.0f, 2.0f)));
-    EXPECT(isfinite(flux_sdf_round_rect((flux_point){1.0f, 1.0f}, 4.0f, 4.0f, -3.0f)));
-    EXPECT(isfinite(flux_sdf_circle((flux_point){0.0f, 0.0f}, 0.0f)));
+    OT_EXPECT(isfinite(flux_sdf_round_rect((flux_point){0.0f, 0.0f}, 0.0f, 0.0f, 0.0f)));
+    OT_EXPECT(isfinite(flux_sdf_round_rect((flux_point){1.0f, 1.0f}, -5.0f, -5.0f, 2.0f)));
+    OT_EXPECT(isfinite(flux_sdf_round_rect((flux_point){1.0f, 1.0f}, 4.0f, 4.0f, -3.0f)));
+    OT_EXPECT(isfinite(flux_sdf_circle((flux_point){0.0f, 0.0f}, 0.0f)));
 }
 
 static float clampf_(float x, float lo, float hi) {
@@ -198,7 +198,7 @@ static void test_squircle(void) {
     for (int i = -40; i <= 40; ++i) {
         for (int j = -40; j <= 40; ++j) {
             flux_point p = {(float)i * 0.4f, (float)j * 0.4f};
-            EXPECT(flux_sdf_squircle(p, hw, hh, r, 0.0f) == flux_sdf_round_rect(p, hw, hh, r));
+            OT_EXPECT(flux_sdf_squircle(p, hw, hh, r, 0.0f) == flux_sdf_round_rect(p, hw, hh, r));
         }
     }
 
@@ -210,7 +210,7 @@ static void test_squircle(void) {
                 float px = (float)i * 0.4f, py = (float)j * 0.4f;
                 float mine = flux_sdf_squircle((flux_point){px, py}, hw, hh, r, curve[c]);
                 float ref = squircle_reference(px, py, 0.0f, 0.0f, hw, hh, r, curve[c]);
-                EXPECT_NEAR(mine, ref, 1e-4);
+                OT_EXPECT_NEAR(mine, ref, 1e-4);
             }
         }
     }
@@ -223,24 +223,24 @@ static void test_squircle(void) {
     corner = (flux_point){hw - r + r * 0.95f, hh - r + r * 0.95f};
     float d0 = flux_sdf_squircle(corner, hw, hh, r, 0.0f);
     float d1 = flux_sdf_squircle(corner, hw, hh, r, 1.0f);
-    EXPECT(d0 > 0.0f); /* outside the circular corner */
-    EXPECT(d1 < d0);   /* the L4 corner reaches out past it */
+    OT_EXPECT(d0 > 0.0f); /* outside the circular corner */
+    OT_EXPECT(d1 < d0);   /* the L4 corner reaches out past it */
     /* Monotone in curvature at that point. */
     float prev = d0;
     for (int k = 1; k <= 10; ++k) {
         float d = flux_sdf_squircle(corner, hw, hh, r, (float)k / 10.0f);
-        EXPECT(d <= prev + 1e-6f);
+        OT_EXPECT(d <= prev + 1e-6f);
         prev = d;
     }
     /* ...and the straight-edge midpoint is *not* moved by curvature: the L4
      * normalisation only reshapes the corner arc. */
     flux_point edge = {hw, 0.0f};
     for (int k = 0; k <= 4; ++k)
-        EXPECT_NEAR(flux_sdf_squircle(edge, hw, hh, r, (float)k / 4.0f), 0.0f, 1e-4);
+        OT_EXPECT_NEAR(flux_sdf_squircle(edge, hw, hh, r, (float)k / 4.0f), 0.0f, 1e-4);
 
     /* Degenerate input stays finite. */
-    EXPECT(isfinite(flux_sdf_squircle((flux_point){0.0f, 0.0f}, 0.0f, 0.0f, 0.0f, 1.0f)));
-    EXPECT(isfinite(flux_sdf_squircle((flux_point){1.0f, 1.0f}, 4.0f, 4.0f, 99.0f, 1.0f)));
+    OT_EXPECT(isfinite(flux_sdf_squircle((flux_point){0.0f, 0.0f}, 0.0f, 0.0f, 0.0f, 1.0f)));
+    OT_EXPECT(isfinite(flux_sdf_squircle((flux_point){1.0f, 1.0f}, 4.0f, 4.0f, 99.0f, 1.0f)));
 }
 
 /* ------------------------------------------------------------------ */
@@ -290,18 +290,19 @@ static void test_gradient_is_the_derivative(void) {
                 /* The field is Eikonal here, so the normalised difference is the
                  * unit gradient itself. 2e-3 rad ~ 0.11 deg is the first-order
                  * truncation of the h = 1e-3 reference. */
-                EXPECT_NEAR(s.normal.x, dx / len, 2e-3f);
-                EXPECT_NEAR(s.normal.y, dy / len, 2e-3f);
+                OT_EXPECT_NEAR(s.normal.x, dx / len, 2e-3f);
+                OT_EXPECT_NEAR(s.normal.y, dy / len, 2e-3f);
                 /* ...and it is a unit vector. */
-                EXPECT_NEAR(sqrtf(s.normal.x * s.normal.x + s.normal.y * s.normal.y), 1.0f, 1e-5f);
+                OT_EXPECT_NEAR(sqrtf(s.normal.x * s.normal.x + s.normal.y * s.normal.y), 1.0f,
+                               1e-5f);
                 /* The distance it carries is the field's own value: one
                  * evaluation, not two. */
-                EXPECT_NEAR(s.distance, flux_sdf_squircle(p, hw, hh, r, curve[c]), 1e-6f);
+                OT_EXPECT_NEAR(s.distance, flux_sdf_squircle(p, hw, hh, r, curve[c]), 1e-6f);
                 checked++;
             }
         }
     }
-    EXPECT(checked > 10000);
+    OT_EXPECT(checked > 10000);
 }
 
 /* The normal does not depend on the sampling footprint outside the interior.
@@ -328,15 +329,15 @@ static void test_normal_is_analytic_not_sampled(void) {
                 for (int k = 0; k < 3; ++k) {
                     flux_sdf_sample s =
                         flux_sdf_squircle_sample(p, hw, hh, r, curvature, aa_values[k]);
-                    EXPECT(s.normal.x == base.normal.x);
-                    EXPECT(s.normal.y == base.normal.y);
-                    EXPECT(s.distance == base.distance);
+                    OT_EXPECT(s.normal.x == base.normal.x);
+                    OT_EXPECT(s.normal.y == base.normal.y);
+                    OT_EXPECT(s.distance == base.distance);
                     compared++;
                 }
             }
         }
     }
-    EXPECT(compared > 20000);
+    OT_EXPECT(compared > 20000);
 
     /* ...and inside the interior the crease rule *does* respond to the
      * footprint, which is the whole reason it exists. Point chosen so both
@@ -345,17 +346,17 @@ static void test_normal_is_analytic_not_sampled(void) {
     flux_point inside = {6.0f, 2.0f}; /* q = (-3, -2): |qx - qy| == 1 */
     flux_sdf_sample tight = flux_sdf_squircle_sample(inside, hw, hh, 0.0f, 0.0f, 0.05f);
     flux_sdf_sample wide = flux_sdf_squircle_sample(inside, hw, hh, 0.0f, 0.0f, 4.0f);
-    EXPECT(tight.normal.x != wide.normal.x);
+    OT_EXPECT(tight.normal.x != wide.normal.x);
     /* A tight footprint converges on the continuum gradient (the dominant edge:
      * qx < qy, so the y edge wins)... */
     flux_sdf_sample limit = flux_sdf_squircle_gradient(inside, hw, hh, 0.0f, 0.0f);
-    EXPECT_NEAR(tight.normal.x, limit.normal.x, 1e-2f);
-    EXPECT_NEAR(tight.normal.y, limit.normal.y, 1e-2f);
-    EXPECT_NEAR(limit.normal.y, 1.0f, 1e-6f);
+    OT_EXPECT_NEAR(tight.normal.x, limit.normal.x, 1e-2f);
+    OT_EXPECT_NEAR(tight.normal.y, limit.normal.y, 1e-2f);
+    OT_EXPECT_NEAR(limit.normal.y, 1.0f, 1e-6f);
     /* ...and the wide one is a blend of the two edge directions that the
      * continuum never produces. */
-    EXPECT(wide.normal.x > 0.2f && wide.normal.x < 0.7f);
-    EXPECT(wide.normal.y > 0.7f && wide.normal.y < 0.98f);
+    OT_EXPECT(wide.normal.x > 0.2f && wide.normal.x < 0.7f);
+    OT_EXPECT(wide.normal.y > 0.7f && wide.normal.y < 0.98f);
 }
 
 /* The interior rule turns a 90-degree flip into a ramp. Sweeping *across* the
@@ -381,7 +382,7 @@ static void test_crease_is_resolved_over_the_footprint(void) {
             worst_step = step;
         prev = s;
     }
-    EXPECT(worst_step < 0.02f);
+    OT_EXPECT(worst_step < 0.02f);
 
     /* The continuum entry point is the one that flips — asserted so the
      * distinction cannot rot. */
@@ -391,7 +392,7 @@ static void test_crease_is_resolved_over_the_footprint(void) {
     flux_sdf_sample gb = flux_sdf_squircle_gradient(b, hw, hh, 0.0f, 0.0f);
     float flip = sqrtf((ga.normal.x - gb.normal.x) * (ga.normal.x - gb.normal.x) +
                        (ga.normal.y - gb.normal.y) * (ga.normal.y - gb.normal.y));
-    EXPECT(flip > 1.0f);
+    OT_EXPECT(flip > 1.0f);
 }
 
 /* Degenerate input must not produce a NaN normal. */
@@ -399,21 +400,21 @@ static void test_gradient_degenerate(void) {
     const flux_point pts[4] = {{0.0f, 0.0f}, {4.0f, 4.0f}, {-4.0f, 4.0f}, {1e6f, 1e6f}};
     for (int i = 0; i < 4; ++i) {
         flux_sdf_sample s = flux_sdf_squircle_sample(pts[i], 0.0f, 0.0f, 0.0f, 1.0f, 1.0f);
-        EXPECT(isfinite(s.distance));
-        EXPECT(isfinite(s.normal.x));
-        EXPECT(isfinite(s.normal.y));
-        EXPECT_NEAR(sqrtf(s.normal.x * s.normal.x + s.normal.y * s.normal.y), 1.0f, 1e-5f);
+        OT_EXPECT(isfinite(s.distance));
+        OT_EXPECT(isfinite(s.normal.x));
+        OT_EXPECT(isfinite(s.normal.y));
+        OT_EXPECT_NEAR(sqrtf(s.normal.x * s.normal.x + s.normal.y * s.normal.y), 1.0f, 1e-5f);
 
         flux_sdf_sample g = flux_sdf_squircle_gradient(pts[i], 0.0f, 0.0f, 0.0f, 1.0f);
-        EXPECT(isfinite(g.normal.x));
-        EXPECT(isfinite(g.normal.y));
-        EXPECT_NEAR(sqrtf(g.normal.x * g.normal.x + g.normal.y * g.normal.y), 1.0f, 1e-5f);
+        OT_EXPECT(isfinite(g.normal.x));
+        OT_EXPECT(isfinite(g.normal.y));
+        OT_EXPECT_NEAR(sqrtf(g.normal.x * g.normal.x + g.normal.y * g.normal.y), 1.0f, 1e-5f);
     }
     /* A negative half extent and an oversized radius clamp like the fields do. */
     flux_sdf_sample s =
         flux_sdf_squircle_sample((flux_point){1.0f, 1.0f}, -5.0f, -5.0f, 99.0f, 1.0f, 1.0f);
-    EXPECT(isfinite(s.normal.x));
-    EXPECT(isfinite(s.distance));
+    OT_EXPECT(isfinite(s.normal.x));
+    OT_EXPECT(isfinite(s.distance));
 }
 
 /* The bound that makes a future binary16 attempt start from a proof instead of a
@@ -436,7 +437,7 @@ static void test_l4_normalisation_is_bounded(void) {
         double nx = pow(u, 0.25);
         double ny = pow(1.0 - u, 0.25);
         /* ...and it really is the direction circle. */
-        EXPECT_NEAR(nx * nx * nx * nx + ny * ny * ny * ny, 1.0, 1e-12);
+        OT_EXPECT_NEAR(nx * nx * nx * nx + ny * ny * ny * ny, 1.0, 1e-12);
         double nx2 = nx * nx, ny2 = ny * ny;
         double g = sqrt(nx2 * nx2 * nx2 + ny2 * ny2 * ny2);
         if (g < observed_lo)
@@ -444,12 +445,12 @@ static void test_l4_normalisation_is_bounded(void) {
         if (g > observed_hi)
             observed_hi = g;
     }
-    EXPECT_NEAR(observed_lo, lo_expected, 1e-9);
-    EXPECT_NEAR(observed_hi, 1.0, 1e-12);
+    OT_EXPECT_NEAR(observed_lo, lo_expected, 1e-9);
+    OT_EXPECT_NEAR(observed_hi, 1.0, 1e-12);
     /* Both endpoints are attainable: g == 2^-1/4 at nx == ny == 2^-1/4, and
      * g == 1 on the axes. A bound that is never approached would be vacuous. */
-    EXPECT(observed_lo < 0.85);
-    EXPECT(observed_hi > 0.999999);
+    OT_EXPECT(observed_lo < 0.85);
+    OT_EXPECT(observed_hi > 0.999999);
 }
 
 int main(void) {
@@ -466,5 +467,5 @@ int main(void) {
     test_crease_is_resolved_over_the_footprint();
     test_gradient_degenerate();
     test_l4_normalisation_is_bounded();
-    TEST_SUMMARY();
+    return OT_REPORT();
 }

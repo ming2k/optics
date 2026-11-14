@@ -4,7 +4,8 @@
  * Assert that per-tile segment sets match a CPU computation of the same binning
  * across 16x16 tiles.
  */
-#include "test_helpers.h"
+#include "flux_test.h"
+#include "optics_test.h"
 
 #include "../../../libs/flux/src/canvas/canvas_tile.h"
 #include <flux/flux.h>
@@ -30,7 +31,7 @@ static void verify_binning(const flux_tile_segment *segs, uint32_t count, uint32
 
     flux_tile_desc *tiles = calloc(total_tiles, sizeof(flux_tile_desc));
     uint32_t *indices = malloc(MAX_INDICES * sizeof(uint32_t));
-    EXPECT(tiles && indices);
+    OT_EXPECT(tiles && indices);
     if (!tiles || !indices) {
         free(tiles);
         free(indices);
@@ -38,8 +39,8 @@ static void verify_binning(const flux_tile_segment *segs, uint32_t count, uint32
     }
 
     uint32_t total_indices = 0;
-    EXPECT(canvas_tile_bin_segments(segs, count, width, height, tiles, indices, MAX_INDICES,
-                                    &total_indices) == FLUX_OK);
+    OT_EXPECT(canvas_tile_bin_segments(segs, count, width, height, tiles, indices, MAX_INDICES,
+                                       &total_indices) == FLUX_OK);
 
     /* Independent direct computation per tile */
     for (uint32_t y = 0; y < ty; ++y) {
@@ -61,7 +62,7 @@ static void verify_binning(const flux_tile_segment *segs, uint32_t count, uint32
             }
 
             /* Gate B2: segment count matches exactly */
-            EXPECT(tiles[tidx].segment_count == expected_count);
+            OT_EXPECT(tiles[tidx].segment_count == expected_count);
 
             /* Gate B2: segment sets match exactly */
             if (expected_count > 0 && expected_count < 256) {
@@ -73,7 +74,7 @@ static void verify_binning(const flux_tile_segment *segs, uint32_t count, uint32
                 qsort(expected_idx, expected_count, sizeof(uint32_t), cmp_u32);
 
                 for (uint32_t k = 0; k < expected_count; ++k)
-                    EXPECT(got_idx[k] == expected_idx[k]);
+                    OT_EXPECT(got_idx[k] == expected_idx[k]);
             }
         }
     }
@@ -86,19 +87,26 @@ int main(void) {
     /* 1. Unit intersection edge cases */
     {
         /* Strictly outside */
-        EXPECT(!canvas_tile_segment_intersects((flux_tile_segment){0, 0, 10, 10}, 20, 20, 36, 36));
+        OT_EXPECT(
+            !canvas_tile_segment_intersects((flux_tile_segment){0, 0, 10, 10}, 20, 20, 36, 36));
         /* Strictly inside */
-        EXPECT(canvas_tile_segment_intersects((flux_tile_segment){22, 22, 28, 28}, 20, 20, 36, 36));
+        OT_EXPECT(
+            canvas_tile_segment_intersects((flux_tile_segment){22, 22, 28, 28}, 20, 20, 36, 36));
         /* Diagonal cutting cleanly through */
-        EXPECT(canvas_tile_segment_intersects((flux_tile_segment){10, 10, 40, 40}, 20, 20, 36, 36));
+        OT_EXPECT(
+            canvas_tile_segment_intersects((flux_tile_segment){10, 10, 40, 40}, 20, 20, 36, 36));
         /* Passing near corner and cutting through (15, 30) -> (30, 15) cuts [20, 36)x[20, 36) */
-        EXPECT(canvas_tile_segment_intersects((flux_tile_segment){15, 30, 30, 15}, 20, 20, 36, 36));
+        OT_EXPECT(
+            canvas_tile_segment_intersects((flux_tile_segment){15, 30, 30, 15}, 20, 20, 36, 36));
         /* Strictly outside near corner without touching */
-        EXPECT(!canvas_tile_segment_intersects((flux_tile_segment){5, 20, 15, 10}, 20, 20, 36, 36));
+        OT_EXPECT(
+            !canvas_tile_segment_intersects((flux_tile_segment){5, 20, 15, 10}, 20, 20, 36, 36));
         /* Horizontal crossing */
-        EXPECT(canvas_tile_segment_intersects((flux_tile_segment){10, 25, 45, 25}, 20, 20, 36, 36));
+        OT_EXPECT(
+            canvas_tile_segment_intersects((flux_tile_segment){10, 25, 45, 25}, 20, 20, 36, 36));
         /* Vertical crossing */
-        EXPECT(canvas_tile_segment_intersects((flux_tile_segment){25, 10, 25, 45}, 20, 20, 36, 36));
+        OT_EXPECT(
+            canvas_tile_segment_intersects((flux_tile_segment){25, 10, 25, 45}, 20, 20, 36, 36));
     }
 
     /* 2. Rotated oblique edge (crosses multiple tile phases) */
@@ -153,5 +161,5 @@ int main(void) {
         verify_binning(poly, N, W, H);
     }
 
-    TEST_SUMMARY();
+    return OT_REPORT();
 }

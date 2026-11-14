@@ -161,6 +161,9 @@ if get_option('examples')
   if opt_transit
     subdir('examples/transit')
   endif
+  if get_option('reticle')
+    subdir('examples/reticle')
+  endif
   subdir('examples/lens')
   subdir('examples/iris')
   subdir('examples/scenarios')
@@ -241,14 +244,6 @@ if san_opts != 'none' and san_opts != ''
 endif
 
 if get_option('tests')
-  subdir('tests/flux')
-  subdir('tests/prism')
-  subdir('tests/transit')
-  subdir('tests/vista')
-  if get_option('reticle')
-    subdir('tests/reticle')
-  endif
-  subdir('tests/lens')
-  subdir('tests/iris')
-  subdir('tests/optics')
+  # One orchestrator owns the test topology and the shared support layer.
+  subdir('tests')
 endif

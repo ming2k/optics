@@ -17,7 +17,8 @@
  * assertion is the one that must be inverted — and this test will fail loudly if
  * someone forgets, which is the point of writing it now.
  */
-#include "test_helpers.h"
+#include "flux_test.h"
+#include "optics_test.h"
 
 #include <flux/canvas.h>
 #include <flux/canvas_cpu.h>
@@ -61,28 +62,29 @@ static int count_levels(const uint8_t *px, uint32_t stride, uint32_t w, uint32_t
 
 int main(void) {
     flux_arena arena;
-    EXPECT(flux_arena_init(&arena, 64 * 1024, nullptr) == FLUX_OK);
+    OT_EXPECT(flux_arena_init(&arena, 64 * 1024, nullptr) == FLUX_OK);
 
     /* ---- CPU: analytic coverage ---- */
     int cpu_levels = 0;
     {
         flux_canvas *cpu = nullptr;
-        EXPECT(flux_canvas_create_cpu(W, H, 1.0f, &cpu) == FLUX_OK);
+        OT_EXPECT(flux_canvas_create_cpu(W, H, 1.0f, &cpu) == FLUX_OK);
         flux_color clear = flux_color_rgba(0, 0, 0, 255);
-        EXPECT(flux_canvas_begin(cpu, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
-                                                               .clear_color = &clear}) == FLUX_OK);
+        OT_EXPECT(
+            flux_canvas_begin(cpu, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                            .clear_color = &clear}) == FLUX_OK);
         draw_oblique(cpu, &arena);
-        EXPECT(flux_canvas_end(cpu) == FLUX_OK);
+        OT_EXPECT(flux_canvas_end(cpu) == FLUX_OK);
         uint32_t w = 0, h = 0, stride = 0;
         const uint8_t *px = flux_canvas_cpu_pixels(cpu, &w, &h, &stride);
-        EXPECT(px != nullptr);
+        OT_EXPECT(px != nullptr);
         if (px)
             cpu_levels = count_levels(px, stride, w, h);
         flux_canvas_release(cpu);
     }
     fprintf(stderr, "  CPU solid fill:        %d distinct levels along the edge\n", cpu_levels);
     /* INV-COV-02: continuous coverage, far beyond what a sample count can carry. */
-    EXPECT(cpu_levels > 16);
+    OT_EXPECT(cpu_levels > 16);
 
     /* The coverage seam answers WHERE a pixel is painted, so it is not specific
      * to solid paint: a gradient fill must reach it too, and therefore carry the
@@ -90,10 +92,11 @@ int main(void) {
     int grad_levels = 0;
     {
         flux_canvas *cpu = nullptr;
-        EXPECT(flux_canvas_create_cpu(W, H, 1.0f, &cpu) == FLUX_OK);
+        OT_EXPECT(flux_canvas_create_cpu(W, H, 1.0f, &cpu) == FLUX_OK);
         flux_color clear = flux_color_rgba(0, 0, 0, 255);
-        EXPECT(flux_canvas_begin(cpu, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
-                                                               .clear_color = &clear}) == FLUX_OK);
+        OT_EXPECT(
+            flux_canvas_begin(cpu, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                            .clear_color = &clear}) == FLUX_OK);
         flux_path *p = nullptr;
         if (flux_path_create(&p, &arena) == FLUX_OK) {
             flux_path_move_to(p, 0.0f, 6.0f);
@@ -108,49 +111,50 @@ int main(void) {
                 flux_brush_linear_gradient((flux_point){0, 0}, (flux_point){0, 127}, stops, 2);
             flux_canvas_fill_path(cpu, p, FLUX_FILL_NON_ZERO, &grad);
         }
-        EXPECT(flux_canvas_end(cpu) == FLUX_OK);
+        OT_EXPECT(flux_canvas_end(cpu) == FLUX_OK);
         uint32_t w = 0, h = 0, stride = 0;
         const uint8_t *px = flux_canvas_cpu_pixels(cpu, &w, &h, &stride);
-        EXPECT(px != nullptr);
+        OT_EXPECT(px != nullptr);
         if (px)
             grad_levels = count_levels(px, stride, w, h);
         flux_canvas_release(cpu);
     }
     fprintf(stderr, "  CPU gradient fill:     %d distinct levels along the edge\n", grad_levels);
-    EXPECT(grad_levels > 16);
+    OT_EXPECT(grad_levels > 16);
 
     /* ---- GPU: 4x MSAA ---- */
-    flux_device *d = test_helpers_make_headless_device();
+    flux_device *d = flux_test_make_headless_device();
     if (!d) {
         fprintf(stderr, "  no Vulkan device; GPU half skipped\n");
-        TEST_SUMMARY();
+        OT_SKIP("no Vulkan device (GPU half)");
     }
     flux_surface *s = nullptr;
     {
         flux_surface_desc sd = FLUX_SURFACE_DESC_INIT;
         sd.width = W;
         sd.height = H;
-        EXPECT(flux_surface_create(d, &sd, &s) == FLUX_OK);
+        OT_EXPECT(flux_surface_create(d, &sd, &s) == FLUX_OK);
     }
     flux_canvas *gpu = nullptr;
     {
         flux_canvas_desc cd = FLUX_CANVAS_DESC_INIT;
         cd.surface = s;
-        EXPECT(flux_canvas_create(&cd, &gpu) == FLUX_OK);
+        OT_EXPECT(flux_canvas_create(&cd, &gpu) == FLUX_OK);
     }
     static uint8_t gpu_px[W * H * 4];
     {
         flux_color clear = flux_color_rgba(0, 0, 0, 255);
         flux_frame *frame = nullptr;
-        EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
-        EXPECT(flux_canvas_begin(gpu, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
-                                                               .frame = frame,
-                                                               .clear_color = &clear}) == FLUX_OK);
+        OT_EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
+        OT_EXPECT(
+            flux_canvas_begin(gpu, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                            .frame = frame,
+                                                            .clear_color = &clear}) == FLUX_OK);
         draw_oblique(gpu, &arena);
-        EXPECT(flux_canvas_end(gpu) == FLUX_OK);
-        EXPECT(flux_frame_submit(frame) == FLUX_OK);
-        EXPECT(flux_frame_present(frame) == FLUX_OK);
-        EXPECT(flux_surface_read_pixels(s, gpu_px, sizeof(gpu_px)) == FLUX_OK);
+        OT_EXPECT(flux_canvas_end(gpu) == FLUX_OK);
+        OT_EXPECT(flux_frame_submit(frame) == FLUX_OK);
+        OT_EXPECT(flux_frame_present(frame) == FLUX_OK);
+        OT_EXPECT(flux_surface_read_pixels(s, gpu_px, sizeof(gpu_px)) == FLUX_OK);
     }
     int gpu_levels = count_levels(gpu_px, W * 4, W, H);
     fprintf(stderr, "  GPU coverage backend:  %d distinct levels along the edge\n", gpu_levels);
@@ -158,12 +162,12 @@ int main(void) {
     /* CONTRACT SATISFIED: ADR-0116/ADR-0119 S3 / ADR-0120 completed.
      * The device path now rasterizes with continuous analytic coverage (> 16 levels, INV-COV-02).
      * The legacy 4x MSAA 16-level ceiling is inverted and closed. */
-    EXPECT(gpu_levels > 16);
-    EXPECT(gpu_levels >= 80);
+    OT_EXPECT(gpu_levels > 16);
+    OT_EXPECT(gpu_levels >= 80);
 
     flux_canvas_release(gpu);
     flux_surface_release(s);
     flux_device_release(d);
     flux_arena_deinit(&arena);
-    TEST_SUMMARY();
+    return OT_REPORT();
 }

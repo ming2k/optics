@@ -2,7 +2,7 @@
  * Runtime-icon rendering through the public API only (ADR-0112).
  *
  * This binary deliberately links *only* the shared library — it must never
- * compile icon_runtime.c / icon_mask.c / icon_svg.c. A runtime SVG registered
+ * compile icon_runtime.c / icon_mask.c. A runtime SVG registered
  * here is stored in liblens's own icon registry, and lens's replay (also inside
  * liblens) resolves it from that same registry. Building a local copy of the
  * registry would give the test two registries: the registration would land in the
@@ -19,7 +19,8 @@
  *     degrades but content never does;
  *   - a built-in icon still follows the theme colour (collapsed single run).
  */
-#include "test_helpers.h"
+#include "lens_test.h"
+#include "optics_test.h"
 #include <flux/canvas.h>
 #include <flux/canvas_cpu.h>
 #include <lens/icon.h>
@@ -95,20 +96,20 @@ static ink_counts render_and_classify(lens_icon_id id, float size) {
 int main(void) {
     /* Registration goes through the library that will draw it. */
     lens_icon_id id = lens_icon_register_svg(SVG_MULTI_RUN);
-    CHECK(id != LENS_ICON_INVALID);
-    CHECK((int)id >= (int)LENS_ICON_COUNT);
+    OT_EXPECT(id != LENS_ICON_INVALID);
+    OT_EXPECT((int)id >= (int)LENS_ICON_COUNT);
     /* The library's own registry must resolve it — this is the exact assertion
      * that fails if a second registry exists anywhere in the binary. */
-    CHECK(lens_icon_info(id, nullptr) != nullptr);
+    OT_EXPECT(lens_icon_info(id, nullptr) != nullptr);
 
     /* ---- mask path: small size, all per-run colours survive ---- */
     {
         ink_counts k = render_and_classify(id, 20.0f);
-        CHECK(k.red > 0);
-        CHECK(k.green > 0);
-        CHECK(k.blue > 0);
+        OT_EXPECT(k.red > 0);
+        OT_EXPECT(k.green > 0);
+        OT_EXPECT(k.blue > 0);
         /* Nothing should have collapsed to the theme colour. */
-        CHECK(k.other < k.red + k.green + k.blue);
+        OT_EXPECT(k.other < k.red + k.green + k.blue);
     }
 
     /* ---- vector fallback: same icon past the mask bake limit ---- *
@@ -116,18 +117,18 @@ int main(void) {
      * declare all three colours rather than collapsing to one paint. */
     {
         ink_counts k = render_and_classify(id, 300.0f);
-        CHECK(k.red > 100);
-        CHECK(k.green > 100);
-        CHECK(k.blue > 100);
-        CHECK(k.other < 50); /* no wholesale collapse to theme colour */
+        OT_EXPECT(k.red > 100);
+        OT_EXPECT(k.green > 100);
+        OT_EXPECT(k.blue > 100);
+        OT_EXPECT(k.other < 50); /* no wholesale collapse to theme colour */
     }
 
     /* ---- built-in icon: collapsed single run follows the theme ---- */
     {
         ink_counts k = render_and_classify(LENS_ICON_CHECK, 20.0f);
-        CHECK(k.red == 0 && k.green == 0 && k.blue == 0);
-        CHECK(k.other > 0);
+        OT_EXPECT(k.red == 0 && k.green == 0 && k.blue == 0);
+        OT_EXPECT(k.other > 0);
     }
 
-    return TEST_REPORT();
+    return OT_REPORT();
 }

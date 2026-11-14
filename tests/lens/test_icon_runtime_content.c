@@ -2,7 +2,7 @@
  * lens_icon_register_svg. CPU-only.
  *
  * Widget-level coverage lives in test_icon_runtime.c; this binary compiles
- * icon_runtime.c (+ icon_data.c, icon_svg.c) directly — the same pattern as
+ * icon_runtime.c (+ icon_data.c) directly — the same pattern as
  * test_drawlist_hash — because the registry accessors (lensi_icon_desc and
  * friends) are hidden symbols that do not link from liblens.so. The point
  * is to assert WHAT got registered, not just that an id came back:
@@ -18,7 +18,8 @@
  */
 
 #include "../../libs/lens/src/internal.h"
-#include "test_helpers.h"
+#include "lens_test.h"
+#include "optics_test.h"
 #include <lens/lens.h>
 
 /* Feather-style: circle + line, stroke only, in a 24x24 viewBox. */
@@ -41,12 +42,12 @@ static const char SVG_WIDE_VIEWBOX[] =
 
 int main(void) {
     lens_icon_id stroke = lens_icon_register_svg(SVG_STROKE);
-    CHECK((int)stroke >= (int)LENS_ICON_COUNT);
+    OT_EXPECT((int)stroke >= (int)LENS_ICON_COUNT);
     lens_icon_id fill = lens_icon_register_svg(SVG_FILL);
-    CHECK((int)fill == (int)stroke + 1);
+    OT_EXPECT((int)fill == (int)stroke + 1);
 
     const lens_icon_desc *desc = lensi_icon_desc((int32_t)stroke);
-    CHECK(desc != NULL);
+    OT_EXPECT(desc != NULL);
 
     /* Both shapes survive: exactly two MOVE verbs (circle subpath + line
      * subpath), 4 cubic arcs for the circle, 1 line verb for the line, and no degenerate cubics. */
@@ -96,27 +97,27 @@ int main(void) {
         }
     }
 #undef TRACK
-    CHECK(moves == 2);
-    CHECK(degenerate == 0);
+    OT_EXPECT(moves == 2);
+    OT_EXPECT(degenerate == 0);
     /* circle = 4 cubic arcs, line = 1 line verb */
-    CHECK(cubics == 4);
-    CHECK(lines == 1);
+    OT_EXPECT(cubics == 4);
+    OT_EXPECT(lines == 1);
     /* 24-box normalization: r=9 circle centred at 12 spans 3..21. */
-    CHECK(min_x > 2.9f && min_x < 3.1f);
-    CHECK(max_x > 20.9f && max_x < 21.1f);
-    CHECK(min_y > 2.9f && max_y < 21.1f);
+    OT_EXPECT(min_x > 2.9f && min_x < 3.1f);
+    OT_EXPECT(max_x > 20.9f && max_x < 21.1f);
+    OT_EXPECT(min_y > 2.9f && max_y < 21.1f);
 
     /* Render mode follows the shapes' paint. */
-    CHECK(lensi_icon_mode((int32_t)stroke) == LENSI_ICON_RENDER_STROKE);
-    CHECK(lensi_icon_mode((int32_t)fill) == LENSI_ICON_RENDER_FILL);
+    OT_EXPECT(lensi_icon_mode((int32_t)stroke) == LENSI_ICON_RENDER_STROKE);
+    OT_EXPECT(lensi_icon_mode((int32_t)fill) == LENSI_ICON_RENDER_FILL);
 
     /* A 48-wide viewBox scales down into the 24 box (r=18 -> 9). */
     lens_icon_id wide = lens_icon_register_svg(SVG_WIDE_VIEWBOX);
     const lens_icon_desc *wd = lensi_icon_desc((int32_t)wide);
-    CHECK(wd != NULL && wd->count > 0);
-    CHECK(wd->cmds[0].type == 0);
-    CHECK(wd->cmds[0].params[0] > 20.9f && wd->cmds[0].params[0] < 21.1f);
-    CHECK(wd->cmds[0].params[1] > 11.9f && wd->cmds[0].params[1] < 12.1f);
+    OT_EXPECT(wd != NULL && wd->count > 0);
+    OT_EXPECT(wd->cmds[0].type == 0);
+    OT_EXPECT(wd->cmds[0].params[0] > 20.9f && wd->cmds[0].params[0] < 21.1f);
+    OT_EXPECT(wd->cmds[0].params[1] > 11.9f && wd->cmds[0].params[1] < 12.1f);
 
-    return TEST_REPORT();
+    return OT_REPORT();
 }

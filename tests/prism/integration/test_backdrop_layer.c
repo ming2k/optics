@@ -18,7 +18,8 @@
  * Also asserts the persistent per-slot output clears previous + current
  * footprints across submissions, mirroring test_liquid_glass.c.
  */
-#include "test_helpers.h"
+#include "flux_test.h"
+#include "optics_test.h"
 #include <flux/effect.h>
 #include <flux/flux.h>
 #include <flux/vulkan.h>
@@ -35,18 +36,17 @@
 #define TEST_FRAME_SLOTS 3u /* mirrors FLUX_MAX_FRAMES_IN_FLIGHT */
 
 int main(void) {
-    flux_device *d = test_helpers_make_headless_device();
+    flux_device *d = flux_test_make_headless_device();
     if (!d) {
         fprintf(stderr, "test_backdrop_layer: no Vulkan device; skipping\n");
-        TEST_SUMMARY();
-        return 0;
+        OT_SKIP("no Vulkan device");
     }
 
     flux_surface_desc sd = FLUX_SURFACE_DESC_INIT;
     sd.width = W;
     sd.height = H;
     flux_surface *s = nullptr;
-    EXPECT(flux_surface_create(d, &sd, &s) == FLUX_OK);
+    OT_EXPECT(flux_surface_create(d, &sd, &s) == FLUX_OK);
 
     VkFormat sfmt = flux_surface_vk_format(s);
     flux_format target_fmt =
@@ -54,17 +54,17 @@ int main(void) {
 
     flux_canvas_desc cd = {.type = FLUX_TYPE_CANVAS_DESC, .surface = s};
     flux_canvas *canvas = nullptr;
-    EXPECT(flux_canvas_create(&cd, &canvas) == FLUX_OK);
+    OT_EXPECT(flux_canvas_create(&cd, &canvas) == FLUX_OK);
 
     flux_image *target = nullptr;
-    EXPECT(flux_image_create_render_target(d, W, H, target_fmt, &target) == FLUX_OK);
+    OT_EXPECT(flux_image_create_render_target(d, W, H, target_fmt, &target) == FLUX_OK);
 
     flux_blur_filter *blur_filter = nullptr;
-    EXPECT(flux_blur_filter_create(d, &blur_filter) == FLUX_OK);
+    OT_EXPECT(flux_blur_filter_create(d, &blur_filter) == FLUX_OK);
     prism_backdrop_layer_filter *layer_filter = nullptr;
-    EXPECT(prism_backdrop_layer_filter_create(d, &layer_filter) == FLUX_OK);
-    EXPECT(prism_backdrop_layer_filter_warmup(nullptr, nullptr) == FLUX_ERROR_INVALID_ARGUMENT);
-    EXPECT(prism_backdrop_layer_filter_warmup(layer_filter, nullptr) == FLUX_OK);
+    OT_EXPECT(prism_backdrop_layer_filter_create(d, &layer_filter) == FLUX_OK);
+    OT_EXPECT(prism_backdrop_layer_filter_warmup(nullptr, nullptr) == FLUX_ERROR_INVALID_ARGUMENT);
+    OT_EXPECT(prism_backdrop_layer_filter_warmup(layer_filter, nullptr) == FLUX_OK);
 
     static uint8_t px[BYTES];
     flux_color black = flux_color_rgba(0, 0, 0, 255);
@@ -72,25 +72,25 @@ int main(void) {
     /* --- glass over frost samples the frosted image, not the capture --- */
     {
         flux_frame *frame = nullptr;
-        EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
+        OT_EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
 
         /* Capture: hard black|white vertical edge at x = 32. */
-        EXPECT(flux_canvas_begin(canvas, &(flux_canvas_pass_desc){
-                                             .type = FLUX_TYPE_CANVAS_PASS_DESC,
-                                             .frame = frame,
-                                             .attachment = {.kind = FLUX_CANVAS_ATTACHMENT_IMAGE,
-                                                            .image = target},
-                                             .clear_color = &black}) == FLUX_OK);
+        OT_EXPECT(flux_canvas_begin(canvas, &(flux_canvas_pass_desc){
+                                                .type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                .frame = frame,
+                                                .attachment = {.kind = FLUX_CANVAS_ATTACHMENT_IMAGE,
+                                                               .image = target},
+                                                .clear_color = &black}) == FLUX_OK);
         flux_canvas_fill_rect_color(canvas,
                                     (flux_rect){(float)(W / 2), 0.0f, (float)(W / 2), (float)H},
                                     flux_color_rgba_premul(255, 255, 255, 255));
-        EXPECT(flux_canvas_end(canvas) == FLUX_OK);
+        OT_EXPECT(flux_canvas_end(canvas) == FLUX_OK);
 
         flux_effect_blur_desc bd = FLUX_EFFECT_BLUR_DESC_INIT;
         bd.input = target;
         bd.sigma = 8.0f;
         flux_image *blurred = nullptr;
-        EXPECT(flux_blur_filter_apply(blur_filter, frame, &bd, &blurred) == FLUX_OK);
+        OT_EXPECT(flux_blur_filter_apply(blur_filter, frame, &bd, &blurred) == FLUX_OK);
 
         /* Full-image frost sheet + a glass body straddling the capture's
          * hard edge, with no refraction. The discriminator: every pixel of
@@ -118,26 +118,26 @@ int main(void) {
         ld.refraction = 0.0f;
         ld.frost_strength = 0.0f;
         prism_material_output layer = {0};
-        EXPECT(prism_backdrop_layer_filter_apply(layer_filter, frame, &ld, &layer) == FLUX_OK);
-        EXPECT(layer.image != nullptr);
+        OT_EXPECT(prism_backdrop_layer_filter_apply(layer_filter, frame, &ld, &layer) == FLUX_OK);
+        OT_EXPECT(layer.image != nullptr);
 
         /* Draw over a *black* base so unfrosted/un-glassed pixels read black
          * and the frost's own alpha is exercised. */
-        EXPECT(
+        OT_EXPECT(
             flux_canvas_begin(canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
                                                                .frame = frame,
                                                                .clear_color = &black}) == FLUX_OK);
         test_draw_material(canvas, layer);
-        EXPECT(flux_canvas_end(canvas) == FLUX_OK);
-        EXPECT(flux_frame_submit(frame) == FLUX_OK);
-        EXPECT(flux_frame_present(frame) == FLUX_OK);
+        OT_EXPECT(flux_canvas_end(canvas) == FLUX_OK);
+        OT_EXPECT(flux_frame_submit(frame) == FLUX_OK);
+        OT_EXPECT(flux_frame_present(frame) == FLUX_OK);
         memset(px, 0xCD, BYTES);
-        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+        OT_EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
 
         /* The frost must never carry the sharp edge: the transition column
          * is an intermediate (blurred) value, not the capture's hard 0/255. */
         const uint8_t *frost_edge = &px[(32u * W + 32u) * 4u];
-        EXPECT(frost_edge[0] > 16u && frost_edge[0] < 245u);
+        OT_EXPECT(frost_edge[0] > 16u && frost_edge[0] < 245u);
 
         /* PRIMARY LAYER ASSERTION. The body spans x=20..44 across the edge.
          * On the dark half (x=22..30) the frost shows its bright-side spill
@@ -149,13 +149,13 @@ int main(void) {
          * flat tint floor cannot pass either. */
         const uint8_t *body_dark_left = &px[(32u * W + 22u) * 4u];
         const uint8_t *body_dark_rising = &px[(32u * W + 26u) * 4u];
-        EXPECT(body_dark_left[0] > 40u && body_dark_left[0] < 80u);
-        EXPECT(body_dark_rising[0] > body_dark_left[0] + 20u);
+        OT_EXPECT(body_dark_left[0] > 40u && body_dark_left[0] < 80u);
+        OT_EXPECT(body_dark_rising[0] > body_dark_left[0] + 20u);
         /* The bright half mirrors it: the frost's dark-side spill pulls the
          * body well below the saturated white a sharp-sampling lens shows
          * (~202 with tint). */
         const uint8_t *body_bright_half = &px[(32u * W + 40u) * 4u];
-        EXPECT(body_bright_half[0] < 240u && body_bright_half[0] > 120u);
+        OT_EXPECT(body_bright_half[0] < 240u && body_bright_half[0] > 120u);
     }
 
     /* --- footprint clearing across submissions on reused slots --- */
@@ -172,26 +172,26 @@ int main(void) {
         bool seen[TEST_FRAME_SLOTS] = {false};
         for (uint32_t i = 0; i < TEST_FRAME_SLOTS; ++i) {
             flux_frame *frame = nullptr;
-            EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
+            OT_EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
             uint32_t slot = flux_frame_index(frame);
-            EXPECT(slot < TEST_FRAME_SLOTS);
+            OT_EXPECT(slot < TEST_FRAME_SLOTS);
             if (slot < TEST_FRAME_SLOTS)
                 seen[slot] = true;
 
-            EXPECT(flux_canvas_begin(
-                       canvas,
-                       &(flux_canvas_pass_desc){
-                           .type = FLUX_TYPE_CANVAS_PASS_DESC,
-                           .frame = frame,
-                           .attachment = {.kind = FLUX_CANVAS_ATTACHMENT_IMAGE, .image = target},
-                           .clear_color = &black}) == FLUX_OK);
-            EXPECT(flux_canvas_end(canvas) == FLUX_OK);
+            OT_EXPECT(flux_canvas_begin(
+                          canvas,
+                          &(flux_canvas_pass_desc){
+                              .type = FLUX_TYPE_CANVAS_PASS_DESC,
+                              .frame = frame,
+                              .attachment = {.kind = FLUX_CANVAS_ATTACHMENT_IMAGE, .image = target},
+                              .clear_color = &black}) == FLUX_OK);
+            OT_EXPECT(flux_canvas_end(canvas) == FLUX_OK);
 
             flux_effect_blur_desc bd = FLUX_EFFECT_BLUR_DESC_INIT;
             bd.input = target;
             bd.sigma = 2.0f;
             flux_image *blurred = nullptr;
-            EXPECT(flux_blur_filter_apply(blur_filter, frame, &bd, &blurred) == FLUX_OK);
+            OT_EXPECT(flux_blur_filter_apply(blur_filter, frame, &bd, &blurred) == FLUX_OK);
 
             prism_backdrop_layer_desc ld = PRISM_BACKDROP_LAYER_DESC_INIT;
             ld.input = target;
@@ -202,23 +202,24 @@ int main(void) {
             ld.group_count = 1u;
             ld.refraction = 0.0f;
             prism_material_output layer = {0};
-            EXPECT(prism_backdrop_layer_filter_apply(layer_filter, frame, &ld, &layer) == FLUX_OK);
+            OT_EXPECT(prism_backdrop_layer_filter_apply(layer_filter, frame, &ld, &layer) ==
+                      FLUX_OK);
 
-            EXPECT(flux_canvas_begin(canvas,
-                                     &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
-                                                              .frame = frame,
-                                                              .clear_color = &black}) == FLUX_OK);
+            OT_EXPECT(flux_canvas_begin(
+                          canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                           .frame = frame,
+                                                           .clear_color = &black}) == FLUX_OK);
             test_draw_material(canvas, layer);
-            EXPECT(flux_canvas_end(canvas) == FLUX_OK);
-            EXPECT(flux_frame_submit(frame) == FLUX_OK);
-            EXPECT(flux_frame_present(frame) == FLUX_OK);
+            OT_EXPECT(flux_canvas_end(canvas) == FLUX_OK);
+            OT_EXPECT(flux_frame_submit(frame) == FLUX_OK);
+            OT_EXPECT(flux_frame_present(frame) == FLUX_OK);
             memset(px, 0xCD, BYTES);
-            EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+            OT_EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
 
             const uint8_t *inside = &px[(32u * W + 12u) * 4u];
             const uint8_t *outside = &px[(32u * W + 52u) * 4u];
-            EXPECT(inside[0] > 0u);
-            EXPECT(outside[0] < 5u && outside[1] < 5u && outside[2] < 5u);
+            OT_EXPECT(inside[0] > 0u);
+            OT_EXPECT(outside[0] < 5u && outside[1] < 5u && outside[2] < 5u);
         }
 
         /* Re-submit with the frost moved to the right: the old footprint
@@ -229,25 +230,25 @@ int main(void) {
         bool reused = false;
         for (uint32_t i = 0; i < TEST_FRAME_SLOTS; ++i) {
             flux_frame *frame = nullptr;
-            EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
+            OT_EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
             uint32_t slot = flux_frame_index(frame);
             if (slot < TEST_FRAME_SLOTS && seen[slot])
                 reused = true;
 
-            EXPECT(flux_canvas_begin(
-                       canvas,
-                       &(flux_canvas_pass_desc){
-                           .type = FLUX_TYPE_CANVAS_PASS_DESC,
-                           .frame = frame,
-                           .attachment = {.kind = FLUX_CANVAS_ATTACHMENT_IMAGE, .image = target},
-                           .clear_color = &black}) == FLUX_OK);
-            EXPECT(flux_canvas_end(canvas) == FLUX_OK);
+            OT_EXPECT(flux_canvas_begin(
+                          canvas,
+                          &(flux_canvas_pass_desc){
+                              .type = FLUX_TYPE_CANVAS_PASS_DESC,
+                              .frame = frame,
+                              .attachment = {.kind = FLUX_CANVAS_ATTACHMENT_IMAGE, .image = target},
+                              .clear_color = &black}) == FLUX_OK);
+            OT_EXPECT(flux_canvas_end(canvas) == FLUX_OK);
 
             flux_effect_blur_desc bd = FLUX_EFFECT_BLUR_DESC_INIT;
             bd.input = target;
             bd.sigma = 2.0f;
             flux_image *blurred = nullptr;
-            EXPECT(flux_blur_filter_apply(blur_filter, frame, &bd, &blurred) == FLUX_OK);
+            OT_EXPECT(flux_blur_filter_apply(blur_filter, frame, &bd, &blurred) == FLUX_OK);
 
             prism_backdrop_layer_desc ld = PRISM_BACKDROP_LAYER_DESC_INIT;
             ld.input = target;
@@ -258,52 +259,53 @@ int main(void) {
             ld.group_count = 1u;
             ld.refraction = 0.0f;
             prism_material_output layer = {0};
-            EXPECT(prism_backdrop_layer_filter_apply(layer_filter, frame, &ld, &layer) == FLUX_OK);
+            OT_EXPECT(prism_backdrop_layer_filter_apply(layer_filter, frame, &ld, &layer) ==
+                      FLUX_OK);
 
-            EXPECT(flux_canvas_begin(canvas,
-                                     &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
-                                                              .frame = frame,
-                                                              .clear_color = &black}) == FLUX_OK);
+            OT_EXPECT(flux_canvas_begin(
+                          canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                           .frame = frame,
+                                                           .clear_color = &black}) == FLUX_OK);
             test_draw_material(canvas, layer);
-            EXPECT(flux_canvas_end(canvas) == FLUX_OK);
-            EXPECT(flux_frame_submit(frame) == FLUX_OK);
-            EXPECT(flux_frame_present(frame) == FLUX_OK);
+            OT_EXPECT(flux_canvas_end(canvas) == FLUX_OK);
+            OT_EXPECT(flux_frame_submit(frame) == FLUX_OK);
+            OT_EXPECT(flux_frame_present(frame) == FLUX_OK);
             memset(px, 0xCD, BYTES);
-            EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+            OT_EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
 
             const uint8_t *old_footprint = &px[(32u * W + 12u) * 4u];
             const uint8_t *new_footprint = &px[(32u * W + 52u) * 4u];
-            EXPECT(old_footprint[0] < 5u && old_footprint[1] < 5u && old_footprint[2] < 5u);
-            EXPECT(new_footprint[0] > 0u);
+            OT_EXPECT(old_footprint[0] < 5u && old_footprint[1] < 5u && old_footprint[2] < 5u);
+            OT_EXPECT(new_footprint[0] > 0u);
         }
-        EXPECT(reused);
+        OT_EXPECT(reused);
     }
 
     /* --- frost resolves opaque; tint washes INTO the frost --- */
     {
         flux_frame *frame = nullptr;
-        EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
+        OT_EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
 
         /* Capture: dark base with one bright block. Inside the block the
          * blur's spread makes blurred < sharp, so a half-opacity frost
          * (blend of frosted with sharp) is measurably brighter than the
          * full frost — the discriminator for the opaque resolve. */
         flux_color dark = flux_color_rgba(24, 24, 24, 255);
-        EXPECT(flux_canvas_begin(canvas, &(flux_canvas_pass_desc){
-                                             .type = FLUX_TYPE_CANVAS_PASS_DESC,
-                                             .frame = frame,
-                                             .attachment = {.kind = FLUX_CANVAS_ATTACHMENT_IMAGE,
-                                                            .image = target},
-                                             .clear_color = &dark}) == FLUX_OK);
+        OT_EXPECT(flux_canvas_begin(canvas, &(flux_canvas_pass_desc){
+                                                .type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                .frame = frame,
+                                                .attachment = {.kind = FLUX_CANVAS_ATTACHMENT_IMAGE,
+                                                               .image = target},
+                                                .clear_color = &dark}) == FLUX_OK);
         flux_canvas_fill_rect_color(canvas, (flux_rect){20.0f, 24.0f, 24.0f, 16.0f},
                                     flux_color_rgba_premul(255, 255, 255, 255));
-        EXPECT(flux_canvas_end(canvas) == FLUX_OK);
+        OT_EXPECT(flux_canvas_end(canvas) == FLUX_OK);
 
         flux_effect_blur_desc bd = FLUX_EFFECT_BLUR_DESC_INIT;
         bd.input = target;
         bd.sigma = 8.0f;
         flux_image *blurred = nullptr;
-        EXPECT(flux_blur_filter_apply(blur_filter, frame, &bd, &blurred) == FLUX_OK);
+        OT_EXPECT(flux_blur_filter_apply(blur_filter, frame, &bd, &blurred) == FLUX_OK);
 
         /* Half-frost over a bright capture: opacity 0.5 must blend
          * frosted-vs-SHARP (a mid grey over the bright base), never
@@ -328,18 +330,18 @@ int main(void) {
         ld.base_material_count = 3u;
         ld.group_count = 0u;
         prism_material_output layer = {0};
-        EXPECT(prism_backdrop_layer_filter_apply(layer_filter, frame, &ld, &layer) == FLUX_OK);
+        OT_EXPECT(prism_backdrop_layer_filter_apply(layer_filter, frame, &ld, &layer) == FLUX_OK);
 
-        EXPECT(
+        OT_EXPECT(
             flux_canvas_begin(canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
                                                                .frame = frame,
                                                                .clear_color = &black}) == FLUX_OK);
         test_draw_material(canvas, layer);
-        EXPECT(flux_canvas_end(canvas) == FLUX_OK);
-        EXPECT(flux_frame_submit(frame) == FLUX_OK);
-        EXPECT(flux_frame_present(frame) == FLUX_OK);
+        OT_EXPECT(flux_canvas_end(canvas) == FLUX_OK);
+        OT_EXPECT(flux_frame_submit(frame) == FLUX_OK);
+        OT_EXPECT(flux_frame_present(frame) == FLUX_OK);
         memset(px, 0xCD, BYTES);
-        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+        OT_EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
 
         /* Probes sit inside the bright block (x=20..44, row 32). The
          * full-frost rect covers x=0..16 only, so `plain` is probed at the
@@ -351,49 +353,49 @@ int main(void) {
         const uint8_t *half = &px[(32u * W + 26u) * 4u];
         const uint8_t *tinted = &px[(32u * W + 48u) * 4u];
         /* Full-opacity rects are opaque. */
-        EXPECT(plain[3] == 255u);
-        EXPECT(tinted[3] == 255u);
+        OT_EXPECT(plain[3] == 255u);
+        OT_EXPECT(tinted[3] == 255u);
         /* The plain frost stays in the dark blurred tail. Lavapipe and
          * hardware drivers differ slightly in their Gaussian edge samples,
          * so keep this as a broad non-black/dark discriminator; the half
          * probe below is the precise opacity-resolve assertion. */
-        EXPECT(plain[0] > 16u && plain[0] < 160u);
+        OT_EXPECT(plain[0] > 16u && plain[0] < 160u);
         /* The tinted frost is dominantly red at 100% strength. */
-        EXPECT(tinted[0] > 200u);
-        EXPECT(tinted[1] < 60u && tinted[2] < 60u);
+        OT_EXPECT(tinted[0] > 200u);
+        OT_EXPECT(tinted[1] < 60u && tinted[2] < 60u);
         /* PRIMARY OPACITY-RESOLVE ASSERTION. The half-opacity frost at the
          * bright block's centre is an OPAQUE blend of frost with SHARP
          * (measured ~210..230 over this capture). A premultiplied write
          * would instead store half-alpha over transparent, which the black
          * output base renders near ~118 — far darker — and with alpha 128.
          * Both probes fail loudly on that regression. */
-        EXPECT(half[3] == 255u);
-        EXPECT(half[0] > 180u);
+        OT_EXPECT(half[3] == 255u);
+        OT_EXPECT(half[0] > 180u);
     }
 
     /* --- the lens reads resolved background colours, not premultiplied
      *      fragments: a body straddling a half-opacity frost edge --- */
     {
         flux_frame *frame = nullptr;
-        EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
+        OT_EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
 
         /* Capture: dark base, one bright block. */
         flux_color dark = flux_color_rgba(24, 24, 24, 255);
-        EXPECT(flux_canvas_begin(canvas, &(flux_canvas_pass_desc){
-                                             .type = FLUX_TYPE_CANVAS_PASS_DESC,
-                                             .frame = frame,
-                                             .attachment = {.kind = FLUX_CANVAS_ATTACHMENT_IMAGE,
-                                                            .image = target},
-                                             .clear_color = &dark}) == FLUX_OK);
+        OT_EXPECT(flux_canvas_begin(canvas, &(flux_canvas_pass_desc){
+                                                .type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                .frame = frame,
+                                                .attachment = {.kind = FLUX_CANVAS_ATTACHMENT_IMAGE,
+                                                               .image = target},
+                                                .clear_color = &dark}) == FLUX_OK);
         flux_canvas_fill_rect_color(canvas, (flux_rect){8.0f, 24.0f, 48.0f, 16.0f},
                                     flux_color_rgba_premul(255, 255, 255, 255));
-        EXPECT(flux_canvas_end(canvas) == FLUX_OK);
+        OT_EXPECT(flux_canvas_end(canvas) == FLUX_OK);
 
         flux_effect_blur_desc bd = FLUX_EFFECT_BLUR_DESC_INIT;
         bd.input = target;
         bd.sigma = 8.0f;
         flux_image *blurred = nullptr;
-        EXPECT(flux_blur_filter_apply(blur_filter, frame, &bd, &blurred) == FLUX_OK);
+        OT_EXPECT(flux_blur_filter_apply(blur_filter, frame, &bd, &blurred) == FLUX_OK);
 
         /* A half-opacity frost over the LEFT half only; a no-refraction
          * glass body centred on the frost edge, well inside the bright
@@ -421,25 +423,25 @@ int main(void) {
         ld.refraction = 0.0f;
         ld.frost_strength = 0.0f;
         prism_material_output layer = {0};
-        EXPECT(prism_backdrop_layer_filter_apply(layer_filter, frame, &ld, &layer) == FLUX_OK);
+        OT_EXPECT(prism_backdrop_layer_filter_apply(layer_filter, frame, &ld, &layer) == FLUX_OK);
 
-        EXPECT(
+        OT_EXPECT(
             flux_canvas_begin(canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
                                                                .frame = frame,
                                                                .clear_color = &black}) == FLUX_OK);
         test_draw_material(canvas, layer);
-        EXPECT(flux_canvas_end(canvas) == FLUX_OK);
-        EXPECT(flux_frame_submit(frame) == FLUX_OK);
-        EXPECT(flux_frame_present(frame) == FLUX_OK);
+        OT_EXPECT(flux_canvas_end(canvas) == FLUX_OK);
+        OT_EXPECT(flux_frame_submit(frame) == FLUX_OK);
+        OT_EXPECT(flux_frame_present(frame) == FLUX_OK);
         memset(px, 0xCD, BYTES);
-        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+        OT_EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
 
         const uint8_t *left = &px[(32u * W + 26u) * 4u];
         const uint8_t *right = &px[(32u * W + 38u) * 4u];
         /* Both halves bright (the block is white; half-frost blends it
          * toward the blur's dark spill but stays far above half). */
-        EXPECT(left[0] > 150u);
-        EXPECT(right[0] > 150u);
+        OT_EXPECT(left[0] > 150u);
+        OT_EXPECT(right[0] > 150u);
         /* PRIMARY LENS-RESOLVE ASSERTIONS. (a) The body's right half sits
          * over NO frost rect: the lens must read the sharp capture through
          * the layer's opaque base — bright, not the transparent-hole black
@@ -449,32 +451,32 @@ int main(void) {
         {
             int hi = left[0] > right[0] ? left[0] : right[0];
             int lo = left[0] > right[0] ? right[0] : left[0];
-            EXPECT(hi == 0 || lo * 100 > hi * 55);
+            OT_EXPECT(hi == 0 || lo * 100 > hi * 55);
         }
-        EXPECT(right[0] > 190u);
+        OT_EXPECT(right[0] > 190u);
     }
 
     /* --- glass with NO frost rects still needs the opaque base --- */
     {
         flux_frame *frame = nullptr;
-        EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
+        OT_EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
 
         flux_color dark = flux_color_rgba(24, 24, 24, 255);
-        EXPECT(flux_canvas_begin(canvas, &(flux_canvas_pass_desc){
-                                             .type = FLUX_TYPE_CANVAS_PASS_DESC,
-                                             .frame = frame,
-                                             .attachment = {.kind = FLUX_CANVAS_ATTACHMENT_IMAGE,
-                                                            .image = target},
-                                             .clear_color = &dark}) == FLUX_OK);
+        OT_EXPECT(flux_canvas_begin(canvas, &(flux_canvas_pass_desc){
+                                                .type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                .frame = frame,
+                                                .attachment = {.kind = FLUX_CANVAS_ATTACHMENT_IMAGE,
+                                                               .image = target},
+                                                .clear_color = &dark}) == FLUX_OK);
         flux_canvas_fill_rect_color(canvas, (flux_rect){8.0f, 24.0f, 48.0f, 16.0f},
                                     flux_color_rgba_premul(255, 255, 255, 255));
-        EXPECT(flux_canvas_end(canvas) == FLUX_OK);
+        OT_EXPECT(flux_canvas_end(canvas) == FLUX_OK);
 
         flux_effect_blur_desc bd = FLUX_EFFECT_BLUR_DESC_INIT;
         bd.input = target;
         bd.sigma = 8.0f;
         flux_image *blurred = nullptr;
-        EXPECT(flux_blur_filter_apply(blur_filter, frame, &bd, &blurred) == FLUX_OK);
+        OT_EXPECT(flux_blur_filter_apply(blur_filter, frame, &bd, &blurred) == FLUX_OK);
 
         /* Glass only: no frost rects at all. The layer pass must still
          * write the sharp capture as the opaque base under the body, or
@@ -494,22 +496,22 @@ int main(void) {
         ld.refraction = 0.0f;
         ld.frost_strength = 0.0f;
         prism_material_output layer = {0};
-        EXPECT(prism_backdrop_layer_filter_apply(layer_filter, frame, &ld, &layer) == FLUX_OK);
+        OT_EXPECT(prism_backdrop_layer_filter_apply(layer_filter, frame, &ld, &layer) == FLUX_OK);
 
-        EXPECT(
+        OT_EXPECT(
             flux_canvas_begin(canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
                                                                .frame = frame,
                                                                .clear_color = &black}) == FLUX_OK);
         test_draw_material(canvas, layer);
-        EXPECT(flux_canvas_end(canvas) == FLUX_OK);
-        EXPECT(flux_frame_submit(frame) == FLUX_OK);
-        EXPECT(flux_frame_present(frame) == FLUX_OK);
+        OT_EXPECT(flux_canvas_end(canvas) == FLUX_OK);
+        OT_EXPECT(flux_frame_submit(frame) == FLUX_OK);
+        OT_EXPECT(flux_frame_present(frame) == FLUX_OK);
         memset(px, 0xCD, BYTES);
-        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+        OT_EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
 
         const uint8_t *body_centre = &px[(32u * W + 32u) * 4u];
         /* The bright block shines through the no-frost glass body. */
-        EXPECT(body_centre[0] > 150u);
+        OT_EXPECT(body_centre[0] > 150u);
     }
 
     /* --- overlapping base-material plates compose in array order --- */
@@ -525,22 +527,22 @@ int main(void) {
          * single-plate test and to the layer-order test above (which only has
          * one plate per region), so it needs its own gate. */
         flux_frame *frame = nullptr;
-        EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
+        OT_EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
 
         flux_color white = flux_color_rgba(255, 255, 255, 255);
-        EXPECT(flux_canvas_begin(canvas, &(flux_canvas_pass_desc){
-                                             .type = FLUX_TYPE_CANVAS_PASS_DESC,
-                                             .frame = frame,
-                                             .attachment = {.kind = FLUX_CANVAS_ATTACHMENT_IMAGE,
-                                                            .image = target},
-                                             .clear_color = &white}) == FLUX_OK);
-        EXPECT(flux_canvas_end(canvas) == FLUX_OK);
+        OT_EXPECT(flux_canvas_begin(canvas, &(flux_canvas_pass_desc){
+                                                .type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                .frame = frame,
+                                                .attachment = {.kind = FLUX_CANVAS_ATTACHMENT_IMAGE,
+                                                               .image = target},
+                                                .clear_color = &white}) == FLUX_OK);
+        OT_EXPECT(flux_canvas_end(canvas) == FLUX_OK);
 
         flux_effect_blur_desc bd = FLUX_EFFECT_BLUR_DESC_INIT;
         bd.input = target;
         bd.sigma = 6.0f;
         flux_image *blurred = nullptr;
-        EXPECT(flux_blur_filter_apply(blur_filter, frame, &bd, &blurred) == FLUX_OK);
+        OT_EXPECT(flux_blur_filter_apply(blur_filter, frame, &bd, &blurred) == FLUX_OK);
 
         prism_base_material plates[2] = {PRISM_BASE_MATERIAL_INIT, PRISM_BASE_MATERIAL_INIT};
         plates[0].bounds = (flux_rect){8.0f, 8.0f, 32.0f, 32.0f}; /* A: x 8..40 */
@@ -559,18 +561,18 @@ int main(void) {
         ld.base_material_count = 2u;
         ld.group_count = 0u;
         prism_material_output layer = {0};
-        EXPECT(prism_backdrop_layer_filter_apply(layer_filter, frame, &ld, &layer) == FLUX_OK);
+        OT_EXPECT(prism_backdrop_layer_filter_apply(layer_filter, frame, &ld, &layer) == FLUX_OK);
 
-        EXPECT(
+        OT_EXPECT(
             flux_canvas_begin(canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
                                                                .frame = frame,
                                                                .clear_color = &black}) == FLUX_OK);
         test_draw_material(canvas, layer);
-        EXPECT(flux_canvas_end(canvas) == FLUX_OK);
-        EXPECT(flux_frame_submit(frame) == FLUX_OK);
-        EXPECT(flux_frame_present(frame) == FLUX_OK);
+        OT_EXPECT(flux_canvas_end(canvas) == FLUX_OK);
+        OT_EXPECT(flux_frame_submit(frame) == FLUX_OK);
+        OT_EXPECT(flux_frame_present(frame) == FLUX_OK);
         memset(px, 0xCD, BYTES);
-        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+        OT_EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
 
         const uint8_t *a_left = &px[(12u * W + 12u) * 4u];  /* A only */
         const uint8_t *a_right = &px[(12u * W + 30u) * 4u]; /* A only, other side */
@@ -579,34 +581,34 @@ int main(void) {
         const uint8_t *outside = &px[(4u * W + 4u) * 4u];   /* neither */
 
         /* A's exclusive area keeps A's wash: red stays red. */
-        EXPECT(a_left[0] > 200u && a_left[1] < 60u && a_left[2] < 60u);
-        EXPECT(a_right[0] > 200u && a_right[1] < 60u && a_right[2] < 60u);
+        OT_EXPECT(a_left[0] > 200u && a_left[1] < 60u && a_left[2] < 60u);
+        OT_EXPECT(a_right[0] > 200u && a_right[1] < 60u && a_right[2] < 60u);
         /* B only and the overlap read the plain (untinted) plate. */
-        EXPECT(b_only[0] > 200u && b_only[1] > 200u && b_only[2] > 200u);
-        EXPECT(a_and_b[0] > 200u && a_and_b[1] > 200u && a_and_b[2] > 200u);
+        OT_EXPECT(b_only[0] > 200u && b_only[1] > 200u && b_only[2] > 200u);
+        OT_EXPECT(a_and_b[0] > 200u && a_and_b[1] > 200u && a_and_b[2] > 200u);
         /* Outside every plate the layer is transparent. */
-        EXPECT(outside[0] == 0u && outside[1] == 0u && outside[2] == 0u);
+        OT_EXPECT(outside[0] == 0u && outside[1] == 0u && outside[2] == 0u);
     }
 
     /* --- multiple glass bodies with NO frost rects: all bodies must render (never black) --- */
     {
         flux_frame *frame = nullptr;
-        EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
+        OT_EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
 
         flux_color white = flux_color_rgba(255, 255, 255, 255);
-        EXPECT(flux_canvas_begin(canvas, &(flux_canvas_pass_desc){
-                                             .type = FLUX_TYPE_CANVAS_PASS_DESC,
-                                             .frame = frame,
-                                             .attachment = {.kind = FLUX_CANVAS_ATTACHMENT_IMAGE,
-                                                            .image = target},
-                                             .clear_color = &white}) == FLUX_OK);
-        EXPECT(flux_canvas_end(canvas) == FLUX_OK);
+        OT_EXPECT(flux_canvas_begin(canvas, &(flux_canvas_pass_desc){
+                                                .type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                .frame = frame,
+                                                .attachment = {.kind = FLUX_CANVAS_ATTACHMENT_IMAGE,
+                                                               .image = target},
+                                                .clear_color = &white}) == FLUX_OK);
+        OT_EXPECT(flux_canvas_end(canvas) == FLUX_OK);
 
         flux_effect_blur_desc bd = FLUX_EFFECT_BLUR_DESC_INIT;
         bd.input = target;
         bd.sigma = 4.0f;
         flux_image *blurred = nullptr;
-        EXPECT(flux_blur_filter_apply(blur_filter, frame, &bd, &blurred) == FLUX_OK);
+        OT_EXPECT(flux_blur_filter_apply(blur_filter, frame, &bd, &blurred) == FLUX_OK);
 
         prism_liquid_glass_group bodies[3] = {PRISM_LIQUID_GLASS_GROUP_INIT,
                                               PRISM_LIQUID_GLASS_GROUP_INIT,
@@ -630,51 +632,51 @@ int main(void) {
         ld.refraction = 4.0f;
         ld.edge_width = 8.0f;
         prism_material_output layer = {0};
-        EXPECT(prism_backdrop_layer_filter_apply(layer_filter, frame, &ld, &layer) == FLUX_OK);
+        OT_EXPECT(prism_backdrop_layer_filter_apply(layer_filter, frame, &ld, &layer) == FLUX_OK);
 
-        EXPECT(
+        OT_EXPECT(
             flux_canvas_begin(canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
                                                                .frame = frame,
                                                                .clear_color = &black}) == FLUX_OK);
         test_draw_material(canvas, layer);
-        EXPECT(flux_canvas_end(canvas) == FLUX_OK);
-        EXPECT(flux_frame_submit(frame) == FLUX_OK);
-        EXPECT(flux_frame_present(frame) == FLUX_OK);
+        OT_EXPECT(flux_canvas_end(canvas) == FLUX_OK);
+        OT_EXPECT(flux_frame_submit(frame) == FLUX_OK);
+        OT_EXPECT(flux_frame_present(frame) == FLUX_OK);
         memset(px, 0xCD, BYTES);
-        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+        OT_EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
 
         /* All three bodies must be visible and bright (none skipped or black). */
         const uint8_t *b0 = &px[(12u * W + 16u) * 4u];
         const uint8_t *b1 = &px[(12u * W + 48u) * 4u];
         const uint8_t *b2 = &px[(46u * W + 32u) * 4u];
-        EXPECT(b0[0] > 150u);
-        EXPECT(b1[0] > 150u);
-        EXPECT(b2[0] > 150u);
+        OT_EXPECT(b0[0] > 150u);
+        OT_EXPECT(b1[0] > 150u);
+        OT_EXPECT(b2[0] > 150u);
 
         /* Outside all bodies must remain transparent (black base shows through). */
         const uint8_t *gap = &px[(28u * W + 32u) * 4u];
-        EXPECT(gap[0] < 5u && gap[1] < 5u && gap[2] < 5u);
+        OT_EXPECT(gap[0] < 5u && gap[1] < 5u && gap[2] < 5u);
     }
 
     /* --- glass statistics round-trip on the layer filter --- */
     {
         flux_frame *frame = nullptr;
-        EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
+        OT_EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
         prism_backdrop_stat stats[8];
         uint32_t count = 0u;
         /* First submission on this slot's cadence: stats may legitimately be
          * UNSUPPORTED_STATE on a fresh slot; the contract is that a slot
          * with a prior glass submission reports the group count. */
-        EXPECT(prism_backdrop_layer_filter_stats(layer_filter, frame, stats, 8u, &count) ==
-               FLUX_OK);
-        EXPECT(flux_frame_submit(frame) == FLUX_OK);
-        EXPECT(flux_frame_present(frame) == FLUX_OK);
+        OT_EXPECT(prism_backdrop_layer_filter_stats(layer_filter, frame, stats, 8u, &count) ==
+                  FLUX_OK);
+        OT_EXPECT(flux_frame_submit(frame) == FLUX_OK);
+        OT_EXPECT(flux_frame_present(frame) == FLUX_OK);
     }
 
     /* --- Material Backdrop Boundary Cache hit (ADR-0123 / INV-COMP-04) --- */
     {
         flux_frame *frame = nullptr;
-        EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
+        OT_EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
         prism_base_material frost = {
             .bounds = {16.0f, 16.0f, 32.0f, 32.0f},
             .corner_radius = 4.0f,
@@ -686,7 +688,7 @@ int main(void) {
         bd.input = target;
         bd.sigma = 4.0f;
         flux_image *blurred = nullptr;
-        EXPECT(flux_blur_filter_apply(blur_filter, frame, &bd, &blurred) == FLUX_OK);
+        OT_EXPECT(flux_blur_filter_apply(blur_filter, frame, &bd, &blurred) == FLUX_OK);
 
         prism_backdrop_layer_desc ld = PRISM_BACKDROP_LAYER_DESC_INIT;
         ld.input = target;
@@ -699,15 +701,15 @@ int main(void) {
         ld.next = &rev;
 
         prism_material_output out1 = {0};
-        EXPECT(prism_backdrop_layer_filter_apply(layer_filter, frame, &ld, &out1) == FLUX_OK);
-        EXPECT(out1.image != nullptr);
+        OT_EXPECT(prism_backdrop_layer_filter_apply(layer_filter, frame, &ld, &out1) == FLUX_OK);
+        OT_EXPECT(out1.image != nullptr);
 
         /* Second application with the same revision on the same slot: hits the
          * cache and returns the exact same persistent image without any
          * dispatch. */
         prism_material_output out2 = {0};
-        EXPECT(prism_backdrop_layer_filter_apply(layer_filter, frame, &ld, &out2) == FLUX_OK);
-        EXPECT(out2.image == out1.image);
+        OT_EXPECT(prism_backdrop_layer_filter_apply(layer_filter, frame, &ld, &out2) == FLUX_OK);
+        OT_EXPECT(out2.image == out1.image);
 
         /* A new revision must invalidate, even though both images and the whole
          * descriptor are unchanged. This is the case the old handle/hash key
@@ -715,16 +717,16 @@ int main(void) {
          * output keep their handles, so content changes were invisible. */
         rev.revision = 43u;
         prism_material_output out3 = {0};
-        EXPECT(prism_backdrop_layer_filter_apply(layer_filter, frame, &ld, &out3) == FLUX_OK);
-        EXPECT(out3.image == out1.image); /* same persistent image ... */
+        OT_EXPECT(prism_backdrop_layer_filter_apply(layer_filter, frame, &ld, &out3) == FLUX_OK);
+        OT_EXPECT(out3.image == out1.image); /* same persistent image ... */
         /* ... re-rendered: the stats for this slot describe this submission,
          * which only happens on a cache miss. */
 
         /* With the cache disabled (revision 0) every call re-renders. */
         ld.next = nullptr;
         prism_material_output out4 = {0};
-        EXPECT(prism_backdrop_layer_filter_apply(layer_filter, frame, &ld, &out4) == FLUX_OK);
-        EXPECT(out4.image == out1.image);
+        OT_EXPECT(prism_backdrop_layer_filter_apply(layer_filter, frame, &ld, &out4) == FLUX_OK);
+        OT_EXPECT(out4.image == out1.image);
 
         /* An extension tag prism does not define is rejected instead of being
          * silently ignored: a dropped revision would quietly turn a
@@ -733,12 +735,12 @@ int main(void) {
         bogus.type = (prism_struct_type)999;
         ld.next = &bogus;
         prism_material_output out5 = {0};
-        EXPECT(prism_backdrop_layer_filter_apply(layer_filter, frame, &ld, &out5) ==
-               FLUX_ERROR_INVALID_ARGUMENT);
-        EXPECT(out5.image == nullptr);
+        OT_EXPECT(prism_backdrop_layer_filter_apply(layer_filter, frame, &ld, &out5) ==
+                  FLUX_ERROR_INVALID_ARGUMENT);
+        OT_EXPECT(out5.image == nullptr);
 
-        EXPECT(flux_frame_submit(frame) == FLUX_OK);
-        EXPECT(flux_frame_present(frame) == FLUX_OK);
+        OT_EXPECT(flux_frame_submit(frame) == FLUX_OK);
+        OT_EXPECT(flux_frame_present(frame) == FLUX_OK);
     }
 
     /* --- cache correctness: a revision bump must publish new backdrop content --- */
@@ -760,23 +762,23 @@ int main(void) {
         for (uint32_t step = 0; step < 2; ++step) {
             uint8_t bg = step == 0 ? 16u : 240u;
             flux_frame *frame = nullptr;
-            EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
+            OT_EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
 
             flux_color backdrop = flux_color_rgba(bg, bg, bg, 255);
-            EXPECT(flux_canvas_begin(
-                       canvas,
-                       &(flux_canvas_pass_desc){
-                           .type = FLUX_TYPE_CANVAS_PASS_DESC,
-                           .frame = frame,
-                           .attachment = {.kind = FLUX_CANVAS_ATTACHMENT_IMAGE, .image = target},
-                           .clear_color = &backdrop}) == FLUX_OK);
-            EXPECT(flux_canvas_end(canvas) == FLUX_OK);
+            OT_EXPECT(flux_canvas_begin(
+                          canvas,
+                          &(flux_canvas_pass_desc){
+                              .type = FLUX_TYPE_CANVAS_PASS_DESC,
+                              .frame = frame,
+                              .attachment = {.kind = FLUX_CANVAS_ATTACHMENT_IMAGE, .image = target},
+                              .clear_color = &backdrop}) == FLUX_OK);
+            OT_EXPECT(flux_canvas_end(canvas) == FLUX_OK);
 
             flux_effect_blur_desc bd = FLUX_EFFECT_BLUR_DESC_INIT;
             bd.input = target;
             bd.sigma = 6.0f;
             flux_image *blurred = nullptr;
-            EXPECT(flux_blur_filter_apply(blur_filter, frame, &bd, &blurred) == FLUX_OK);
+            OT_EXPECT(flux_blur_filter_apply(blur_filter, frame, &bd, &blurred) == FLUX_OK);
 
             prism_base_material frost = PRISM_BASE_MATERIAL_INIT;
             frost.bounds = (flux_rect){0.0f, 0.0f, (float)W, (float)H};
@@ -795,25 +797,26 @@ int main(void) {
             ld.next = &rev;
 
             prism_material_output layer = {0};
-            EXPECT(prism_backdrop_layer_filter_apply(layer_filter, frame, &ld, &layer) == FLUX_OK);
+            OT_EXPECT(prism_backdrop_layer_filter_apply(layer_filter, frame, &ld, &layer) ==
+                      FLUX_OK);
 
-            EXPECT(flux_canvas_begin(canvas,
-                                     &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
-                                                              .frame = frame,
-                                                              .clear_color = &black}) == FLUX_OK);
+            OT_EXPECT(flux_canvas_begin(
+                          canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                           .frame = frame,
+                                                           .clear_color = &black}) == FLUX_OK);
             test_draw_material(canvas, layer);
-            EXPECT(flux_canvas_end(canvas) == FLUX_OK);
-            EXPECT(flux_frame_submit(frame) == FLUX_OK);
-            EXPECT(flux_frame_present(frame) == FLUX_OK);
+            OT_EXPECT(flux_canvas_end(canvas) == FLUX_OK);
+            OT_EXPECT(flux_frame_submit(frame) == FLUX_OK);
+            OT_EXPECT(flux_frame_present(frame) == FLUX_OK);
             memset(px, 0xCD, BYTES);
-            EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+            OT_EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
             levels[step] = px[(32u * W + 32u) * 4u];
             rev.revision++;
         }
         /* Dark backdrop -> dark body; light backdrop -> light body. A frozen
          * cache would report the same level twice. */
-        EXPECT(levels[0] < 60u);
-        EXPECT(levels[1] > 180u);
+        OT_EXPECT(levels[0] < 60u);
+        OT_EXPECT(levels[1] > 180u);
     }
 
     prism_backdrop_layer_filter_release(layer_filter);
@@ -822,6 +825,5 @@ int main(void) {
     flux_image_release(target);
     flux_surface_release(s);
     flux_device_release(d);
-    TEST_SUMMARY();
-    return 0;
+    return OT_REPORT();
 }

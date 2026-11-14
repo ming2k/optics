@@ -82,7 +82,7 @@ flux_result reticle_rasterize(const reticle_rasterize_opts *opts, reticle_pixmap
             flux_canvas_release(canvas);
             return FLUX_ERROR_UNSUPPORTED;
         }
-        uint8_t *pixels = (uint8_t *)svg__alloc((size_t)width * (size_t)height);
+        uint8_t *pixels = (uint8_t *)reticle_priv_alloc((size_t)width * (size_t)height);
         if (!pixels) {
             flux_canvas_release(canvas);
             return FLUX_ERROR_OUT_OF_MEMORY;
@@ -107,7 +107,7 @@ flux_result reticle_rasterize(const reticle_rasterize_opts *opts, reticle_pixmap
         return FLUX_ERROR_UNSUPPORTED;
     }
     const size_t row_bytes = (size_t)width * 4u;
-    uint8_t *pixels = (uint8_t *)svg__alloc(row_bytes * (size_t)height);
+    uint8_t *pixels = (uint8_t *)reticle_priv_alloc(row_bytes * (size_t)height);
     if (!pixels) {
         flux_canvas_release(canvas);
         return FLUX_ERROR_OUT_OF_MEMORY;
@@ -144,6 +144,6 @@ flux_result reticle_rasterize(const reticle_rasterize_opts *opts, reticle_pixmap
 void reticle_pixmap_deinit(reticle_pixmap *pixmap) {
     if (!pixmap)
         return;
-    svg__free(pixmap->pixels);
+    reticle_priv_free(pixmap->pixels);
     *pixmap = (reticle_pixmap){};
 }

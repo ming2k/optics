@@ -20,7 +20,8 @@
  * the table sits at spike capacity with a tiny live population. CPU
  * only; headless lens (no device).
  */
-#include "test_helpers.h"
+#include "lens_test.h"
+#include "optics_test.h"
 #include <lens/lens.h>
 
 #define GRACE_FRAMES 8 /* LENSI_LEAVE_GRACE_FRAMES (internal.h); see also below */
@@ -46,20 +47,20 @@ static void spike_and_dwell(lens *ui, int count, int idle_frames) {
         snprintf(label, sizeof label, "spike##%d", i);
         lens_button(ui, &(lens_button_opts){.label = label});
     }
-    test_end(ui);
+    lens_test_end(ui);
     /* Per-frame arena overflow is acceptable and expected for the big
      * spikes: draw calls get dropped, but the retained store still
      * tracks every node it created, which is what this test exercises. */
     for (int f = 0; f < idle_frames; f++) {
         lens_begin(ui, &(lens_input){.size = sizeof(lens_input)});
-        test_end(ui);
+        lens_test_end(ui);
     }
 }
 
 int main(void) {
     /* Small arena on purpose: the overflow path is part of the stress. */
     lens *ui = NULL;
-    CHECK(lens_create(&(lens_desc){.arena_bytes = 64u * 1024u}, &ui) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){.arena_bytes = 64u * 1024u}, &ui) == FLUX_OK);
 
     /* 1. Spike sizes around the growth thresholds (initial cap 256 at
      *    0.75 load = 191 entries; then 512, 1024, ...). Every size here
@@ -68,7 +69,7 @@ int main(void) {
     static const int sizes[] = {50, 70, 100, 150, 191, 200, 260, 400, 700};
     for (size_t k = 0; k < sizeof sizes / sizeof sizes[0]; k++) {
         spike_and_dwell(ui, sizes[k], GRACE_FRAMES + 4);
-        CHECK(k < sizeof sizes / sizeof sizes[0]); /* reached the end alive */
+        OT_EXPECT(k < sizeof sizes / sizeof sizes[0]); /* reached the end alive */
     }
 
     /* 2. Big spike + dwell: 20 000 nodes forces several growths and a
@@ -87,11 +88,11 @@ int main(void) {
     lens_begin(ui, &(lens_input){.size = sizeof(lens_input)});
     lens_row_begin(ui, NULL);
     (void)lens_button(ui, &(lens_button_opts){.label = "stable##keep"});
-    test_end(ui);
+    lens_test_end(ui);
     g_seen_button = false;
     lens_accessibility_walk(ui, saw_button, NULL);
-    CHECK(g_seen_button);
+    OT_EXPECT(g_seen_button);
 
     lens_release(ui);
-    return TEST_REPORT();
+    return OT_REPORT();
 }

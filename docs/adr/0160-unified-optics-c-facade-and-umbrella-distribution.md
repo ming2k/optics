@@ -13,6 +13,7 @@ negative_knowledge: true
 - Status: Accepted
 - Date: 2026-11-12
 - Scope: `include/optics/optics.h`, `meson.build`, `tests/optics/`
+- Amended: 2026-11-12 — the document compiler named `svg` here was renamed to `reticle` by [ADR-0161](0161-reticle-vector-compiler-and-vista-boundary.md); the umbrella now includes `<reticle/reticle.h>`.
 - Amends: [ADR-0023](0023-unified-monorepo-build.md), [ADR-0106](0106-monorepo-identity-unification-glyph-vista-transit.md)
 
 ## Context

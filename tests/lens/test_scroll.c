@@ -1,6 +1,7 @@
 /* test_scroll.c — scroll container offset handling. */
 
-#include "test_helpers.h"
+#include "lens_test.h"
+#include "optics_test.h"
 #include <flux/canvas_cpu.h>
 #include <lens/lens.h>
 #include <math.h>
@@ -9,7 +10,7 @@ static const lens_input IN0 = {.display_size = {400, 400}, .dt_seconds = 0.016f}
 
 static void test_scroll_offset(void) {
     lens *ui = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
 
     /* Frame 1: empty scroll with cursor inside */
     lens_input in1 = IN0;
@@ -18,7 +19,7 @@ static void test_scroll_offset(void) {
     lens_size(ui, 200, 200);
     lens_scroll_begin(ui, &(lens_scroll_opts){.box = {.id = "log"}});
     lens_scroll_end(ui);
-    test_end(ui);
+    lens_test_end(ui);
 
     /* Frame 2: scroll down */
     lens_input in = IN0;
@@ -28,18 +29,18 @@ static void test_scroll_offset(void) {
     lens_size(ui, 200, 200);
     lens_scroll_begin(ui, &(lens_scroll_opts){.box = {.id = "log"}});
     lens_scroll_end(ui);
-    test_end(ui);
+    lens_test_end(ui);
 
     float sx = 0, sy = 0;
-    CHECK(lens_scroll_offset(ui, "log", &sx, &sy));
-    CHECK(sy > 0.0f); /* scrolled down -> positive offset */
+    OT_EXPECT(lens_scroll_offset(ui, "log", &sx, &sy));
+    OT_EXPECT(sy > 0.0f); /* scrolled down -> positive offset */
 
     lens_release(ui);
 }
 
 static void test_precise_scroll_uses_pixel_distance(void) {
     lens *ui = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
 
     /* Warm-up frame: place the pointer inside the scroll container */
     lens_input in = IN0;
@@ -48,7 +49,7 @@ static void test_precise_scroll_uses_pixel_distance(void) {
     lens_size(ui, 200, 200);
     lens_scroll_begin(ui, &(lens_scroll_opts){.box = {.id = "log"}});
     lens_scroll_end(ui);
-    test_end(ui);
+    lens_test_end(ui);
 
     /* Frame 2: 12 px touchpad scroll */
     in.scroll_y = 0.0f;
@@ -57,18 +58,18 @@ static void test_precise_scroll_uses_pixel_distance(void) {
     lens_size(ui, 200, 200);
     lens_scroll_begin(ui, &(lens_scroll_opts){.box = {.id = "log"}});
     lens_scroll_end(ui);
-    test_end(ui);
+    lens_test_end(ui);
 
     float sx = 0, sy = 0;
-    CHECK(lens_scroll_offset(ui, "log", &sx, &sy));
-    CHECK_NEAR(sy, 12.0f, 0.001f);
+    OT_EXPECT(lens_scroll_offset(ui, "log", &sx, &sy));
+    OT_EXPECT_NEAR(sy, 12.0f, 0.001f);
 
     lens_release(ui);
 }
 
 static void test_programmatic_scroll_is_applied_and_clamped(void) {
     lens *ui = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
 
     lens_input input = {.display_size = {200, 160}, .dt_seconds = 0.016f};
     lens_begin(ui, &input);
@@ -82,19 +83,19 @@ static void test_programmatic_scroll_is_applied_and_clamped(void) {
     }
     lens_scroll_end(ui);
     lens_scroll_to(ui, "jump-scroll", 0, 60);
-    test_end(ui);
+    lens_test_end(ui);
 
     lens_node *scroll = lens_node_first_child(lens_root(ui));
     lens_node *first = lens_node_first_child(scroll);
-    CHECK(scroll != NULL && first != NULL);
-    CHECK(fabsf(lens_node_bounds(first).y + 60.0f) < 0.01f);
+    OT_EXPECT(scroll != NULL && first != NULL);
+    OT_EXPECT(fabsf(lens_node_bounds(first).y + 60.0f) < 0.01f);
 
     lens_release(ui);
 }
 
 static void test_scrollbar_gutter_clips_overflowing_descendants(void) {
     lens *ui = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
 
     lens_theme theme = lens_theme_dark();
     theme.gap = 0.0f;
@@ -120,19 +121,20 @@ static void test_scrollbar_gutter_clips_overflowing_descendants(void) {
         lens_close(ui);
     }
     lens_scroll_end(ui);
-    test_end(ui);
+    lens_test_end(ui);
 
     flux_canvas *canvas = NULL;
-    CHECK(flux_canvas_create_cpu(100, 40, 1.0f, &canvas) == FLUX_OK);
+    OT_EXPECT(flux_canvas_create_cpu(100, 40, 1.0f, &canvas) == FLUX_OK);
     flux_color black = flux_color_rgba_premul(0, 0, 0, 255);
-    CHECK(flux_canvas_begin(canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
-                                                             .clear_color = &black}) == FLUX_OK);
-    CHECK(test_snapshot_render(ui, canvas) == FLUX_OK);
-    CHECK(flux_canvas_end(canvas) == FLUX_OK);
+    OT_EXPECT(flux_canvas_begin(canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                                 .clear_color = &black}) ==
+              FLUX_OK);
+    OT_EXPECT(lens_test_snapshot_render(ui, canvas) == FLUX_OK);
+    OT_EXPECT(flux_canvas_end(canvas) == FLUX_OK);
 
     uint32_t width = 0, height = 0, stride = 0;
     const uint8_t *fb = flux_canvas_cpu_pixels(canvas, &width, &height, &stride);
-    CHECK(fb != NULL && width == 100 && height == 40);
+    OT_EXPECT(fb != NULL && width == 100 && height == 40);
     bool gutter_is_clear = true;
     for (uint32_t y = 0; y < height; y++) {
         for (uint32_t x = 92; x < width; x++) {
@@ -140,7 +142,7 @@ static void test_scrollbar_gutter_clips_overflowing_descendants(void) {
             gutter_is_clear &= p[0] == 0 && p[1] == 255 && p[2] == 0 && p[3] == 255;
         }
     }
-    CHECK(gutter_is_clear);
+    OT_EXPECT(gutter_is_clear);
 
     flux_canvas_release(canvas);
     lens_release(ui);
@@ -151,5 +153,5 @@ int main(void) {
     test_precise_scroll_uses_pixel_distance();
     test_programmatic_scroll_is_applied_and_clamped();
     test_scrollbar_gutter_clips_overflowing_descendants();
-    return TEST_REPORT();
+    return OT_REPORT();
 }

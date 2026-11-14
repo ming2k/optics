@@ -19,7 +19,7 @@
  * result, then restores the environment.
  */
 
-#include "test_helpers.h"
+#include "optics_test.h"
 #include <iris/a11y_prefs.h>
 #include <lens/lens.h>
 #include <stdlib.h>
@@ -37,13 +37,13 @@ static void on_prefs(const iris_a11y_prefs *prefs, void *user) {
 
 static void test_query_baseline_is_sane(void) {
     iris_a11y_prefs p = iris_a11y_prefs_query();
-    CHECK(p.text_scale > 0.0f && p.text_scale <= 10.0f);
-    CHECK(p.reduced_motion == true || p.reduced_motion == false);
-    CHECK(p.high_contrast == true || p.high_contrast == false);
+    OT_EXPECT(p.text_scale > 0.0f && p.text_scale <= 10.0f);
+    OT_EXPECT(p.reduced_motion == true || p.reduced_motion == false);
+    OT_EXPECT(p.high_contrast == true || p.high_contrast == false);
 }
 
 static void test_watch_null_cb_rejected(void) {
-    CHECK(iris_a11y_prefs_watch(NULL, NULL) != 0);
+    OT_EXPECT(iris_a11y_prefs_watch(NULL, NULL) != 0);
     /* NULL backend callback is equally rejected (internal slot, same
      * contract; called through the public surface's sibling for
      * coverage). */
@@ -51,7 +51,7 @@ static void test_watch_null_cb_rejected(void) {
 }
 
 static void test_watch_unwatch_roundtrip(void) {
-    CHECK(iris_a11y_prefs_watch(on_prefs, NULL) == 0 || true);
+    OT_EXPECT(iris_a11y_prefs_watch(on_prefs, NULL) == 0 || true);
     /* Unwatch must clear cleanly even if watch reported unavailable
      * (stub build): the no-op contract. */
     iris_a11y_prefs_unwatch();
@@ -62,11 +62,11 @@ static void test_full_set_delivery_shape(void) {
     /* The callback receives the FULL preference set (value semantics, not
      * a delta): pin the struct size so accidental field removal is a
      * compile error here rather than silent ABI drift. */
-    CHECK(sizeof(iris_a11y_prefs) >= sizeof(bool) + sizeof(bool) + sizeof(float));
+    OT_EXPECT(sizeof(iris_a11y_prefs) >= sizeof(bool) + sizeof(bool) + sizeof(float));
     iris_a11y_prefs a = {.reduced_motion = true, .high_contrast = false, .text_scale = 1.5f};
     iris_a11y_prefs b = a;
-    CHECK(b.reduced_motion == a.reduced_motion);
-    CHECK(b.text_scale == a.text_scale);
+    OT_EXPECT(b.reduced_motion == a.reduced_motion);
+    OT_EXPECT(b.text_scale == a.text_scale);
 }
 
 int main(void) {
@@ -74,5 +74,5 @@ int main(void) {
     test_watch_null_cb_rejected();
     test_watch_unwatch_roundtrip();
     test_full_set_delivery_shape();
-    return TEST_REPORT();
+    return OT_REPORT();
 }

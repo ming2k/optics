@@ -1,4 +1,4 @@
-/* test_svg_leak.c — the drain assertion for the `svg` resource kind
+/* test_reticle_leak.c — the drain assertion for the `reticle` resource kind
  * (INV-ARCH-LEDGER, ADR-0130).
  *
  * A parsed document is device-less by design (ADR-0136), so no flux device
@@ -10,7 +10,7 @@
  * fail partway through parsing, because a mid-parse failure is exactly where a
  * leaked document would hide. */
 
-#include "test_helpers.h"
+#include "optics_test.h"
 
 #include <reticle/reticle.h>
 #include <stdlib.h>
@@ -46,15 +46,15 @@ static void every_document_drains(void) {
     const uint32_t baseline = live();
     for (size_t i = 0; i < sizeof DOCUMENTS / sizeof DOCUMENTS[0]; ++i) {
         reticle_document *doc = nullptr;
-        CHECK(reticle_parse(
-                  &(reticle_parse_opts){.length = RETICLE_LENGTH_MEASURE, .text = DOCUMENTS[i]},
-                  &doc) == FLUX_OK);
-        CHECK(doc != nullptr);
+        OT_EXPECT(reticle_parse(
+                      &(reticle_parse_opts){.length = RETICLE_LENGTH_MEASURE, .text = DOCUMENTS[i]},
+                      &doc) == FLUX_OK);
+        OT_EXPECT(doc != nullptr);
         if (!doc)
             continue;
-        CHECK(live() == baseline + 1u);
+        OT_EXPECT(live() == baseline + 1u);
         reticle_release(doc);
-        CHECK(live() == baseline);
+        OT_EXPECT(live() == baseline);
     }
 }
 
@@ -71,25 +71,26 @@ static void failed_parses_do_not_leak(void) {
     };
     for (size_t i = 0; i < sizeof BAD / sizeof BAD[0]; ++i) {
         reticle_document *doc = nullptr;
-        CHECK(reticle_parse(&(reticle_parse_opts){.length = RETICLE_LENGTH_MEASURE, .text = BAD[i]},
-                            &doc) != FLUX_OK);
-        CHECK(doc == nullptr);
+        OT_EXPECT(
+            reticle_parse(&(reticle_parse_opts){.length = RETICLE_LENGTH_MEASURE, .text = BAD[i]},
+                          &doc) != FLUX_OK);
+        OT_EXPECT(doc == nullptr);
         if (doc)
             reticle_release(doc);
-        CHECK(live() == baseline);
+        OT_EXPECT(live() == baseline);
     }
 
     /* A ceiling failure happens after shapes have been allocated. */
     reticle_parse_limits limits = {.max_shapes = 1};
     reticle_document *doc = nullptr;
-    CHECK(reticle_parse(&(reticle_parse_opts){.length = RETICLE_LENGTH_MEASURE,
-                                              .text = "<svg viewBox=\"0 0 8 8\">"
-                                                      "<rect width=\"1\" height=\"1\"/>"
-                                                      "<rect width=\"1\" height=\"1\"/></svg>",
-                                              .limits = &limits},
-                        &doc) != FLUX_OK);
-    CHECK(doc == nullptr);
-    CHECK(live() == baseline);
+    OT_EXPECT(reticle_parse(&(reticle_parse_opts){.length = RETICLE_LENGTH_MEASURE,
+                                                  .text = "<svg viewBox=\"0 0 8 8\">"
+                                                          "<rect width=\"1\" height=\"1\"/>"
+                                                          "<rect width=\"1\" height=\"1\"/></svg>",
+                                                  .limits = &limits},
+                            &doc) != FLUX_OK);
+    OT_EXPECT(doc == nullptr);
+    OT_EXPECT(live() == baseline);
 }
 
 static void retention_balances(void) {
@@ -101,14 +102,14 @@ static void retention_balances(void) {
         return;
     /* Retention is not a new document; it is a new reference to one. Three
      * references, three releases, one document. */
-    CHECK(reticle_retain(doc) == doc);
-    CHECK(reticle_retain(doc) == doc);
-    CHECK(live() == baseline + 1u);
+    OT_EXPECT(reticle_retain(doc) == doc);
+    OT_EXPECT(reticle_retain(doc) == doc);
+    OT_EXPECT(live() == baseline + 1u);
     reticle_release(doc);
     reticle_release(doc);
-    CHECK(live() == baseline + 1u);
+    OT_EXPECT(live() == baseline + 1u);
     reticle_release(doc);
-    CHECK(live() == baseline);
+    OT_EXPECT(live() == baseline);
 }
 
 static void rasterization_is_document_neutral(void) {
@@ -124,21 +125,21 @@ static void rasterization_is_document_neutral(void) {
     const uint32_t after_parse = live();
     for (uint32_t size = 8; size <= 32; size += 8) {
         reticle_pixmap pixmap = {};
-        CHECK(reticle_rasterize(
-                  &(reticle_rasterize_opts){
-                      .document = doc,
-                      .width = size,
-                      .height = size,
-                      .format = RETICLE_PIXELS_RGBA8_PREMUL,
-                      .paint = RETICLE_PAINT_MONOCHROME,
-                      .color = flux_color_rgba(255, 255, 255, 255),
-                  },
-                  &pixmap) == FLUX_OK);
+        OT_EXPECT(reticle_rasterize(
+                      &(reticle_rasterize_opts){
+                          .document = doc,
+                          .width = size,
+                          .height = size,
+                          .format = RETICLE_PIXELS_RGBA8_PREMUL,
+                          .paint = RETICLE_PAINT_MONOCHROME,
+                          .color = flux_color_rgba(255, 255, 255, 255),
+                      },
+                      &pixmap) == FLUX_OK);
         reticle_pixmap_deinit(&pixmap);
-        CHECK(live() == after_parse);
+        OT_EXPECT(live() == after_parse);
     }
     reticle_release(doc);
-    CHECK(live() == baseline);
+    OT_EXPECT(live() == baseline);
 }
 
 static void repeated_parse_release_does_not_drift(void) {
@@ -151,10 +152,10 @@ static void repeated_parse_release_does_not_drift(void) {
                 &(reticle_parse_opts){.length = RETICLE_LENGTH_MEASURE, .text = DOCUMENTS[2]},
                 &doc) != FLUX_OK)
             break;
-        CHECK(live() == baseline + 1u);
+        OT_EXPECT(live() == baseline + 1u);
         reticle_release(doc);
     }
-    CHECK(live() == baseline);
+    OT_EXPECT(live() == baseline);
 }
 
 int main(void) {
@@ -167,6 +168,6 @@ int main(void) {
     retention_balances();
     rasterization_is_document_neutral();
     repeated_parse_release_does_not_drift();
-    CHECK(live() == baseline);
-    TEST_REPORT();
+    OT_EXPECT(live() == baseline);
+    return OT_REPORT();
 }

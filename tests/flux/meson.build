@@ -1,26 +1,13 @@
-# tests/ — orchestrator
+# tests/flux — flux-specific shader products and suite forwarding.
 #
-# Layout:
-#   tests/
-#   ├── test_helpers.{c,h}  shared test-helper static lib
-#   ├── shaders/            SPIR-V sources compiled to .spv here
-#   ├── unit/               no Vulkan ICD required
-#   ├── integration/        require a VK ICD (lavapipe / real driver)
-#   └── bench/              reserved for future meson benchmarks
-#
-# This file builds the shared helpers + SPIR-V custom_targets once
-# and forwards them into the sub-suites via subdir() scope. Tests
-# in the suites pick them up directly — no declare_dependency
-# indirection needed because the variables stay in scope across the
-# subdir() boundary.
+# Assertions and Vulkan fixtures live in tests/support. This file owns only
+# what is specific to flux tests: SPIR-V custom targets and generated headers.
+# The suite directories (unit/, integration/, bench/, fuzz/) consume
+# flux_test_support_dep from this scope.
 
-# --- shared test helper static library ---
-test_helpers_inc = include_directories('.')  # this file lives in tests/
-test_helpers_lib = static_library('test_helpers',
-  'test_helpers.c',
-  dependencies : [flux_dep, m_dep, vulkan_dep],
-  install      : false,
-)
+# The assertion harness and device fixtures live in tests/support. This
+# subdirectory only owns flux-specific shader build products.
+flux_test_inc = include_directories('.')  # shader headers generated in this dir
 # --- shared SPIR-V custom_targets (used by integration tests) ---
 core_tests_build_dir = meson.current_build_dir()
 slangc = find_program('slangc', required : true)
@@ -92,12 +79,22 @@ test_fill_pattern_h = custom_target('fill_pattern_comp_spv.h',
 # Declared after the shader header targets so every consumer of the
 # helpers (unit + integration suites) also carries an order-only
 # dependency on the generated headers — no per-test source edits needed.
-test_helpers_dep = declare_dependency(
-  link_with           : [test_helpers_lib],
-  sources             : ['test_helpers.h', test_triangle_vert_h, test_triangle_frag_h,
+#
+# Assertions come from optics_test_dep; Vulkan fixtures from flux_test_dep.
+# Keeping the two dependencies separate is what lets a CPU-only test link
+# without Vulkan.
+flux_test_support_dep = declare_dependency(
+  sources             : [test_triangle_vert_h, test_triangle_frag_h,
                          test_triangle_attr_vert_h, test_fill_pattern_h],
-  include_directories : test_helpers_inc,
-  dependencies        : [flux_dep, m_dep, vulkan_dep],
+  include_directories : flux_test_inc,
+  dependencies        : [flux_test_dep, optics_test_dep],
+)
+
+# CPU-only unit tests use this dependency. It deliberately does not link the
+# Vulkan fixture library or add the shader-header targets: a unit test that
+# needs either belongs in integration.
+flux_unit_support_dep = declare_dependency(
+  dependencies : [flux_dep, m_dep, optics_test_dep],
 )
 
 # Coverage acceptance harness (ADR-0119 S0): the independent ground truth every
@@ -111,8 +108,8 @@ coverage_harness_lib = static_library('coverage_harness',
 coverage_harness_dep = declare_dependency(
   link_with           : [coverage_harness_lib],
   sources             : ['coverage_harness.h'],
-  include_directories : test_helpers_inc,
-  dependencies        : [test_helpers_dep],
+  include_directories : flux_test_inc,
+  dependencies        : [flux_unit_support_dep],
 )
 
 # --- sub-suites ---

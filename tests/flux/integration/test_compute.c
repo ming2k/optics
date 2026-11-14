@@ -5,7 +5,8 @@
  * push-bytes-too-large path needs a real device for d->props; we
  * skip when no Vulkan is available.
  */
-#include "test_helpers.h"
+#include "flux_test.h"
+#include "optics_test.h"
 #include <flux/compute.h>
 #include <flux/flux.h>
 
@@ -17,8 +18,9 @@ int main(void) {
     /* --- NULL device / desc / out reject without touching anything --- */
     {
         flux_compute_pipeline *p = nullptr;
-        EXPECT(flux_compute_pipeline_create(nullptr, nullptr, &p) == FLUX_ERROR_INVALID_ARGUMENT);
-        EXPECT(p == nullptr);
+        OT_EXPECT(flux_compute_pipeline_create(nullptr, nullptr, &p) ==
+                  FLUX_ERROR_INVALID_ARGUMENT);
+        OT_EXPECT(p == nullptr);
 
         flux_compute_pipeline_desc desc = {
             .type = FLUX_TYPE_COMPUTE_PIPELINE_DESC,
@@ -26,13 +28,13 @@ int main(void) {
             .push_constant_bytes = 0,
         };
         /* d=NULL → INVALID_ARGUMENT, regardless of desc contents. */
-        EXPECT(flux_compute_pipeline_create(nullptr, &desc, &p) == FLUX_ERROR_INVALID_ARGUMENT);
+        OT_EXPECT(flux_compute_pipeline_create(nullptr, &desc, &p) == FLUX_ERROR_INVALID_ARGUMENT);
     }
 
-    flux_device *d = test_helpers_make_headless_device();
+    flux_device *d = flux_test_make_headless_device();
     if (!d) {
         fprintf(stderr, "test_compute: no Vulkan device available; skipping device-bound checks\n");
-        TEST_SUMMARY();
+        OT_SKIP("no Vulkan device");
     }
 
     /* --- wrong tagged-struct type --- */
@@ -44,12 +46,12 @@ int main(void) {
             .spirv = spv,
             .spirv_word_count = 4,
         };
-        EXPECT(flux_compute_pipeline_create(d, &desc, &p) == FLUX_ERROR_INVALID_ARGUMENT);
-        EXPECT(p == nullptr);
+        OT_EXPECT(flux_compute_pipeline_create(d, &desc, &p) == FLUX_ERROR_INVALID_ARGUMENT);
+        OT_EXPECT(p == nullptr);
 
         flux_error_info info;
         flux_get_last_error(&info);
-        EXPECT(info.code == FLUX_ERROR_INVALID_ARGUMENT);
+        OT_EXPECT(info.code == FLUX_ERROR_INVALID_ARGUMENT);
     }
 
     /* --- missing SPIR-V --- */
@@ -60,8 +62,8 @@ int main(void) {
             .spirv = nullptr,
             .spirv_word_count = 0,
         };
-        EXPECT(flux_compute_pipeline_create(d, &desc, &p) == FLUX_ERROR_INVALID_ARGUMENT);
-        EXPECT(p == nullptr);
+        OT_EXPECT(flux_compute_pipeline_create(d, &desc, &p) == FLUX_ERROR_INVALID_ARGUMENT);
+        OT_EXPECT(p == nullptr);
     }
 
     /* --- push constants larger than device-reported max --- */
@@ -74,17 +76,17 @@ int main(void) {
             .spirv_word_count = 4,
             .push_constant_bytes = 1u << 20, /* 1 MiB — no driver allows this */
         };
-        EXPECT(flux_compute_pipeline_create(d, &desc, &p) == FLUX_ERROR_INVALID_ARGUMENT);
-        EXPECT(p == nullptr);
+        OT_EXPECT(flux_compute_pipeline_create(d, &desc, &p) == FLUX_ERROR_INVALID_ARGUMENT);
+        OT_EXPECT(p == nullptr);
     }
 
     /* --- release-NULL is a no-op --- */
     flux_compute_pipeline_release(nullptr);
 
     /* --- vk accessors on NULL return VK_NULL_HANDLE --- */
-    EXPECT(flux_compute_pipeline_vk_pipeline(nullptr) == VK_NULL_HANDLE);
-    EXPECT(flux_compute_pipeline_vk_layout(nullptr) == VK_NULL_HANDLE);
+    OT_EXPECT(flux_compute_pipeline_vk_pipeline(nullptr) == VK_NULL_HANDLE);
+    OT_EXPECT(flux_compute_pipeline_vk_layout(nullptr) == VK_NULL_HANDLE);
 
     flux_device_release(d);
-    TEST_SUMMARY();
+    return OT_REPORT();
 }

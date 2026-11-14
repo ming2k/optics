@@ -6,7 +6,8 @@
  * retargeting, linear quaternion sampling, hips translation, looping, and
  * animation-handle ownership without checking large binary fixtures into git.
  */
-#include "test_helpers.h"
+#include "flux_test.h"
+#include "optics_test.h"
 
 #include <vista/vista.h>
 
@@ -142,28 +143,28 @@ static test_glb make_animation(void) {
 }
 
 int main(void) {
-    flux_device *device = test_helpers_make_headless_device();
+    flux_device *device = flux_test_make_headless_device();
     if (!device) {
         fprintf(stderr, "test_scene_graph_animation: no Vulkan device; skipping\n");
-        TEST_SUMMARY();
+        OT_SKIP("no Vulkan device");
     }
 
     test_glb target_glb = make_target();
     test_glb animation_glb = make_animation();
-    EXPECT(target_glb.bytes != NULL);
-    EXPECT(animation_glb.bytes != NULL);
+    OT_EXPECT(target_glb.bytes != NULL);
+    OT_EXPECT(animation_glb.bytes != NULL);
     if (!target_glb.bytes || !animation_glb.bytes) {
         free(target_glb.bytes);
         free(animation_glb.bytes);
         flux_device_release(device);
-        TEST_SUMMARY();
+        return OT_REPORT();
     }
 
     vista_scene *scene = NULL;
     flux_result load_result = vista_load_glb(device, target_glb.bytes, target_glb.size, &scene);
     if (load_result != FLUX_OK)
         fprintf(stderr, "target GLB load failed: %s\n", flux_result_string(load_result));
-    EXPECT(load_result == FLUX_OK);
+    OT_EXPECT(load_result == FLUX_OK);
     if (scene) {
         flux_material_desc material_desc = {
             .type = FLUX_TYPE_MATERIAL_DESC,
@@ -172,54 +173,54 @@ int main(void) {
             .color_format = FLUX_FORMAT_RGBA8_UNORM,
         };
         flux_material *material = NULL;
-        EXPECT(flux_material_create(device, &material_desc, &material) == FLUX_OK);
+        OT_EXPECT(flux_material_create(device, &material_desc, &material) == FLUX_OK);
         flux_material *table[1] = {material};
-        EXPECT(vista_scene_set_materials(scene, table, 1, material) == FLUX_OK);
+        OT_EXPECT(vista_scene_set_materials(scene, table, 1, material) == FLUX_OK);
         /* The scene retains both table and fallback references. */
         flux_material_release(material);
-        EXPECT(vista_scene_set_materials(scene, NULL, 0, NULL) == FLUX_OK);
-        EXPECT(vista_scene_set_materials(NULL, NULL, 0, NULL) == FLUX_ERROR_INVALID_ARGUMENT);
+        OT_EXPECT(vista_scene_set_materials(scene, NULL, 0, NULL) == FLUX_OK);
+        OT_EXPECT(vista_scene_set_materials(NULL, NULL, 0, NULL) == FLUX_ERROR_INVALID_ARGUMENT);
     }
     vista_animation *animation = NULL;
     if (scene)
-        EXPECT(vista_load_animation_glb(scene, animation_glb.bytes, animation_glb.size,
-                                        &animation) == FLUX_OK);
+        OT_EXPECT(vista_load_animation_glb(scene, animation_glb.bytes, animation_glb.size,
+                                           &animation) == FLUX_OK);
 
     if (scene && animation) {
-        EXPECT_NEAR(vista_animation_duration(animation), 1.0f, 1e-6);
-        EXPECT(vista_animation_channel_count(animation) == 2u);
+        OT_EXPECT_NEAR(vista_animation_duration(animation), 1.0f, 1e-6);
+        OT_EXPECT(vista_animation_channel_count(animation) == 2u);
 
         flux_vec3 eye = {0};
-        EXPECT(vista_scene_humanoid_bone_position(scene, "leftEye", &eye));
-        EXPECT_NEAR(eye.x, 1.0f, 1e-5);
-        EXPECT_NEAR(eye.y, 2.0f, 1e-5);
+        OT_EXPECT(vista_scene_humanoid_bone_position(scene, "leftEye", &eye));
+        OT_EXPECT_NEAR(eye.x, 1.0f, 1e-5);
+        OT_EXPECT_NEAR(eye.y, 2.0f, 1e-5);
 
         /* Matrix-authored nodes must preserve their column-major rotation
          * during TRS decomposition: +X under +90-degree Z becomes +Y. */
         flux_vec3 jaw = {0};
-        EXPECT(vista_scene_humanoid_bone_position(scene, "jaw", &jaw));
-        EXPECT_NEAR(jaw.x, 0.0f, 1e-5);
-        EXPECT_NEAR(jaw.y, 3.0f, 1e-5);
+        OT_EXPECT(vista_scene_humanoid_bone_position(scene, "jaw", &jaw));
+        OT_EXPECT_NEAR(jaw.x, 0.0f, 1e-5);
+        OT_EXPECT_NEAR(jaw.y, 3.0f, 1e-5);
 
-        EXPECT(vista_scene_apply_animation(scene, animation, 0.5f, false) == FLUX_OK);
-        EXPECT(vista_scene_humanoid_bone_position(scene, "leftEye", &eye));
-        EXPECT_NEAR(eye.x, 0.70710678f, 1e-4);
-        EXPECT_NEAR(eye.y, 3.20710678f, 1e-4);
+        OT_EXPECT(vista_scene_apply_animation(scene, animation, 0.5f, false) == FLUX_OK);
+        OT_EXPECT(vista_scene_humanoid_bone_position(scene, "leftEye", &eye));
+        OT_EXPECT_NEAR(eye.x, 0.70710678f, 1e-4);
+        OT_EXPECT_NEAR(eye.y, 3.20710678f, 1e-4);
 
-        EXPECT(vista_scene_apply_animation(scene, animation, 1.0f, false) == FLUX_OK);
-        EXPECT(vista_scene_humanoid_bone_position(scene, "leftEye", &eye));
-        EXPECT_NEAR(eye.x, 0.0f, 1e-4);
-        EXPECT_NEAR(eye.y, 4.0f, 1e-4);
+        OT_EXPECT(vista_scene_apply_animation(scene, animation, 1.0f, false) == FLUX_OK);
+        OT_EXPECT(vista_scene_humanoid_bone_position(scene, "leftEye", &eye));
+        OT_EXPECT_NEAR(eye.x, 0.0f, 1e-4);
+        OT_EXPECT_NEAR(eye.y, 4.0f, 1e-4);
 
-        EXPECT(vista_scene_apply_animation(scene, animation, 1.0f, true) == FLUX_OK);
-        EXPECT(vista_scene_humanoid_bone_position(scene, "leftEye", &eye));
-        EXPECT_NEAR(eye.x, 1.0f, 1e-5);
-        EXPECT_NEAR(eye.y, 2.0f, 1e-5);
+        OT_EXPECT(vista_scene_apply_animation(scene, animation, 1.0f, true) == FLUX_OK);
+        OT_EXPECT(vista_scene_humanoid_bone_position(scene, "leftEye", &eye));
+        OT_EXPECT_NEAR(eye.x, 1.0f, 1e-5);
+        OT_EXPECT_NEAR(eye.y, 2.0f, 1e-5);
 
         vista_animation *retained = vista_animation_retain(animation);
         vista_animation_release(animation);
         animation = retained;
-        EXPECT(vista_scene_apply_animation(scene, animation, -1.0f, false) == FLUX_OK);
+        OT_EXPECT(vista_scene_apply_animation(scene, animation, -1.0f, false) == FLUX_OK);
     }
 
     /* A node array where children precede their parents must still fold the
@@ -227,12 +228,12 @@ int main(void) {
      * relied on array-order convergence; this locks the correct composed
      * transforms regardless of ordering. */
     test_glb reversed_glb = make_reversed_chain();
-    EXPECT(reversed_glb.bytes != NULL);
+    OT_EXPECT(reversed_glb.bytes != NULL);
     if (reversed_glb.bytes) {
         vista_scene *reversed = NULL;
         flux_result reversed_result =
             vista_load_glb(device, reversed_glb.bytes, reversed_glb.size, &reversed);
-        EXPECT(reversed_result == FLUX_OK);
+        OT_EXPECT(reversed_result == FLUX_OK);
         if (reversed) {
             /* Two children each carry the mesh. Their translated AABBs
              * (positions plus the child's world translation) must fold in
@@ -241,15 +242,15 @@ int main(void) {
              * node array. */
             flux_vec3 bounds_min = {0};
             flux_vec3 bounds_max = {0};
-            EXPECT(vista_scene_bounds(reversed, &bounds_min, &bounds_max));
+            OT_EXPECT(vista_scene_bounds(reversed, &bounds_min, &bounds_max));
             /* Positions span x in [-0.1, 0.1], y in [-0.1, 0.1], z = 0.
              * childA's world is (0, 3, 0); childB's is (4, 0, 3). */
-            EXPECT_NEAR(bounds_min.x, -0.1f, 1e-4);
-            EXPECT_NEAR(bounds_min.y, -0.1f, 1e-4);
-            EXPECT_NEAR(bounds_min.z, 0.0f, 1e-4);
-            EXPECT_NEAR(bounds_max.x, 4.1f, 1e-4);
-            EXPECT_NEAR(bounds_max.y, 3.1f, 1e-4);
-            EXPECT_NEAR(bounds_max.z, 3.0f, 1e-4);
+            OT_EXPECT_NEAR(bounds_min.x, -0.1f, 1e-4);
+            OT_EXPECT_NEAR(bounds_min.y, -0.1f, 1e-4);
+            OT_EXPECT_NEAR(bounds_min.z, 0.0f, 1e-4);
+            OT_EXPECT_NEAR(bounds_max.x, 4.1f, 1e-4);
+            OT_EXPECT_NEAR(bounds_max.y, 3.1f, 1e-4);
+            OT_EXPECT_NEAR(bounds_max.z, 3.0f, 1e-4);
         }
         flux_device_wait_idle(device);
         vista_scene_release(reversed);
@@ -265,5 +266,5 @@ int main(void) {
     free(target_glb.bytes);
     free(animation_glb.bytes);
     flux_device_release(device);
-    TEST_SUMMARY();
+    return OT_REPORT();
 }

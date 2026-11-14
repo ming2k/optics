@@ -1,6 +1,7 @@
 /* test_a11y.c — accessibility semantics + export walk (ADR-0012). */
 
-#include "test_helpers.h"
+#include "lens_test.h"
+#include "optics_test.h"
 #include <lens/lens.h>
 #include <string.h>
 
@@ -48,7 +49,7 @@ static void reset(void) {
 /* Built-in widgets publish role, name, and state. */
 static void test_widget_roles(void) {
     lens *ui = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
     lens_input in = {.display_size = {300, 200}, .dt_seconds = 0.016f};
 
     bool wrap = true;
@@ -62,31 +63,31 @@ static void test_widget_roles(void) {
                 .label = "Zoom", .value = &zoom, .min = 0.0f, .max = 4.0f, .format = "%.4g"});
     lens_label(ui, &(lens_label_opts){.text = "Ready"});
     lens_close(ui);
-    test_end(ui);
+    lens_test_end(ui);
 
     reset();
     lens_accessibility_walk(ui, collect, NULL);
 
     rec *b = find_role(LENS_ROLE_BUTTON);
-    CHECK(b != NULL);
-    CHECK(b && strcmp(b->name, "Save") == 0); /* "##b" stripped */
+    OT_EXPECT(b != NULL);
+    OT_EXPECT(b && strcmp(b->name, "Save") == 0); /* "##b" stripped */
 
     rec *c = find_role(LENS_ROLE_CHECKBOX);
-    CHECK(c != NULL);
-    CHECK(c && strcmp(c->name, "Wrap") == 0);
-    CHECK(c && (c->flags & LENS_A11Y_CHECKED));
+    OT_EXPECT(c != NULL);
+    OT_EXPECT(c && strcmp(c->name, "Wrap") == 0);
+    OT_EXPECT(c && (c->flags & LENS_A11Y_CHECKED));
 
     rec *s = find_role(LENS_ROLE_SLIDER);
-    CHECK(s != NULL);
-    CHECK(s && strcmp(s->name, "Zoom") == 0);
-    CHECK(s && strcmp(s->value, "1.5") == 0);
+    OT_EXPECT(s != NULL);
+    OT_EXPECT(s && strcmp(s->name, "Zoom") == 0);
+    OT_EXPECT(s && strcmp(s->value, "1.5") == 0);
 
     rec *l = find_role(LENS_ROLE_LABEL);
-    CHECK(l != NULL);
-    CHECK(l && strcmp(l->name, "Ready") == 0);
+    OT_EXPECT(l != NULL);
+    OT_EXPECT(l && strcmp(l->name, "Ready") == 0);
 
     /* layout-only row is decorative: not surfaced */
-    CHECK(find_role(LENS_ROLE_GROUP) == NULL);
+    OT_EXPECT(find_role(LENS_ROLE_GROUP) == NULL);
 
     lens_release(ui);
 }
@@ -94,19 +95,19 @@ static void test_widget_roles(void) {
 /* lens_a11y overrides the most recent widget's name (icon-only control). */
 static void test_a11y_override(void) {
     lens *ui = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
     lens_input in = {.display_size = {300, 200}, .dt_seconds = 0.016f};
 
     lens_begin(ui, &in);
     (void)lens_button(ui, &(lens_button_opts){.label = "##save-icon"});
     lens_a11y(ui, &(lens_a11y_desc){.name = "Save document"});
-    test_end(ui);
+    lens_test_end(ui);
 
     reset();
     lens_accessibility_walk(ui, collect, NULL);
     rec *b = find_role(LENS_ROLE_BUTTON);
-    CHECK(b != NULL);
-    CHECK(b && strcmp(b->name, "Save document") == 0);
+    OT_EXPECT(b != NULL);
+    OT_EXPECT(b && strcmp(b->name, "Save document") == 0);
 
     lens_release(ui);
 }
@@ -115,20 +116,20 @@ static void test_a11y_override(void) {
  * layout containers, and reports solved bounds. */
 static void test_walk_parenting(void) {
     lens *ui = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
     lens_input in = {.display_size = {300, 200}, .dt_seconds = 0.016f};
 
     lens_begin(ui, &in);
     lens_pressable_begin(ui, &(lens_pressable_opts){.box = {.id = "Section"}, .label = "Section"});
     (void)lens_button(ui, &(lens_button_opts){.label = "Top"});
     lens_pressable_end(ui);
-    test_end(ui);
+    lens_test_end(ui);
 
     reset();
     lens_accessibility_walk(ui, collect, NULL);
 
     rec *p = find_role(LENS_ROLE_BUTTON);
-    CHECK(p != NULL);
+    OT_EXPECT(p != NULL);
 
     lens_release(ui);
 }
@@ -137,5 +138,5 @@ int main(void) {
     test_widget_roles();
     test_a11y_override();
     test_walk_parenting();
-    return TEST_REPORT();
+    return OT_REPORT();
 }

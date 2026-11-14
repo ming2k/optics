@@ -8,7 +8,8 @@
  *     3D perspective foreshortening, asserting > 16 distinct coverage levels
  *   - Module isolation (INV-SCV-05): tests scene without canvas headers.
  */
-#include "test_helpers.h"
+#include "flux_test.h"
+#include "optics_test.h"
 
 #include <flux/core.h>
 #include <flux/curve.h>
@@ -44,17 +45,17 @@ static int count_edge_levels(const uint8_t *px, uint32_t w, uint32_t h) {
 }
 
 int main(void) {
-    flux_device *d = test_helpers_make_headless_device();
+    flux_device *d = flux_test_make_headless_device();
     if (!d) {
-        fprintf(stderr, "test_scene_vector: no Vulkan device; skipping\n");
-        return 0;
+        fprintf(stderr, "test_scene_vector: no Vulkan device available; skipping\n");
+        OT_SKIP("no Vulkan device");
     }
 
     flux_surface_desc sd = FLUX_SURFACE_DESC_INIT;
     sd.width = W;
     sd.height = H;
     flux_surface *s = nullptr;
-    EXPECT(flux_surface_create(d, &sd, &s) == FLUX_OK);
+    OT_EXPECT(flux_surface_create(d, &sd, &s) == FLUX_OK);
 
     flux_format color_fmt = flux_format_from_vk(flux_surface_vk_format(s));
 
@@ -75,7 +76,7 @@ int main(void) {
         .index_count = 6,
     };
     flux_mesh *mesh = nullptr;
-    EXPECT(flux_mesh_create(d, &mdesc, &mesh) == FLUX_OK);
+    OT_EXPECT(flux_mesh_create(d, &mdesc, &mesh) == FLUX_OK);
 
     /* 2. Vector content: a high-contrast oblique polygon in object space [-0.8, 0.8] */
     GpuSegment segs[4] = {
@@ -94,7 +95,7 @@ int main(void) {
         .initial_data = segs,
     };
     flux_buffer *seg_buf = nullptr;
-    EXPECT(flux_buffer_create(d, &bdesc, &seg_buf) == FLUX_OK);
+    OT_EXPECT(flux_buffer_create(d, &bdesc, &seg_buf) == FLUX_OK);
 
     /* 3. ADR-0117 Vector Coverage Material */
     flux_material_vector_desc vdesc = {
@@ -113,7 +114,7 @@ int main(void) {
         .depth_format = FLUX_FORMAT_UNDEFINED,
     };
     flux_material *material = nullptr;
-    EXPECT(flux_material_create(d, &mat_desc, &material) == FLUX_OK);
+    OT_EXPECT(flux_material_create(d, &mat_desc, &material) == FLUX_OK);
 
     /* 4. Camera with strong 3D perspective foreshortening */
     flux_camera cam;
@@ -130,7 +131,7 @@ int main(void) {
     static uint8_t px[W * H * 4];
     {
         flux_frame *frame = nullptr;
-        EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
+        OT_EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
 
         flux_pass_attachment color = {
             .load_op = FLUX_LOAD_CLEAR,
@@ -149,9 +150,9 @@ int main(void) {
         flux_scene_draw_mesh(frame, &cam, world, mesh, material);
 
         flux_frame_end_pass(frame);
-        EXPECT(flux_frame_submit(frame) == FLUX_OK);
-        EXPECT(flux_frame_present(frame) == FLUX_OK);
-        EXPECT(flux_surface_read_pixels(s, px, sizeof(px)) == FLUX_OK);
+        OT_EXPECT(flux_frame_submit(frame) == FLUX_OK);
+        OT_EXPECT(flux_frame_present(frame) == FLUX_OK);
+        OT_EXPECT(flux_surface_read_pixels(s, px, sizeof(px)) == FLUX_OK);
     }
 
     int levels = count_edge_levels(px, W, H);
@@ -160,13 +161,13 @@ int main(void) {
             levels);
 
     /* Assert analytic continuous coverage in 3D perspective space (> 16 levels, INV-SCV-03) */
-    EXPECT(levels > 16);
-    EXPECT(levels >= 40);
+    OT_EXPECT(levels > 16);
+    OT_EXPECT(levels >= 40);
 
     flux_material_release(material);
     flux_buffer_release(seg_buf);
     flux_mesh_release(mesh);
     flux_surface_release(s);
     flux_device_release(d);
-    TEST_SUMMARY();
+    return OT_REPORT();
 }

@@ -2,7 +2,8 @@
  * interactions aimed at widgets beneath it, while its own children stay
  * interactive (ADR-0060: occlusion IS the hit-test order). */
 
-#include "test_helpers.h"
+#include "lens_test.h"
+#include "optics_test.h"
 #include <flux/canvas_cpu.h>
 #include <lens/lens.h>
 #include <string.h>
@@ -31,7 +32,7 @@ static lens_place_opts card_opts(flux_rect rect) {
 
 static void test_popup_card_occludes_base_widget(void) {
     lens *ui = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
 
     bool base_clicked = false;
     bool card_clicked = false;
@@ -58,11 +59,11 @@ static void test_popup_card_occludes_base_widget(void) {
             card_clicked = true;
         lens_place_end(ui);
 
-        test_end(ui);
+        lens_test_end(ui);
     }
 
-    CHECK(!base_clicked);
-    CHECK(card_clicked);
+    OT_EXPECT(!base_clicked);
+    OT_EXPECT(card_clicked);
     lens_release(ui);
 }
 
@@ -78,7 +79,7 @@ static lens_place_opts popup_at(const char *id, flux_rect rect) {
 
 static void test_later_popup_occludes_earlier_same_band(void) {
     lens *ui = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
 
     const flux_rect R1 = {0, 0, 200, 200};
     const flux_rect R2 = {100, 0, 200, 200};
@@ -102,29 +103,29 @@ static void test_later_popup_occludes_earlier_same_band(void) {
     lens_response first_r = {0}, second_r = {0};
     lens_begin(ui, &IN0);
     BUILD_TWO();
-    test_end(ui);
+    lens_test_end(ui);
 
     lens_input in = IN0;
     in.cursor = (flux_point){150, 20};
     lens_begin(ui, &in);
     BUILD_TWO();
-    test_end(ui);
-    CHECK(!first_r.hovered);
-    CHECK(second_r.hovered);
+    lens_test_end(ui);
+    OT_EXPECT(!first_r.hovered);
+    OT_EXPECT(second_r.hovered);
 
     in.mouse_pressed[LENS_MOUSE_LEFT] = true;
     in.mouse_down[LENS_MOUSE_LEFT] = true;
     lens_begin(ui, &in);
     BUILD_TWO();
-    test_end(ui);
+    lens_test_end(ui);
     in.mouse_pressed[LENS_MOUSE_LEFT] = false;
     in.mouse_down[LENS_MOUSE_LEFT] = false;
     in.mouse_released[LENS_MOUSE_LEFT] = true;
     lens_begin(ui, &in);
     BUILD_TWO();
-    test_end(ui);
-    CHECK(!first_r.clicked);
-    CHECK(second_r.clicked);
+    lens_test_end(ui);
+    OT_EXPECT(!first_r.clicked);
+    OT_EXPECT(second_r.clicked);
 
 #undef BUILD_TWO
     lens_release(ui);
@@ -133,5 +134,5 @@ static void test_later_popup_occludes_earlier_same_band(void) {
 int main(void) {
     test_popup_card_occludes_base_widget();
     test_later_popup_occludes_earlier_same_band();
-    return TEST_REPORT();
+    return OT_REPORT();
 }

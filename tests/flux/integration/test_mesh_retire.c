@@ -8,7 +8,8 @@
  * every frame so any inline destruction trips an error on real
  * hardware. Skips if no Vulkan device.
  */
-#include "test_helpers.h"
+#include "flux_test.h"
+#include "optics_test.h"
 #include <flux/flux.h>
 #include <flux/scene.h>
 #include <flux/vulkan.h>
@@ -37,10 +38,10 @@ static flux_mesh *make_quad(flux_device *d) {
 }
 
 int main(void) {
-    flux_device *d = test_helpers_make_headless_device();
+    flux_device *d = flux_test_make_headless_device();
     if (!d) {
         fprintf(stderr, "test_mesh_retire: no Vulkan device; skipping\n");
-        TEST_SUMMARY();
+        OT_SKIP("no Vulkan device");
     }
 
     flux_surface *surface = nullptr;
@@ -48,7 +49,7 @@ int main(void) {
         flux_surface_desc desc = FLUX_SURFACE_DESC_INIT;
         desc.width = SURF_W;
         desc.height = SURF_H;
-        EXPECT(flux_surface_create(d, &desc, &surface) == FLUX_OK);
+        OT_EXPECT(flux_surface_create(d, &desc, &surface) == FLUX_OK);
     }
 
     flux_target *depth = nullptr;
@@ -60,7 +61,7 @@ int main(void) {
             .width = SURF_W,
             .height = SURF_H,
         };
-        EXPECT(flux_target_create(d, &desc, &depth) == FLUX_OK);
+        OT_EXPECT(flux_target_create(d, &desc, &depth) == FLUX_OK);
     }
 
     flux_camera cam;
@@ -76,7 +77,7 @@ int main(void) {
             .color_format = flux_format_from_vk(flux_surface_vk_format(surface)),
             .depth_format = FLUX_FORMAT_D32_SFLOAT,
         };
-        EXPECT(flux_material_create(d, &desc, &material) == FLUX_OK);
+        OT_EXPECT(flux_material_create(d, &desc, &material) == FLUX_OK);
     }
 
     /* Churn: each frame draws a fresh indexed mesh, then releases it
@@ -85,10 +86,10 @@ int main(void) {
      * must keep those buffers valid. */
     for (uint32_t i = 0; i < CHURN_FRAMES; ++i) {
         flux_mesh *mesh = make_quad(d);
-        EXPECT(mesh != nullptr);
+        OT_EXPECT(mesh != nullptr);
 
         flux_frame *frame = nullptr;
-        EXPECT(flux_surface_begin_frame(surface, nullptr, &frame) == FLUX_OK);
+        OT_EXPECT(flux_surface_begin_frame(surface, nullptr, &frame) == FLUX_OK);
         flux_frame_prepare_target(frame, depth);
         flux_pass_attachment color = {
             .load_op = FLUX_LOAD_CLEAR,
@@ -113,8 +114,8 @@ int main(void) {
         flux_frame_set_scissor(frame, 0, 0, SURF_W, SURF_H);
         flux_scene_draw_mesh(frame, &cam, flux_mat4_identity(), mesh, material);
         flux_frame_end_pass(frame);
-        EXPECT(flux_frame_submit(frame) == FLUX_OK);
-        EXPECT(flux_frame_present(frame) == FLUX_OK);
+        OT_EXPECT(flux_frame_submit(frame) == FLUX_OK);
+        OT_EXPECT(flux_frame_present(frame) == FLUX_OK);
 
         flux_mesh_release(mesh);
     }
@@ -122,12 +123,12 @@ int main(void) {
     /* Release-without-frame: zombies parked after the last submission
      * must be destroyed by device teardown (drain path). */
     flux_mesh *stray = make_quad(d);
-    EXPECT(stray != nullptr);
+    OT_EXPECT(stray != nullptr);
     flux_mesh_release(stray);
 
     flux_material_release(material);
     flux_target_release(depth);
     flux_surface_release(surface);
     flux_device_release(d);
-    TEST_SUMMARY();
+    return OT_REPORT();
 }

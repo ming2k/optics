@@ -18,7 +18,8 @@
 #if defined(GLYPH_HAVE_FTHB)
 #include <glyph/glyph.h>
 #endif
-#include "test_helpers.h"
+#include "flux_test.h"
+#include "optics_test.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -86,7 +87,7 @@ static bool settle_frame_slots(flux_device *d, flux_surface *s, flux_canvas *can
                                                                .frame = frame,
                                                                .clear_color = &clear}) != FLUX_OK)
             return false;
-        EXPECT(flux_canvas_end(canvas) == FLUX_OK);
+        OT_EXPECT(flux_canvas_end(canvas) == FLUX_OK);
         if (flux_frame_submit(frame) != FLUX_OK || flux_frame_present(frame) != FLUX_OK)
             return false;
     }
@@ -95,10 +96,10 @@ static bool settle_frame_slots(flux_device *d, flux_surface *s, flux_canvas *can
 }
 
 int main(void) {
-    flux_device *d = test_helpers_make_headless_device();
+    flux_device *d = flux_test_make_headless_device();
     if (d == nullptr) {
         fprintf(stderr, "test_text_atlas_leak: no Vulkan device; skipping\n");
-        TEST_SUMMARY();
+        OT_SKIP("no Vulkan device");
     }
 
     flux_surface *s = nullptr;
@@ -106,7 +107,7 @@ int main(void) {
         flux_surface_desc sd = FLUX_SURFACE_DESC_INIT;
         sd.width = W;
         sd.height = H;
-        EXPECT(flux_surface_create(d, &sd, &s) == FLUX_OK);
+        OT_EXPECT(flux_surface_create(d, &sd, &s) == FLUX_OK);
     }
     flux_canvas *canvas = nullptr;
     {
@@ -117,12 +118,12 @@ int main(void) {
          * the 94-glyph working set spans multiple 4096px pages and forces
          * atlas_clear at the page cap. */
         cd.scale = 8.0f;
-        EXPECT(flux_canvas_create(&cd, &canvas) == FLUX_OK);
+        OT_EXPECT(flux_canvas_create(&cd, &canvas) == FLUX_OK);
     }
 
     glyph_ctx *text = nullptr;
     glyph_desc td = {.device = d, .scale = 1.0f};
-    EXPECT(glyph_create(&td, &text) == FLUX_OK);
+    OT_EXPECT(glyph_create(&td, &text) == FLUX_OK);
 
     /* One snapshot per clear, all taken at the same phase of the cycle, so a
      * consecutive-delta comparison is phase-identical and therefore exact.
@@ -161,23 +162,23 @@ int main(void) {
             break;
         }
         draw_filler(canvas, &dc);
-        EXPECT(flux_canvas_end(canvas) == FLUX_OK);
-        EXPECT(flux_frame_submit(frame) == FLUX_OK);
-        EXPECT(flux_frame_present(frame) == FLUX_OK);
+        OT_EXPECT(flux_canvas_end(canvas) == FLUX_OK);
+        OT_EXPECT(flux_frame_submit(frame) == FLUX_OK);
+        OT_EXPECT(flux_frame_present(frame) == FLUX_OK);
 
         glyph_stats after;
         glyph_get_stats(text, &after);
 
         if (after.atlas_clears > before.atlas_clears) {
             clears_seen++;
-            EXPECT(settle_frame_slots(d, s, canvas));
+            OT_EXPECT(settle_frame_slots(d, s, canvas));
             if (clear_snapshots < MAX_CLEAR_SNAPSHOTS) {
                 flux_device_memory_stats(d, &clear_mem[clear_snapshots]);
                 clear_snapshots++;
             }
         }
     }
-    EXPECT(clears_seen >= 1);
+    OT_EXPECT(clears_seen >= 1);
 
     /* The leaked page-0 image held a refcount forever, so each clear
      * permanently added one live 16 MiB allocation that no idle wait could
@@ -186,10 +187,10 @@ int main(void) {
      * count after the final clear is at most one above the count measured
      * right after the first clear (the slack covers one in-flight page
      * mid-recreate, not a per-clear increment). */
-    EXPECT(settle_frame_slots(d, s, canvas));
+    OT_EXPECT(settle_frame_slots(d, s, canvas));
     flux_device_memory_stats(d, &mem_after);
-    EXPECT(clears_seen >= 1);
-    EXPECT(clear_snapshots >= 2);
+    OT_EXPECT(clears_seen >= 1);
+    OT_EXPECT(clear_snapshots >= 2);
 
     /* The invariant is a bound, not a tolerance (ADR-0130): every snapshot is
      * taken after an identical settle sequence, so the only legitimate
@@ -257,19 +258,19 @@ int main(void) {
         }
     }
     if (clear_snapshots >= 3)
-        EXPECT(gave_memory_back);
+        OT_EXPECT(gave_memory_back);
 
     flux_canvas_release(canvas);
     flux_surface_release(s);
     glyph_release(text);
     flux_device_release(d);
-    TEST_SUMMARY();
+    return OT_REPORT();
 }
 
 #else /* !GLYPH_HAVE_FTHB */
 
 int main(void) {
-    TEST_SUMMARY();
+    return OT_REPORT();
 }
 
 #endif

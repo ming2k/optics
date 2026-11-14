@@ -11,7 +11,8 @@
  *
  * Output is plain numbers for CI parsing (suite 'bench'; no pass/fail).
  */
-#include "../test_helpers.h"
+#include "flux_test.h"
+#include "optics_test.h"
 #include <flux/canvas.h>
 #include <flux/core.h>
 #include <flux/flux.h>
@@ -33,7 +34,7 @@ static double now_ms(void) {
 }
 
 int main(void) {
-    flux_device *d = test_helpers_make_headless_device();
+    flux_device *d = flux_test_make_headless_device();
     if (d == nullptr) {
         fprintf(stderr, "bench_frame_loop: no Vulkan device; skipping\n");
         return 0;

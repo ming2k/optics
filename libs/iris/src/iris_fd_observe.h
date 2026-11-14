@@ -6,10 +6,10 @@
  * host counter the stack keeps. Before this header, `app_wayland.c` carried
  * comments admitting the hazard in prose ("or it leaks").
  *
- * The wrappers below are the only sanctioned way to open, duplicate or close
- * a descriptor in iris. `tools/gate check leaks` fails the build on a raw
- * `close(` / `dup(` / `eventfd(` / `timerfd_create(` in libs/iris outside
- * this header, because a leak detector that can be bypassed by the next
+ * The wrappers below are the sanctioned way to open, duplicate or close a
+ * descriptor in iris. A new raw `close(` / `dup(` / `eventfd(` /
+ * `timerfd_create(` call must be paired with a process-scope ledger row in
+ * the same change; a leak detector that can be bypassed by the next
  * `#include <unistd.h>` is not a detector.
  *
  * Ownership rule: the wrapper pair is on the *descriptor*, not the call site.

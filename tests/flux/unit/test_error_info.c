@@ -18,7 +18,7 @@
  * directly (same precedent as test_canvas_tess / test_canvas_flatten).
  */
 #include "../../../libs/flux/src/core/internal.h"
-#include "test_helpers.h"
+#include "optics_test.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -50,23 +50,23 @@ static void clobber_stack(void) {
 int main(void) {
     /* --- formatted message survives the producing frame --- */
     {
-        EXPECT(fail_from_nested_frame(256u, 3840u, 2160u) == FLUX_ERROR_OUT_OF_MEMORY);
+        OT_EXPECT(fail_from_nested_frame(256u, 3840u, 2160u) == FLUX_ERROR_OUT_OF_MEMORY);
         clobber_stack();
 
         flux_error_info info;
         flux_get_last_error(&info);
-        EXPECT(info.code == FLUX_ERROR_OUT_OF_MEMORY);
-        EXPECT(info.message != nullptr);
+        OT_EXPECT(info.code == FLUX_ERROR_OUT_OF_MEMORY);
+        OT_EXPECT(info.message != nullptr);
         if (info.message) {
-            EXPECT(strcmp(info.message,
-                          "output pool at its 256 MiB budget: requesting 3840x2160, every "
-                          "evictable entry in flight") == 0);
+            OT_EXPECT(strcmp(info.message,
+                             "output pool at its 256 MiB budget: requesting 3840x2160, every "
+                             "evictable entry in flight") == 0);
         }
         /* Provenance is captured, not just the text. */
-        EXPECT(info.function != nullptr);
-        EXPECT(info.file != nullptr);
-        EXPECT(info.line > 0);
-        EXPECT(info.backend_code == 0);
+        OT_EXPECT(info.function != nullptr);
+        OT_EXPECT(info.file != nullptr);
+        OT_EXPECT(info.line > 0);
+        OT_EXPECT(info.backend_code == 0);
     }
 
     /* --- a literal message keeps pointing at the literal --- */
@@ -74,23 +74,23 @@ int main(void) {
         FLUX_FAIL(FLUX_ERROR_INVALID_STATE, "literal detail");
         flux_error_info info;
         flux_get_last_error(&info);
-        EXPECT(info.code == FLUX_ERROR_INVALID_STATE);
-        EXPECT(info.message != nullptr);
-        EXPECT(info.message && strcmp(info.message, "literal detail") == 0);
+        OT_EXPECT(info.code == FLUX_ERROR_INVALID_STATE);
+        OT_EXPECT(info.message != nullptr);
+        OT_EXPECT(info.message && strcmp(info.message, "literal detail") == 0);
     }
 
     /* --- the latest failure wins, and the earlier text is allowed to go --- */
     {
-        EXPECT(fail_from_nested_frame(64u, 128u, 128u) == FLUX_ERROR_OUT_OF_MEMORY);
+        OT_EXPECT(fail_from_nested_frame(64u, 128u, 128u) == FLUX_ERROR_OUT_OF_MEMORY);
         flux_error_info first;
         flux_get_last_error(&first);
-        EXPECT(first.message && strstr(first.message, "128x128") != nullptr);
+        OT_EXPECT(first.message && strstr(first.message, "128x128") != nullptr);
 
         FLUX_FAIL(FLUX_ERROR_UNSUPPORTED, "second failure");
         flux_error_info second;
         flux_get_last_error(&second);
-        EXPECT(second.code == FLUX_ERROR_UNSUPPORTED);
-        EXPECT(second.message && strcmp(second.message, "second failure") == 0);
+        OT_EXPECT(second.code == FLUX_ERROR_UNSUPPORTED);
+        OT_EXPECT(second.message && strcmp(second.message, "second failure") == 0);
     }
 
     /* --- an oversized composition truncates instead of overrunning --- */
@@ -108,11 +108,11 @@ int main(void) {
         FLUX_FAILF(FLUX_ERROR_OUT_OF_RANGE, "%s", long_text);
         flux_error_info info;
         flux_get_last_error(&info);
-        EXPECT(info.code == FLUX_ERROR_OUT_OF_RANGE);
-        EXPECT(info.message != nullptr);
-        EXPECT(info.message && strlen(info.message) == 511u);
-        EXPECT(info.message && strlen(info.message) < sizeof(long_text) - 1u);
+        OT_EXPECT(info.code == FLUX_ERROR_OUT_OF_RANGE);
+        OT_EXPECT(info.message != nullptr);
+        OT_EXPECT(info.message && strlen(info.message) == 511u);
+        OT_EXPECT(info.message && strlen(info.message) < sizeof(long_text) - 1u);
     }
 
-    TEST_SUMMARY();
+    return OT_REPORT();
 }

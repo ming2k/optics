@@ -19,7 +19,7 @@ Every architectural and operational rule maps deterministically into one of four
 
 | Category | Definition & Scope | Identifier Policy | Mandatory Enforcement Mechanism |
 | :--- | :--- | :--- | :--- |
-| **System Invariant** | Non-negotiable structural red-lines with cross-boundary blast radius (e.g., library boundaries, material isolation, zero-alloc loop, C23 purity). Max ~15 across the repo. | Formally ratified in ADRs (`[INV-ARCH-*]`, `[INV-CORE-*]`) | 1. Linker/library dependency firewalls<br>2. Dedicated check command (`tools/gate check <target>`)<br>3. Compiler attributes (`[[nodiscard]]`, `static_assert`) |
+| **System Invariant** | Non-negotiable structural red-lines with cross-boundary blast radius (e.g., library boundaries, material isolation, zero-alloc loop, C23 purity). Max ~15 across the repo. | Formally ratified in ADRs (`[INV-ARCH-*]`, `[INV-CORE-*]`) | 1. Linker/library dependency firewalls<br>2. Meson lint/unit/integration gates<br>3. Compiler attributes (`[[nodiscard]]`, `static_assert`) |
 | **Domain Contract** | State-machine transitions, function signatures, and memory lifecycles within a single library or module. | **NO global `INV-` tag**.<br>Expressed as named structs / enums. | 1. Typed enums & struct layouts<br>2. Assertion guards (`assert`)<br>3. Unit/integration tests |
 | **Design Specification** | Layout padding, font scales, spring stiffness constants, color palette tokens. | **NO `INV-` tag**.<br>Expressed as design tokens / constants. | 1. Constant definitions (e.g. style tokens / metrics)<br>2. Snapshot or golden pixel tests |
 | **Implementation Note** | Transient workarounds, compiler bug workarounds, localized edge-case guards. | **NO `INV-` tag**.<br>Standard code comments. | Direct regression unit test |
@@ -46,7 +46,7 @@ The following canonical system invariants are mechanically enforced in Optics:
 | `[INV-ARCH-ARENA]` | Zero Heap Alloc Frame Walk | Hot frame traversal, layout passes, and render walks use only per-frame arena memory. | Arena memory tracking & integration tests |
 | `[INV-ARCH-SCOPEDRAIN]` | Scope Drain Point (ADR-0129) | A scope's live count returns to zero at its declared drain point; frame-lifetime kinds are asserted at the frame boundary. | `flux_observe_frame_drain_check` in `flux_frame_present`/`abandon` + `tests/flux/integration/test_resource_leak.c` |
 
-*Note on Retired Pseudo-Invariants:* Bureaucratic tags such as `[INV-ARCH-LEDGER]` (TOML leak-lane ledgers), `[INV-ARCH-VERSION]` (manual lockstep grepping), `[INV-ARCH-SYMBOLS]` (symbols.md generation), `[INV-DOC-FIREWALL]`, and `[INV-DOC-ROOT]` (root file whitelists) have been formally retired. True runtime memory cleanliness is verified via standard ASan/LSan test suites, and architectural modularity is enforced natively by Meson/linker dependency boundaries.
+*Note on Retired Pseudo-Invariants:* Bureaucratic tags such as `[INV-ARCH-LEDGER]` (TOML leak-lane ledgers), `[INV-ARCH-VERSION]` (manual lockstep grepping), `[INV-ARCH-SYMBOLS]` (symbols.md generation), and `[INV-DOC-ROOT]` (root file whitelists) have been formally retired. Version lockstep is now a plain lint script (`tools/check_versions.py`), not a tagged invariant. True runtime memory cleanliness is verified via standard ASan/LSan test suites, and architectural modularity is enforced natively by Meson/linker dependency boundaries.
 
 ---
 

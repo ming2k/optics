@@ -80,7 +80,7 @@ We execute a clean, uncompromised architectural refactoring without backwards co
 
 ## References
 
-- [ADR-0063](0063-material-boundary-separation.md): Material Boundary Separation
+- [ADR-0063](0063-liquid-glass-material-library.md): Material Boundary Separation
 - [ADR-0106](0106-monorepo-identity-unification-glyph-vista-transit.md): Monorepo Subsystem Identity
 - [ADR-0150](0150-svg-vector-document-compiler.md): SVG Vector Document Compiler
 - [ADR-0159](0159-unified-cargo-workspace-and-optics-facade-bindings.md): Unified Cargo Workspace and Optics Facade Bindings

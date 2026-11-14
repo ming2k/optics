@@ -1,32 +1,26 @@
 /*
- * Shared definitions backing test_helpers.h. One definition of
- * g_test_failed / g_test_count per test binary (each test is its
- * own executable, linked against this static lib).
+ * flux_test.c — Vulkan device fixtures for the shared test support library.
  *
- * The Vulkan probe helpers here are the single source of truth for
- * "can I create a device on this host?" Every test that needs a
- * device goes through these; no test should open-code the
- * FLUX_DEVICE_DESC_INIT + flux_device_create sequence.
+ * The fixture layer is deliberately separate from <optics_test.h>: a runtime
+ * test's assertion accounting must not depend on Vulkan headers, and a Vulkan
+ * probe must not own test counters.
  */
-#include "test_helpers.h"
+#include "flux_test.h"
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #if defined(__linux__)
 #include <dlfcn.h>
 #endif
-#include <stdio.h>
-#include <string.h>
 
-int g_test_failed = 0;
-int g_test_count = 0;
-
-/* LeakSanitizer: Mesa ICDs leak a handful of driver-internal blocks
- * at vkDestroyDevice (e.g. ANV's companion RCS command buffer used
- * by the gfx125 BLORP copy path). Those blocks are allocated and
- * owned entirely inside the driver; flux cannot free them. Suppress
- * by ICD module so the suites stay signal-bearing: a flux-side leak
- * still reports, because every flux object also owns a host block
- * allocated in libflux.so (flux_internal_alloc), which no entry
- * below matches. */
+/* LeakSanitizer: Mesa ICDs leak a handful of driver-internal blocks at
+ * vkDestroyDevice (for example ANV's companion RCS command buffer). Those
+ * blocks are allocated and owned entirely inside the driver; flux cannot free
+ * them. Suppress by ICD module so the suites stay signal-bearing: a flux-side
+ * leak still reports because every flux object also owns a host block
+ * allocated in libflux.so, which no entry below matches. */
 const char *__lsan_default_suppressions(void) {
     return "leak:libvulkan_intel\n"
            "leak:libvulkan_lvp\n"
@@ -35,11 +29,10 @@ const char *__lsan_default_suppressions(void) {
 }
 
 /* The Vulkan loader dlcloses ICDs at vkDestroyInstance; by the time
- * LeakSanitizer symbolises its report the driver mapping is gone and
- * the suppressions above can never match. Re-open every loaded ICD
- * with RTLD_NODELETE so it stays mapped through process exit.
- * RTLD_NOLOAD only promotes libraries that are already resident —
- * nothing new is loaded. */
+ * LeakSanitizer symbolises its report the driver mapping is gone and the
+ * suppressions above can never match. Re-open every loaded ICD with
+ * RTLD_NODELETE so it stays mapped through process exit. RTLD_NOLOAD only
+ * promotes libraries that are already resident — nothing new is loaded. */
 #if defined(__linux__)
 static void pin_loaded_vulkan_drivers(void) {
     FILE *maps = fopen("/proc/self/maps", "r");
@@ -47,13 +40,13 @@ static void pin_loaded_vulkan_drivers(void) {
         return;
     char line[512];
     char last[512] = "";
-    while (fgets(line, sizeof(line), maps)) {
+    while (fgets(line, sizeof line, maps)) {
         char *path = strchr(line, '/');
         if (!path || !strstr(path, "libvulkan_"))
             continue;
         path[strcspn(path, "\n")] = '\0';
         if (strcmp(path, last) == 0)
-            continue; /* one dlopen per lib */
+            continue;
         strcpy(last, path);
         dlopen(path, RTLD_NOW | RTLD_NOLOAD | RTLD_NODELETE);
     }
@@ -63,21 +56,7 @@ static void pin_loaded_vulkan_drivers(void) {
 static void pin_loaded_vulkan_drivers(void) {}
 #endif
 
-/* Cached so the dozen-odd device-needing tests don't each pay the
- * instance+device-create cost just to learn "no Vulkan here". */
-static int g_have_vulkan_cached = -1;
-
-bool test_helpers_have_vulkan(void) {
-    if (g_have_vulkan_cached == -1) {
-        flux_device *d = test_helpers_make_headless_device();
-        g_have_vulkan_cached = (d != nullptr) ? 1 : 0;
-        if (d)
-            flux_device_release(d);
-    }
-    return g_have_vulkan_cached == 1;
-}
-
-flux_device *test_helpers_make_headless_device_in_flight(uint32_t frames_in_flight) {
+flux_device *flux_test_make_headless_device_in_flight(uint32_t frames_in_flight) {
     flux_device_desc d = FLUX_DEVICE_DESC_INIT;
     d.headless = true;
     d.frames_in_flight = frames_in_flight;
@@ -89,24 +68,15 @@ flux_device *test_helpers_make_headless_device_in_flight(uint32_t frames_in_flig
     return out;
 }
 
-flux_device *test_helpers_make_headless_device(void) {
-    return test_helpers_make_headless_device_in_flight(1);
+flux_device *flux_test_make_headless_device(void) {
+    return flux_test_make_headless_device_in_flight(1);
 }
 
-/*
- * Whether the Khronos validation layer is installed on this host.
- * `flux_device_create` asks for `VK_LAYER_KHRONOS_validation` but
- * proceeds silently without it, so a device created with
- * FLUX_VALIDATION_ON can still return success with no layer loaded —
- * which would make every "zero validation errors" assertion in
- * test_validation pass vacuously. Probe the layer list directly so the
- * validation tests skip honestly instead of reporting a false clean.
- */
 static bool validation_layer_available(void) {
     uint32_t count = 0;
     if (vkEnumerateInstanceLayerProperties(&count, nullptr) != VK_SUCCESS || count == 0)
         return false;
-    VkLayerProperties *props = calloc(count, sizeof(*props));
+    VkLayerProperties *props = calloc(count, sizeof *props);
     if (!props)
         return false;
     bool found = false;
@@ -122,7 +92,7 @@ static bool validation_layer_available(void) {
     return found;
 }
 
-flux_device *test_helpers_make_dmabuf_device(void) {
+flux_device *flux_test_make_dmabuf_device(void) {
     flux_device_features_desc features = FLUX_DEVICE_FEATURES_DESC_INIT;
     features.required = FLUX_DEVICE_FEATURE_DMABUF | FLUX_DEVICE_FEATURE_DMABUF_SYNC_FILE;
     flux_device_desc d = FLUX_DEVICE_DESC_INIT;
@@ -137,7 +107,7 @@ flux_device *test_helpers_make_dmabuf_device(void) {
     return out;
 }
 
-flux_device *test_helpers_make_validation_device(flux_log_fn log) {
+flux_device *flux_test_make_validation_device(flux_log_fn log) {
     if (!validation_layer_available())
         return nullptr;
     flux_device_desc d = FLUX_DEVICE_DESC_INIT;
@@ -152,7 +122,7 @@ flux_device *test_helpers_make_validation_device(flux_log_fn log) {
     return out;
 }
 
-flux_device *test_helpers_make_validation_dmabuf_device(flux_log_fn log) {
+flux_device *flux_test_make_validation_dmabuf_device(flux_log_fn log) {
     if (!validation_layer_available())
         return nullptr;
     flux_device_features_desc features = FLUX_DEVICE_FEATURES_DESC_INIT;
@@ -170,10 +140,10 @@ flux_device *test_helpers_make_validation_dmabuf_device(flux_log_fn log) {
     return out;
 }
 
-uint32_t test_helpers_find_memory_type(flux_device *d, uint32_t filter,
-                                       VkMemoryPropertyFlags want) {
+uint32_t flux_test_find_memory_type(flux_device *device, uint32_t filter,
+                                    VkMemoryPropertyFlags want) {
     VkPhysicalDeviceMemoryProperties mp;
-    vkGetPhysicalDeviceMemoryProperties(flux_device_vk_physical_device(d), &mp);
+    vkGetPhysicalDeviceMemoryProperties(flux_device_vk_physical_device(device), &mp);
     for (uint32_t i = 0; i < mp.memoryTypeCount; ++i) {
         if (!(filter & (1u << i)))
             continue;

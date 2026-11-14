@@ -49,7 +49,7 @@ libraries, and their examples and tests. No intermediate install is needed.
 ## Step 3 — Run the Tests
 
 ```bash
-meson test -C build --no-suite bench
+meson test -C build --no-suite bench --no-suite fuzz
 ```
 
 The CPU suites run everywhere. GPU integration cases use the available Vulkan

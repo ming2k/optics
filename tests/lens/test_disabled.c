@@ -3,7 +3,8 @@
  * Verifies that disabled widgets do not respond to clicks, do not
  * receive focus, and report LENS_A11Y_DISABLED in semantics. */
 
-#include "test_helpers.h"
+#include "lens_test.h"
+#include "optics_test.h"
 #include <lens/lens.h>
 #include <string.h>
 
@@ -11,12 +12,12 @@ static const lens_input IN0 = {.display_size = {400, 200}, .dt_seconds = 0.016f}
 
 static void test_disabled_button_no_click(void) {
     lens *ui = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
 
     /* frame 1: build disabled button at (0,0) 100x30 */
     lens_begin(ui, &IN0);
     lens_button(ui, &(lens_button_opts){.label = "Click me", .box = {.disabled = true}});
-    test_end(ui);
+    lens_test_end(ui);
 
     /* frame 2: click inside the button */
     lens_input in = IN0;
@@ -26,16 +27,16 @@ static void test_disabled_button_no_click(void) {
     bool clicked =
         lens_button(ui, &(lens_button_opts){.label = "Click me", .box = {.disabled = true}})
             .clicked;
-    test_end(ui);
+    lens_test_end(ui);
 
-    CHECK(clicked == false);
+    OT_EXPECT(clicked == false);
 
     lens_release(ui);
 }
 
 static void test_disabled_slider_no_change(void) {
     lens *ui = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
 
     float val = 0.5f;
 
@@ -44,7 +45,7 @@ static void test_disabled_slider_no_change(void) {
     lens_slider(
         ui, &(lens_slider_opts){
                 .label = "s", .value = &val, .min = 0.0f, .max = 1.0f, .box = {.disabled = true}});
-    test_end(ui);
+    lens_test_end(ui);
 
     /* frame 2: drag inside slider */
     lens_input in = IN0;
@@ -57,17 +58,17 @@ static void test_disabled_slider_no_change(void) {
                                                        .max = 1.0f,
                                                        .box = {.disabled = true}})
                        .changed;
-    test_end(ui);
+    lens_test_end(ui);
 
-    CHECK(changed == false);
-    CHECK_NEAR(val, 0.5f, 0.001f);
+    OT_EXPECT(changed == false);
+    OT_EXPECT_NEAR(val, 0.5f, 0.001f);
 
     lens_release(ui);
 }
 
 static void test_disabled_checkbox_no_toggle(void) {
     lens *ui = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
 
     bool on = false;
 
@@ -77,16 +78,16 @@ static void test_disabled_checkbox_no_toggle(void) {
     lens_begin(ui, &in);
     lens_checkbox(ui,
                   &(lens_checkbox_opts){.label = "cb", .value = &on, .box = {.disabled = true}});
-    test_end(ui);
+    lens_test_end(ui);
 
-    CHECK(on == false);
+    OT_EXPECT(on == false);
 
     lens_release(ui);
 }
 
 static void test_disabled_textfield_no_input(void) {
     lens *ui = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
 
     char buf[64] = "hello";
 
@@ -94,7 +95,7 @@ static void test_disabled_textfield_no_input(void) {
     lens_begin(ui, &IN0);
     lens_textedit(ui, &(lens_textedit_opts){
                           .box = {.id = "tf", .disabled = true}, .buf = buf, .cap = sizeof buf});
-    test_end(ui);
+    lens_test_end(ui);
 
     /* frame 2: send keys — should be ignored */
     lens_input in = IN0;
@@ -107,10 +108,10 @@ static void test_disabled_textfield_no_input(void) {
                                                            .buf = buf,
                                                            .cap = sizeof buf})
                        .changed;
-    test_end(ui);
+    lens_test_end(ui);
 
-    CHECK(changed == false);
-    CHECK(strcmp(buf, "hello") == 0);
+    OT_EXPECT(changed == false);
+    OT_EXPECT(strcmp(buf, "hello") == 0);
 
     lens_release(ui);
 }
@@ -126,16 +127,16 @@ static void a11y_cb(const lens_semantics *s, flux_rect bounds, lens_id id, lens_
 
 static void test_disabled_a11y_flag(void) {
     lens *ui = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
 
     lens_begin(ui, &IN0);
     lens_button(ui, &(lens_button_opts){.label = "disabled", .box = {.disabled = true}});
-    test_end(ui);
+    lens_test_end(ui);
 
     bool found = false;
     lens_accessibility_walk(ui, a11y_cb, &found);
 
-    CHECK(found == true);
+    OT_EXPECT(found == true);
 
     lens_release(ui);
 }
@@ -146,5 +147,5 @@ int main(void) {
     test_disabled_checkbox_no_toggle();
     test_disabled_textfield_no_input();
     test_disabled_a11y_flag();
-    return TEST_REPORT();
+    return OT_REPORT();
 }

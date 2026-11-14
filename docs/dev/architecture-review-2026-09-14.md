@@ -27,7 +27,7 @@ It is a static review, not a full regression run or formal verification.
 | Squircle and complete brush execution | Squircle lowers to rounded rectangles; the geometry bridge does not handle image brushes or apply brush opacity. | Distinct geometry and complete declared brush semantics, including unsupported-operation errors. |
 | Complete Lens scene compilation | `lens_compile_draw_list` emits only root background and assigns command count 1 in [replay.c](../../libs/lens/src/render/replay.c). | Complete visual snapshots, including text and overlays, under ADR-0094. |
 | Frame-epoch atlas flush | `flux_text_flush_atlas` ignores its Frame argument in [atlas.c](../../libs/glyph/src/atlas.c). This entry does not establish the advertised epoch contract; this observation alone does not prove all existing uploads race. | Separate staging, destination, descriptor, and retirement guarantees under ADR-0092. |
-| Rust session lifetime enforcement | `Canvas::begin` returns no session retaining the target borrow; `AsTarget` is a public safe trait in [the Flux binding](../../bindings/flux-rs/crates/flux/src/lib.rs). | Session ownership and compile-fail tests under ADR-0093. |
+| Rust session lifetime enforcement | `Canvas::begin` returns no session retaining the target borrow; `AsTarget` is a public safe trait in [the Flux binding](../../bindings/crates/flux/src/lib.rs). | Session ownership and compile-fail tests under ADR-0093. |
 | Contract tests establish completed architecture | [test_rfc0094_contracts.c](../../tests/flux/unit/test_rfc0094_contracts.c) checks geometry size <=48, constructors, nonempty commands, and successful playback; it does not assert the relevant layer pixels or worker-thread lifetime behavior. | Tests tied to individual semantic guarantees, not aggregate pass counts. |
 
 Symbol absence can establish ABI cleanup, not rendering correctness.
@@ -62,8 +62,8 @@ SHA-256 values identify reviewed content before this documentation change.
 | Source review document | `b307e7bc09ba3101aa2819974fe9e50889772a577c7d13a29aa139bbdba3b326` |
 | `libs/flux/src/canvas/encoder.c` | `5814600b7aaeeb14d710d92b5262703ec4aa13f02dd6046ee3f12728f0001830` |
 | `libs/lens/src/render/replay.c` | `eb416f66ed00ac3980c07e8a93bcae706f6690e45a6f714b03b82bdc05436d3a` |
-| `libs/flux/text/src/atlas.c` | `ebb6f51ec84dab2ece25d5c107daa947f92d1c4a7ea3a988bfdc3bf15f83e77d` |
-| `bindings/flux-rs/crates/flux/src/lib.rs` | `71f305a2b9e011c86820171c43f57b52359c81ca9958a9cb1506eb4adc27a77c` |
+| `libs/glyph/src/atlas.c` | `ebb6f51ec84dab2ece25d5c107daa947f92d1c4a7ea3a988bfdc3bf15f83e77d` |
+| `bindings/crates/flux/src/lib.rs` | `71f305a2b9e011c86820171c43f57b52359c81ca9958a9cb1506eb4adc27a77c` |
 | `tests/flux/unit/test_rfc0094_contracts.c` | `4dad1822db1050a948f60f3f232cec72010c24051ce28aa30c5c4fa6239b8aec` |
 
 ## Subsequent implementation status

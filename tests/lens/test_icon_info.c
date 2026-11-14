@@ -9,7 +9,8 @@
  *     built-in table's render mode (0 fill / 1 stroke).
  */
 
-#include "test_helpers.h"
+#include "lens_test.h"
+#include "optics_test.h"
 #include <lens/icon.h>
 #include <lens/lens.h>
 #include <string.h>
@@ -27,36 +28,36 @@ static void test_builtin_ids_resolve(void) {
     for (size_t i = 0; i < sizeof ids / sizeof ids[0]; i++) {
         uint8_t mode = 0xFF;
         const lens_icon_desc *d = lens_icon_info(ids[i], &mode);
-        CHECK(d != NULL);
-        CHECK(d->count > 0);
-        CHECK(d->cmds != NULL);
-        CHECK(mode <= 1); /* 0 = fill, 1 = stroke render style */
+        OT_EXPECT(d != NULL);
+        OT_EXPECT(d->count > 0);
+        OT_EXPECT(d->cmds != NULL);
+        OT_EXPECT(mode <= 1); /* 0 = fill, 1 = stroke render style */
     }
 }
 
 static void test_invalid_id_is_null(void) {
-    CHECK(lens_icon_info(LENS_ICON_INVALID, NULL) == NULL);
-    CHECK(lens_icon_info((lens_icon_id)-1, NULL) == NULL);
-    CHECK(lens_icon_info((lens_icon_id)(LENS_ICON_COUNT + 100000), NULL) == NULL);
+    OT_EXPECT(lens_icon_info(LENS_ICON_INVALID, NULL) == NULL);
+    OT_EXPECT(lens_icon_info((lens_icon_id)-1, NULL) == NULL);
+    OT_EXPECT(lens_icon_info((lens_icon_id)(LENS_ICON_COUNT + 100000), NULL) == NULL);
 }
 
 static void test_mode_out_param_is_optional(void) {
     /* NULL mode pointer must not crash; both spellings resolve equally. */
     const lens_icon_desc *a = lens_icon_info(LENS_ICON_ZAP, NULL);
     const lens_icon_desc *b = lens_icon_info(LENS_ICON_ZAP, &(uint8_t){0});
-    CHECK(a != NULL && a == b);
+    OT_EXPECT(a != NULL && a == b);
 }
 
 static void test_runtime_registered_id_resolves(void) {
     lens_icon_id id = lens_icon_register_svg(k_svg);
-    CHECK(id != LENS_ICON_INVALID);
-    CHECK((int32_t)id >= (int32_t)LENS_ICON_COUNT);
+    OT_EXPECT(id != LENS_ICON_INVALID);
+    OT_EXPECT((int32_t)id >= (int32_t)LENS_ICON_COUNT);
 
     uint8_t mode = 0xFF;
     const lens_icon_desc *d = lens_icon_info(id, &mode);
-    CHECK(d != NULL);
-    CHECK(d->count > 0);
-    CHECK(mode == 1 || mode == 0);
+    OT_EXPECT(d != NULL);
+    OT_EXPECT(d->count > 0);
+    OT_EXPECT(mode == 1 || mode == 0);
 }
 
 int main(void) {

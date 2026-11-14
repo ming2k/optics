@@ -12,7 +12,8 @@
  *      light must brighten the quad; a light travelling away from it
  *      must leave only the ambient term.
  */
-#include "test_helpers.h"
+#include "flux_test.h"
+#include "optics_test.h"
 #include <flux/flux.h>
 #include <flux/scene.h>
 #include <flux/vulkan.h>
@@ -178,10 +179,10 @@ static void draw_texture_case(flux_frame *f, const flux_camera *cam, void *user)
 }
 
 int main(void) {
-    flux_device *d = test_helpers_make_headless_device();
+    flux_device *d = flux_test_make_headless_device();
     if (!d) {
         fprintf(stderr, "test_scene_render: no Vulkan device; skipping\n");
-        TEST_SUMMARY();
+        OT_SKIP("no Vulkan device");
     }
 
     flux_surface *s = nullptr;
@@ -189,7 +190,7 @@ int main(void) {
         flux_surface_desc sd = FLUX_SURFACE_DESC_INIT;
         sd.width = W;
         sd.height = H;
-        EXPECT(flux_surface_create(d, &sd, &s) == FLUX_OK);
+        OT_EXPECT(flux_surface_create(d, &sd, &s) == FLUX_OK);
     }
 
     flux_target_desc depth_desc = {
@@ -200,7 +201,7 @@ int main(void) {
         .height = H,
     };
     flux_target *depth = nullptr;
-    EXPECT(flux_target_create(d, &depth_desc, &depth) == FLUX_OK);
+    OT_EXPECT(flux_target_create(d, &depth_desc, &depth) == FLUX_OK);
 
     flux_camera cam;
     flux_camera_perspective(&cam, 1.0f, (float)W / (float)H, 0.1f, 100.0f);
@@ -214,7 +215,7 @@ int main(void) {
         depth_case c = {0};
         c.near_quad = make_quad(d, 0.8f, 1.0f); /* 3 units from the eye */
         c.far_quad = make_quad(d, 2.5f, -1.0f); /* 5 units, projects larger */
-        EXPECT(c.near_quad != nullptr && c.far_quad != nullptr);
+        OT_EXPECT(c.near_quad != nullptr && c.far_quad != nullptr);
 
         flux_material_desc md = {
             .type = FLUX_TYPE_MATERIAL_DESC,
@@ -223,28 +224,28 @@ int main(void) {
             .color_format = color_fmt,
             .depth_format = FLUX_DEPTH_FORMAT,
         };
-        EXPECT(flux_material_create(d, &md, &c.red) == FLUX_OK);
+        OT_EXPECT(flux_material_create(d, &md, &c.red) == FLUX_OK);
         md.base_color = (flux_vec4){0, 1, 0, 1};
-        EXPECT(flux_material_create(d, &md, &c.green) == FLUX_OK);
+        OT_EXPECT(flux_material_create(d, &md, &c.green) == FLUX_OK);
 
-        EXPECT(render_frame(s, depth, &cam, draw_depth_case, &c) == FLUX_OK);
+        OT_EXPECT(render_frame(s, depth, &cam, draw_depth_case, &c) == FLUX_OK);
         memset(px, 0xCD, BYTES);
-        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+        OT_EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
 
         /* Centre: the near red quad, despite being drawn first. */
         const uint8_t *centre = px_at(px, W / 2, H / 2);
-        EXPECT(centre[0] > 200 && centre[1] < 50);
+        OT_EXPECT(centre[0] > 200 && centre[1] < 50);
 
         /* Off-centre along x: outside the near quad's projection
          * (extends to ~0.49 of the half-screen) but inside the far
          * quad's (~0.91) — the green quad shows. Symmetric in x, so
          * no assumption about axis orientation. */
         const uint8_t *ring = px_at(px, W / 2 + (uint32_t)(0.65f * W / 2), H / 2);
-        EXPECT(ring[1] > 200 && ring[0] < 50);
+        OT_EXPECT(ring[1] > 200 && ring[0] < 50);
 
         /* Corner: beyond both quads — the clear colour. */
         const uint8_t *corner = px_at(px, 1, 1);
-        EXPECT(corner[0] < 20 && corner[1] < 20 && corner[2] < 20);
+        OT_EXPECT(corner[0] < 20 && corner[1] < 20 && corner[2] < 20);
 
         flux_material_release(c.red);
         flux_material_release(c.green);
@@ -256,7 +257,7 @@ int main(void) {
     {
         phong_case c = {0};
         c.quad = make_quad(d, 1.5f, 0.0f);
-        EXPECT(c.quad != nullptr);
+        OT_EXPECT(c.quad != nullptr);
 
         flux_material_desc md = {
             .type = FLUX_TYPE_MATERIAL_DESC,
@@ -267,7 +268,7 @@ int main(void) {
             .shininess = 32.0f,
             .specular = 0.0f, /* diffuse only: predictable bytes */
         };
-        EXPECT(flux_material_create(d, &md, &c.mat) == FLUX_OK);
+        OT_EXPECT(flux_material_create(d, &md, &c.mat) == FLUX_OK);
 
         /* Light travels -Z, straight at the +Z-facing quad: ndotl = 1,
          * so the centre is ambient + full diffuse ≈ saturated white. */
@@ -276,23 +277,23 @@ int main(void) {
             .color = {1, 1, 1},
             .ambient = 0.1f,
         };
-        EXPECT(render_frame(s, depth, &cam, draw_phong_case, &c) == FLUX_OK);
+        OT_EXPECT(render_frame(s, depth, &cam, draw_phong_case, &c) == FLUX_OK);
         memset(px, 0xCD, BYTES);
-        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+        OT_EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
         /* Copy out of px — the next readback overwrites it. */
         uint8_t lit[3];
         memcpy(lit, px_at(px, W / 2, H / 2), 3);
-        EXPECT(lit[0] > 200 && lit[1] > 200 && lit[2] > 200);
+        OT_EXPECT(lit[0] > 200 && lit[1] > 200 && lit[2] > 200);
 
         /* Light travels +Z, away from the quad: ndotl = 0, ambient
          * only (0.1 → ~26). The shading must respond to direction. */
         c.light.direction = (flux_vec3){0, 0, 1};
-        EXPECT(render_frame(s, depth, &cam, draw_phong_case, &c) == FLUX_OK);
+        OT_EXPECT(render_frame(s, depth, &cam, draw_phong_case, &c) == FLUX_OK);
         memset(px, 0xCD, BYTES);
-        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+        OT_EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
         const uint8_t *dark = px_at(px, W / 2, H / 2);
-        EXPECT(dark[0] > 5 && dark[0] < 80);
-        EXPECT(dark[0] < lit[0] / 2);
+        OT_EXPECT(dark[0] > 5 && dark[0] < 80);
+        OT_EXPECT(dark[0] < lit[0] / 2);
 
         flux_material_release(c.mat);
         flux_mesh_release(c.quad);
@@ -303,7 +304,7 @@ int main(void) {
         skin_case c = {0};
         c.quad = make_skinned_quad(d, 0.4f);
         c.palette[0] = flux_mat4_translate(1.0f, 0.0f, 0.0f);
-        EXPECT(c.quad != nullptr);
+        OT_EXPECT(c.quad != nullptr);
         flux_material_desc md = {
             .type = FLUX_TYPE_MATERIAL_DESC,
             .kind = FLUX_MATERIAL_UNLIT,
@@ -311,14 +312,14 @@ int main(void) {
             .color_format = color_fmt,
             .depth_format = FLUX_DEPTH_FORMAT,
         };
-        EXPECT(flux_material_create(d, &md, &c.material) == FLUX_OK);
-        EXPECT(render_frame(s, depth, &cam, draw_skin_case, &c) == FLUX_OK);
+        OT_EXPECT(flux_material_create(d, &md, &c.material) == FLUX_OK);
+        OT_EXPECT(render_frame(s, depth, &cam, draw_skin_case, &c) == FLUX_OK);
         memset(px, 0xCD, BYTES);
-        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+        OT_EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
         const uint8_t *old_centre = px_at(px, W / 2, H / 2);
         const uint8_t *translated = px_at(px, W / 2 + 15, H / 2);
-        EXPECT(old_centre[0] < 20);
-        EXPECT(translated[0] > 200 && translated[1] < 30);
+        OT_EXPECT(old_centre[0] < 20);
+        OT_EXPECT(translated[0] > 200 && translated[1] < 30);
         flux_material_release(c.material);
         flux_mesh_release(c.quad);
     }
@@ -334,7 +335,7 @@ int main(void) {
         image_desc.format = FLUX_FORMAT_RGBA8_SRGB;
         image_desc.initial_data = texels;
         flux_image *image = nullptr;
-        EXPECT(flux_image_create(d, &image_desc, &image) == FLUX_OK);
+        OT_EXPECT(flux_image_create(d, &image_desc, &image) == FLUX_OK);
 
         flux_sampler_desc sampler_desc = FLUX_SAMPLER_DESC_INIT;
         sampler_desc.min_filter = FLUX_FILTER_NEAREST;
@@ -342,7 +343,7 @@ int main(void) {
         sampler_desc.address_u = FLUX_ADDRESS_CLAMP_TO_EDGE;
         sampler_desc.address_v = FLUX_ADDRESS_CLAMP_TO_EDGE;
         flux_sampler *sampler = nullptr;
-        EXPECT(flux_sampler_create(d, &sampler_desc, &sampler) == FLUX_OK);
+        OT_EXPECT(flux_sampler_create(d, &sampler_desc, &sampler) == FLUX_OK);
 
         flux_material_surface_desc surface = FLUX_MATERIAL_SURFACE_DESC_INIT;
         surface.base_color_image = image;
@@ -359,40 +360,40 @@ int main(void) {
         };
 
         /* OPAQUE ignores sampled alpha: the red texel is fully visible. */
-        EXPECT(flux_material_create(d, &material_desc, &c.material) == FLUX_OK);
-        EXPECT(render_frame(s, depth, &cam, draw_texture_case, &c) == FLUX_OK);
+        OT_EXPECT(flux_material_create(d, &material_desc, &c.material) == FLUX_OK);
+        OT_EXPECT(render_frame(s, depth, &cam, draw_texture_case, &c) == FLUX_OK);
         memset(px, 0xCD, BYTES);
-        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+        OT_EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
         const uint8_t *opaque = px_at(px, W / 2, H / 2);
-        EXPECT(opaque[0] > 220 && opaque[1] < 30 && opaque[2] < 30);
+        OT_EXPECT(opaque[0] > 220 && opaque[1] < 30 && opaque[2] < 30);
         flux_material_release(c.material);
 
         /* UV offset selects the transparent green texel; MASK discards it. */
         surface.alpha_mode = FLUX_MATERIAL_ALPHA_MASK;
         surface.alpha_cutoff = 0.5f;
         surface.uv_offset = (flux_vec2){0.75f, 0.5f};
-        EXPECT(flux_material_create(d, &material_desc, &c.material) == FLUX_OK);
-        EXPECT(render_frame(s, depth, &cam, draw_texture_case, &c) == FLUX_OK);
+        OT_EXPECT(flux_material_create(d, &material_desc, &c.material) == FLUX_OK);
+        OT_EXPECT(render_frame(s, depth, &cam, draw_texture_case, &c) == FLUX_OK);
         memset(px, 0xCD, BYTES);
-        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+        OT_EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
         const uint8_t *masked = px_at(px, W / 2, H / 2);
-        EXPECT(masked[0] < 20 && masked[1] < 20 && masked[2] < 20);
+        OT_EXPECT(masked[0] < 20 && masked[1] < 20 && masked[2] < 20);
         flux_material_release(c.material);
 
         /* BLEND uses straight source alpha and leaves depth writes disabled. */
         surface.alpha_mode = FLUX_MATERIAL_ALPHA_BLEND;
         surface.uv_offset = (flux_vec2){0.25f, 0.5f};
         surface.double_sided = true;
-        EXPECT(flux_material_create(d, &material_desc, &c.material) == FLUX_OK);
+        OT_EXPECT(flux_material_create(d, &material_desc, &c.material) == FLUX_OK);
         /* Material owns retained references after successful creation. */
         flux_sampler_release(sampler);
         flux_image_release(image);
-        EXPECT(render_frame(s, depth, &cam, draw_texture_case, &c) == FLUX_OK);
+        OT_EXPECT(render_frame(s, depth, &cam, draw_texture_case, &c) == FLUX_OK);
         memset(px, 0xCD, BYTES);
-        EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+        OT_EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
         const uint8_t *blended = px_at(px, W / 2, H / 2);
-        EXPECT(blended[0] > 100 && blended[0] < 160);
-        EXPECT(blended[1] < 30 && blended[2] < 30);
+        OT_EXPECT(blended[0] > 100 && blended[0] < 160);
+        OT_EXPECT(blended[1] < 30 && blended[2] < 30);
 
         flux_material_release(c.material);
         flux_mesh_release(c.quad);
@@ -411,7 +412,7 @@ int main(void) {
         image_desc.format = FLUX_FORMAT_RGBA8_UNORM;
         image_desc.initial_data = gray;
         flux_image *tex = nullptr;
-        EXPECT(flux_image_create(d, &image_desc, &tex) == FLUX_OK);
+        OT_EXPECT(flux_image_create(d, &image_desc, &tex) == FLUX_OK);
 
         flux_material_surface_desc surface = FLUX_MATERIAL_SURFACE_DESC_INIT;
         surface.base_color_image = tex;
@@ -433,7 +434,7 @@ int main(void) {
              * variant 1: 16F working-space target (edge decode). */
             flux_format tfmt = variant == 0 ? color_fmt : FLUX_FORMAT_RGBA16_SFLOAT;
             flux_image *rt = nullptr;
-            EXPECT(flux_image_create_render_target(d, W, H, tfmt, &rt) == FLUX_OK);
+            OT_EXPECT(flux_image_create_render_target(d, W, H, tfmt, &rt) == FLUX_OK);
 
             flux_material_desc md = {
                 .type = FLUX_TYPE_MATERIAL_DESC,
@@ -446,13 +447,13 @@ int main(void) {
                 .specular = 0.0f,
             };
             flux_material *mat = nullptr;
-            EXPECT(flux_material_create(d, &md, &mat) == FLUX_OK);
+            OT_EXPECT(flux_material_create(d, &md, &mat) == FLUX_OK);
             flux_mesh *quad = make_quad(d, 1.5f, 0.0f);
-            EXPECT(quad != nullptr);
+            OT_EXPECT(quad != nullptr);
 
             flux_frame *frame = nullptr;
-            EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
-            EXPECT(flux_frame_prepare_image_target(frame, rt) == FLUX_OK);
+            OT_EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
+            OT_EXPECT(flux_frame_prepare_image_target(frame, rt) == FLUX_OK);
             flux_pass_attachment color_att = {
                 .view = flux_image_vk_image_view(rt),
                 .format = flux_format_to_vk(tfmt),
@@ -480,7 +481,7 @@ int main(void) {
             flux_frame_set_scissor(frame, 0, 0, W, H);
             flux_scene_draw_mesh_lit(frame, &cam, flux_mat4_identity(), quad, mat, &light);
             flux_frame_end_pass(frame);
-            EXPECT(flux_frame_finish_image_target(frame, rt) == FLUX_OK);
+            OT_EXPECT(flux_frame_finish_image_target(frame, rt) == FLUX_OK);
 
             /* Composite the target onto the sRGB surface through the
              * canvas (16F images are working-space linear; 8-bit UNORM
@@ -488,19 +489,19 @@ int main(void) {
             flux_canvas *canvas = nullptr;
             flux_canvas_desc cd = FLUX_CANVAS_DESC_INIT;
             cd.surface = s;
-            EXPECT(flux_canvas_create(&cd, &canvas) == FLUX_OK);
+            OT_EXPECT(flux_canvas_create(&cd, &canvas) == FLUX_OK);
             flux_color black = flux_color_rgba(0, 0, 0, 255);
-            EXPECT(flux_canvas_begin(canvas,
-                                     &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
-                                                              .frame = frame,
-                                                              .clear_color = &black}) == FLUX_OK);
+            OT_EXPECT(flux_canvas_begin(
+                          canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                           .frame = frame,
+                                                           .clear_color = &black}) == FLUX_OK);
             flux_canvas_draw_image(canvas, rt, (flux_rect){0, 0, (float)W, (float)H}, nullptr);
-            EXPECT(flux_canvas_end(canvas) == FLUX_OK);
-            EXPECT(flux_frame_submit(frame) == FLUX_OK);
-            EXPECT(flux_frame_present(frame) == FLUX_OK);
+            OT_EXPECT(flux_canvas_end(canvas) == FLUX_OK);
+            OT_EXPECT(flux_frame_submit(frame) == FLUX_OK);
+            OT_EXPECT(flux_frame_present(frame) == FLUX_OK);
 
             memset(px, 0xCD, BYTES);
-            EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
+            OT_EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
             got[variant] = px_at(px, W / 2, H / 2)[0];
 
             flux_canvas_release(canvas);
@@ -509,9 +510,9 @@ int main(void) {
             flux_image_release(rt);
         }
 
-        EXPECT(got[0] > 58 && got[0] < 70); /* legacy gamma path */
-        EXPECT(got[1] > want16f - 5 && got[1] < want16f + 5);
-        EXPECT(got[1] > got[0] + 15); /* linear-light lift is unmistakable */
+        OT_EXPECT(got[0] > 58 && got[0] < 70); /* legacy gamma path */
+        OT_EXPECT(got[1] > want16f - 5 && got[1] < want16f + 5);
+        OT_EXPECT(got[1] > got[0] + 15); /* linear-light lift is unmistakable */
 
         flux_image_release(tex);
     }
@@ -520,5 +521,5 @@ int main(void) {
     flux_target_release(depth);
     flux_surface_release(s);
     flux_device_release(d);
-    TEST_SUMMARY();
+    return OT_REPORT();
 }

@@ -16,7 +16,8 @@
  */
 
 #include "../../libs/lens/src/internal.h"
-#include "test_helpers.h"
+#include "lens_test.h"
+#include "optics_test.h"
 #include <lens/lens.h>
 
 static const lens_input IN0 = {.display_size = {400, 200}, .dt_seconds = 0.016f};
@@ -54,18 +55,18 @@ static void test_merge_is_per_field(void) {
     over.font_size = 22.0f;
 
     lens_style m = lensi_style_merge(&base, &over);
-    CHECK(m.fg == 0xFF445566u); /* over wins where set        */
-    CHECK_NEAR(m.font_size, 22.0f, 0.0f);
-    CHECK_NEAR(m.padding, 9.0f, 0.0f); /* base fills the rest        */
-    CHECK(m.fields == (LENS_STYLE_FG | LENS_STYLE_PADDING | LENS_STYLE_FONT_SIZE));
-    CHECK_NEAR(base.font_size, 0.0f, 0.0f); /* inputs untouched (pure) */
+    OT_EXPECT(m.fg == 0xFF445566u); /* over wins where set        */
+    OT_EXPECT_NEAR(m.font_size, 22.0f, 0.0f);
+    OT_EXPECT_NEAR(m.padding, 9.0f, 0.0f); /* base fills the rest        */
+    OT_EXPECT(m.fields == (LENS_STYLE_FG | LENS_STYLE_PADDING | LENS_STYLE_FONT_SIZE));
+    OT_EXPECT_NEAR(base.font_size, 0.0f, 0.0f); /* inputs untouched (pure) */
 }
 
 /* ---- the scope stack ------------------------------------------------- */
 
 static void test_scope_reaches_terse_widgets(void) {
     lens *ui = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
     flux_color red = flux_color_rgba_premul(0xFF, 0x20, 0x20, 0xFF);
 
     lens_begin(ui, &IN0);
@@ -74,18 +75,18 @@ static void test_scope_reaches_terse_widgets(void) {
     lens_label(ui, &(lens_label_opts){.text = "scoped"});
     lens_pop_style(ui);
     lens_label(ui, &(lens_label_opts){.text = "after"});
-    test_end(ui);
+    lens_test_end(ui);
 
     flux_color themed = lens_get_theme(ui).color_fg;
-    CHECK(first_text_color(find_widget(ui, "before")) == themed);
-    CHECK(first_text_color(find_widget(ui, "scoped")) == red);
-    CHECK(first_text_color(find_widget(ui, "after")) == themed);
+    OT_EXPECT(first_text_color(find_widget(ui, "before")) == themed);
+    OT_EXPECT(first_text_color(find_widget(ui, "scoped")) == red);
+    OT_EXPECT(first_text_color(find_widget(ui, "after")) == themed);
     lens_release(ui);
 }
 
 static void test_nested_scopes_merge_and_nearest_wins(void) {
     lens *ui = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
     flux_color red = flux_color_rgba_premul(0xFF, 0x20, 0x20, 0xFF);
     flux_color green = flux_color_rgba_premul(0x20, 0xC0, 0x20, 0xFF);
 
@@ -102,35 +103,35 @@ static void test_nested_scopes_merge_and_nearest_wins(void) {
     lens_pop_style(ui);
     lens_label(ui, &(lens_label_opts){.text = "back-to-outer"});
     lens_pop_style(ui);
-    test_end(ui);
+    lens_test_end(ui);
 
     /* The inner scope overrides fg but inherits the outer font size. */
     lens_node *in_node = find_widget(ui, "inner");
-    CHECK(first_text_color(in_node) == green);
-    CHECK(in_node && in_node->cmds[0].text_size == 21.0f);
-    CHECK(first_text_color(find_widget(ui, "outer")) == red);
+    OT_EXPECT(first_text_color(in_node) == green);
+    OT_EXPECT(in_node && in_node->cmds[0].text_size == 21.0f);
+    OT_EXPECT(first_text_color(find_widget(ui, "outer")) == red);
     lens_node *back = find_widget(ui, "back-to-outer");
-    CHECK(first_text_color(back) == red); /* pop restored the outer scope */
-    CHECK(back && back->cmds[0].text_size == 21.0f);
+    OT_EXPECT(first_text_color(back) == red); /* pop restored the outer scope */
+    OT_EXPECT(back && back->cmds[0].text_size == 21.0f);
     lens_release(ui);
 }
 
 static void test_forgotten_pop_cannot_leak_across_frames(void) {
     lens *ui = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
     flux_color red = flux_color_rgba_premul(0xFF, 0x20, 0x20, 0xFF);
 
     lens_begin(ui, &IN0);
     lens_push_style(ui, fg_only(red));
     lens_label(ui, &(lens_label_opts){.text = "scoped"});
     /* no pop — the frame ends with the stack non-empty */
-    test_end(ui);
-    CHECK(first_text_color(find_widget(ui, "scoped")) == red);
+    lens_test_end(ui);
+    OT_EXPECT(first_text_color(find_widget(ui, "scoped")) == red);
 
     lens_begin(ui, &IN0);
     lens_label(ui, &(lens_label_opts){.text = "next-frame"});
-    test_end(ui);
-    CHECK(first_text_color(find_widget(ui, "next-frame")) == lens_get_theme(ui).color_fg);
+    lens_test_end(ui);
+    OT_EXPECT(first_text_color(find_widget(ui, "next-frame")) == lens_get_theme(ui).color_fg);
     lens_release(ui);
 }
 
@@ -156,7 +157,7 @@ static flux_color first_rect_color(const lens_node *n) {
 
 static void test_box_style_beats_scope_beats_theme(void) {
     lens *ui = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
     flux_color red = flux_color_rgba_premul(0xC0, 0x20, 0x20, 0xFF);
     flux_color blue = flux_color_rgba_premul(0x20, 0x20, 0xC0, 0xFF);
 
@@ -166,12 +167,12 @@ static void test_box_style_beats_scope_beats_theme(void) {
     lens_button(ui, &(lens_button_opts){.label = "scoped"});
     lens_button(ui, &(lens_button_opts){.label = "per-call", .box = {.style = bg_only(blue)}});
     lens_pop_style(ui);
-    test_end(ui);
+    lens_test_end(ui);
 
     flux_color themed = lens_get_theme(ui).color_bg;
-    CHECK(first_rect_color(find_widget(ui, "themed")) == themed);
-    CHECK(first_rect_color(find_widget(ui, "scoped")) == red);
-    CHECK(first_rect_color(find_widget(ui, "per-call")) == blue);
+    OT_EXPECT(first_rect_color(find_widget(ui, "themed")) == themed);
+    OT_EXPECT(first_rect_color(find_widget(ui, "scoped")) == red);
+    OT_EXPECT(first_rect_color(find_widget(ui, "per-call")) == blue);
     lens_release(ui);
 }
 
@@ -179,7 +180,7 @@ static void test_box_style_beats_scope_beats_theme(void) {
 
 static void test_outline_atoms_reach_draw_commands(void) {
     lens *ui = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
     flux_color contour = flux_color_rgba_premul(0, 0, 0, 180);
 
     lens_style s = lens_style_init();
@@ -192,18 +193,18 @@ static void test_outline_atoms_reach_draw_commands(void) {
     lens_push_style(ui, s);
     lens_label(ui, &(lens_label_opts){.text = "12:34", .size = 14.0f});
     lens_pop_style(ui);
-    test_end(ui);
+    lens_test_end(ui);
 
     lens_node *plain = find_widget(ui, "plain");
     lens_node *outlined = find_widget(ui, "12:34");
-    CHECK(plain != NULL && outlined != NULL);
+    OT_EXPECT(plain != NULL && outlined != NULL);
     if (plain && plain->cmd_count > 0) {
-        CHECK(plain->cmds[0].outline_width == 0.0f); /* unset = no contour */
-        CHECK(plain->cmds[0].outline_color == 0);
+        OT_EXPECT(plain->cmds[0].outline_width == 0.0f); /* unset = no contour */
+        OT_EXPECT(plain->cmds[0].outline_color == 0);
     }
     if (outlined && outlined->cmd_count > 0) {
-        CHECK(outlined->cmds[0].outline_color == contour);
-        CHECK_NEAR(outlined->cmds[0].outline_width, 0.75f, 0.0f);
+        OT_EXPECT(outlined->cmds[0].outline_color == contour);
+        OT_EXPECT_NEAR(outlined->cmds[0].outline_width, 0.75f, 0.0f);
     }
     lens_release(ui);
 }
@@ -212,32 +213,32 @@ static void test_outline_atoms_reach_draw_commands(void) {
 
 static void test_skin_scratch_lifecycle(void) {
     lens *ui = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
 
     lens_begin(ui, &IN0);
     lens_button(ui, &(lens_button_opts){.label = "Host"});
-    test_end(ui);
+    lens_test_end(ui);
 
     lens_node *n = find_widget(ui, "Host");
-    CHECK(n != NULL);
+    OT_EXPECT(n != NULL);
     float *scratch = lens_skin_scratch(ui, n);
-    CHECK(scratch != NULL);
+    OT_EXPECT(scratch != NULL);
     /* Zeroed on first touch. */
     for (int i = 0; i < 4; i++)
-        CHECK_NEAR(scratch[i], 0.0f, 0.0f);
+        OT_EXPECT_NEAR(scratch[i], 0.0f, 0.0f);
 
     /* Persistent across frames: write once, read back next frame. */
     scratch[0] = 12.5f;
     scratch[3] = -4.25f;
     lens_begin(ui, &IN0);
     lens_button(ui, &(lens_button_opts){.label = "Host"});
-    test_end(ui);
+    lens_test_end(ui);
     n = find_widget(ui, "Host");
-    CHECK(n != NULL);
+    OT_EXPECT(n != NULL);
     scratch = lens_skin_scratch(ui, n);
-    CHECK(scratch != NULL);
-    CHECK_NEAR(scratch[0], 12.5f, 0.0f);
-    CHECK_NEAR(scratch[3], -4.25f, 0.0f);
+    OT_EXPECT(scratch != NULL);
+    OT_EXPECT_NEAR(scratch[0], 12.5f, 0.0f);
+    OT_EXPECT_NEAR(scratch[3], -4.25f, 0.0f);
 
     /* Reclaimed with the node: stop declaring the widget past the reap
      * grace (LENSI_LEAVE_GRACE_FRAMES) and the slot — scratch included —
@@ -245,10 +246,10 @@ static void test_skin_scratch_lifecycle(void) {
     for (int f = 0; f < 12; f++) {
         lens_begin(ui, &IN0);
         lens_label(ui, &(lens_label_opts){.text = "unrelated"});
-        test_end(ui);
+        lens_test_end(ui);
     }
-    CHECK(find_widget(ui, "Host") == NULL);
-    CHECK(lens_skin_scratch(ui, NULL) == NULL); /* NULL-safety */
+    OT_EXPECT(find_widget(ui, "Host") == NULL);
+    OT_EXPECT(lens_skin_scratch(ui, NULL) == NULL); /* NULL-safety */
 
     lens_release(ui);
 }
@@ -258,44 +259,47 @@ static void test_material_theme_and_cascade_resolution(void) {
     lens_theme dark = lens_theme_dark();
 
     /* 1. Theme recipe defaults: dual-polarity contrast */
-    CHECK_NEAR(light.materials.foundation.plate_polarity, 1.0f, 0.0f); /* Pearl */
-    CHECK_NEAR(dark.materials.foundation.plate_polarity, 0.0f, 0.0f);  /* Smoke */
-    CHECK_NEAR(light.materials.command.plate_polarity, 1.0f, 0.0f);
-    CHECK_NEAR(dark.materials.command.plate_polarity, 0.0f, 0.0f);
-    CHECK_NEAR(light.materials.floating.plate_polarity, 1.0f, 0.0f);
-    CHECK_NEAR(dark.materials.floating.plate_polarity, 0.0f, 0.0f);
+    OT_EXPECT_NEAR(light.materials.foundation.plate_polarity, 1.0f, 0.0f); /* Pearl */
+    OT_EXPECT_NEAR(dark.materials.foundation.plate_polarity, 0.0f, 0.0f);  /* Smoke */
+    OT_EXPECT_NEAR(light.materials.command.plate_polarity, 1.0f, 0.0f);
+    OT_EXPECT_NEAR(dark.materials.command.plate_polarity, 0.0f, 0.0f);
+    OT_EXPECT_NEAR(light.materials.floating.plate_polarity, 1.0f, 0.0f);
+    OT_EXPECT_NEAR(dark.materials.floating.plate_polarity, 0.0f, 0.0f);
     /* Lens body is a pure dielectric medium: zero opaque plate, governed by Contact AO */
-    CHECK_NEAR(light.materials.lens_body.plate_opacity, 0.0f, 0.0f);
-    CHECK_NEAR(dark.materials.lens_body.plate_opacity, 0.0f, 0.0f);
-    CHECK(light.materials.lens_body.contact_ao > 0.0f);
-    CHECK(dark.materials.lens_body.ambient_fresnel > 0.0f);
+    OT_EXPECT_NEAR(light.materials.lens_body.plate_opacity, 0.0f, 0.0f);
+    OT_EXPECT_NEAR(dark.materials.lens_body.plate_opacity, 0.0f, 0.0f);
+    OT_EXPECT(light.materials.lens_body.contact_ao > 0.0f);
+    OT_EXPECT(dark.materials.lens_body.ambient_fresnel > 0.0f);
 
     /* Dark mode requires higher border highlight for silhouette contrast */
-    CHECK(dark.materials.foundation.border_highlight > light.materials.foundation.border_highlight);
+    OT_EXPECT(dark.materials.foundation.border_highlight >
+              light.materials.foundation.border_highlight);
 
     /* 2. Cascade style resolution: material kind -> mapped recipe */
     lens *ui = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
 
     lens_style s_acrylic = lens_style_init();
     s_acrylic.fields = LENS_STYLE_MATERIAL;
     s_acrylic.material = LENS_MATERIAL_ACRYLIC;
 
     lens_style_resolved r_light = lensi_style_resolve(ui, &s_acrylic, &light, 0);
-    CHECK(r_light.material == LENS_MATERIAL_ACRYLIC);
-    CHECK_NEAR(r_light.material_recipe.plate_polarity, 1.0f, 0.0f);
-    CHECK_NEAR(r_light.material_recipe.plate_opacity, light.materials.floating.plate_opacity, 0.0f);
+    OT_EXPECT(r_light.material == LENS_MATERIAL_ACRYLIC);
+    OT_EXPECT_NEAR(r_light.material_recipe.plate_polarity, 1.0f, 0.0f);
+    OT_EXPECT_NEAR(r_light.material_recipe.plate_opacity, light.materials.floating.plate_opacity,
+                   0.0f);
 
     lens_style_resolved r_dark = lensi_style_resolve(ui, &s_acrylic, &dark, 0);
-    CHECK(r_dark.material == LENS_MATERIAL_ACRYLIC);
-    CHECK_NEAR(r_dark.material_recipe.plate_polarity, 0.0f, 0.0f);
-    CHECK_NEAR(r_dark.material_recipe.plate_opacity, dark.materials.floating.plate_opacity, 0.0f);
+    OT_EXPECT(r_dark.material == LENS_MATERIAL_ACRYLIC);
+    OT_EXPECT_NEAR(r_dark.material_recipe.plate_polarity, 0.0f, 0.0f);
+    OT_EXPECT_NEAR(r_dark.material_recipe.plate_opacity, dark.materials.floating.plate_opacity,
+                   0.0f);
 
     /* Unset material resolves to LENS_MATERIAL_NONE and zeroed recipe */
     lens_style s_empty = lens_style_init();
     lens_style_resolved r_none = lensi_style_resolve(ui, &s_empty, &light, 0);
-    CHECK(r_none.material == LENS_MATERIAL_NONE);
-    CHECK_NEAR(r_none.material_recipe.plate_opacity, 0.0f, 0.0f);
+    OT_EXPECT(r_none.material == LENS_MATERIAL_NONE);
+    OT_EXPECT_NEAR(r_none.material_recipe.plate_opacity, 0.0f, 0.0f);
 
     lens_release(ui);
 }
@@ -309,5 +313,5 @@ int main(void) {
     test_outline_atoms_reach_draw_commands();
     test_skin_scratch_lifecycle();
     test_material_theme_and_cascade_resolution();
-    return TEST_REPORT();
+    return OT_REPORT();
 }

@@ -1,4 +1,4 @@
-/* test_svg_geometry.c — the path grammar and basic-shape decomposition.
+/* test_reticle_geometry.c — the path grammar and basic-shape decomposition.
  *
  * The property under test is that everything richer than move/line/quad/cubic
  * has already been decomposed by the time a consumer looks: a rounded rect, an
@@ -7,7 +7,7 @@
  * baker, the lens icon replay path) rely on that and never reimplement SVG
  * geometry. */
 
-#include "test_helpers.h"
+#include "optics_test.h"
 
 #include <reticle/reticle.h>
 
@@ -63,11 +63,12 @@ static void absolute_and_relative_agree(void) {
         dispose(&absolute);
         return;
     }
-    CHECK(absolute.shape.cmd_count == relative.shape.cmd_count);
+    OT_EXPECT(absolute.shape.cmd_count == relative.shape.cmd_count);
     for (uint32_t i = 0; i < absolute.shape.cmd_count && i < relative.shape.cmd_count; ++i) {
-        CHECK(absolute.shape.cmds[i].verb == relative.shape.cmds[i].verb);
+        OT_EXPECT(absolute.shape.cmds[i].verb == relative.shape.cmds[i].verb);
         for (uint32_t k = 0; k < 6; ++k)
-            CHECK_NEAR(absolute.shape.cmds[i].params[k], relative.shape.cmds[i].params[k], 1e-5);
+            OT_EXPECT_NEAR(absolute.shape.cmds[i].params[k], relative.shape.cmds[i].params[k],
+                           1e-5);
     }
     dispose(&absolute);
     dispose(&relative);
@@ -79,8 +80,8 @@ static void implicit_lineto_after_moveto(void) {
     geometry g;
     if (!load("<svg viewBox=\"0 0 24 24\"><path d=\"M0 0 10 0 10 10\"/></svg>", &g))
         return;
-    CHECK(g.moves == 1);
-    CHECK(g.lines == 2);
+    OT_EXPECT(g.moves == 1);
+    OT_EXPECT(g.lines == 2);
     dispose(&g);
 }
 
@@ -88,11 +89,11 @@ static void h_and_v_emit_lines(void) {
     geometry g;
     if (!load("<svg viewBox=\"0 0 24 24\"><path d=\"M1 1 H10 V10\"/></svg>", &g))
         return;
-    CHECK(g.lines == 2);
-    CHECK_NEAR(g.shape.cmds[1].params[0], 10.0f, 1e-5);
-    CHECK_NEAR(g.shape.cmds[1].params[1], 1.0f, 1e-5);
-    CHECK_NEAR(g.shape.cmds[2].params[0], 10.0f, 1e-5);
-    CHECK_NEAR(g.shape.cmds[2].params[1], 10.0f, 1e-5);
+    OT_EXPECT(g.lines == 2);
+    OT_EXPECT_NEAR(g.shape.cmds[1].params[0], 10.0f, 1e-5);
+    OT_EXPECT_NEAR(g.shape.cmds[1].params[1], 1.0f, 1e-5);
+    OT_EXPECT_NEAR(g.shape.cmds[2].params[0], 10.0f, 1e-5);
+    OT_EXPECT_NEAR(g.shape.cmds[2].params[1], 10.0f, 1e-5);
     dispose(&g);
 }
 
@@ -102,10 +103,10 @@ static void smooth_cubic_reflects_the_previous_control_point(void) {
     geometry g;
     if (!load("<svg viewBox=\"0 0 24 24\"><path d=\"M0 0 C2 0 4 2 4 4 S8 8 8 10\"/></svg>", &g))
         return;
-    CHECK(g.cubics == 2);
+    OT_EXPECT(g.cubics == 2);
     /* Previous c2 = (4,2); current point (4,4); so the reflected c1 = (4,6). */
-    CHECK_NEAR(g.shape.cmds[2].params[0], 4.0f, 1e-5);
-    CHECK_NEAR(g.shape.cmds[2].params[1], 6.0f, 1e-5);
+    OT_EXPECT_NEAR(g.shape.cmds[2].params[0], 4.0f, 1e-5);
+    OT_EXPECT_NEAR(g.shape.cmds[2].params[1], 6.0f, 1e-5);
     dispose(&g);
 }
 
@@ -113,10 +114,10 @@ static void smooth_quad_reflects_the_previous_control_point(void) {
     geometry g;
     if (!load("<svg viewBox=\"0 0 24 24\"><path d=\"M0 0 Q2 4 4 4 T8 8\"/></svg>", &g))
         return;
-    CHECK(g.quads == 2);
+    OT_EXPECT(g.quads == 2);
     /* Previous control (2,4), current point (4,4) -> reflected (6,4). */
-    CHECK_NEAR(g.shape.cmds[2].params[0], 6.0f, 1e-5);
-    CHECK_NEAR(g.shape.cmds[2].params[1], 4.0f, 1e-5);
+    OT_EXPECT_NEAR(g.shape.cmds[2].params[0], 6.0f, 1e-5);
+    OT_EXPECT_NEAR(g.shape.cmds[2].params[1], 4.0f, 1e-5);
     dispose(&g);
 }
 
@@ -128,12 +129,12 @@ static void arcs_decompose_into_cubics(void) {
     geometry g;
     if (!load("<svg viewBox=\"0 0 24 24\"><path d=\"M2 12 A10 10 0 0 1 22 12\"/></svg>", &g))
         return;
-    CHECK(g.moves == 1);
-    CHECK(g.cubics >= 2);
+    OT_EXPECT(g.moves == 1);
+    OT_EXPECT(g.cubics >= 2);
     const reticle_path_cmd *last = &g.shape.cmds[g.shape.cmd_count - 1];
-    CHECK(last->verb == RETICLE_PATH_CUBIC);
-    CHECK_NEAR(last->params[4], 22.0f, 1e-3);
-    CHECK_NEAR(last->params[5], 12.0f, 1e-3);
+    OT_EXPECT(last->verb == RETICLE_PATH_CUBIC);
+    OT_EXPECT_NEAR(last->params[4], 22.0f, 1e-3);
+    OT_EXPECT_NEAR(last->params[5], 12.0f, 1e-3);
     dispose(&g);
 }
 
@@ -143,7 +144,7 @@ static void arc_flags_parse_without_separators(void) {
     geometry g;
     if (!load("<svg viewBox=\"0 0 24 24\"><path d=\"M2 12A10 10 0 0122 12\"/></svg>", &g))
         return;
-    CHECK(g.cubics >= 2);
+    OT_EXPECT(g.cubics >= 2);
     dispose(&g);
 }
 
@@ -151,15 +152,15 @@ static void circle_is_decomposed_and_bounded(void) {
     geometry g;
     if (!load("<svg viewBox=\"0 0 24 24\"><circle cx=\"12\" cy=\"12\" r=\"6\"/></svg>", &g))
         return;
-    CHECK(g.moves == 1);
-    CHECK(g.closes == 1);
-    CHECK(g.cubics == 4);
+    OT_EXPECT(g.moves == 1);
+    OT_EXPECT(g.closes == 1);
+    OT_EXPECT(g.cubics == 4);
     /* Bounds are exact for a circle's cardinal points because the arcs are
      * anchored there. */
-    CHECK_NEAR(g.shape.bounds.x, 6.0f, 1e-3);
-    CHECK_NEAR(g.shape.bounds.y, 6.0f, 1e-3);
-    CHECK_NEAR(g.shape.bounds.w, 12.0f, 1e-3);
-    CHECK_NEAR(g.shape.bounds.h, 12.0f, 1e-3);
+    OT_EXPECT_NEAR(g.shape.bounds.x, 6.0f, 1e-3);
+    OT_EXPECT_NEAR(g.shape.bounds.y, 6.0f, 1e-3);
+    OT_EXPECT_NEAR(g.shape.bounds.w, 12.0f, 1e-3);
+    OT_EXPECT_NEAR(g.shape.bounds.h, 12.0f, 1e-3);
     dispose(&g);
 }
 
@@ -168,8 +169,8 @@ static void ellipse_keeps_both_radii(void) {
     if (!load("<svg viewBox=\"0 0 24 24\"><ellipse cx=\"12\" cy=\"12\" rx=\"8\" ry=\"3\"/></svg>",
               &g))
         return;
-    CHECK_NEAR(g.shape.bounds.w, 16.0f, 1e-3);
-    CHECK_NEAR(g.shape.bounds.h, 6.0f, 1e-3);
+    OT_EXPECT_NEAR(g.shape.bounds.w, 16.0f, 1e-3);
+    OT_EXPECT_NEAR(g.shape.bounds.h, 6.0f, 1e-3);
     dispose(&g);
 }
 
@@ -180,11 +181,11 @@ static void rounded_rect_honours_the_radius(void) {
               &g))
         return;
     /* Rounded corners still fill the declared box. */
-    CHECK_NEAR(g.shape.bounds.x, 2.0f, 1e-3);
-    CHECK_NEAR(g.shape.bounds.y, 2.0f, 1e-3);
-    CHECK_NEAR(g.shape.bounds.w, 20.0f, 1e-3);
-    CHECK_NEAR(g.shape.bounds.h, 10.0f, 1e-3);
-    CHECK(g.cubics == 4);
+    OT_EXPECT_NEAR(g.shape.bounds.x, 2.0f, 1e-3);
+    OT_EXPECT_NEAR(g.shape.bounds.y, 2.0f, 1e-3);
+    OT_EXPECT_NEAR(g.shape.bounds.w, 20.0f, 1e-3);
+    OT_EXPECT_NEAR(g.shape.bounds.h, 10.0f, 1e-3);
+    OT_EXPECT(g.cubics == 4);
     dispose(&g);
 }
 
@@ -196,7 +197,7 @@ static void single_radius_applies_to_both_axes(void) {
               "rx=\"4\"/></svg>",
               &g))
         return;
-    CHECK(g.cubics == 4);
+    OT_EXPECT(g.cubics == 4);
     dispose(&g);
 }
 
@@ -204,16 +205,16 @@ static void zero_sized_rect_paints_nothing(void) {
     /* SVG disables an element with a zero extent; it must not become a
      * degenerate path with a stroke around it. */
     reticle_document *doc = nullptr;
-    CHECK(reticle_parse(&(reticle_parse_opts){.length = RETICLE_LENGTH_MEASURE,
-                                              .text =
-                                                  "<svg viewBox=\"0 0 8 8\">"
-                                                  "<rect x=\"0\" y=\"0\" width=\"0\" height=\"4\"/>"
-                                                  "</svg>"},
-                        &doc) == FLUX_OK);
+    OT_EXPECT(reticle_parse(
+                  &(reticle_parse_opts){.length = RETICLE_LENGTH_MEASURE,
+                                        .text = "<svg viewBox=\"0 0 8 8\">"
+                                                "<rect x=\"0\" y=\"0\" width=\"0\" height=\"4\"/>"
+                                                "</svg>"},
+                  &doc) == FLUX_OK);
     if (doc) {
         /* SVG disables an element with a zero extent: it contributes no shape at
          * all. An empty shape would make shape indices lie to a consumer. */
-        CHECK(reticle_shape_count(doc) == 0);
+        OT_EXPECT(reticle_shape_count(doc) == 0);
         reticle_release(doc);
     }
 }
@@ -222,13 +223,13 @@ static void polygon_closes_and_polyline_does_not(void) {
     geometry polygon = {}, polyline = {};
     if (!load("<svg viewBox=\"0 0 24 24\"><polygon points=\"2,2 10,2 10,10\"/></svg>", &polygon))
         return;
-    CHECK(polygon.closes == 1);
-    CHECK(polygon.moves == 1);
-    CHECK(polygon.lines == 2);
+    OT_EXPECT(polygon.closes == 1);
+    OT_EXPECT(polygon.moves == 1);
+    OT_EXPECT(polygon.lines == 2);
     dispose(&polygon);
     if (!load("<svg viewBox=\"0 0 24 24\"><polyline points=\"2 2 10 2 10 10\"/></svg>", &polyline))
         return;
-    CHECK(polyline.closes == 0);
+    OT_EXPECT(polyline.closes == 0);
     dispose(&polyline);
 }
 
@@ -240,9 +241,9 @@ static void transform_moves_geometry_into_user_space(void) {
               "transform=\"translate(10 5)\"/></svg>",
               &g))
         return;
-    CHECK_NEAR(g.shape.cmds[0].params[0], 10.0f, 1e-4);
-    CHECK_NEAR(g.shape.cmds[0].params[1], 5.0f, 1e-4);
-    CHECK_NEAR(g.shape.bounds.x, 10.0f, 1e-4);
+    OT_EXPECT_NEAR(g.shape.cmds[0].params[0], 10.0f, 1e-4);
+    OT_EXPECT_NEAR(g.shape.cmds[0].params[1], 5.0f, 1e-4);
+    OT_EXPECT_NEAR(g.shape.bounds.x, 10.0f, 1e-4);
     dispose(&g);
 }
 
@@ -254,8 +255,8 @@ static void nested_group_transforms_compose(void) {
               &g))
         return;
     /* (1,1) -> scale 2 -> (2,2) -> translate 4 -> (6,2). */
-    CHECK_NEAR(g.shape.cmds[0].params[0], 6.0f, 1e-4);
-    CHECK_NEAR(g.shape.cmds[0].params[1], 2.0f, 1e-4);
+    OT_EXPECT_NEAR(g.shape.cmds[0].params[0], 6.0f, 1e-4);
+    OT_EXPECT_NEAR(g.shape.cmds[0].params[1], 2.0f, 1e-4);
     dispose(&g);
 }
 
@@ -268,29 +269,29 @@ static void rotate_about_a_point_is_not_the_origin(void) {
               &g))
         return;
     /* (9,1) rotated 90° about (10,10) -> (19,9). */
-    CHECK_NEAR(g.shape.cmds[0].params[0], 19.0f, 1e-3);
-    CHECK_NEAR(g.shape.cmds[0].params[1], 9.0f, 1e-3);
+    OT_EXPECT_NEAR(g.shape.cmds[0].params[0], 19.0f, 1e-3);
+    OT_EXPECT_NEAR(g.shape.cmds[0].params[1], 9.0f, 1e-3);
     dispose(&g);
 }
 
 static void every_shape_keeps_document_order(void) {
     reticle_document *doc = nullptr;
-    CHECK(reticle_parse(&(reticle_parse_opts){.length = RETICLE_LENGTH_MEASURE,
-                                              .text =
-                                                  "<svg viewBox=\"0 0 24 24\">"
-                                                  "<rect x=\"0\" y=\"0\" width=\"1\" height=\"1\"/>"
-                                                  "<circle cx=\"5\" cy=\"5\" r=\"1\"/>"
-                                                  "<path d=\"M0 0L1 1\"/></svg>"},
-                        &doc) == FLUX_OK);
+    OT_EXPECT(reticle_parse(
+                  &(reticle_parse_opts){.length = RETICLE_LENGTH_MEASURE,
+                                        .text = "<svg viewBox=\"0 0 24 24\">"
+                                                "<rect x=\"0\" y=\"0\" width=\"1\" height=\"1\"/>"
+                                                "<circle cx=\"5\" cy=\"5\" r=\"1\"/>"
+                                                "<path d=\"M0 0L1 1\"/></svg>"},
+                  &doc) == FLUX_OK);
     if (!doc)
         return;
-    CHECK(reticle_shape_count(doc) == 3);
+    OT_EXPECT(reticle_shape_count(doc) == 3);
     reticle_shape_view shape = {};
     if (reticle_shape_at(doc, 0, &shape) == FLUX_OK)
-        CHECK_NEAR(shape.bounds.w, 1.0f, 1e-4);
+        OT_EXPECT_NEAR(shape.bounds.w, 1.0f, 1e-4);
     if (reticle_shape_at(doc, 1, &shape) == FLUX_OK)
-        CHECK_NEAR(shape.bounds.w, 2.0f, 1e-4);
-    CHECK(reticle_shape_at(doc, 3, &shape) == FLUX_ERROR_OUT_OF_RANGE);
+        OT_EXPECT_NEAR(shape.bounds.w, 2.0f, 1e-4);
+    OT_EXPECT(reticle_shape_at(doc, 3, &shape) == FLUX_ERROR_OUT_OF_RANGE);
     reticle_release(doc);
 }
 
@@ -312,5 +313,5 @@ int main(void) {
     nested_group_transforms_compose();
     rotate_about_a_point_is_not_the_origin();
     every_shape_keeps_document_order();
-    TEST_REPORT();
+    return OT_REPORT();
 }

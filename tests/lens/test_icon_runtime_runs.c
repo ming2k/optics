@@ -1,6 +1,6 @@
 /* test_icon_runtime_runs.c — per-shape colour runs recorded by
  * lens_icon_register_svg (lens_icon_run). CPU-only; links icon_runtime.c
- * (+ icon_data.c, icon_svg.c) directly, same as test_icon_runtime_content.
+ * (+ icon_data.c) directly, same as test_icon_runtime_content.
  *
  * Asserts WHAT was registered:
  *  - a stroke="#FF0000" shape records a stroke run with color 0xFF0000FF;
@@ -12,7 +12,8 @@
  */
 
 #include "../../libs/lens/src/internal.h"
-#include "test_helpers.h"
+#include "lens_test.h"
+#include "optics_test.h"
 #include <lens/lens.h>
 
 /* Explicit red stroke, one circle. */
@@ -54,90 +55,90 @@ static const char SVG_THEME_MIXED[] =
 int main(void) {
     /* Explicit colour -> exactly one run, colour preserved, stroke mode. */
     lens_icon_id red = lens_icon_register_svg(SVG_RED);
-    CHECK((int)red >= (int)LENS_ICON_COUNT);
+    OT_EXPECT((int)red >= (int)LENS_ICON_COUNT);
     {
         const lens_icon_desc *d = lensi_icon_desc((int32_t)red);
-        CHECK(d != NULL);
-        CHECK(d->runs != NULL);
-        CHECK(d->run_count == 1);
-        CHECK(d->runs[0].color == 0xFFFF0000u); /* R=FF A=FF */
-        CHECK(d->runs[0].fill == 0);
-        CHECK(d->runs[0].first_cmd == 0);
-        CHECK(d->runs[0].count == d->count);
+        OT_EXPECT(d != NULL);
+        OT_EXPECT(d->runs != NULL);
+        OT_EXPECT(d->run_count == 1);
+        OT_EXPECT(d->runs[0].color == 0xFFFF0000u); /* R=FF A=FF */
+        OT_EXPECT(d->runs[0].fill == 0);
+        OT_EXPECT(d->runs[0].first_cmd == 0);
+        OT_EXPECT(d->runs[0].count == d->count);
     }
 
     /* currentColor everywhere -> collapsed to the single-paint form. */
     lens_icon_id theme = lens_icon_register_svg(SVG_THEME);
-    CHECK((int)theme >= (int)LENS_ICON_COUNT);
+    OT_EXPECT((int)theme >= (int)LENS_ICON_COUNT);
     {
         const lens_icon_desc *d = lensi_icon_desc((int32_t)theme);
-        CHECK(d != NULL);
-        CHECK(d->runs == NULL);
-        CHECK(d->run_count == 0);
+        OT_EXPECT(d != NULL);
+        OT_EXPECT(d->runs == NULL);
+        OT_EXPECT(d->run_count == 0);
         /* Two shapes still produce two subpaths (two MOVE verbs). */
         uint32_t moves = 0;
         for (uint32_t i = 0; i < d->count; i++)
             if (d->cmds[i].type == 0)
                 moves++;
-        CHECK(moves == 2);
+        OT_EXPECT(moves == 2);
     }
 
     /* Two same-colour filled shapes merge into one run. */
     lens_icon_id two = lens_icon_register_svg(SVG_TWO_RED);
-    CHECK((int)two >= (int)LENS_ICON_COUNT);
+    OT_EXPECT((int)two >= (int)LENS_ICON_COUNT);
     {
         const lens_icon_desc *d = lensi_icon_desc((int32_t)two);
-        CHECK(d != NULL);
-        CHECK(d->runs != NULL);
-        CHECK(d->run_count == 1);
-        CHECK(d->runs[0].color == 0xFF00FF00u); /* G=FF A=FF */
-        CHECK(d->runs[0].fill == 1);
-        CHECK(d->runs[0].count == d->count);
+        OT_EXPECT(d != NULL);
+        OT_EXPECT(d->runs != NULL);
+        OT_EXPECT(d->run_count == 1);
+        OT_EXPECT(d->runs[0].color == 0xFF00FF00u); /* G=FF A=FF */
+        OT_EXPECT(d->runs[0].fill == 1);
+        OT_EXPECT(d->runs[0].count == d->count);
     }
 
     /* Mixed paints: three runs, order preserved, alpha carried through,
      * currentColor run recorded as theme (color == 0). */
     lens_icon_id mixed = lens_icon_register_svg(SVG_MIXED);
-    CHECK((int)mixed >= (int)LENS_ICON_COUNT);
+    OT_EXPECT((int)mixed >= (int)LENS_ICON_COUNT);
     {
         const lens_icon_desc *d = lensi_icon_desc((int32_t)mixed);
-        CHECK(d != NULL);
-        CHECK(d->runs != NULL);
-        CHECK(d->run_count == 3);
-        CHECK(d->runs[0].color == 0xFF112233u); /* R=11 G=22 B=33 A=FF */
-        CHECK(d->runs[0].fill == 1);
-        CHECK(d->runs[1].color == 0u); /* currentColor -> theme */
-        CHECK(d->runs[1].fill == 0);   /* stroke run */
+        OT_EXPECT(d != NULL);
+        OT_EXPECT(d->runs != NULL);
+        OT_EXPECT(d->run_count == 3);
+        OT_EXPECT(d->runs[0].color == 0xFF112233u); /* R=11 G=22 B=33 A=FF */
+        OT_EXPECT(d->runs[0].fill == 1);
+        OT_EXPECT(d->runs[1].color == 0u); /* currentColor -> theme */
+        OT_EXPECT(d->runs[1].fill == 0);   /* stroke run */
         /* fill-opacity 0.5 -> alpha 127 or 128 depending on nanosvg's
          * rounding; accept either (the straight-alpha channel is what
          * matters, not the exact rounding of the opacity). */
         uint32_t a = d->runs[2].color >> 24;
-        CHECK(a >= 127 && a <= 128);
-        CHECK((d->runs[2].color & 0xFFFFFFu) == 0x445566u);
-        CHECK(d->runs[2].fill == 1);
+        OT_EXPECT(a >= 127 && a <= 128);
+        OT_EXPECT((d->runs[2].color & 0xFFFFFFu) == 0x445566u);
+        OT_EXPECT(d->runs[2].fill == 1);
         /* Runs bracket the whole stream with no gaps. */
-        CHECK(d->runs[0].first_cmd == 0);
-        CHECK(d->runs[0].first_cmd + d->runs[0].count == d->runs[1].first_cmd);
-        CHECK(d->runs[1].first_cmd + d->runs[1].count == d->runs[2].first_cmd);
-        CHECK(d->runs[2].first_cmd + d->runs[2].count == d->count);
+        OT_EXPECT(d->runs[0].first_cmd == 0);
+        OT_EXPECT(d->runs[0].first_cmd + d->runs[0].count == d->runs[1].first_cmd);
+        OT_EXPECT(d->runs[1].first_cmd + d->runs[1].count == d->runs[2].first_cmd);
+        OT_EXPECT(d->runs[2].first_cmd + d->runs[2].count == d->count);
     }
 
     /* Mixed theme stroke and fill: must preserve runs even though all colors are theme (0). */
     lens_icon_id theme_mixed = lens_icon_register_svg(SVG_THEME_MIXED);
-    CHECK((int)theme_mixed >= (int)LENS_ICON_COUNT);
+    OT_EXPECT((int)theme_mixed >= (int)LENS_ICON_COUNT);
     {
         const lens_icon_desc *d = lensi_icon_desc((int32_t)theme_mixed);
-        CHECK(d != NULL);
-        CHECK(d->runs != NULL);
-        CHECK(d->run_count == 2);
-        CHECK(d->runs[0].color == 0u);
-        CHECK(d->runs[0].fill == 0); /* stroke */
-        CHECK(d->runs[1].color == 0u);
-        CHECK(d->runs[1].fill == 1); /* fill */
-        CHECK(d->runs[0].first_cmd == 0);
-        CHECK(d->runs[0].first_cmd + d->runs[0].count == d->runs[1].first_cmd);
-        CHECK(d->runs[1].first_cmd + d->runs[1].count == d->count);
+        OT_EXPECT(d != NULL);
+        OT_EXPECT(d->runs != NULL);
+        OT_EXPECT(d->run_count == 2);
+        OT_EXPECT(d->runs[0].color == 0u);
+        OT_EXPECT(d->runs[0].fill == 0); /* stroke */
+        OT_EXPECT(d->runs[1].color == 0u);
+        OT_EXPECT(d->runs[1].fill == 1); /* fill */
+        OT_EXPECT(d->runs[0].first_cmd == 0);
+        OT_EXPECT(d->runs[0].first_cmd + d->runs[0].count == d->runs[1].first_cmd);
+        OT_EXPECT(d->runs[1].first_cmd + d->runs[1].count == d->count);
     }
 
-    return TEST_REPORT();
+    return OT_REPORT();
 }

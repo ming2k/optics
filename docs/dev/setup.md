@@ -89,7 +89,7 @@ meson setup --reconfigure build -Dexamples=true -Dtests=true
 
 ```bash
 meson compile -C build
-meson test -C build --no-suite bench
+meson test -C build --no-suite bench --no-suite fuzz
 ```
 
 Run representative binaries from their module directories:
@@ -109,7 +109,7 @@ see [Interactive examples showcase](../how-to/run-and-explore-examples.md).
 
 Meson enforces out-of-tree builds. Adhere to these conventions to keep the repository root orderly:
 
-- `build/`: The **canonical local development directory** (Debug + tests + examples). Rust bindings (`bindings/`) probe this directory automatically.
+- `build/`: The **canonical local development directory** (Debug + tests + examples). Rust binding crates under `bindings/crates/` probe this directory automatically; the Cargo workspace manifest is at the repository root.
 - `build-tidy/`: Dedicated build tree for `tools/check-tidy.sh` (created automatically on demand).
 - **Ephemeral matrix builds (`build-fuzz*`, `build-release*`, `build-api*`, etc.)**: Temporary directories created when reproducing CI matrices locally. Treat them as disposable and clean them up after testing:
   ```bash

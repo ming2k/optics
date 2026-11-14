@@ -1,4 +1,4 @@
-//! Tests for frosted glass and acrylic materials in prism-rs.
+//! Tests for frosted glass and acrylic materials in the `prism` binding.
 
 use prism::{AcrylicGroup, AcrylicParams, AcrylicShape, FrostedGroup, FrostedParams, FrostedShape};
 

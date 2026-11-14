@@ -5,7 +5,8 @@
  * evaluates exact analytic area coverage at 1x on a high-contrast oblique edge,
  * and asserts that the resulting coverage levels exceed the 16-level ceiling.
  */
-#include "test_helpers.h"
+#include "flux_test.h"
+#include "optics_test.h"
 
 #include "../../../libs/flux/src/canvas/canvas_tile.h"
 #include <flux/compute.h>
@@ -53,10 +54,10 @@ static int count_distinct_levels(const float *cov, uint32_t w, uint32_t h) {
 }
 
 int main(void) {
-    flux_device *d = test_helpers_make_headless_device();
+    flux_device *d = flux_test_make_headless_device();
     if (!d) {
-        fprintf(stderr, "test_tile_gpu_compute: no Vulkan device; skipping\n");
-        return 0;
+        fprintf(stderr, "test_tile_gpu_compute: no Vulkan device available; skipping\n");
+        OT_SKIP("no Vulkan device");
     }
 
     VkDevice vk = flux_device_vk_device(d);
@@ -75,7 +76,7 @@ int main(void) {
     flux_tile_segment segs[4];
     flux_rect bounds;
     uint32_t n_segs = canvas_tile_extract_segments(pts, &con, 1, segs, 4, &bounds);
-    EXPECT(n_segs == 4);
+    OT_EXPECT(n_segs == 4);
 
     uint32_t tx = 0, ty = 0;
     canvas_tile_grid_dims(W, H, &tx, &ty);
@@ -86,12 +87,12 @@ int main(void) {
     canvas_tile_bin_segments(segs, n_segs, W, H, tiles, nullptr, 0, &total_indices);
 
     uint32_t *indices = malloc((size_t)(total_indices + 1) * sizeof(uint32_t));
-    EXPECT(tiles && indices);
+    OT_EXPECT(tiles && indices);
     if (!tiles || !indices) {
         free(tiles);
         free(indices);
         flux_device_release(d);
-        TEST_SUMMARY();
+        return OT_REPORT();
     }
 
     canvas_tile_bin_segments(segs, n_segs, W, H, tiles, indices, total_indices, &total_indices);
@@ -99,8 +100,8 @@ int main(void) {
 
     /* 2. Upload Segments SSBO */
     flux_buffer *seg_buf = nullptr;
-    EXPECT(canvas_tile_upload_segments(d, segs, n_segs, FLUX_FILL_NON_ZERO, bounds, &seg_buf) ==
-           FLUX_OK);
+    OT_EXPECT(canvas_tile_upload_segments(d, segs, n_segs, FLUX_FILL_NON_ZERO, bounds, &seg_buf) ==
+              FLUX_OK);
     uint64_t seg_addr = flux_buffer_device_address(seg_buf) + sizeof(flux_tile_segment_header);
 
     /* 3. Upload Tiles SSBO */
@@ -113,7 +114,7 @@ int main(void) {
         .initial_data = tiles,
     };
     flux_buffer *tile_buf = nullptr;
-    EXPECT(flux_buffer_create(d, &tile_bdesc, &tile_buf) == FLUX_OK);
+    OT_EXPECT(flux_buffer_create(d, &tile_bdesc, &tile_buf) == FLUX_OK);
     uint64_t tile_addr = flux_buffer_device_address(tile_buf);
 
     /* 4. Upload Indices SSBO */
@@ -126,7 +127,7 @@ int main(void) {
         .initial_data = indices,
     };
     flux_buffer *idx_buf = nullptr;
-    EXPECT(flux_buffer_create(d, &idx_bdesc, &idx_buf) == FLUX_OK);
+    OT_EXPECT(flux_buffer_create(d, &idx_bdesc, &idx_buf) == FLUX_OK);
     uint64_t idx_addr = flux_buffer_device_address(idx_buf);
 
     /* 5. Destination Coverage SSBO */
@@ -138,7 +139,7 @@ int main(void) {
         .device_address = true,
     };
     flux_buffer *cov_buf = nullptr;
-    EXPECT(flux_buffer_create(d, &cov_bdesc, &cov_buf) == FLUX_OK);
+    OT_EXPECT(flux_buffer_create(d, &cov_bdesc, &cov_buf) == FLUX_OK);
     uint64_t cov_addr = flux_buffer_device_address(cov_buf);
 
     /* 6. Create Compute Pipeline */
@@ -150,8 +151,8 @@ int main(void) {
         .push_constant_bytes = sizeof(push_constants),
     };
     flux_compute_pipeline *pipe = nullptr;
-    EXPECT(flux_compute_pipeline_create(d, &pdesc, &pipe) == FLUX_OK);
-    EXPECT(pipe != nullptr);
+    OT_EXPECT(flux_compute_pipeline_create(d, &pdesc, &pipe) == FLUX_OK);
+    OT_EXPECT(pipe != nullptr);
     if (!pipe)
         goto cleanup;
 
@@ -232,7 +233,7 @@ int main(void) {
 
     /* 8. Read back GPU compute coverage */
     const float *gpu_cov = (const float *)flux_buffer_mapped(cov_buf);
-    EXPECT(gpu_cov != nullptr);
+    OT_EXPECT(gpu_cov != nullptr);
 
     int gpu_levels = count_distinct_levels(gpu_cov, W, H);
     fprintf(stderr,
@@ -240,8 +241,8 @@ int main(void) {
             gpu_levels);
 
     /* CONTRACT ASSERTION: Must exceed the 16-level ceiling on actual hardware */
-    EXPECT(gpu_levels > 16);
-    EXPECT(gpu_levels >= 50);
+    OT_EXPECT(gpu_levels > 16);
+    OT_EXPECT(gpu_levels >= 50);
 
 cleanup:
     if (pipe)
@@ -257,5 +258,5 @@ cleanup:
     free(tiles);
     free(indices);
     flux_device_release(d);
-    TEST_SUMMARY();
+    return OT_REPORT();
 }

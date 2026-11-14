@@ -13,7 +13,7 @@ This document codifies the hyperlink, formatting, and prose conventions across a
    - Heading anchors must match the lowercase, hyphen-separated GitHub markdown slugification of the target heading.
    - Anchor links must point to existing headings in the target document.
 3. **Explicit Markdown Extensions**:
-   - Always append `.md` to file paths in markdown links (e.g. `[Tutorial](01-getting-started.md)` rather than extensionless paths).
+   - Always append `.md` to file paths in markdown links (e.g. `[Tutorial](../../tutorials/01-getting-started.md)` rather than extensionless paths).
 
 ---
 

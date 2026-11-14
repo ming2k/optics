@@ -15,7 +15,23 @@ if ! command -v "$CF" >/dev/null 2>&1; then
     exit 1
 fi
 
-SOURCES=$(git ls-files 'libs/*.c' 'libs/*.h' 'examples/*.c' 'tests/*.c' 'tests/*.h')
+# Include tracked and new sources, but skip index entries whose working-tree
+# file was deleted (a clean-break refactor must not make the formatter fail).
+SOURCES=$(
+    git ls-files --cached --others --exclude-standard \
+        'libs/*.c' 'libs/*.h' 'examples/*.c' 'tests/*.c' 'tests/*.h' |
+    while IFS= read -r file; do
+        if [ -f "$file" ]; then
+            printf '%s\n' "$file"
+        fi
+    done
+    true
+)
+
+if [ -z "$SOURCES" ]; then
+    echo "No C sources found."
+    exit 0
+fi
 
 if [ "${1:-}" = "--check" ]; then
     echo "$SOURCES" | xargs "$CF" --dry-run --Werror

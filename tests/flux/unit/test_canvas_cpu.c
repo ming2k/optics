@@ -3,7 +3,7 @@
  * the software backend (flux_canvas_backend_cpu) end to end — create, record,
  * read back pixels — across the solid, SDF rounded-rect, and gradient paths.
  */
-#include "test_helpers.h"
+#include "optics_test.h"
 #include <flux/canvas.h>
 #include <flux/canvas_cpu.h>
 #include <flux/math.h>
@@ -23,125 +23,125 @@ int main(void) {
 
     /* ---- Solid fill on an opaque black clear ---- */
     flux_canvas *c = nullptr;
-    EXPECT(flux_canvas_create_cpu(W, H, 1.0f, &c) == FLUX_OK);
-    EXPECT(c != nullptr);
+    OT_EXPECT(flux_canvas_create_cpu(W, H, 1.0f, &c) == FLUX_OK);
+    OT_EXPECT(c != nullptr);
 
     flux_color black = flux_color_rgba_premul(0, 0, 0, 255);
     flux_color red = flux_color_rgba_premul(255, 0, 0, 255);
-    EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
-                                                         .clear_color = &black}) == FLUX_OK);
+    OT_EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                            .clear_color = &black}) == FLUX_OK);
     flux_canvas_fill_rect_color(c, (flux_rect){16, 16, 32, 32}, red);
-    EXPECT(flux_canvas_end(c) == FLUX_OK);
+    OT_EXPECT(flux_canvas_end(c) == FLUX_OK);
 
     uint32_t w = 0, h = 0, stride = 0;
     const uint8_t *fb = flux_canvas_cpu_pixels(c, &w, &h, &stride);
-    EXPECT(fb != nullptr);
-    EXPECT(w == W && h == H && stride == W * 4);
+    OT_EXPECT(fb != nullptr);
+    OT_EXPECT(w == W && h == H && stride == W * 4);
 
     uint8_t p[4];
     px(fb, stride, 32, 32, p); /* inside the rect → red */
-    EXPECT(p[0] > 250 && p[1] < 5 && p[2] < 5 && p[3] > 250);
+    OT_EXPECT(p[0] > 250 && p[1] < 5 && p[2] < 5 && p[3] > 250);
     px(fb, stride, 3, 3, p); /* outside → cleared black */
-    EXPECT(p[0] < 5 && p[1] < 5 && p[2] < 5 && p[3] > 250);
+    OT_EXPECT(p[0] < 5 && p[1] < 5 && p[2] < 5 && p[3] > 250);
     px(fb, stride, 40, 40, p); /* still inside */
-    EXPECT(p[0] > 250 && p[3] > 250);
+    OT_EXPECT(p[0] > 250 && p[3] > 250);
 
     /* ---- SDF rounded rect on a transparent clear: corners are cut ---- */
-    EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
-                                                         .clear_color = &(flux_color){0}}) ==
-           FLUX_OK);
+    OT_EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                            .clear_color = &(flux_color){0}}) ==
+              FLUX_OK);
     flux_color white = flux_color_rgba_premul(255, 255, 255, 255);
     flux_canvas_fill_rrect(c, (flux_rect){0, 0, 64, 64}, 20.0f, white);
-    EXPECT(flux_canvas_end(c) == FLUX_OK);
+    OT_EXPECT(flux_canvas_end(c) == FLUX_OK);
     fb = flux_canvas_cpu_pixels(c, &w, &h, &stride);
     px(fb, stride, 32, 32, p); /* centre → opaque white */
-    EXPECT(p[0] > 250 && p[1] > 250 && p[2] > 250 && p[3] > 250);
+    OT_EXPECT(p[0] > 250 && p[1] > 250 && p[2] > 250 && p[3] > 250);
     px(fb, stride, 1, 1, p); /* rounded corner → transparent */
-    EXPECT(p[3] < 20);
+    OT_EXPECT(p[3] < 20);
 
     /* ---- Clip rect confines a fill ---- */
-    EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
-                                                         .clear_color = &black}) == FLUX_OK);
+    OT_EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                            .clear_color = &black}) == FLUX_OK);
     flux_canvas_clip_rect(c, (flux_rect){0, 0, 32, 64});
     flux_canvas_fill_rect_color(c, (flux_rect){0, 0, 64, 64}, red);
-    EXPECT(flux_canvas_end(c) == FLUX_OK);
+    OT_EXPECT(flux_canvas_end(c) == FLUX_OK);
     fb = flux_canvas_cpu_pixels(c, &w, &h, &stride);
     px(fb, stride, 10, 32, p); /* inside clip → red */
-    EXPECT(p[0] > 250 && p[3] > 250);
+    OT_EXPECT(p[0] > 250 && p[3] > 250);
     px(fb, stride, 50, 32, p); /* outside clip → untouched black */
-    EXPECT(p[0] < 5 && p[3] > 250);
+    OT_EXPECT(p[0] < 5 && p[3] > 250);
 
     /* ---- Shared triangle edge is covered once, not blended twice ---- */
-    EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
-                                                         .clear_color = &(flux_color){0}}) ==
-           FLUX_OK);
+    OT_EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                            .clear_color = &(flux_color){0}}) ==
+              FLUX_OK);
     flux_color half_red = flux_color_rgba_premul(255, 0, 0, 128);
     flux_canvas_fill_rect_color(c, (flux_rect){16, 16, 32, 32}, half_red);
-    EXPECT(flux_canvas_end(c) == FLUX_OK);
+    OT_EXPECT(flux_canvas_end(c) == FLUX_OK);
     fb = flux_canvas_cpu_pixels(c, &w, &h, &stride);
     px(fb, stride, 32, 32, p); /* exactly on the quad's shared diagonal */
-    EXPECT(p[0] >= 126 && p[0] <= 130);
-    EXPECT(p[3] >= 126 && p[3] <= 130);
+    OT_EXPECT(p[0] >= 126 && p[0] <= 130);
+    OT_EXPECT(p[3] >= 126 && p[3] <= 130);
     px(fb, stride, 30, 32, p); /* ordinary interior sample has the same alpha */
-    EXPECT(p[0] >= 126 && p[0] <= 130);
-    EXPECT(p[3] >= 126 && p[3] <= 130);
+    OT_EXPECT(p[0] >= 126 && p[0] <= 130);
+    OT_EXPECT(p[3] >= 126 && p[3] <= 130);
 
     /* ---- Fixed SRC_OVER SDF does not inherit a preceding SRC paint ---- */
-    EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
-                                                         .clear_color = &black}) == FLUX_OK);
+    OT_EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                            .clear_color = &black}) == FLUX_OK);
     flux_brush replace_red = flux_brush_solid(red);
     replace_red.blend = FLUX_BLEND_SRC;
     flux_canvas_fill_rect(c, (flux_rect){0, 0, W, H}, &replace_red);
     flux_color half_black = flux_color_rgba_premul(0, 0, 0, 128);
     flux_canvas_stroke_rrect(c, (flux_rect){16, 16, 32, 32}, 0.0f, half_black, 2.0f);
-    EXPECT(flux_canvas_end(c) == FLUX_OK);
+    OT_EXPECT(flux_canvas_end(c) == FLUX_OK);
     fb = flux_canvas_cpu_pixels(c, &w, &h, &stride);
     px(fb, stride, 16, 32, p); /* antialiased point on the left stroke */
-    EXPECT(p[0] > 100 && p[0] < 200);
-    EXPECT(p[1] < 5 && p[2] < 5 && p[3] > 250);
+    OT_EXPECT(p[0] > 100 && p[0] < 200);
+    OT_EXPECT(p[1] < 5 && p[2] < 5 && p[3] > 250);
 
     flux_canvas_release(c);
 
     /* ---- Clip follows the current HiDPI transform and cannot expand ---- */
-    EXPECT(flux_canvas_create_cpu(W, H, 2.0f, &c) == FLUX_OK);
-    EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
-                                                         .clear_color = &black}) == FLUX_OK);
+    OT_EXPECT(flux_canvas_create_cpu(W, H, 2.0f, &c) == FLUX_OK);
+    OT_EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                            .clear_color = &black}) == FLUX_OK);
     flux_canvas_clip_rect(c, (flux_rect){0, 0, 16, 32});
     /* A later, larger clip intersects the first instead of replacing it. */
     flux_canvas_clip_rect(c, (flux_rect){0, 0, 32, 32});
     flux_canvas_fill_rect_color(c, (flux_rect){0, 0, 32, 32}, red);
-    EXPECT(flux_canvas_end(c) == FLUX_OK);
+    OT_EXPECT(flux_canvas_end(c) == FLUX_OK);
     fb = flux_canvas_cpu_pixels(c, &w, &h, &stride);
     px(fb, stride, 24, 32, p); /* logical x=12: inside transformed clip */
-    EXPECT(p[0] > 250 && p[3] > 250);
+    OT_EXPECT(p[0] > 250 && p[3] > 250);
     px(fb, stride, 40, 32, p); /* logical x=20: outside transformed clip */
-    EXPECT(p[0] < 5 && p[3] > 250);
+    OT_EXPECT(p[0] < 5 && p[3] > 250);
     flux_canvas_release(c);
 
     /* ---- Linear gradient ---- */
-    EXPECT(flux_canvas_create_cpu(W, H, 1.0f, &c) == FLUX_OK);
+    OT_EXPECT(flux_canvas_create_cpu(W, H, 1.0f, &c) == FLUX_OK);
     flux_gradient_stop stops[2] = {
         {0.0f, flux_color_rgba_premul(255, 0, 0, 255)},
         {1.0f, flux_color_rgba_premul(0, 0, 255, 255)},
     };
     flux_brush g =
         flux_brush_linear_gradient((flux_point){0, 0}, (flux_point){(float)W, 0}, stops, 2);
-    EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
-                                                         .clear_color = &black}) == FLUX_OK);
+    OT_EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                            .clear_color = &black}) == FLUX_OK);
     flux_canvas_fill_rect(c, (flux_rect){0, 0, (float)W, (float)H}, &g);
-    EXPECT(flux_canvas_end(c) == FLUX_OK);
+    OT_EXPECT(flux_canvas_end(c) == FLUX_OK);
     fb = flux_canvas_cpu_pixels(c, &w, &h, &stride);
     px(fb, stride, 2, 32, p); /* left → red end */
-    EXPECT(p[0] > 200 && p[2] < 60);
+    OT_EXPECT(p[0] > 200 && p[2] < 60);
     px(fb, stride, 61, 32, p); /* right → blue end */
-    EXPECT(p[2] > 200 && p[0] < 60);
+    OT_EXPECT(p[2] > 200 && p[0] < 60);
     flux_canvas_release(c);
 
     /* Dimensions that overflow the supersample buffer are rejected before any
      * allocation or wrapped size calculation. */
     c = nullptr;
-    EXPECT(flux_canvas_create_cpu(UINT32_MAX, 1, 1.0f, &c) == FLUX_ERROR_OUT_OF_RANGE);
-    EXPECT(c == nullptr);
+    OT_EXPECT(flux_canvas_create_cpu(UINT32_MAX, 1, 1.0f, &c) == FLUX_ERROR_OUT_OF_RANGE);
+    OT_EXPECT(c == nullptr);
 
     /* ---- Unified factory + pass API (Skia SkSurface-style) ---- */
     flux_canvas_desc d = FLUX_CANVAS_DESC_INIT;
@@ -149,36 +149,36 @@ int main(void) {
     d.width = W;
     d.height = H;
     d.scale = 1.0f;
-    EXPECT(flux_canvas_create(&d, &c) == FLUX_OK);
-    EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
-                                                         .frame = nullptr,
-                                                         .clear_color = &black}) == FLUX_OK);
+    OT_EXPECT(flux_canvas_create(&d, &c) == FLUX_OK);
+    OT_EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                            .frame = nullptr,
+                                                            .clear_color = &black}) == FLUX_OK);
     flux_canvas_fill_rect_color(c, (flux_rect){0, 0, (float)W, (float)H}, red);
-    EXPECT(flux_canvas_end(c) == FLUX_OK);
+    OT_EXPECT(flux_canvas_end(c) == FLUX_OK);
     fb = flux_canvas_read_pixels(c, &w, &h, &stride);
-    EXPECT(fb != nullptr && w == W && h == H);
+    OT_EXPECT(fb != nullptr && w == W && h == H);
     px(fb, stride, 32, 32, p);
-    EXPECT(p[0] > 250 && p[1] < 5 && p[2] < 5 && p[3] > 250);
+    OT_EXPECT(p[0] > 250 && p[1] < 5 && p[2] < 5 && p[3] > 250);
 
     /* Descriptor LOAD preserves the previous pass, while explicit NONE
      * permits a clear without asking the backend for multisampling. */
     flux_canvas_pass_desc pd = FLUX_CANVAS_PASS_DESC_INIT;
     pd.antialias = FLUX_CANVAS_ANTIALIAS_NONE;
     pd.frame = nullptr;
-    EXPECT(flux_canvas_begin(c, &pd) == FLUX_OK);
-    EXPECT(flux_canvas_end(c) == FLUX_OK);
+    OT_EXPECT(flux_canvas_begin(c, &pd) == FLUX_OK);
+    OT_EXPECT(flux_canvas_end(c) == FLUX_OK);
     fb = flux_canvas_read_pixels(c, &w, &h, &stride);
     px(fb, stride, 32, 32, p);
-    EXPECT(p[0] > 250 && p[1] < 5 && p[2] < 5 && p[3] > 250);
+    OT_EXPECT(p[0] > 250 && p[1] < 5 && p[2] < 5 && p[3] > 250);
 
     flux_color blue = flux_color_rgba_premul(0, 0, 255, 255);
     pd.clear_color = &blue;
     pd.frame = nullptr;
-    EXPECT(flux_canvas_begin(c, &pd) == FLUX_OK);
-    EXPECT(flux_canvas_end(c) == FLUX_OK);
+    OT_EXPECT(flux_canvas_begin(c, &pd) == FLUX_OK);
+    OT_EXPECT(flux_canvas_end(c) == FLUX_OK);
     fb = flux_canvas_read_pixels(c, &w, &h, &stride);
     px(fb, stride, 32, 32, p);
-    EXPECT(p[0] < 5 && p[1] < 5 && p[2] > 250 && p[3] > 250);
+    OT_EXPECT(p[0] < 5 && p[1] < 5 && p[2] > 250 && p[3] > 250);
 
     /* An explicitly no-stencil pass keeps ordinary CPU solid/image-style
      * operations valid, matching the Vulkan pass contract. */
@@ -187,13 +187,13 @@ int main(void) {
     pd.next = &no_stencil;
     pd.clear_color = &black;
     pd.frame = nullptr;
-    EXPECT(flux_canvas_begin(c, &pd) == FLUX_OK);
+    OT_EXPECT(flux_canvas_begin(c, &pd) == FLUX_OK);
     flux_canvas_fill_rect_color(c, (flux_rect){8, 8, 16, 16}, red);
-    EXPECT(flux_canvas_end(c) == FLUX_OK);
-    EXPECT(flux_canvas_end(c) == FLUX_ERROR_INVALID_STATE);
+    OT_EXPECT(flux_canvas_end(c) == FLUX_OK);
+    OT_EXPECT(flux_canvas_end(c) == FLUX_ERROR_INVALID_STATE);
     fb = flux_canvas_read_pixels(c, &w, &h, &stride);
     px(fb, stride, 12, 12, p);
-    EXPECT(p[0] > 250 && p[1] < 5 && p[2] < 5 && p[3] > 250);
+    OT_EXPECT(p[0] > 250 && p[1] < 5 && p[2] < 5 && p[3] > 250);
 
     /* EVEN_ODD used to be unrepresentable here: the ear-clip path computes
      * non-zero winding, so a no-stencil pass had to diagnose and drop the draw.
@@ -205,42 +205,42 @@ int main(void) {
      * Two nested same-winding squares is the case that separates the rules:
      * non-zero fills both, even-odd leaves the inner one empty. */
     flux_arena arena;
-    EXPECT(flux_arena_init(&arena, 4096, nullptr) == FLUX_OK);
+    OT_EXPECT(flux_arena_init(&arena, 4096, nullptr) == FLUX_OK);
     flux_path *eo_path = nullptr;
-    EXPECT(flux_path_create(&eo_path, &arena) == FLUX_OK);
+    OT_EXPECT(flux_path_create(&eo_path, &arena) == FLUX_OK);
     flux_path_add_rect(eo_path, (flux_rect){8, 8, 24, 24});
     flux_path_add_rect(eo_path, (flux_rect){14, 14, 12, 12});
     flux_brush eo = flux_brush_solid(white);
     pd.clear_color = &black;
     pd.frame = nullptr;
-    EXPECT(flux_canvas_begin(c, &pd) == FLUX_OK);
+    OT_EXPECT(flux_canvas_begin(c, &pd) == FLUX_OK);
     flux_canvas_fill_path(c, eo_path, FLUX_FILL_EVEN_ODD, &eo);
-    EXPECT(flux_canvas_end(c) == FLUX_OK);
+    OT_EXPECT(flux_canvas_end(c) == FLUX_OK);
     fb = flux_canvas_read_pixels(c, &w, &h, &stride);
     px(fb, stride, 11, 20, p); /* between the squares: painted */
-    EXPECT(p[0] > 250 && p[3] > 250);
+    OT_EXPECT(p[0] > 250 && p[3] > 250);
     px(fb, stride, 20, 20, p); /* inside the inner square: the hole */
-    EXPECT(p[0] < 5 && p[3] > 250);
+    OT_EXPECT(p[0] < 5 && p[3] > 250);
     /* Non-zero paints the same path solid, inner square included. */
     pd.frame = nullptr;
-    EXPECT(flux_canvas_begin(c, &pd) == FLUX_OK);
+    OT_EXPECT(flux_canvas_begin(c, &pd) == FLUX_OK);
     flux_canvas_fill_path(c, eo_path, FLUX_FILL_NON_ZERO, &eo);
-    EXPECT(flux_canvas_end(c) == FLUX_OK);
+    OT_EXPECT(flux_canvas_end(c) == FLUX_OK);
     fb = flux_canvas_read_pixels(c, &w, &h, &stride);
     px(fb, stride, 20, 20, p);
-    EXPECT(p[0] > 250 && p[3] > 250);
+    OT_EXPECT(p[0] > 250 && p[3] > 250);
     /* The sticky error was consumed by end; the next pass starts clean. */
     pd.frame = nullptr;
-    EXPECT(flux_canvas_begin(c, &pd) == FLUX_OK);
-    EXPECT(flux_canvas_end(c) == FLUX_OK);
+    OT_EXPECT(flux_canvas_begin(c, &pd) == FLUX_OK);
+    OT_EXPECT(flux_canvas_end(c) == FLUX_OK);
     flux_arena_deinit(&arena);
     pd.next = nullptr;
 
     /* Restore the blue baseline used by the partial-clear preservation check. */
     pd.clear_color = &blue;
     pd.frame = nullptr;
-    EXPECT(flux_canvas_begin(c, &pd) == FLUX_OK);
-    EXPECT(flux_canvas_end(c) == FLUX_OK);
+    OT_EXPECT(flux_canvas_begin(c, &pd) == FLUX_OK);
+    OT_EXPECT(flux_canvas_end(c) == FLUX_OK);
 
     /* A damage scope constrains both the attachment clear and the initial draw
      * scissor. Pixels outside it retain the previous blue pass. */
@@ -248,31 +248,31 @@ int main(void) {
     pd.clear_color = &red;
     pd.damage = (flux_damage){.rects = &dirty, .count = 1};
     pd.frame = nullptr;
-    EXPECT(flux_canvas_begin(c, &pd) == FLUX_OK);
-    EXPECT(flux_canvas_end(c) == FLUX_OK);
+    OT_EXPECT(flux_canvas_begin(c, &pd) == FLUX_OK);
+    OT_EXPECT(flux_canvas_end(c) == FLUX_OK);
     fb = flux_canvas_read_pixels(c, &w, &h, &stride);
     px(fb, stride, 20, 24, p);
-    EXPECT(p[0] > 250 && p[1] < 5 && p[2] < 5 && p[3] > 250);
+    OT_EXPECT(p[0] > 250 && p[1] < 5 && p[2] < 5 && p[3] > 250);
     px(fb, stride, 8, 24, p);
-    EXPECT(p[0] < 5 && p[1] < 5 && p[2] > 250 && p[3] > 250);
+    OT_EXPECT(p[0] < 5 && p[1] < 5 && p[2] > 250 && p[3] > 250);
 
     /* A damage rect entirely outside the framebuffer names no pixel at all, so
      * the pass is rejected rather than silently painting nothing. */
     const flux_rect outside = {W + 4, 0, 2, 4};
     pd.damage = (flux_damage){.rects = &outside, .count = 1};
     pd.frame = nullptr;
-    EXPECT(flux_canvas_begin(c, &pd) == FLUX_ERROR_INVALID_ARGUMENT);
+    OT_EXPECT(flux_canvas_begin(c, &pd) == FLUX_ERROR_INVALID_ARGUMENT);
 
     /* A count with no array is a malformed descriptor, not "the whole extent". */
     pd.damage = (flux_damage){.rects = nullptr, .count = 3};
     pd.frame = nullptr;
-    EXPECT(flux_canvas_begin(c, &pd) == FLUX_ERROR_INVALID_ARGUMENT);
+    OT_EXPECT(flux_canvas_begin(c, &pd) == FLUX_ERROR_INVALID_ARGUMENT);
 
     pd.clear_color = nullptr;
     pd.antialias = FLUX_CANVAS_ANTIALIAS_MSAA_4X;
     pd.damage = (flux_damage){0};
     pd.frame = nullptr;
-    EXPECT(flux_canvas_begin(c, &pd) == FLUX_ERROR_INVALID_ARGUMENT);
+    OT_EXPECT(flux_canvas_begin(c, &pd) == FLUX_ERROR_INVALID_ARGUMENT);
 
     /* ---- Antialias create-time policy (flux_canvas_antialias_desc) -----
      *
@@ -282,26 +282,28 @@ int main(void) {
      * identical flat interiors, 4x less sample-buffer memory. */
     {
         flux_canvas *ss2 = nullptr, *ss1 = nullptr;
-        EXPECT(flux_canvas_create_cpu(64, 64, 1.0f, &ss2) == FLUX_OK);
-        EXPECT(flux_canvas_create_cpu_aa(64, 64, 1.0f, FLUX_CANVAS_ANTIALIAS_NONE, &ss1) ==
-               FLUX_OK);
+        OT_EXPECT(flux_canvas_create_cpu(64, 64, 1.0f, &ss2) == FLUX_OK);
+        OT_EXPECT(flux_canvas_create_cpu_aa(64, 64, 1.0f, FLUX_CANVAS_ANTIALIAS_NONE, &ss1) ==
+                  FLUX_OK);
 
         flux_color black = flux_color_rgba_premul(0, 0, 0, 255);
-        EXPECT(flux_canvas_begin(ss2, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
-                                                               .clear_color = &black}) == FLUX_OK);
+        OT_EXPECT(
+            flux_canvas_begin(ss2, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                            .clear_color = &black}) == FLUX_OK);
         flux_canvas_fill_rect_color(ss2, (flux_rect){16, 16, 32, 32},
                                     flux_color_rgba_premul(255, 0, 0, 255));
-        EXPECT(flux_canvas_end(ss2) == FLUX_OK);
-        EXPECT(flux_canvas_begin(ss1, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
-                                                               .clear_color = &black}) == FLUX_OK);
+        OT_EXPECT(flux_canvas_end(ss2) == FLUX_OK);
+        OT_EXPECT(
+            flux_canvas_begin(ss1, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                            .clear_color = &black}) == FLUX_OK);
         flux_canvas_fill_rect_color(ss1, (flux_rect){16, 16, 32, 32},
                                     flux_color_rgba_premul(255, 0, 0, 255));
-        EXPECT(flux_canvas_end(ss1) == FLUX_OK);
+        OT_EXPECT(flux_canvas_end(ss1) == FLUX_OK);
 
         uint32_t w2, h2, st2, w1, h1, st1;
         const uint8_t *p2 = flux_canvas_cpu_pixels(ss2, &w2, &h2, &st2);
         const uint8_t *p1 = flux_canvas_cpu_pixels(ss1, &w1, &h1, &st1);
-        EXPECT(p2 && p1 && w2 == 64 && w1 == 64);
+        OT_EXPECT(p2 && p1 && w2 == 64 && w1 == 64);
 
         /* Flat interiors must be byte-identical: supersampling only
          * affects coverage edges. */
@@ -318,9 +320,9 @@ int main(void) {
                     solid1++;
             }
         }
-        EXPECT(interior_mismatch == 0);
-        EXPECT(solid2 >= 32 * 32);
-        EXPECT(solid1 >= 32 * 32);
+        OT_EXPECT(interior_mismatch == 0);
+        OT_EXPECT(solid2 >= 32 * 32);
+        OT_EXPECT(solid1 >= 32 * 32);
 
         flux_canvas_release(ss2);
         flux_canvas_release(ss1);
@@ -336,12 +338,12 @@ int main(void) {
         cd.height = 8;
         cd.next = &aa;
         flux_canvas *c = nullptr;
-        EXPECT(flux_canvas_create(&cd, &c) == FLUX_OK);
-        EXPECT(c != nullptr);
+        OT_EXPECT(flux_canvas_create(&cd, &c) == FLUX_OK);
+        OT_EXPECT(c != nullptr);
         flux_canvas_release(c);
     }
 
     flux_canvas_release(c);
 
-    TEST_SUMMARY();
+    return OT_REPORT();
 }

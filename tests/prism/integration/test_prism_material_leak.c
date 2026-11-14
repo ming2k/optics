@@ -11,7 +11,8 @@
  * slab, and counting that one-time growth as a leak would force a slack
  * constant back in. The assertion is exact between two identical iterations.
  */
-#include "../../flux/test_helpers.h"
+#include "flux_test.h"
+#include "optics_test.h"
 
 #include <flux/observe.h>
 #include <prism/prism.h>
@@ -41,9 +42,9 @@ static void expect_back(flux_device *d, const char *kind, const char *what,
     if (after.live != before->live) {
         fprintf(stderr, "FAIL %s: %s leaked in prism's own row (live %llu -> %llu)\n", __FILE__,
                 what, (unsigned long long)before->live, (unsigned long long)after.live);
-        g_test_failed++;
+        OT_MANUAL_FAIL();
     }
-    g_test_count++;
+    OT_MANUAL_CHECK();
 }
 
 typedef flux_result (*create_fn)(flux_device *, void **);
@@ -65,9 +66,9 @@ static void lane(flux_device *d, const char *kind, const char *what, create_fn c
     flux_observe_counters pipe_before = flux_row(d, "vk_pipeline");
 
     void *obj = nullptr;
-    EXPECT(create(d, &obj) == FLUX_OK);
+    OT_EXPECT(create(d, &obj) == FLUX_OK);
     flux_observe_counters during = row(d, kind);
-    EXPECT(during.live == before.live + 1);
+    OT_EXPECT(during.live == before.live + 1);
 
     release(obj);
     flux_device_wait_idle(d);
@@ -81,15 +82,15 @@ static void lane(flux_device *d, const char *kind, const char *what, create_fn c
     if (img_after.live != img_before.live) {
         fprintf(stderr, "FAIL %s: %s left vk_image live (%llu -> %llu)\n", __FILE__, what,
                 (unsigned long long)img_before.live, (unsigned long long)img_after.live);
-        g_test_failed++;
+        OT_MANUAL_FAIL();
     }
-    g_test_count++;
+    OT_MANUAL_CHECK();
     if (pipe_after.live != pipe_before.live) {
         fprintf(stderr, "FAIL %s: %s left vk_pipeline live (%llu -> %llu)\n", __FILE__, what,
                 (unsigned long long)pipe_before.live, (unsigned long long)pipe_after.live);
-        g_test_failed++;
+        OT_MANUAL_FAIL();
     }
-    g_test_count++;
+    OT_MANUAL_CHECK();
 }
 
 /* Adapters: the prism entry points take typed out-parameters. */
@@ -134,28 +135,28 @@ static void lane_detects_a_real_prism_leak(flux_device *d) {
                                                            .capacity = 32,
                                                            .scope = SCOPE,
                                                        });
-    EXPECT(rep.result == FLUX_OK);
+    OT_EXPECT(rep.result == FLUX_OK);
 
     bool saw_prism_row = false;
     for (uint32_t i = 0; i < rep.count; ++i) {
         if (rows[i].owner && strcmp(rows[i].owner, OWNER) == 0) {
             saw_prism_row = true;
-            EXPECT(rows[i].live >= 1);
+            OT_EXPECT(rows[i].live >= 1);
             /* The whole point of ADR-0134: it must NOT be attributed to flux. */
-            EXPECT(strcmp(rows[i].owner, "flux/core") != 0);
+            OT_EXPECT(strcmp(rows[i].owner, "flux/core") != 0);
         }
     }
-    EXPECT(saw_prism_row);
+    OT_EXPECT(saw_prism_row);
 
     prism_mica_filter_release((prism_mica_filter *)leaked);
     flux_device_wait_idle(d);
 }
 
 int main(void) {
-    flux_device *d = test_helpers_make_headless_device();
+    flux_device *d = flux_test_make_headless_device();
     if (!d) {
         fprintf(stderr, "test_prism_material_leak: no Vulkan device; skipping\n");
-        TEST_SUMMARY();
+        OT_SKIP("no Vulkan device");
     }
 
     lane(d, "filter_mica", "prism_mica_filter", make_mica, drop_mica);
@@ -165,5 +166,5 @@ int main(void) {
     lane_detects_a_real_prism_leak(d);
 
     flux_device_release(d);
-    TEST_SUMMARY();
+    return OT_REPORT();
 }

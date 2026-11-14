@@ -1503,6 +1503,14 @@ void flux_device_wait_idle(const flux_device *d) {
     flux_device *mut = (flux_device *)d;
     flux_vk_note_graphics_completed(
         mut, atomic_load_explicit(&mut->submit_serial, memory_order_acquire));
+    /* An idle device proves every parked upload fence has signaled too.
+     * Recycle those entries here for the same reason as the retire FIFO
+     * below: wait_idle is the host's "everything I released is gone"
+     * barrier, and without this they sit on the pending-upload list until
+     * the next upload happens to sweep them or the device is destroyed.
+     * Staging buffers return to the reuse cache by design, so the cache
+     * itself remains live. */
+    flux_vk_upload_pending_drain(mut);
     /* An idle device means every parked resource is provably unreferenced,
      * so drain the retire FIFO here rather than leaving it to the async
      * sweep. Hosts and tests use this call as the "everything I released is

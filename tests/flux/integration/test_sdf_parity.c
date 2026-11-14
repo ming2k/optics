@@ -22,7 +22,8 @@
  * budget is a few ulp at these magnitudes, asserted as an absolute epsilon
  * well below a 1/255 pixel step.
  */
-#include "test_helpers.h"
+#include "flux_test.h"
+#include "optics_test.h"
 #include <flux/compute.h>
 #include <flux/flux.h>
 #include <flux/sdf.h>
@@ -88,10 +89,10 @@ typedef struct case_desc {
 } case_desc;
 
 int main(void) {
-    flux_device *d = test_helpers_make_headless_device();
+    flux_device *d = flux_test_make_headless_device();
     if (!d) {
         fprintf(stderr, "test_sdf_parity: no Vulkan device; skipping\n");
-        TEST_SUMMARY();
+        OT_SKIP("no Vulkan device");
     }
 
     VkDevice vk = flux_device_vk_device(d);
@@ -108,14 +109,14 @@ int main(void) {
             .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
             .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
         };
-        EXPECT(vkCreateBuffer(vk, &bci, nullptr, &buffer) == VK_SUCCESS);
+        OT_EXPECT(vkCreateBuffer(vk, &bci, nullptr, &buffer) == VK_SUCCESS);
 
         VkMemoryRequirements mr;
         vkGetBufferMemoryRequirements(vk, buffer, &mr);
-        uint32_t mt = test_helpers_find_memory_type(d, mr.memoryTypeBits,
-                                                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                                                        VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-        EXPECT(mt != UINT32_MAX);
+        uint32_t mt = flux_test_find_memory_type(d, mr.memoryTypeBits,
+                                                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                                     VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+        OT_EXPECT(mt != UINT32_MAX);
         VkMemoryAllocateFlagsInfo flags = {
             .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO,
             .flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT,
@@ -126,15 +127,15 @@ int main(void) {
             .allocationSize = mr.size,
             .memoryTypeIndex = mt,
         };
-        EXPECT(vkAllocateMemory(vk, &mai, nullptr, &memory) == VK_SUCCESS);
-        EXPECT(vkBindBufferMemory(vk, buffer, memory, 0) == VK_SUCCESS);
+        OT_EXPECT(vkAllocateMemory(vk, &mai, nullptr, &memory) == VK_SUCCESS);
+        OT_EXPECT(vkBindBufferMemory(vk, buffer, memory, 0) == VK_SUCCESS);
 
         VkBufferDeviceAddressInfo bdai = {
             .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
             .buffer = buffer,
         };
         (void)bdai;
-        EXPECT(vkMapMemory(vk, memory, 0, BYTES, 0, &mapped) == VK_SUCCESS);
+        OT_EXPECT(vkMapMemory(vk, memory, 0, BYTES, 0, &mapped) == VK_SUCCESS);
     }
 
     VkBufferDeviceAddressInfo bdai = {
@@ -142,7 +143,7 @@ int main(void) {
         .buffer = buffer,
     };
     const uint64_t buffer_address = vkGetBufferDeviceAddress(vk, &bdai);
-    EXPECT(buffer_address != 0);
+    OT_EXPECT(buffer_address != 0);
 
     flux_compute_pipeline *pipeline = nullptr;
     {
@@ -153,7 +154,7 @@ int main(void) {
             .push_constant_bytes = sizeof(push_constants),
         };
         flux_result r = flux_compute_pipeline_create(d, &desc, &pipeline);
-        EXPECT(r == FLUX_OK);
+        OT_EXPECT(r == FLUX_OK);
         if (r != FLUX_OK) {
             flux_error_info info = {0};
             flux_get_last_error(&info);
@@ -195,19 +196,19 @@ int main(void) {
                     .flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT,
                     .queueFamilyIndex = qfam,
                 };
-                EXPECT(vkCreateCommandPool(vk, &pci, nullptr, &pool) == VK_SUCCESS);
+                OT_EXPECT(vkCreateCommandPool(vk, &pci, nullptr, &pool) == VK_SUCCESS);
                 VkCommandBufferAllocateInfo cbai = {
                     .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
                     .commandPool = pool,
                     .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
                     .commandBufferCount = 1,
                 };
-                EXPECT(vkAllocateCommandBuffers(vk, &cbai, &cmd) == VK_SUCCESS);
+                OT_EXPECT(vkAllocateCommandBuffers(vk, &cbai, &cmd) == VK_SUCCESS);
                 VkCommandBufferBeginInfo bi = {
                     .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
                     .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
                 };
-                EXPECT(vkBeginCommandBuffer(cmd, &bi) == VK_SUCCESS);
+                OT_EXPECT(vkBeginCommandBuffer(cmd, &bi) == VK_SUCCESS);
             }
 
             push_constants pc = {
@@ -243,15 +244,15 @@ int main(void) {
                 vkCmdPipelineBarrier2(cmd, &di);
             }
 
-            EXPECT(vkEndCommandBuffer(cmd) == VK_SUCCESS);
+            OT_EXPECT(vkEndCommandBuffer(cmd) == VK_SUCCESS);
             {
                 VkSubmitInfo si = {
                     .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
                     .commandBufferCount = 1,
                     .pCommandBuffers = &cmd,
                 };
-                EXPECT(vkQueueSubmit(queue, 1, &si, VK_NULL_HANDLE) == VK_SUCCESS);
-                EXPECT(vkQueueWaitIdle(queue) == VK_SUCCESS);
+                OT_EXPECT(vkQueueSubmit(queue, 1, &si, VK_NULL_HANDLE) == VK_SUCCESS);
+                OT_EXPECT(vkQueueWaitIdle(queue) == VK_SUCCESS);
             }
             vkDestroyCommandPool(vk, pool, nullptr);
 
@@ -350,7 +351,7 @@ int main(void) {
                     !isfinite(host.normal.y)) {
                     fprintf(stderr, "test_sdf_parity[%s]: host non-finite at sample %u\n", cs->name,
                             i);
-                    EXPECT(false);
+                    OT_EXPECT(false);
                     continue;
                 }
 
@@ -371,7 +372,7 @@ int main(void) {
                     fprintf(stderr,
                             "test_sdf_parity[%s/%u]: distance drift at %u: host=%.7f gpu=%.7f\n",
                             cs->name, mode, i, (double)host.distance, (double)gpu_d);
-                    EXPECT(false);
+                    OT_EXPECT(false);
                 }
                 /* Unit vectors: normal_tol is derived above from the crease ramp's
                  * conditioning, so this bounds arithmetic order noise rather than
@@ -382,14 +383,14 @@ int main(void) {
                             "gpu=(%.7f,%.7f) tol=%.2e\n",
                             cs->name, mode, i, (double)host.normal.x, (double)host.normal.y,
                             (double)gpu_nx, (double)gpu_ny, normal_tol);
-                    EXPECT(false);
+                    OT_EXPECT(false);
                 }
             }
 
             /* Every sample must be either compared or explicitly excused. A run
              * that skipped everything would otherwise pass vacuously. */
-            EXPECT(compared > 0u);
-            EXPECT(compared + skipped_discontinuity == SAMPLE_COUNT);
+            OT_EXPECT(compared > 0u);
+            OT_EXPECT(compared + skipped_discontinuity == SAMPLE_COUNT);
             fprintf(stderr,
                     "test_sdf_parity[%s/%u]: %u compared (%u at the crease, skipped), "
                     "max|dd|=%.3e max|dn|=%.3e\n",
@@ -403,6 +404,5 @@ int main(void) {
     vkFreeMemory(vk, memory, nullptr);
     flux_device_release(d);
 
-    TEST_SUMMARY();
-    return 0;
+    return OT_REPORT();
 }

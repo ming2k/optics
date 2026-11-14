@@ -5,7 +5,7 @@
  *   - Layer 0: Vulkan 1.3 RHI & 2D Vector Canvas (flux)
  *   - Layer 1: HarfBuzz Text Shaping & Typography (glyph)
  *   - Layer 2: Visual Capabilities, Material Optics (prism), Motion (transit), 3D (vista)
- *   - Document: SVG Static Art Compiler (svg)
+ *   - Document: SVG Static Art Compiler (reticle)
  *   - Layer 3: UI State Engine (lens) & Native Window Shell (iris)
  */
 
@@ -23,7 +23,7 @@
 #define OPTICS_VERSION_PATCH 79
 
 #define OPTICS_VERSION_NUMBER                                                                      \
-    (((uint32_t)OPTICS_VERSION_MAJOR << 16) | ((uint32_t)OPTICS_VERSION_MINOR << 8) |             \
+    (((uint32_t)OPTICS_VERSION_MAJOR << 16) | ((uint32_t)OPTICS_VERSION_MINOR << 8) |              \
      (uint32_t)OPTICS_VERSION_PATCH)
 
 /* Layer 0: Rendering Foundation & Rasterization Core */
@@ -57,7 +57,7 @@
 #endif
 
 /* Layer 3: UI State & Platform Shell */
-#include <lens/lens.h>
 #include <iris/iris.h>
+#include <lens/lens.h>
 
 #endif /* OPTICS_H */

@@ -5,7 +5,8 @@
  * production-critical ownership rule on failures: flux must not close
  * caller-owned fds unless import succeeds.
  */
-#include "test_helpers.h"
+#include "flux_test.h"
+#include "optics_test.h"
 #include <flux/dmabuf.h>
 #include <flux/flux.h>
 #include <flux/vulkan.h>
@@ -38,18 +39,19 @@ static bool fd_is_open(int fd) {
 }
 
 int main(void) {
-    EXPECT(flux_dmabuf_supported(nullptr) == false);
-    EXPECT(flux_dmabuf_sync_supported(nullptr) == false);
-    EXPECT(flux_image_import_dmabuf(nullptr, nullptr, nullptr) == FLUX_ERROR_INVALID_ARGUMENT);
+    bool skipped_real_import = false;
+    OT_EXPECT(flux_dmabuf_supported(nullptr) == false);
+    OT_EXPECT(flux_dmabuf_sync_supported(nullptr) == false);
+    OT_EXPECT(flux_image_import_dmabuf(nullptr, nullptr, nullptr) == FLUX_ERROR_INVALID_ARGUMENT);
 
-    flux_device *d = test_helpers_make_headless_device();
+    flux_device *d = flux_test_make_headless_device();
     if (!d) {
         fprintf(stderr, "test_dmabuf: no Vulkan device; skipping device checks\n");
-        TEST_SUMMARY();
+        OT_SKIP("no Vulkan device");
     }
 
-    EXPECT(flux_dmabuf_supported(d) == false);
-    EXPECT(flux_dmabuf_sync_supported(d) == false);
+    OT_EXPECT(flux_dmabuf_supported(d) == false);
+    OT_EXPECT(flux_dmabuf_sync_supported(d) == false);
 
     flux_image *img = (flux_image *)0x1;
     flux_dmabuf_image_desc desc = FLUX_DMABUF_IMAGE_DESC_INIT;
@@ -59,30 +61,30 @@ int main(void) {
     desc.plane_count = 1;
     desc.planes[0].fd = -1;
     desc.planes[0].stride = 64 * 4;
-    EXPECT(flux_image_import_dmabuf(d, &desc, &img) == FLUX_ERROR_INVALID_ARGUMENT);
-    EXPECT(img == nullptr);
+    OT_EXPECT(flux_image_import_dmabuf(d, &desc, &img) == FLUX_ERROR_INVALID_ARGUMENT);
+    OT_EXPECT(img == nullptr);
 
     desc.has_acquire_sync_fd = true;
     desc.acquire_sync_fd = -1;
-    EXPECT(flux_image_import_dmabuf(d, &desc, &img) == FLUX_ERROR_INVALID_ARGUMENT);
-    EXPECT(img == nullptr);
+    OT_EXPECT(flux_image_import_dmabuf(d, &desc, &img) == FLUX_ERROR_INVALID_ARGUMENT);
+    OT_EXPECT(img == nullptr);
     desc.has_acquire_sync_fd = false;
     desc.acquire_sync_fd = 0;
 
     int fd = open("/dev/null", O_RDONLY | O_CLOEXEC);
     if (fd >= 0) {
         desc.planes[0].fd = fd;
-        EXPECT(flux_image_import_dmabuf(d, &desc, &img) == FLUX_ERROR_UNSUPPORTED);
-        EXPECT(img == nullptr);
-        EXPECT(fd_is_open(fd));
+        OT_EXPECT(flux_image_import_dmabuf(d, &desc, &img) == FLUX_ERROR_UNSUPPORTED);
+        OT_EXPECT(img == nullptr);
+        OT_EXPECT(fd_is_open(fd));
         close(fd);
     }
 
     fd = open("/dev/null", O_RDONLY | O_CLOEXEC);
     if (fd >= 0) {
-        EXPECT(flux_canvas_wait_dmabuf_acquire(nullptr, nullptr, fd) ==
-               FLUX_ERROR_INVALID_ARGUMENT);
-        EXPECT(fd_is_open(fd));
+        OT_EXPECT(flux_canvas_wait_dmabuf_acquire(nullptr, nullptr, fd) ==
+                  FLUX_ERROR_INVALID_ARGUMENT);
+        OT_EXPECT(fd_is_open(fd));
         close(fd);
     }
 
@@ -92,17 +94,17 @@ int main(void) {
         desc.plane_count = 2;
         desc.planes[1].fd = fd;
         desc.planes[1].stride = 64 * 4;
-        EXPECT(flux_image_import_dmabuf(d, &desc, &img) == FLUX_ERROR_UNSUPPORTED);
-        EXPECT(img == nullptr);
-        EXPECT(fd_is_open(fd));
+        OT_EXPECT(flux_image_import_dmabuf(d, &desc, &img) == FLUX_ERROR_UNSUPPORTED);
+        OT_EXPECT(img == nullptr);
+        OT_EXPECT(fd_is_open(fd));
         close(fd);
     }
 
     flux_device_release(d);
 
-    flux_device *dd = test_helpers_make_dmabuf_device();
+    flux_device *dd = flux_test_make_dmabuf_device();
     if (dd) {
-        EXPECT(flux_dmabuf_supported(dd) == true);
+        OT_EXPECT(flux_dmabuf_supported(dd) == true);
 
         flux_surface_desc sd = FLUX_SURFACE_DESC_INIT;
         sd.width = 16;
@@ -111,13 +113,13 @@ int main(void) {
 
         flux_surface_dmabuf_desc invalid_export = FLUX_SURFACE_DMABUF_DESC_INIT;
         sd.next = &invalid_export;
-        EXPECT(flux_surface_create(dd, &sd, &surface) == FLUX_ERROR_INVALID_ARGUMENT);
-        EXPECT(surface == nullptr);
+        OT_EXPECT(flux_surface_create(dd, &sd, &surface) == FLUX_ERROR_INVALID_ARGUMENT);
+        OT_EXPECT(surface == nullptr);
 
         uint64_t supported_modifiers[512];
         uint32_t supported_modifier_count = 512;
-        EXPECT(flux_dmabuf_format_modifiers(dd, FLUX_FORMAT_BGRA8_UNORM, supported_modifiers,
-                                            &supported_modifier_count) == FLUX_OK);
+        OT_EXPECT(flux_dmabuf_format_modifiers(dd, FLUX_FORMAT_BGRA8_UNORM, supported_modifiers,
+                                               &supported_modifier_count) == FLUX_OK);
         flux_surface_dmabuf_desc exportable = FLUX_SURFACE_DMABUF_DESC_INIT;
         if (supported_modifier_count > 0) {
             exportable.modifiers = supported_modifiers;
@@ -138,31 +140,31 @@ int main(void) {
                  * begin must reset it, or the retry's vkQueueSubmit2 would start
                  * from an already-signalled binary semaphore. */
                 flux_frame *abandoned = nullptr;
-                EXPECT(flux_surface_begin_frame(surface, nullptr, &abandoned) == FLUX_OK);
-                EXPECT(flux_frame_submit(abandoned) == FLUX_OK);
+                OT_EXPECT(flux_surface_begin_frame(surface, nullptr, &abandoned) == FLUX_OK);
+                OT_EXPECT(flux_frame_submit(abandoned) == FLUX_OK);
                 flux_frame_abandon(abandoned);
                 /* Abandon consumed the frame: later transitions reject. */
-                EXPECT(flux_frame_present(abandoned) == FLUX_ERROR_INVALID_STATE);
+                OT_EXPECT(flux_frame_present(abandoned) == FLUX_ERROR_INVALID_STATE);
 
                 flux_frame *retry = nullptr;
-                EXPECT(flux_surface_begin_frame(surface, nullptr, &retry) == FLUX_OK);
-                EXPECT(flux_frame_submit(retry) == FLUX_OK);
-                EXPECT(flux_frame_present(retry) == FLUX_OK);
+                OT_EXPECT(flux_surface_begin_frame(surface, nullptr, &retry) == FLUX_OK);
+                OT_EXPECT(flux_frame_submit(retry) == FLUX_OK);
+                OT_EXPECT(flux_frame_present(retry) == FLUX_OK);
 
                 flux_frame *frame = nullptr;
-                EXPECT(flux_surface_begin_frame(surface, nullptr, &frame) == FLUX_OK);
-                EXPECT(flux_frame_submit(frame) == FLUX_OK);
-                EXPECT(flux_frame_present(frame) == FLUX_OK);
+                OT_EXPECT(flux_surface_begin_frame(surface, nullptr, &frame) == FLUX_OK);
+                OT_EXPECT(flux_frame_submit(frame) == FLUX_OK);
+                OT_EXPECT(flux_frame_present(frame) == FLUX_OK);
                 int exported = -1;
                 int sync_fd = -1;
                 if (flux_dmabuf_sync_supported(dd)) {
-                    EXPECT(flux_surface_export_dmabuf_explicit(surface, &exported, &sync_fd) ==
-                           FLUX_OK);
-                    EXPECT(fd_is_open(sync_fd));
+                    OT_EXPECT(flux_surface_export_dmabuf_explicit(surface, &exported, &sync_fd) ==
+                              FLUX_OK);
+                    OT_EXPECT(fd_is_open(sync_fd));
                 } else {
-                    EXPECT(flux_surface_export_dmabuf(surface, &exported) == FLUX_OK);
+                    OT_EXPECT(flux_surface_export_dmabuf(surface, &exported) == FLUX_OK);
                 }
-                EXPECT(fd_is_open(exported));
+                OT_EXPECT(fd_is_open(exported));
 
                 uint64_t produced_modifier = flux_surface_dmabuf_modifier(surface);
                 if (exported >= 0) {
@@ -181,28 +183,28 @@ int main(void) {
                     flux_result imported_result =
                         flux_image_import_dmabuf(dd, &imported_desc, &sampled);
                     if (imported_result == FLUX_OK) {
-                        EXPECT(!fd_is_open(exported));
+                        OT_EXPECT(!fd_is_open(exported));
                         if (sync_fd >= 0)
-                            EXPECT(!fd_is_open(sync_fd));
+                            OT_EXPECT(!fd_is_open(sync_fd));
 
                         /* A borrowed import may be sampled now but must not be
                          * frozen into a retained DisplayList; dynamic input
                          * slots are the supported path. */
                         flux_image *borrowed_snapshot = nullptr;
-                        EXPECT(flux_image_snapshot(sampled, &borrowed_snapshot) ==
-                               FLUX_ERROR_INVALID_STATE);
-                        EXPECT(borrowed_snapshot == nullptr);
+                        OT_EXPECT(flux_image_snapshot(sampled, &borrowed_snapshot) ==
+                                  FLUX_ERROR_INVALID_STATE);
+                        OT_EXPECT(borrowed_snapshot == nullptr);
 
                         flux_surface_desc consumer_desc = FLUX_SURFACE_DESC_INIT;
                         consumer_desc.width = 16;
                         consumer_desc.height = 16;
                         flux_surface *consumer = nullptr;
-                        EXPECT(flux_surface_create(dd, &consumer_desc, &consumer) == FLUX_OK);
+                        OT_EXPECT(flux_surface_create(dd, &consumer_desc, &consumer) == FLUX_OK);
                         if (consumer) {
                             flux_canvas_desc canvas_desc = FLUX_CANVAS_DESC_INIT;
                             canvas_desc.surface = consumer;
                             flux_canvas *canvas = nullptr;
-                            EXPECT(flux_canvas_create(&canvas_desc, &canvas) == FLUX_OK);
+                            OT_EXPECT(flux_canvas_create(&canvas_desc, &canvas) == FLUX_OK);
                             if (canvas) {
                                 /* Repeated frames exercise release/reacquire
                                  * without rebuilding `sampled`. Eight frames
@@ -214,39 +216,40 @@ int main(void) {
                                     int reuse_sync_fd = -1;
                                     if (frame_index > 0 && flux_dmabuf_sync_supported(dd)) {
                                         flux_frame *producer_frame = nullptr;
-                                        EXPECT(flux_surface_begin_frame(
-                                                   surface, nullptr, &producer_frame) == FLUX_OK);
-                                        EXPECT(flux_frame_submit(producer_frame) == FLUX_OK);
-                                        EXPECT(flux_frame_present(producer_frame) == FLUX_OK);
+                                        OT_EXPECT(flux_surface_begin_frame(surface, nullptr,
+                                                                           &producer_frame) ==
+                                                  FLUX_OK);
+                                        OT_EXPECT(flux_frame_submit(producer_frame) == FLUX_OK);
+                                        OT_EXPECT(flux_frame_present(producer_frame) == FLUX_OK);
                                         int unused_dmabuf = -1;
-                                        EXPECT(flux_surface_export_dmabuf_explicit(
-                                                   surface, &unused_dmabuf, &reuse_sync_fd) ==
-                                               FLUX_OK);
-                                        EXPECT(fd_is_open(unused_dmabuf));
-                                        EXPECT(fd_is_open(reuse_sync_fd));
+                                        OT_EXPECT(flux_surface_export_dmabuf_explicit(
+                                                      surface, &unused_dmabuf, &reuse_sync_fd) ==
+                                                  FLUX_OK);
+                                        OT_EXPECT(fd_is_open(unused_dmabuf));
+                                        OT_EXPECT(fd_is_open(reuse_sync_fd));
                                         if (unused_dmabuf >= 0)
                                             close(unused_dmabuf);
                                     }
 
                                     flux_frame *consumer_frame = nullptr;
-                                    EXPECT(flux_surface_begin_frame(consumer, nullptr,
-                                                                    &consumer_frame) == FLUX_OK);
+                                    OT_EXPECT(flux_surface_begin_frame(consumer, nullptr,
+                                                                       &consumer_frame) == FLUX_OK);
                                     flux_color clear = flux_color_rgba(0, 0, 0, 255);
-                                    EXPECT(flux_canvas_begin(
-                                               canvas, &(flux_canvas_pass_desc){
-                                                           .type = FLUX_TYPE_CANVAS_PASS_DESC,
-                                                           .frame = consumer_frame,
-                                                           .clear_color = &clear}) == FLUX_OK);
+                                    OT_EXPECT(flux_canvas_begin(
+                                                  canvas, &(flux_canvas_pass_desc){
+                                                              .type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                              .frame = consumer_frame,
+                                                              .clear_color = &clear}) == FLUX_OK);
                                     if (reuse_sync_fd >= 0) {
-                                        EXPECT(flux_canvas_wait_dmabuf_acquire(
-                                                   canvas, sampled, reuse_sync_fd) == FLUX_OK);
-                                        EXPECT(!fd_is_open(reuse_sync_fd));
+                                        OT_EXPECT(flux_canvas_wait_dmabuf_acquire(
+                                                      canvas, sampled, reuse_sync_fd) == FLUX_OK);
+                                        OT_EXPECT(!fd_is_open(reuse_sync_fd));
                                     }
                                     flux_canvas_draw_image(canvas, sampled,
                                                            (flux_rect){0, 0, 16, 16}, nullptr);
-                                    EXPECT(flux_canvas_end(canvas) == FLUX_OK);
-                                    EXPECT(flux_frame_submit(consumer_frame) == FLUX_OK);
-                                    EXPECT(flux_frame_present(consumer_frame) == FLUX_OK);
+                                    OT_EXPECT(flux_canvas_end(canvas) == FLUX_OK);
+                                    OT_EXPECT(flux_frame_submit(consumer_frame) == FLUX_OK);
+                                    OT_EXPECT(flux_frame_present(consumer_frame) == FLUX_OK);
                                 }
                                 flux_canvas_release(canvas);
                             }
@@ -254,10 +257,10 @@ int main(void) {
                         }
                         flux_image_release(sampled);
                     } else {
-                        EXPECT(fd_is_open(exported));
+                        OT_EXPECT(fd_is_open(exported));
                         close(exported);
                         if (sync_fd >= 0) {
-                            EXPECT(fd_is_open(sync_fd));
+                            OT_EXPECT(fd_is_open(sync_fd));
                             close(sync_fd);
                         }
                     }
@@ -268,8 +271,8 @@ int main(void) {
                 constrained.modifier_count = 1;
                 sd.next = &constrained;
                 flux_surface *shared = nullptr;
-                EXPECT(flux_surface_create(dd, &sd, &shared) == FLUX_OK);
-                EXPECT(shared != nullptr && flux_surface_exportable(shared));
+                OT_EXPECT(flux_surface_create(dd, &sd, &shared) == FLUX_OK);
+                OT_EXPECT(shared != nullptr && flux_surface_exportable(shared));
                 if (shared)
                     flux_surface_release(shared);
             }
@@ -289,7 +292,7 @@ int main(void) {
                 .format = FLUX_FORMAT_RGBA8_UNORM,
             };
             flux_image *probe = nullptr;
-            EXPECT(flux_image_create(dd, &probe_desc, &probe) == FLUX_OK);
+            OT_EXPECT(flux_image_create(dd, &probe_desc, &probe) == FLUX_OK);
             flux_memory_stats before;
             flux_device_memory_stats(dd, &before);
 
@@ -305,42 +308,46 @@ int main(void) {
             flux_image *imported = nullptr;
             flux_result rr = flux_image_import_dmabuf(dd, &real, &imported);
             if (rr == FLUX_OK) {
-                EXPECT(imported != nullptr);
-                EXPECT(!fd_is_open(dmabuf_fd));
+                OT_EXPECT(imported != nullptr);
+                OT_EXPECT(!fd_is_open(dmabuf_fd));
 
                 /* Imported memory bypasses the slab but must still be
                  * counted (ADR: stats and the teardown leak warning see
                  * external memory). */
                 flux_memory_stats after_import;
                 flux_device_memory_stats(dd, &after_import);
-                EXPECT(after_import.live_allocations == before.live_allocations + 1);
-                EXPECT(after_import.bytes_in_use > before.bytes_in_use);
+                OT_EXPECT(after_import.live_allocations == before.live_allocations + 1);
+                OT_EXPECT(after_import.bytes_in_use > before.bytes_in_use);
 
                 flux_image_release(imported);
 
                 /* A fresh upload sweeps the import's retire zombie; the
                  * import's bytes must be uncounted again. */
                 flux_image *tmp = nullptr;
-                EXPECT(flux_image_create(dd, &probe_desc, &tmp) == FLUX_OK);
+                OT_EXPECT(flux_image_create(dd, &probe_desc, &tmp) == FLUX_OK);
                 flux_memory_stats settled;
                 flux_device_memory_stats(dd, &settled);
-                EXPECT(settled.live_allocations == before.live_allocations + 1);
-                EXPECT(settled.bytes_in_use < after_import.bytes_in_use);
+                OT_EXPECT(settled.live_allocations == before.live_allocations + 1);
+                OT_EXPECT(settled.bytes_in_use < after_import.bytes_in_use);
                 flux_image_release(tmp);
             } else {
-                EXPECT(imported == nullptr);
-                EXPECT(fd_is_open(dmabuf_fd));
+                OT_EXPECT(imported == nullptr);
+                OT_EXPECT(fd_is_open(dmabuf_fd));
                 close(dmabuf_fd);
             }
             flux_image_release(probe);
         } else {
+            skipped_real_import = true;
             fprintf(stderr,
                     "test_dmabuf: /dev/dma_heap/system unavailable; skipping real import\n");
         }
         flux_device_release(dd);
     } else {
+        skipped_real_import = true;
         fprintf(stderr, "test_dmabuf: dmabuf extensions unavailable; skipping real import\n");
     }
 
-    TEST_SUMMARY();
+    if (skipped_real_import)
+        OT_SKIP("dmabuf real import unavailable");
+    return OT_REPORT();
 }

@@ -1,6 +1,7 @@
 /* test_pressable.c — composable single-target interaction containers. */
 
-#include "test_helpers.h"
+#include "lens_test.h"
+#include "optics_test.h"
 #include <lens/lens.h>
 
 static const lens_input IN0 = {.display_size = {400, 200}, .dt_seconds = 0.016f};
@@ -26,34 +27,34 @@ static lens_response build_pressable(lens *ui) {
 
 static void test_complete_row_is_one_hit_target(void) {
     lens *ui = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
 
     lens_begin(ui, &IN0);
-    CHECK(!build_pressable(ui).hovered);
-    test_end(ui);
+    OT_EXPECT(!build_pressable(ui).hovered);
+    lens_test_end(ui);
 
     lens_input in = IN0;
     in.cursor = (flux_point){220.0f, 60.0f}; /* trailing whitespace, past both children */
     in.mouse_pressed[LENS_MOUSE_LEFT] = true;
     lens_begin(ui, &in);
     lens_response pressed = build_pressable(ui);
-    test_end(ui);
-    CHECK(pressed.hovered);
-    CHECK(pressed.pressed);
-    CHECK(lens_get_cursor_hint(ui) == LENS_CURSOR_POINTER);
+    lens_test_end(ui);
+    OT_EXPECT(pressed.hovered);
+    OT_EXPECT(pressed.pressed);
+    OT_EXPECT(lens_get_cursor_hint(ui) == LENS_CURSOR_POINTER);
 
     in = IN0;
     in.cursor = (flux_point){220.0f, 60.0f};
     in.mouse_released[LENS_MOUSE_LEFT] = true;
     lens_begin(ui, &in);
     lens_response released = build_pressable(ui);
-    test_end(ui);
-    CHECK(released.clicked);
+    lens_test_end(ui);
+    OT_EXPECT(released.clicked);
 
     lens_release(ui);
 }
 
 int main(void) {
     test_complete_row_is_one_hit_target();
-    return TEST_REPORT();
+    return OT_REPORT();
 }

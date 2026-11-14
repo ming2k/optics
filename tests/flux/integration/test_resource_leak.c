@@ -13,9 +13,10 @@
  *
  * The kind vocabulary is the one declared in <flux/observe.h>. Every row this
  * file touches must exist there — a kind that is missing is a coverage hole
- * the guardrail (tools/gate check leaks) reports independently.
+ * the resource ledger reports independently.
  */
-#include "test_helpers.h"
+#include "flux_test.h"
+#include "optics_test.h"
 
 #include <flux/flux.h>
 #include <flux/observe.h>
@@ -71,9 +72,9 @@ static void expect_drained(flux_device *d, flux_scope scope, const char *kind, c
                 __FILE__, what, (unsigned long long)before->live, (unsigned long long)after.live,
                 (unsigned long long)before->bytes_live, (unsigned long long)after.bytes_live,
                 (unsigned long long)after.acquire_total, (unsigned long long)after.release_total);
-        g_test_failed++;
+        OT_MANUAL_FAIL();
     }
-    g_test_count++;
+    OT_MANUAL_CHECK();
 }
 
 static void expect_rose(flux_device *d, flux_scope scope, const char *kind, const char *owner,
@@ -82,9 +83,9 @@ static void expect_rose(flux_device *d, flux_scope scope, const char *kind, cons
     if (after.live <= before->live) {
         fprintf(stderr, "FAIL %s: %s did not register in the ledger (live %llu -> %llu)\n",
                 __FILE__, what, (unsigned long long)before->live, (unsigned long long)after.live);
-        g_test_failed++;
+        OT_MANUAL_FAIL();
     }
-    g_test_count++;
+    OT_MANUAL_CHECK();
 }
 
 /* Every kind shares the device scope and the flux/core owner unless stated. */
@@ -114,7 +115,7 @@ static void make_image(flux_device *d, uint32_t w, uint32_t h, flux_image **out)
     id.format = FLUX_FORMAT_RGBA8_UNORM;
     id.initial_data = px;
     *out = nullptr;
-    EXPECT(flux_image_create(d, &id, out) == FLUX_OK);
+    OT_EXPECT(flux_image_create(d, &id, out) == FLUX_OK);
 }
 
 static void drop_image(flux_device *d, flux_image *im) {
@@ -151,13 +152,13 @@ static void lane_sampler(flux_device *d) {
     sd.address_w = FLUX_ADDRESS_REPEAT;
 
     flux_sampler *warm = nullptr;
-    EXPECT(flux_sampler_create(d, &sd, &warm) == FLUX_OK);
+    OT_EXPECT(flux_sampler_create(d, &sd, &warm) == FLUX_OK);
     flux_sampler_release(warm);
     flux_device_wait_idle(d);
 
     LANE("vk_sampler");
     flux_sampler *s = nullptr;
-    EXPECT(flux_sampler_create(d, &sd, &s) == FLUX_OK);
+    OT_EXPECT(flux_sampler_create(d, &sd, &s) == FLUX_OK);
     expect_rose(d, SCOPE, "vk_sampler", OWNER, &before_, "flux_sampler_create");
     flux_sampler_release(s);
     LANE_END("vk_sampler", "flux_sampler");
@@ -171,14 +172,14 @@ static void lane_buffer(flux_device *d) {
     bd.device_address = true;
 
     flux_buffer *warm = nullptr;
-    EXPECT(flux_buffer_create(d, &bd, &warm) == FLUX_OK);
+    OT_EXPECT(flux_buffer_create(d, &bd, &warm) == FLUX_OK);
     flux_buffer_release(warm);
     flux_device_wait_idle(d);
 
     LANE("vk_buffer");
     flux_observe_counters mem_before = row_of(d, SCOPE, "vk_memory", OWNER);
     flux_buffer *b = nullptr;
-    EXPECT(flux_buffer_create(d, &bd, &b) == FLUX_OK);
+    OT_EXPECT(flux_buffer_create(d, &bd, &b) == FLUX_OK);
     expect_rose(d, SCOPE, "vk_buffer", OWNER, &before_, "flux_buffer_create");
     flux_buffer_release(b);
     LANE_END("vk_buffer", "flux_buffer");
@@ -202,7 +203,7 @@ static void lane_target(flux_device *d) {
 
     LANE("vk_target");
     flux_target *t = nullptr;
-    EXPECT(flux_target_create(d, &td, &t) == FLUX_OK);
+    OT_EXPECT(flux_target_create(d, &td, &t) == FLUX_OK);
     expect_rose(d, SCOPE, "vk_target", OWNER, &before_, "flux_target_create");
     flux_target_release(t);
     LANE_END("vk_target", "flux_target");
@@ -247,7 +248,7 @@ static void lane_graphics_pipeline(flux_device *d) {
 
     LANE("vk_pipeline");
     flux_graphics_pipeline *gp = nullptr;
-    EXPECT(flux_graphics_pipeline_create(d, &pd, &gp) == FLUX_OK);
+    OT_EXPECT(flux_graphics_pipeline_create(d, &pd, &gp) == FLUX_OK);
     expect_rose(d, SCOPE, "vk_pipeline", OWNER, &before_, "flux_graphics_pipeline_create");
     flux_graphics_pipeline_release(gp);
     LANE_END("vk_pipeline", "flux_graphics_pipeline");
@@ -271,19 +272,19 @@ static void lane_frame_scope_drain(flux_device *d) {
     const char *owner = "tests/observe";
 
     /* Balanced: acquire then release, check is clean. */
-    EXPECT(FLUX_OBSERVE_ACQUIRE(d, FLUX_SCOPE_CONTEXT, FLUX_LIFETIME_FRAME, kind, owner, 0,
-                                FLUX_SITE_NONE));
+    OT_EXPECT(FLUX_OBSERVE_ACQUIRE(d, FLUX_SCOPE_CONTEXT, FLUX_LIFETIME_FRAME, kind, owner, 0,
+                                   FLUX_SITE_NONE));
     FLUX_OBSERVE_RELEASE(d, FLUX_SCOPE_CONTEXT, kind, owner, 0);
-    EXPECT(flux_observe_frame_drain_check(d));
+    OT_EXPECT(flux_observe_frame_drain_check(d));
 
     /* Unbalanced: the check must report, and must report at the frame
      * boundary rather than waiting for teardown. */
-    EXPECT(FLUX_OBSERVE_ACQUIRE(d, FLUX_SCOPE_CONTEXT, FLUX_LIFETIME_FRAME, kind, owner, 0,
-                                FLUX_SITE_NONE));
-    EXPECT(!flux_observe_frame_drain_check(d));
+    OT_EXPECT(FLUX_OBSERVE_ACQUIRE(d, FLUX_SCOPE_CONTEXT, FLUX_LIFETIME_FRAME, kind, owner, 0,
+                                   FLUX_SITE_NONE));
+    OT_EXPECT(!flux_observe_frame_drain_check(d));
 
     FLUX_OBSERVE_RELEASE(d, FLUX_SCOPE_CONTEXT, kind, owner, 0);
-    EXPECT(flux_observe_frame_drain_check(d));
+    OT_EXPECT(flux_observe_frame_drain_check(d));
 }
 
 /* ------------------------------------------------------------------ */
@@ -305,14 +306,14 @@ static void lane_bindless_double_release(flux_device *d) {
         id.height = 2;
         id.format = FLUX_FORMAT_RGBA8_UNORM;
         id.initial_data = px;
-        EXPECT(flux_image_create(d, &id, &imgs[i]) == FLUX_OK);
+        OT_EXPECT(flux_image_create(d, &id, &imgs[i]) == FLUX_OK);
         handles[i] = flux_image_bindless_handle(imgs[i]);
-        EXPECT(handles[i] != FLUX_BINDLESS_INVALID);
+        OT_EXPECT(handles[i] != FLUX_BINDLESS_INVALID);
     }
     /* Three distinct slots: the heap must never hand out an alias. */
-    EXPECT(handles[0] != handles[1]);
-    EXPECT(handles[1] != handles[2]);
-    EXPECT(handles[0] != handles[2]);
+    OT_EXPECT(handles[0] != handles[1]);
+    OT_EXPECT(handles[1] != handles[2]);
+    OT_EXPECT(handles[0] != handles[2]);
 
     /* Release the middle image, then duplicate its release through the public
      * bindless path. The second call must be refused, not corrupt the stack. */
@@ -329,10 +330,10 @@ static void lane_bindless_double_release(flux_device *d) {
     id.height = 2;
     id.format = FLUX_FORMAT_RGBA8_UNORM;
     id.initial_data = px;
-    EXPECT(flux_image_create(d, &id, &fourth) == FLUX_OK);
+    OT_EXPECT(flux_image_create(d, &id, &fourth) == FLUX_OK);
     flux_bindless_handle h4 = flux_image_bindless_handle(fourth);
-    EXPECT(h4 != handles[0]);
-    EXPECT(h4 != handles[2]);
+    OT_EXPECT(h4 != handles[0]);
+    OT_EXPECT(h4 != handles[2]);
 
     flux_image_release(fourth);
     flux_image_release(imgs[0]);
@@ -358,7 +359,7 @@ static void lane_detects_a_real_leak(flux_device *d) {
     flux_observe_counters before = row_of(d, SCOPE, "vk_memory", OWNER);
 
     flux_image *leaked = nullptr;
-    EXPECT(flux_image_create(d, &id, &leaked) == FLUX_OK);
+    OT_EXPECT(flux_image_create(d, &id, &leaked) == FLUX_OK);
 
     flux_observe_response resp = flux_observe_report(d, &(flux_observe_report_opts){
                                                             .type = FLUX_TYPE_OBSERVE_REPORT_OPTS,
@@ -366,21 +367,21 @@ static void lane_detects_a_real_leak(flux_device *d) {
                                                             .capacity = 64,
                                                             .scope = SCOPE,
                                                         });
-    EXPECT(resp.result == FLUX_OK);
-    EXPECT(resp.overflowed_kinds == 0);
+    OT_EXPECT(resp.result == FLUX_OK);
+    OT_EXPECT(resp.overflowed_kinds == 0);
 
     bool saw_vk_memory = false;
     for (uint32_t i = 0; i < resp.count; ++i) {
         if (strcmp(rows[i].kind, "vk_memory") == 0) {
             saw_vk_memory = true;
-            EXPECT(rows[i].live >= 1);
-            EXPECT(rows[i].bytes_live > 0);
+            OT_EXPECT(rows[i].live >= 1);
+            OT_EXPECT(rows[i].bytes_live > 0);
             /* A leaking row must carry its creation site: that is the whole
              * difference between this and the old byte-total warning. */
-            EXPECT(rows[i].site != nullptr);
+            OT_EXPECT(rows[i].site != nullptr);
         }
     }
-    EXPECT(saw_vk_memory);
+    OT_EXPECT(saw_vk_memory);
 
     flux_image_release(leaked);
     flux_device_wait_idle(d);
@@ -388,10 +389,10 @@ static void lane_detects_a_real_leak(flux_device *d) {
 }
 
 int main(void) {
-    flux_device *d = test_helpers_make_headless_device();
+    flux_device *d = flux_test_make_headless_device();
     if (!d) {
         fprintf(stderr, "test_resource_leak: no Vulkan device; skipping\n");
-        TEST_SUMMARY();
+        OT_SKIP("no Vulkan device");
     }
 
     lane_image(d);
@@ -405,5 +406,5 @@ int main(void) {
     lane_detects_a_real_leak(d);
 
     flux_device_release(d);
-    TEST_SUMMARY();
+    return OT_REPORT();
 }

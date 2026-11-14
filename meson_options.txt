@@ -4,8 +4,7 @@ option('compute',  type : 'boolean', value : true,  description : 'Build the flu
 option('effect',   type : 'boolean', value : true,  description : 'Build the flux image effect module')
 
 # Observation-plane attribution (ADR-0129, ADR-0130). Off by default: a
-# release build must not carry the name/site machinery at all, and
-# 'debug-only' is enforced mechanically by ./tools/gate check leaks.
+# release build must not carry the name/site machinery at all.
 option('observe_attribution', type : 'boolean', value : false,
        description : 'Compile object-name and creation-site attribution into the ledger')
 

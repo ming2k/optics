@@ -47,13 +47,13 @@ const char *reticle_version_string(void) {
 
 /* ---- Allocation ------------------------------------------------------- */
 
-void *svg__alloc(size_t bytes) {
+void *reticle_priv_alloc(size_t bytes) {
     if (bytes == 0)
         return nullptr;
     return malloc(bytes); // RAW_ALLOC_OK(no-device)
 }
 
-void *svg__realloc(void *ptr, size_t bytes) {
+void *reticle_priv_realloc(void *ptr, size_t bytes) {
     if (bytes == 0) {
         free(ptr); // RAW_ALLOC_OK(no-device)
         return nullptr;
@@ -61,14 +61,14 @@ void *svg__realloc(void *ptr, size_t bytes) {
     return realloc(ptr, bytes); // RAW_ALLOC_OK(no-device)
 }
 
-void svg__free(void *ptr) {
+void reticle_priv_free(void *ptr) {
     free(ptr); // RAW_ALLOC_OK(no-device)
 }
 
-char *svg__strndup(const char *s, size_t n) {
+char *reticle_priv_strndup(const char *s, size_t n) {
     if (!s)
         return nullptr;
-    char *out = (char *)svg__alloc(n + 1u);
+    char *out = (char *)reticle_priv_alloc(n + 1u);
     if (!out)
         return nullptr;
     memcpy(out, s, n);
@@ -78,7 +78,7 @@ char *svg__strndup(const char *s, size_t n) {
 
 /* ---- Bounded substring search ------------------------------------------ */
 
-const char *svg__find(const char *hay, size_t hay_len, const char *needle) {
+const char *reticle_priv_find(const char *hay, size_t hay_len, const char *needle) {
     size_t n = strlen(needle);
     if (!hay || n == 0 || hay_len < n)
         return nullptr;
@@ -101,7 +101,7 @@ const char *svg__find(const char *hay, size_t hay_len, const char *needle) {
 
 /* ---- Growable path-command buffer ------------------------------------- */
 
-bool svg_cmd_buf_push(svg_cmd_buf *b, reticle_path_cmd value) {
+bool reticle_cmd_buf_push(reticle_cmd_buf *b, reticle_path_cmd value) {
     /* The ceiling is checked here rather than only in the parse loop: a single
      * `<polyline points="…">` can produce millions of commands from one element,
      * and the loop's after-the-fact check would let all of them be allocated
@@ -114,7 +114,7 @@ bool svg_cmd_buf_push(svg_cmd_buf *b, reticle_path_cmd value) {
         if (b->limit && cap > b->limit)
             cap = b->limit;
         reticle_path_cmd *grown =
-            (reticle_path_cmd *)svg__realloc(b->data, (size_t)cap * sizeof *grown);
+            (reticle_path_cmd *)reticle_priv_realloc(b->data, (size_t)cap * sizeof *grown);
         if (!grown)
             return false;
         b->data = grown;
@@ -124,20 +124,20 @@ bool svg_cmd_buf_push(svg_cmd_buf *b, reticle_path_cmd value) {
     return true;
 }
 
-void svg_cmd_buf_deinit(svg_cmd_buf *b) {
-    svg__free(b->data);
-    *b = (svg_cmd_buf){};
+void reticle_cmd_buf_deinit(reticle_cmd_buf *b) {
+    reticle_priv_free(b->data);
+    *b = (reticle_cmd_buf){};
 }
 
 /* ---- Affine transforms ------------------------------------------------ */
 
-svg_transform svg__xform_identity(void) {
-    return (svg_transform){1.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f};
+reticle_transform reticle_priv_xform_identity(void) {
+    return (reticle_transform){1.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f};
 }
 
 /* Result applies `rhs` first, then `lhs`. */
-svg_transform svg__xform_mul(svg_transform lhs, svg_transform rhs) {
-    return (svg_transform){
+reticle_transform reticle_priv_xform_mul(reticle_transform lhs, reticle_transform rhs) {
+    return (reticle_transform){
         .a = lhs.a * rhs.a + lhs.c * rhs.b,
         .b = lhs.b * rhs.a + lhs.d * rhs.b,
         .c = lhs.a * rhs.c + lhs.c * rhs.d,
@@ -147,19 +147,19 @@ svg_transform svg__xform_mul(svg_transform lhs, svg_transform rhs) {
     };
 }
 
-svg_transform svg__xform_scale(float sx, float sy) {
-    return (svg_transform){sx, 0.0f, 0.0f, sy, 0.0f, 0.0f};
+reticle_transform reticle_priv_xform_scale(float sx, float sy) {
+    return (reticle_transform){sx, 0.0f, 0.0f, sy, 0.0f, 0.0f};
 }
 
-svg_transform svg__xform_translate(float tx, float ty) {
-    return (svg_transform){1.0f, 0.0f, 0.0f, 1.0f, tx, ty};
+reticle_transform reticle_priv_xform_translate(float tx, float ty) {
+    return (reticle_transform){1.0f, 0.0f, 0.0f, 1.0f, tx, ty};
 }
 
-void svg__xform_point(svg_transform t, float x, float y, float *ox, float *oy) {
+void reticle_priv_xform_point(reticle_transform t, float x, float y, float *ox, float *oy) {
     *ox = t.a * x + t.c * y + t.e;
     *oy = t.b * x + t.d * y + t.f;
 }
 
-bool svg__xform_is_identity(svg_transform t) {
+bool reticle_priv_xform_is_identity(reticle_transform t) {
     return t.a == 1.0f && t.b == 0.0f && t.c == 0.0f && t.d == 1.0f && t.e == 0.0f && t.f == 0.0f;
 }

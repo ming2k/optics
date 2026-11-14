@@ -24,21 +24,9 @@
  *      older, because a full write is the one entry with no rectangle list.
  */
 #include "damage_history.h"
+#include "optics_test.h"
 
-#include <stdio.h>
 #include <string.h>
-
-static int failures;
-static int checks;
-
-#define CHECK(cond)                                                                                \
-    do {                                                                                           \
-        checks++;                                                                                  \
-        if (!(cond)) {                                                                             \
-            failures++;                                                                            \
-            fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);                        \
-        }                                                                                          \
-    } while (0)
 
 #define DEPTH FLUX_DAMAGE_HISTORY_DEPTH
 
@@ -59,13 +47,13 @@ static void test_never_synchronised_is_full(void) {
     bool full = false;
 
     /* Before anything is committed. */
-    CHECK(flux_damage_history_since(&h, FLUX_DAMAGE_EPOCH_NONE, out, 64, &full) == 0);
-    CHECK(full);
+    OT_EXPECT(flux_damage_history_since(&h, FLUX_DAMAGE_EPOCH_NONE, out, 64, &full) == 0);
+    OT_EXPECT(full);
 
     commit_band(&h, 10.0f);
     /* Still: the sentinel never resolves to a partial answer. */
-    CHECK(flux_damage_history_since(&h, FLUX_DAMAGE_EPOCH_NONE, out, 64, &full) == 0);
-    CHECK(full);
+    OT_EXPECT(flux_damage_history_since(&h, FLUX_DAMAGE_EPOCH_NONE, out, 64, &full) == 0);
+    OT_EXPECT(full);
 }
 
 static void test_already_current_copies_nothing(void) {
@@ -78,13 +66,13 @@ static void test_already_current_copies_nothing(void) {
     /* An image leaving the present at e1 is current: nothing to copy. This is
      * the steady-state case for a double-buffered rotation, so getting it wrong
      * would mean a full copy on most frames. */
-    CHECK(flux_damage_history_since(&h, e1, out, 64, &full) == 0);
-    CHECK(!full);
+    OT_EXPECT(flux_damage_history_since(&h, e1, out, 64, &full) == 0);
+    OT_EXPECT(!full);
 
     /* "Current" must be distinguishable from "never synchronised", which is why
      * the empty answer carries `full == false` while the sentinel carries true. */
-    CHECK(flux_damage_history_since(&h, FLUX_DAMAGE_EPOCH_NONE, out, 64, &full) == 0);
-    CHECK(full);
+    OT_EXPECT(flux_damage_history_since(&h, FLUX_DAMAGE_EPOCH_NONE, out, 64, &full) == 0);
+    OT_EXPECT(full);
 }
 
 static void test_gap_union(void) {
@@ -98,15 +86,15 @@ static void test_gap_union(void) {
     bool full = true;
     /* An image last presented at e1 missed e2 and e3: exactly two bands. */
     const uint32_t n = flux_damage_history_since(&h, e1, out, 64, &full);
-    CHECK(!full);
-    CHECK(n == 2);
+    OT_EXPECT(!full);
+    OT_EXPECT(n == 2);
     if (n == 2) {
         /* Order is the ring's, which is chronological for entries newer than
          * `since`. What matters is that both distinct bands are present. */
         const bool has20 = (out[0].y == 20.0f) || (out[1].y == 20.0f);
         const bool has30 = (out[0].y == 30.0f) || (out[1].y == 30.0f);
-        CHECK(has20);
-        CHECK(has30);
+        OT_EXPECT(has20);
+        OT_EXPECT(has30);
     }
 }
 
@@ -117,16 +105,16 @@ static void test_full_entry_poisons_everything_older(void) {
     /* A full-extent frame: it has no rectangle list, so any image that predates
      * it cannot be repaired from a union of rects — the middle of the surface
      * changed and nothing names it. */
-    CHECK(flux_damage_history_commit(&h, nullptr, 0, true) == e1 + 1);
+    OT_EXPECT(flux_damage_history_commit(&h, nullptr, 0, true) == e1 + 1);
 
     flux_rect out[64];
     bool full = false;
-    CHECK(flux_damage_history_since(&h, e1, out, 64, &full) == 0);
-    CHECK(full);
+    OT_EXPECT(flux_damage_history_since(&h, e1, out, 64, &full) == 0);
+    OT_EXPECT(full);
 
     /* An image that leaves *at* the full frame is still current afterwards. */
-    CHECK(flux_damage_history_since(&h, e1 + 1, out, 64, &full) == 0);
-    CHECK(!full);
+    OT_EXPECT(flux_damage_history_since(&h, e1 + 1, out, 64, &full) == 0);
+    OT_EXPECT(!full);
 }
 
 static void test_empty_commit_is_no_change_unless_full_is_explicit(void) {
@@ -140,12 +128,12 @@ static void test_empty_commit_is_no_change_unless_full_is_explicit(void) {
 
     flux_rect out[64];
     bool full = true;
-    CHECK(flux_damage_history_since(&h, e1, out, 64, &full) == 0);
-    CHECK(!full);
+    OT_EXPECT(flux_damage_history_since(&h, e1, out, 64, &full) == 0);
+    OT_EXPECT(!full);
 
     const uint64_t e3 = flux_damage_history_commit(&h, nullptr, 0, true);
-    CHECK(flux_damage_history_since(&h, e3 - 1, out, 64, &full) == 0);
-    CHECK(full);
+    OT_EXPECT(flux_damage_history_since(&h, e3 - 1, out, 64, &full) == 0);
+    OT_EXPECT(full);
 }
 
 static void test_window_overflow_falls_back_to_full(void) {
@@ -159,14 +147,14 @@ static void test_window_overflow_falls_back_to_full(void) {
 
     flux_rect out[64];
     bool full = false;
-    CHECK(flux_damage_history_since(&h, first, out, 64, &full) == 0);
-    CHECK(full);
+    OT_EXPECT(flux_damage_history_since(&h, first, out, 64, &full) == 0);
+    OT_EXPECT(full);
 
     /* One frame shorter than the window is still reconstructable. */
     const uint64_t recent = h.committed - DEPTH;
     const uint32_t n = flux_damage_history_since(&h, recent, out, 64, &full);
-    CHECK(!full);
-    CHECK(n == DEPTH);
+    OT_EXPECT(!full);
+    OT_EXPECT(n == DEPTH);
 }
 
 static void test_capacity_overflow_falls_back_to_full(void) {
@@ -181,15 +169,15 @@ static void test_capacity_overflow_falls_back_to_full(void) {
      * answer under-covers. */
     flux_rect tiny[1];
     bool full = false;
-    CHECK(flux_damage_history_since(&h, e1, tiny, 1, &full) == 0);
-    CHECK(full);
+    OT_EXPECT(flux_damage_history_since(&h, e1, tiny, 1, &full) == 0);
+    OT_EXPECT(full);
 
     /* Zero capacity: the union cannot be described at all. A zero-length array
      * would express the same intent, but it is a GNU extension that -Wpedantic
      * (and therefore the release build's -Werror) rejects — the buffer is
      * irrelevant when the capacity already forbids every write. */
-    CHECK(flux_damage_history_since(&h, e1, tiny, 0, &full) == 0);
-    CHECK(full);
+    OT_EXPECT(flux_damage_history_since(&h, e1, tiny, 0, &full) == 0);
+    OT_EXPECT(full);
 }
 
 static void test_commit_counts_rects_and_drops_degenerate(void) {
@@ -206,8 +194,8 @@ static void test_commit_counts_rects_and_drops_degenerate(void) {
     flux_rect out[64];
     bool full = false;
     const uint32_t n = flux_damage_history_since(&h, 0, out, 64, &full);
-    CHECK(!full);
-    CHECK(n == 2);
+    OT_EXPECT(!full);
+    OT_EXPECT(n == 2);
 }
 
 static void test_reset_forgets_history(void) {
@@ -221,9 +209,9 @@ static void test_reset_forgets_history(void) {
     bool full = false;
     /* The old epoch number is meaningless after a reset: every image is
      * unsynchronised with the new content image by definition. */
-    CHECK(flux_damage_history_since(&h, e1, out, 64, &full) == 0);
-    CHECK(full);
-    CHECK(h.committed == 0);
+    OT_EXPECT(flux_damage_history_since(&h, e1, out, 64, &full) == 0);
+    OT_EXPECT(full);
+    OT_EXPECT(h.committed == 0);
 }
 
 static bool rects_overlap(flux_rect a, flux_rect b) {
@@ -255,16 +243,16 @@ static void test_overlapping_and_duplicate_rects_are_pairwise_disjoint(void) {
     flux_rect out[64];
     bool full = true;
     const uint32_t n = flux_damage_history_since(&h, e1, out, 64, &full);
-    CHECK(!full);
-    CHECK(n == 3);
+    OT_EXPECT(!full);
+    OT_EXPECT(n == 3);
 
     float total_area = 0.0f;
     for (uint32_t i = 0; i < n; i++) {
         total_area += out[i].w * out[i].h;
         for (uint32_t j = i + 1; j < n; j++)
-            CHECK(!rects_overlap(out[i], out[j]));
+            OT_EXPECT(!rects_overlap(out[i], out[j]));
     }
-    CHECK(total_area == 700.0f);
+    OT_EXPECT(total_area == 700.0f);
 }
 
 int main(void) {
@@ -279,6 +267,5 @@ int main(void) {
     test_reset_forgets_history();
     test_overlapping_and_duplicate_rects_are_pairwise_disjoint();
 
-    fprintf(stderr, "damage_history: %d checks, %d failures\n", checks, failures);
-    return failures ? 1 : 0;
+    return OT_REPORT();
 }

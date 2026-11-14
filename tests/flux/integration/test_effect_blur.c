@@ -6,7 +6,8 @@
  * Also covers: input validation, sigma=0 acts as a copy,
  * flux_effect_reset is harmless when called twice.
  */
-#include "test_helpers.h"
+#include "flux_test.h"
+#include "optics_test.h"
 #include <flux/effect.h>
 #include <flux/flux.h>
 #include <flux/vulkan.h>
@@ -191,8 +192,8 @@ static void record_blur16_and_readback(VkCommandBuffer cmd, void *user) {
 
 static void record_blur_and_readback(VkCommandBuffer cmd, void *user) {
     blur_record_ctx *ctx = user;
-    EXPECT(flux_effect_blur(cmd, ctx->bdesc, ctx->out) == FLUX_OK);
-    EXPECT(*ctx->out != nullptr);
+    OT_EXPECT(flux_effect_blur(cmd, ctx->bdesc, ctx->out) == FLUX_OK);
+    OT_EXPECT(*ctx->out != nullptr);
 
     /* Transition the output from GENERAL to TRANSFER_SRC_OPTIMAL so
      * the copy is valid. The blur's trailing barrier already made
@@ -244,18 +245,19 @@ static void record_blur_and_readback(VkCommandBuffer cmd, void *user) {
 }
 
 int main(void) {
+    bool skipped_16f = false;
     /* --- input validation (no device required) --- */
     {
         flux_image *out = nullptr;
         flux_effect_blur_desc d = FLUX_EFFECT_BLUR_DESC_INIT;
-        EXPECT(flux_effect_blur(nullptr, &d, &out) == FLUX_ERROR_INVALID_ARGUMENT);
-        EXPECT(out == nullptr);
+        OT_EXPECT(flux_effect_blur(nullptr, &d, &out) == FLUX_ERROR_INVALID_ARGUMENT);
+        OT_EXPECT(out == nullptr);
     }
 
-    flux_device *d = test_helpers_make_headless_device();
+    flux_device *d = flux_test_make_headless_device();
     if (!d) {
         fprintf(stderr, "test_effect_blur: no Vulkan device; skipping\n");
-        TEST_SUMMARY();
+        OT_SKIP("no Vulkan device");
     }
     VkDevice vk = flux_device_vk_device(d);
 
@@ -282,12 +284,12 @@ int main(void) {
         };
         vkAllocateCommandBuffers(vk, &cbai, &cmd);
 
-        EXPECT(flux_effect_blur(cmd, &bdesc, &out) == FLUX_ERROR_INVALID_ARGUMENT);
-        EXPECT(out == nullptr);
+        OT_EXPECT(flux_effect_blur(cmd, &bdesc, &out) == FLUX_ERROR_INVALID_ARGUMENT);
+        OT_EXPECT(out == nullptr);
 
         bdesc.type = FLUX_TYPE_EFFECT_BLUR_DESC;
         bdesc.input = nullptr;
-        EXPECT(flux_effect_blur(cmd, &bdesc, &out) == FLUX_ERROR_INVALID_ARGUMENT);
+        OT_EXPECT(flux_effect_blur(cmd, &bdesc, &out) == FLUX_ERROR_INVALID_ARGUMENT);
 
         vkDestroyCommandPool(vk, pool, nullptr);
     }
@@ -302,7 +304,7 @@ int main(void) {
     idesc.format = FLUX_FORMAT_RGBA8_UNORM;
     idesc.initial_data = pixels;
     flux_image *input = nullptr;
-    EXPECT(flux_image_create(d, &idesc, &input) == FLUX_OK);
+    OT_EXPECT(flux_image_create(d, &idesc, &input) == FLUX_OK);
 
     /* --- host-visible readback buffer --- */
     VkBuffer buffer = VK_NULL_HANDLE;
@@ -315,19 +317,19 @@ int main(void) {
             .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT,
             .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
         };
-        EXPECT(vkCreateBuffer(vk, &bci, nullptr, &buffer) == VK_SUCCESS);
+        OT_EXPECT(vkCreateBuffer(vk, &bci, nullptr, &buffer) == VK_SUCCESS);
         VkMemoryRequirements mr;
         vkGetBufferMemoryRequirements(vk, buffer, &mr);
-        uint32_t mt = test_helpers_find_memory_type(d, mr.memoryTypeBits,
-                                                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                                                        VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-        EXPECT(mt != UINT32_MAX);
+        uint32_t mt = flux_test_find_memory_type(d, mr.memoryTypeBits,
+                                                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                                     VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+        OT_EXPECT(mt != UINT32_MAX);
         VkMemoryAllocateInfo mai = {
             .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
             .allocationSize = mr.size,
             .memoryTypeIndex = mt,
         };
-        EXPECT(vkAllocateMemory(vk, &mai, nullptr, &memory) == VK_SUCCESS);
+        OT_EXPECT(vkAllocateMemory(vk, &mai, nullptr, &memory) == VK_SUCCESS);
         vkBindBufferMemory(vk, buffer, memory, 0);
         vkMapMemory(vk, memory, 0, VK_WHOLE_SIZE, 0, &mapped);
     }
@@ -346,17 +348,17 @@ int main(void) {
         const uint8_t *px = mapped;
 
         /* Far left of the image stays black; far right stays white. */
-        EXPECT(px[(15 * W + 0) * 4 + 0] < 16);        /* near-black */
-        EXPECT(px[(15 * W + (W - 1)) * 4 + 0] > 240); /* near-white */
+        OT_EXPECT(px[(15 * W + 0) * 4 + 0] < 16);        /* near-black */
+        OT_EXPECT(px[(15 * W + (W - 1)) * 4 + 0] > 240); /* near-white */
 
         /* The column immediately left of the original sharp edge
          * was pure black in the input; with sigma=4 it should now
          * have picked up appreciable luminance from the white half. */
         uint8_t edge_left = px[(15 * W + (W / 2 - 1)) * 4 + 0];
         uint8_t edge_right = px[(15 * W + (W / 2)) * 4 + 0];
-        EXPECT(edge_left > 32 && edge_left < 224); /* meaningfully softened */
-        EXPECT(edge_right > 32 && edge_right < 224);
-        EXPECT(edge_right > edge_left); /* gradient runs the right way */
+        OT_EXPECT(edge_left > 32 && edge_left < 224); /* meaningfully softened */
+        OT_EXPECT(edge_right > 32 && edge_right < 224);
+        OT_EXPECT(edge_right > edge_left); /* gradient runs the right way */
     }
 
     /* --- sigma == 0 → output matches input exactly --- */
@@ -375,7 +377,7 @@ int main(void) {
             if (px[i] != pixels[i]) {
                 fprintf(stderr, "FAIL sigma=0 mismatch at byte %u: got %u expected %u\n", i, px[i],
                         pixels[i]);
-                EXPECT(px[i] == pixels[i]);
+                OT_EXPECT(px[i] == pixels[i]);
                 break;
             }
         }
@@ -409,9 +411,9 @@ int main(void) {
             .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
         };
         vkBeginCommandBuffer(cmd, &cbbi);
-        EXPECT(flux_effect_blur(cmd, &bdesc, &a) == FLUX_OK);
-        EXPECT(flux_effect_blur(cmd, &bdesc, &b) == FLUX_OK);
-        EXPECT(a != nullptr && b != nullptr && a != b);
+        OT_EXPECT(flux_effect_blur(cmd, &bdesc, &a) == FLUX_OK);
+        OT_EXPECT(flux_effect_blur(cmd, &bdesc, &b) == FLUX_OK);
+        OT_EXPECT(a != nullptr && b != nullptr && a != b);
         vkEndCommandBuffer(cmd);
 
         VkCommandBufferSubmitInfo cbsi = {
@@ -464,7 +466,7 @@ int main(void) {
             .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
         };
         vkBeginCommandBuffer(cmd, &cbbi);
-        EXPECT(flux_effect_blur(cmd, &bdesc, &transient) == FLUX_OK);
+        OT_EXPECT(flux_effect_blur(cmd, &bdesc, &transient) == FLUX_OK);
         vkEndCommandBuffer(cmd);
 
         VkCommandBufferSubmitInfo cbsi = {
@@ -486,12 +488,12 @@ int main(void) {
 
         /* Promote. Synchronous: returns after the copy completes. */
         flux_image *owned = nullptr;
-        EXPECT(flux_effect_promote(transient, &owned) == FLUX_OK);
-        EXPECT(owned != nullptr);
+        OT_EXPECT(flux_effect_promote(transient, &owned) == FLUX_OK);
+        OT_EXPECT(owned != nullptr);
         /* The promoted image must have a fresh sampled bindless handle
          * (regular flux_image lifecycle), distinct from the transient. */
-        EXPECT(flux_image_bindless_handle(owned) != FLUX_BINDLESS_INVALID);
-        EXPECT(flux_image_bindless_handle(owned) != flux_image_bindless_handle(transient));
+        OT_EXPECT(flux_image_bindless_handle(owned) != FLUX_BINDLESS_INVALID);
+        OT_EXPECT(flux_image_bindless_handle(owned) != flux_image_bindless_handle(transient));
 
         /* Read the promoted image back via vkCmdCopyImageToBuffer.
          * Owned image is in SHADER_READ_ONLY_OPTIMAL after promote. */
@@ -553,28 +555,28 @@ int main(void) {
 
         const uint8_t *px = mapped;
         /* Same edge-softening assertions as the direct read-back path. */
-        EXPECT(px[(15 * W + 0) * 4 + 0] < 16);
-        EXPECT(px[(15 * W + (W - 1)) * 4 + 0] > 240);
+        OT_EXPECT(px[(15 * W + 0) * 4 + 0] < 16);
+        OT_EXPECT(px[(15 * W + (W - 1)) * 4 + 0] > 240);
         uint8_t edge_left = px[(15 * W + (W / 2 - 1)) * 4 + 0];
         uint8_t edge_right = px[(15 * W + (W / 2)) * 4 + 0];
-        EXPECT(edge_left > 32 && edge_left < 224);
-        EXPECT(edge_right > 32 && edge_right < 224);
-        EXPECT(edge_right > edge_left);
+        OT_EXPECT(edge_left > 32 && edge_left < 224);
+        OT_EXPECT(edge_right > 32 && edge_right < 224);
+        OT_EXPECT(edge_right > edge_left);
 
         /* Owned image survives flux_effect_reset (which only releases
          * transients). After reset, we can still sample it. */
         flux_effect_reset(d);
-        EXPECT(flux_image_vk_image(owned) != VK_NULL_HANDLE);
+        OT_EXPECT(flux_image_vk_image(owned) != VK_NULL_HANDLE);
         flux_image_release(owned);
     }
 
     /* --- promote rejects non-effect-output images --- */
     {
         flux_image *owned = nullptr;
-        EXPECT(flux_effect_promote(input, &owned) == FLUX_ERROR_INVALID_ARGUMENT);
-        EXPECT(owned == nullptr);
+        OT_EXPECT(flux_effect_promote(input, &owned) == FLUX_ERROR_INVALID_ARGUMENT);
+        OT_EXPECT(owned == nullptr);
 
-        EXPECT(flux_effect_promote(nullptr, &owned) == FLUX_ERROR_INVALID_ARGUMENT);
+        OT_EXPECT(flux_effect_promote(nullptr, &owned) == FLUX_ERROR_INVALID_ARGUMENT);
     }
 
     /* --- 16F working-space input: HDR values survive the blur (ADR-0069) --- */
@@ -598,7 +600,7 @@ int main(void) {
         f16desc.format = FLUX_FORMAT_RGBA16_SFLOAT;
         f16desc.initial_data = f16pixels;
         flux_image *f16input = nullptr;
-        EXPECT(flux_image_create(d, &f16desc, &f16input) == FLUX_OK);
+        OT_EXPECT(flux_image_create(d, &f16desc, &f16input) == FLUX_OK);
 
         VkBuffer buffer16 = VK_NULL_HANDLE;
         VkDeviceMemory memory16 = VK_NULL_HANDLE;
@@ -610,19 +612,19 @@ int main(void) {
                 .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                 .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
             };
-            EXPECT(vkCreateBuffer(vk, &bci, nullptr, &buffer16) == VK_SUCCESS);
+            OT_EXPECT(vkCreateBuffer(vk, &bci, nullptr, &buffer16) == VK_SUCCESS);
             VkMemoryRequirements mr;
             vkGetBufferMemoryRequirements(vk, buffer16, &mr);
-            uint32_t mt = test_helpers_find_memory_type(d, mr.memoryTypeBits,
-                                                        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                                                            VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-            EXPECT(mt != UINT32_MAX);
+            uint32_t mt = flux_test_find_memory_type(d, mr.memoryTypeBits,
+                                                     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                                         VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+            OT_EXPECT(mt != UINT32_MAX);
             VkMemoryAllocateInfo mai = {
                 .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
                 .allocationSize = mr.size,
                 .memoryTypeIndex = mt,
             };
-            EXPECT(vkAllocateMemory(vk, &mai, nullptr, &memory16) == VK_SUCCESS);
+            OT_EXPECT(vkAllocateMemory(vk, &mai, nullptr, &memory16) == VK_SUCCESS);
             vkBindBufferMemory(vk, buffer16, memory16, 0);
             vkMapMemory(vk, memory16, 0, VK_WHOLE_SIZE, 0, &mapped16);
         }
@@ -635,20 +637,21 @@ int main(void) {
         run_one_shot(d, record_blur16_and_readback, &ctx);
 
         if (ctx.result == FLUX_ERROR_UNSUPPORTED) {
+            skipped_16f = true;
             fprintf(stderr, "test_effect_blur: no rgba16f storage; 16F case skipped\n");
         } else {
-            EXPECT(ctx.result == FLUX_OK);
-            EXPECT(flux_image_format(out) == FLUX_FORMAT_RGBA16_SFLOAT);
+            OT_EXPECT(ctx.result == FLUX_OK);
+            OT_EXPECT(flux_image_format(out) == FLUX_FORMAT_RGBA16_SFLOAT);
             const uint16_t *hx = mapped16;
             float far_right = f16_to_f32(hx[(15 * W + (W - 1)) * 4 + 0]);
             float edge_left = f16_to_f32(hx[(15 * W + (W / 2 - 1)) * 4 + 0]);
             float edge_right = f16_to_f32(hx[(15 * W + (W / 2)) * 4 + 0]);
             /* The 2.0 highlight survived (8-bit would clamp at 1.0). */
-            EXPECT(far_right > 1.9f && far_right < 2.1f);
+            OT_EXPECT(far_right > 1.9f && far_right < 2.1f);
             /* Symmetric kernel around the step: both sides of the edge
              * land on the linear midpoint 1.0 — above every 8-bit encode. */
-            EXPECT(edge_left > 0.85f && edge_left < 1.15f);
-            EXPECT(edge_right > 0.85f && edge_right < 1.15f);
+            OT_EXPECT(edge_left > 0.85f && edge_left < 1.15f);
+            OT_EXPECT(edge_right > 0.85f && edge_right < 1.15f);
         }
 
         if (mapped16)
@@ -673,5 +676,7 @@ int main(void) {
         vkDestroyBuffer(vk, buffer, nullptr);
     flux_image_release(input);
     flux_device_release(d);
-    TEST_SUMMARY();
+    if (skipped_16f)
+        OT_SKIP("rgba16f storage unavailable");
+    return OT_REPORT();
 }

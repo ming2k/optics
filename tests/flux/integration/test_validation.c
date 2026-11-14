@@ -5,7 +5,8 @@
  * compute pipeline + dispatch) and fails if any validation message
  * fired. Skips if validation isn't available on the test host.
  */
-#include "test_helpers.h"
+#include "flux_test.h"
+#include "optics_test.h"
 #include <flux/compute.h>
 #include <flux/dmabuf.h>
 #include <flux/flux.h>
@@ -61,12 +62,12 @@ typedef struct push_constants {
 } push_constants;
 
 int main(void) {
-    flux_device *d = test_helpers_make_validation_device(counting_logger);
+    flux_device *d = flux_test_make_validation_device(counting_logger);
     if (!d) {
         /* Validation unavailable (no validation layer on the host).
          * Don't fail the test; that's an environment concern. */
         fprintf(stderr, "test_validation: validation not available; skipping\n");
-        TEST_SUMMARY();
+        OT_SKIP("validation layer unavailable");
     }
 
     /* --- bindless lifecycle via flux_image_create --- */
@@ -76,7 +77,7 @@ int main(void) {
         desc.height = 8;
         desc.format = FLUX_FORMAT_RGBA8_UNORM;
         flux_image *im = nullptr;
-        EXPECT(flux_image_create(d, &desc, &im) == FLUX_OK);
+        OT_EXPECT(flux_image_create(d, &desc, &im) == FLUX_OK);
         flux_image_release(im);
     }
 
@@ -95,13 +96,13 @@ int main(void) {
             .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
             .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
         };
-        EXPECT(vkCreateBuffer(vk, &bci, nullptr, &buffer) == VK_SUCCESS);
+        OT_EXPECT(vkCreateBuffer(vk, &bci, nullptr, &buffer) == VK_SUCCESS);
 
         VkMemoryRequirements mr;
         vkGetBufferMemoryRequirements(vk, buffer, &mr);
-        uint32_t mt = test_helpers_find_memory_type(d, mr.memoryTypeBits,
-                                                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                                                        VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+        uint32_t mt = flux_test_find_memory_type(d, mr.memoryTypeBits,
+                                                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                                     VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
         VkMemoryAllocateFlagsInfo afi = {
             .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO,
             .flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT,
@@ -112,7 +113,7 @@ int main(void) {
             .allocationSize = mr.size,
             .memoryTypeIndex = mt,
         };
-        EXPECT(vkAllocateMemory(vk, &mai, nullptr, &memory) == VK_SUCCESS);
+        OT_EXPECT(vkAllocateMemory(vk, &mai, nullptr, &memory) == VK_SUCCESS);
         vkBindBufferMemory(vk, buffer, memory, 0);
         vkMapMemory(vk, memory, 0, VK_WHOLE_SIZE, 0, &mapped);
     }
@@ -129,7 +130,7 @@ int main(void) {
     pdesc.entry_point = "main";
     pdesc.push_constant_bytes = sizeof(push_constants);
     flux_compute_pipeline *pipe = nullptr;
-    EXPECT(flux_compute_pipeline_create(d, &pdesc, &pipe) == FLUX_OK);
+    OT_EXPECT(flux_compute_pipeline_create(d, &pdesc, &pipe) == FLUX_OK);
 
     VkCommandPool pool = VK_NULL_HANDLE;
     VkCommandPoolCreateInfo pci = {
@@ -208,7 +209,7 @@ int main(void) {
          * does not expose them; a device that enables both is the only
          * configuration where an exportable offscreen surface exists *and*
          * the layers report misuse of it. */
-        flux_device *dd = test_helpers_make_validation_dmabuf_device(counting_logger);
+        flux_device *dd = flux_test_make_validation_dmabuf_device(counting_logger);
         if (dd) {
             uint64_t modifiers[512];
             uint32_t modifier_count = 512;
@@ -227,19 +228,20 @@ int main(void) {
                 if (flux_surface_create(dd, &sd, &surface) == FLUX_OK && surface) {
                     if (flux_surface_exportable(surface)) {
                         flux_frame *abandoned = nullptr;
-                        EXPECT(flux_surface_begin_frame(surface, nullptr, &abandoned) == FLUX_OK);
-                        EXPECT(flux_frame_submit(abandoned) == FLUX_OK);
+                        OT_EXPECT(flux_surface_begin_frame(surface, nullptr, &abandoned) ==
+                                  FLUX_OK);
+                        OT_EXPECT(flux_frame_submit(abandoned) == FLUX_OK);
                         flux_frame_abandon(abandoned);
                         /* Abandon released the borrow: the same ring slot
                          * begins again with no advance, and the submit's
                          * already-signalled export semaphore must have been
                          * reset (a validation error otherwise). */
-                        EXPECT(flux_frame_present(abandoned) == FLUX_ERROR_INVALID_STATE);
+                        OT_EXPECT(flux_frame_present(abandoned) == FLUX_ERROR_INVALID_STATE);
 
                         flux_frame *retry = nullptr;
-                        EXPECT(flux_surface_begin_frame(surface, nullptr, &retry) == FLUX_OK);
-                        EXPECT(flux_frame_submit(retry) == FLUX_OK);
-                        EXPECT(flux_frame_present(retry) == FLUX_OK);
+                        OT_EXPECT(flux_surface_begin_frame(surface, nullptr, &retry) == FLUX_OK);
+                        OT_EXPECT(flux_frame_submit(retry) == FLUX_OK);
+                        OT_EXPECT(flux_frame_present(retry) == FLUX_OK);
                     }
                     flux_surface_release(surface);
                 }
@@ -258,8 +260,8 @@ int main(void) {
     if (errs || warns) {
         fprintf(stderr, "validation: %u errors, %u warnings\n", errs, warns);
     }
-    EXPECT(errs == 0);
-    EXPECT(warns == 0);
+    OT_EXPECT(errs == 0);
+    OT_EXPECT(warns == 0);
 
-    TEST_SUMMARY();
+    return OT_REPORT();
 }

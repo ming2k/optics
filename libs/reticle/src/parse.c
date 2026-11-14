@@ -19,13 +19,13 @@
 #include <string.h>
 
 enum {
-    SVG__DEFAULT_MAX_SHAPES = 4096,
-    SVG__DEFAULT_MAX_COMMANDS = 65536,
-    SVG__DEFAULT_MAX_GRADIENTS = 256,
-    SVG__DEFAULT_MAX_ELEMENTS = 16384,
-    SVG__DEFAULT_MAX_DEPTH = 32,
-    SVG__MAX_INPUT_BYTES = 16u << 20,
-    SVG__MAX_STYLE_DEPTH = 64,
+    RETICLE_INTERNAL_DEFAULT_MAX_SHAPES = 4096,
+    RETICLE_INTERNAL_DEFAULT_MAX_COMMANDS = 65536,
+    RETICLE_INTERNAL_DEFAULT_MAX_GRADIENTS = 256,
+    RETICLE_INTERNAL_DEFAULT_MAX_ELEMENTS = 16384,
+    RETICLE_INTERNAL_DEFAULT_MAX_DEPTH = 32,
+    RETICLE_MAX_INPUT_BYTES = 16u << 20,
+    RETICLE_INTERNAL_MAX_STYLE_DEPTH = 64,
 };
 
 /* Live documents, for the leak lane (INV-ARCH-LEDGER). Atomic because
@@ -40,21 +40,21 @@ uint32_t reticle_live_documents(void) {
 /*  Tokeniser                                                         */
 /* ------------------------------------------------------------------ */
 
-typedef struct svg_attr {
+typedef struct reticle_attr {
     const char *name;
     size_t name_len;
     const char *value;
     size_t value_len;
-} svg_attr;
+} reticle_attr;
 
-typedef struct svg_tag {
+typedef struct reticle_tag {
     const char *name;
     size_t name_len;
-    svg_attr attrs[64];
+    reticle_attr attrs[64];
     uint32_t attr_count;
     bool self_closing;
     bool is_end;
-} svg_tag;
+} reticle_tag;
 
 static bool is_ws(char c) {
     return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f';
@@ -75,12 +75,12 @@ static bool name_eq(const char *name, size_t len, const char *literal) {
 }
 
 /* Read one element tag starting at `*cursor` (which points at '<'). */
-static bool read_tag(const char **cursor, const char *end, svg_tag *tag) {
+static bool read_tag(const char **cursor, const char *end, reticle_tag *tag) {
     const char *p = *cursor;
     if (p >= end || *p != '<')
         return false;
     p++;
-    *tag = (svg_tag){};
+    *tag = (reticle_tag){};
     if (p < end && *p == '/') {
         tag->is_end = true;
         p++;
@@ -150,7 +150,7 @@ static bool read_tag(const char **cursor, const char *end, svg_tag *tag) {
             value_len = (size_t)(p - value_start);
         }
         if (tag->attr_count < sizeof tag->attrs / sizeof tag->attrs[0]) {
-            tag->attrs[tag->attr_count++] = (svg_attr){
+            tag->attrs[tag->attr_count++] = (reticle_attr){
                 .name = attr_start,
                 .name_len = attr_len,
                 .value = value_start,
@@ -161,7 +161,7 @@ static bool read_tag(const char **cursor, const char *end, svg_tag *tag) {
     return false;
 }
 
-static const svg_attr *find_attr(const svg_tag *tag, const char *name) {
+static const reticle_attr *find_attr(const reticle_tag *tag, const char *name) {
     for (uint32_t i = 0; i < tag->attr_count; ++i) {
         if (name_eq(tag->attrs[i].name, tag->attrs[i].name_len, name))
             return &tag->attrs[i];
@@ -170,8 +170,8 @@ static const svg_attr *find_attr(const svg_tag *tag, const char *name) {
 }
 
 /* A value span, trimmed. */
-static bool attr_span(const svg_tag *tag, const char *name, const char **value, size_t *len) {
-    const svg_attr *attr = find_attr(tag, name);
+static bool attr_span(const reticle_tag *tag, const char *name, const char **value, size_t *len) {
+    const reticle_attr *attr = find_attr(tag, name);
     if (!attr)
         return false;
     const char *p = attr->value;
@@ -193,30 +193,30 @@ static bool span_eq(const char *value, size_t len, const char *literal) {
 /*  Parser state                                                      */
 /* ------------------------------------------------------------------ */
 
-typedef struct svg_style_stack {
-    svg_style frames[SVG__MAX_STYLE_DEPTH];
+typedef struct reticle_style_stack {
+    reticle_style frames[RETICLE_INTERNAL_MAX_STYLE_DEPTH];
     uint32_t depth;
-} svg_style_stack;
+} reticle_style_stack;
 
 struct reticle_parser {
     const char *p;
     const char *end;
     reticle_parse_limits limits;
 
-    svg_cmd_buf cmds;
-    svg_raw_shape *shapes;
+    reticle_cmd_buf cmds;
+    reticle_raw_shape *shapes;
     uint32_t shape_count;
     uint32_t shape_cap;
 
-    svg_raw_gradient *gradients;
+    reticle_raw_gradient *gradients;
     uint32_t gradient_count;
     uint32_t gradient_cap;
 
-    svg_raw_attr *attrs;
+    reticle_raw_attr *attrs;
     uint32_t attr_count;
     uint32_t attr_cap;
 
-    svg_style_stack stack;
+    reticle_style_stack stack;
     uint32_t element_count;
     bool saw_markup;     /* at least one tag was read */
     uint32_t style_peak; /* the deepest style frame ever pushed */
@@ -231,7 +231,7 @@ struct reticle_parser {
     /* Pending gradient: `<linearGradient>`/`<radialGradient>` open, its stops
      * being collected from `<stop>` children. */
     bool in_gradient;
-    svg_raw_gradient gradient;
+    reticle_raw_gradient gradient;
     bool gradient_is_pending;
 
     /* The root viewport, resolved once the `<svg>` tag is seen. */
@@ -240,30 +240,30 @@ struct reticle_parser {
     bool viewport_from_viewbox;
 };
 
-static void free_paint(svg_raw_paint *paint) {
-    svg__free(paint->gradient_id);
+static void free_paint(reticle_raw_paint *paint) {
+    reticle_priv_free(paint->gradient_id);
     paint->gradient_id = nullptr;
 }
 
-static void free_gradient(svg_raw_gradient *gradient) {
-    svg__free(gradient->id);
-    svg__free(gradient->href);
-    *gradient = (svg_raw_gradient){};
+static void free_gradient(reticle_raw_gradient *gradient) {
+    reticle_priv_free(gradient->id);
+    reticle_priv_free(gradient->href);
+    *gradient = (reticle_raw_gradient){};
 }
 
 static void free_tag_attrs(reticle_parser *p) {
     for (uint32_t i = 0; i < p->attr_count; ++i) {
-        svg__free(p->attrs[i].name);
-        svg__free(p->attrs[i].value);
+        reticle_priv_free(p->attrs[i].name);
+        reticle_priv_free(p->attrs[i].value);
     }
     p->attr_count = 0;
 }
 
 /* ---- Style -------------------------------------------------------- */
 
-static svg_raw_paint paint_from_style_value(reticle_parser *p, const char *value, size_t len,
-                                            float opacity) {
-    svg_raw_paint paint = {.kind = RETICLE_PAINT_NONE, .opacity = 1.0f};
+static reticle_raw_paint paint_from_style_value(reticle_parser *p, const char *value, size_t len,
+                                                float opacity) {
+    reticle_raw_paint paint = {.kind = RETICLE_PAINT_NONE, .opacity = 1.0f};
     if (len == 4 && span_eq(value, len, "none")) {
         paint.kind = RETICLE_PAINT_NONE;
         return paint;
@@ -279,14 +279,14 @@ static svg_raw_paint paint_from_style_value(reticle_parser *p, const char *value
         return paint;
     }
     char *id = nullptr;
-    if (svg__parse_gradient_ref(value, len, &id)) {
+    if (reticle_priv_parse_gradient_ref(value, len, &id)) {
         paint.kind = RETICLE_PAINT_LINEAR_GRADIENT; /* corrected at resolution */
         paint.gradient_id = id;
         paint.opacity = opacity;
         return paint;
     }
     uint8_t r = 0, g = 0, b = 0, a = 255;
-    if (svg__parse_color(value, len, &r, &g, &b, &a)) {
+    if (reticle_priv_parse_color(value, len, &r, &g, &b, &a)) {
         paint.kind = RETICLE_PAINT_SOLID;
         paint.r = r;
         paint.g = g;
@@ -303,7 +303,7 @@ static svg_raw_paint paint_from_style_value(reticle_parser *p, const char *value
 static bool parse_opacity(const char *value, size_t len, float *out) {
     bool percent = len > 0 && value[len - 1] == '%';
     bool ok = false;
-    float v = svg__parse_number(value, percent ? len - 1 : len, &ok);
+    float v = reticle_priv_parse_number(value, percent ? len - 1 : len, &ok);
     if (!ok)
         return false;
     if (percent)
@@ -346,7 +346,8 @@ static flux_fill_rule parse_fill_rule(const char *value, size_t len, flux_fill_r
 }
 
 /* Split a `style="..."` declaration list and apply each `name:value`. */
-static void apply_style_attr(reticle_parser *p, svg_style *style, const char *value, size_t len) {
+static void apply_style_attr(reticle_parser *p, reticle_style *style, const char *value,
+                             size_t len) {
     (void)p;
     const char *cursor = value;
     const char *end = value + len;
@@ -380,7 +381,7 @@ static void apply_style_attr(reticle_parser *p, svg_style *style, const char *va
                 style->stroke = paint_from_style_value(nullptr, val, val_len, 1.0f);
             } else if (name_eq(name, name_len, "stroke-width")) {
                 float width = 0.0f;
-                if (svg__parse_length(val, val_len, 0.0f, &width) && width >= 0.0f)
+                if (reticle_priv_parse_length(val, val_len, 0.0f, &width) && width >= 0.0f)
                     style->stroke_width = width;
             } else if (name_eq(name, name_len, "fill-opacity")) {
                 float opacity = 1.0f;
@@ -402,7 +403,7 @@ static void apply_style_attr(reticle_parser *p, svg_style *style, const char *va
                 style->join = parse_join(val, val_len, style->join);
             } else if (name_eq(name, name_len, "stroke-miterlimit")) {
                 bool ok = false;
-                float limit = svg__parse_number(val, val_len, &ok);
+                float limit = reticle_priv_parse_number(val, val_len, &ok);
                 if (ok && limit > 0.0f)
                     style->miter_limit = limit;
             }
@@ -413,7 +414,7 @@ static void apply_style_attr(reticle_parser *p, svg_style *style, const char *va
 
 /* Apply presentation attributes then `style=""` (the cascade order CSS
  * mandates: presentation attributes are author-level, style is stronger). */
-static void apply_tag_style(reticle_parser *p, svg_style *style, const svg_tag *tag) {
+static void apply_tag_style(reticle_parser *p, reticle_style *style, const reticle_tag *tag) {
     const char *value = nullptr;
     size_t len = 0;
     if (attr_span(tag, "fill", &value, &len)) {
@@ -426,7 +427,7 @@ static void apply_tag_style(reticle_parser *p, svg_style *style, const svg_tag *
     }
     if (attr_span(tag, "color", &value, &len)) {
         uint8_t r = 0, g = 0, b = 0, a = 255;
-        if (svg__parse_color(value, len, &r, &g, &b, &a)) {
+        if (reticle_priv_parse_color(value, len, &r, &g, &b, &a)) {
             style->has_color = true;
             style->color_r = r;
             style->color_g = g;
@@ -436,7 +437,7 @@ static void apply_tag_style(reticle_parser *p, svg_style *style, const svg_tag *
     }
     if (attr_span(tag, "stroke-width", &value, &len)) {
         float width = 0.0f;
-        if (svg__parse_length(value, len, 0.0f, &width) && width >= 0.0f)
+        if (reticle_priv_parse_length(value, len, 0.0f, &width) && width >= 0.0f)
             style->stroke_width = width;
     }
     if (attr_span(tag, "fill-opacity", &value, &len)) {
@@ -462,7 +463,7 @@ static void apply_tag_style(reticle_parser *p, svg_style *style, const svg_tag *
         style->join = parse_join(value, len, style->join);
     if (attr_span(tag, "stroke-miterlimit", &value, &len)) {
         bool ok = false;
-        float limit = svg__parse_number(value, len, &ok);
+        float limit = reticle_priv_parse_number(value, len, &ok);
         if (ok && limit > 0.0f)
             style->miter_limit = limit;
     }
@@ -471,19 +472,19 @@ static void apply_tag_style(reticle_parser *p, svg_style *style, const svg_tag *
 }
 
 /* Defined below `style_push`/`style_pop`, which dispose the frames they pop. */
-static void style_dispose(svg_style *style);
+static void style_dispose(reticle_style *style);
 
 /* Takes ownership of `style` on success: the frame is disposed by `style_pop`
  * when it is popped, so a caller must not dispose it again. On failure the
  * caller still owns it. (A frame can own a heap `gradient_id` — `<g
  * fill="url(#g)">` clones the reference — so a pop that only decremented the
  * depth leaked it.) */
-static bool style_push(reticle_parser *p, svg_style *style) {
+static bool style_push(reticle_parser *p, reticle_style *style) {
     /* Frame 0 is the root seed, so `max_depth` nested containers fit on top of
      * it. The hard array bound is the second, independent ceiling. */
     if (p->stack.depth >= p->limits.max_depth + 1u)
         return false;
-    if (p->stack.depth >= SVG__MAX_STYLE_DEPTH)
+    if (p->stack.depth >= RETICLE_INTERNAL_MAX_STYLE_DEPTH)
         return false;
     p->stack.frames[p->stack.depth++] = *style;
     if (p->stack.depth > p->style_peak)
@@ -503,8 +504,8 @@ static bool style_pop(reticle_parser *p) {
     return true;
 }
 
-static const svg_style *style_current(const reticle_parser *p) {
-    static const svg_style root = {
+static const reticle_style *style_current(const reticle_parser *p) {
+    static const reticle_style root = {
         .fill = {.kind = RETICLE_PAINT_NONE, .opacity = 1.0f},
         .stroke = {.kind = RETICLE_PAINT_NONE, .opacity = 1.0f},
         .stroke_width = 1.0f,
@@ -522,15 +523,15 @@ static const svg_style *style_current(const reticle_parser *p) {
 
 /* The initial SVG fill is black; a shape with neither fill nor stroke paints
  * black fill. Encode that as explicit defaults on the root svg element. */
-static void seed_root_style(reticle_parser *p, svg_style *style) {
-    style->fill = (svg_raw_paint){.kind = RETICLE_PAINT_SOLID,
-                                  .r = 0,
-                                  .g = 0,
-                                  .b = 0,
-                                  .a = 255,
-                                  .opacity = 1.0f,
-                                  .gradient_id = nullptr};
-    style->stroke = (svg_raw_paint){.kind = RETICLE_PAINT_NONE, .opacity = 1.0f};
+static void seed_root_style(reticle_parser *p, reticle_style *style) {
+    style->fill = (reticle_raw_paint){.kind = RETICLE_PAINT_SOLID,
+                                      .r = 0,
+                                      .g = 0,
+                                      .b = 0,
+                                      .a = 255,
+                                      .opacity = 1.0f,
+                                      .gradient_id = nullptr};
+    style->stroke = (reticle_raw_paint){.kind = RETICLE_PAINT_NONE, .opacity = 1.0f};
     style->stroke_width = 1.0f;
     style->miter_limit = 4.0f;
     style->cap = FLUX_CAP_BUTT;
@@ -546,38 +547,39 @@ static void seed_root_style(reticle_parser *p, svg_style *style) {
     style->color_g = 0;
     style->color_b = 0;
     style->color_a = 255;
-    style->ctm = svg__xform_identity();
+    style->ctm = reticle_priv_xform_identity();
     (void)p;
 }
 
 /* Duplicate a style frame, deep-copying the two paints' owned ids. */
-static bool style_clone(const svg_style *src, svg_style *dst) {
+static bool style_clone(const reticle_style *src, reticle_style *dst) {
     *dst = *src;
-    dst->fill.gradient_id = src->fill.gradient_id
-                                ? svg__strndup(src->fill.gradient_id, strlen(src->fill.gradient_id))
-                                : nullptr;
+    dst->fill.gradient_id =
+        src->fill.gradient_id
+            ? reticle_priv_strndup(src->fill.gradient_id, strlen(src->fill.gradient_id))
+            : nullptr;
     if (src->fill.gradient_id && !dst->fill.gradient_id)
         return false;
     dst->stroke.gradient_id =
         src->stroke.gradient_id
-            ? svg__strndup(src->stroke.gradient_id, strlen(src->stroke.gradient_id))
+            ? reticle_priv_strndup(src->stroke.gradient_id, strlen(src->stroke.gradient_id))
             : nullptr;
     if (src->stroke.gradient_id && !dst->stroke.gradient_id) {
-        svg__free(dst->fill.gradient_id);
+        reticle_priv_free(dst->fill.gradient_id);
         dst->fill.gradient_id = nullptr;
         return false;
     }
     return true;
 }
 
-static void style_dispose(svg_style *style) {
+static void style_dispose(reticle_style *style) {
     free_paint(&style->fill);
     free_paint(&style->stroke);
 }
 
 /* ---- Shape emission ------------------------------------------------ */
 
-bool svg__emit_shape(reticle_parser *p, const svg_raw_shape *shape) {
+bool reticle_priv_emit_shape(reticle_parser *p, const reticle_raw_shape *shape) {
     if (shape->cmd_count == 0)
         return true;
     if (p->shape_count >= p->limits.max_shapes)
@@ -586,8 +588,8 @@ bool svg__emit_shape(reticle_parser *p, const svg_raw_shape *shape) {
         uint32_t cap = p->shape_cap ? p->shape_cap * 2u : 32u;
         if (cap > p->limits.max_shapes)
             cap = p->limits.max_shapes;
-        svg_raw_shape *grown =
-            (svg_raw_shape *)svg__realloc(p->shapes, (size_t)cap * sizeof *grown);
+        reticle_raw_shape *grown =
+            (reticle_raw_shape *)reticle_priv_realloc(p->shapes, (size_t)cap * sizeof *grown);
         if (!grown)
             return false;
         p->shapes = grown;
@@ -603,8 +605,8 @@ static bool finish_shape(reticle_parser *p, uint32_t cmd_first, uint32_t cmd_cou
                          flux_rect bounds) {
     if (cmd_count == 0)
         return true;
-    const svg_style *style = style_current(p);
-    svg_raw_shape shape = {
+    const reticle_style *style = style_current(p);
+    reticle_raw_shape shape = {
         .cmd_first = cmd_first,
         .cmd_count = cmd_count,
         .stroke_width = style->stroke_width,
@@ -640,19 +642,19 @@ static bool finish_shape(reticle_parser *p, uint32_t cmd_first, uint32_t cmd_cou
     bool ok = true;
     if (style->fill.gradient_id) {
         shape.fill.gradient_id =
-            svg__strndup(style->fill.gradient_id, strlen(style->fill.gradient_id));
+            reticle_priv_strndup(style->fill.gradient_id, strlen(style->fill.gradient_id));
         ok = ok && shape.fill.gradient_id != nullptr;
     }
     if (ok && style->stroke.gradient_id) {
         shape.stroke.gradient_id =
-            svg__strndup(style->stroke.gradient_id, strlen(style->stroke.gradient_id));
+            reticle_priv_strndup(style->stroke.gradient_id, strlen(style->stroke.gradient_id));
         ok = ok && shape.stroke.gradient_id != nullptr;
     }
     /* The gradient kind is resolved later, when the definition is known. The
      * stored shape takes ownership of both `gradient_id` strings: on success
      * emit_shape copies the struct, so freeing here would leave the document
      * with dangling pointers that reticle_release frees a second time. */
-    if (ok && svg__emit_shape(p, &shape))
+    if (ok && reticle_priv_emit_shape(p, &shape))
         return true;
     free_paint(&shape.fill);
     free_paint(&shape.stroke);
@@ -665,20 +667,21 @@ static bool record_attr(reticle_parser *p, const char *name, size_t name_len, co
                         size_t value_len) {
     if (p->attr_count == p->attr_cap) {
         uint32_t cap = p->attr_cap ? p->attr_cap * 2u : 8u;
-        svg_raw_attr *grown = (svg_raw_attr *)svg__realloc(p->attrs, (size_t)cap * sizeof *grown);
+        reticle_raw_attr *grown =
+            (reticle_raw_attr *)reticle_priv_realloc(p->attrs, (size_t)cap * sizeof *grown);
         if (!grown)
             return false;
         p->attrs = grown;
         p->attr_cap = cap;
     }
-    char *owned_name = svg__strndup(name, name_len);
-    char *owned_value = svg__strndup(value, value_len);
+    char *owned_name = reticle_priv_strndup(name, name_len);
+    char *owned_value = reticle_priv_strndup(value, value_len);
     if (!owned_name || !owned_value) {
-        svg__free(owned_name);
-        svg__free(owned_value);
+        reticle_priv_free(owned_name);
+        reticle_priv_free(owned_value);
         return false;
     }
-    p->attrs[p->attr_count++] = (svg_raw_attr){.name = owned_name, .value = owned_value};
+    p->attrs[p->attr_count++] = (reticle_raw_attr){.name = owned_name, .value = owned_value};
     return true;
 }
 
@@ -690,7 +693,7 @@ static void parse_viewbox(reticle_parser *p, const char *value, size_t len) {
         while (cursor < end && (is_ws(*cursor) || *cursor == ','))
             cursor++;
         bool ok = false;
-        parts[i] = svg__parse_number(cursor, (size_t)(end - cursor), &ok);
+        parts[i] = reticle_priv_parse_number(cursor, (size_t)(end - cursor), &ok);
         if (!ok)
             return;
         while (cursor < end && !is_ws(*cursor) && *cursor != ',')
@@ -703,7 +706,7 @@ static void parse_viewbox(reticle_parser *p, const char *value, size_t len) {
     p->saw_root = true;
 }
 
-static void parse_root_geometry(reticle_parser *p, const svg_tag *tag) {
+static void parse_root_geometry(reticle_parser *p, const reticle_tag *tag) {
     const char *value = nullptr;
     size_t len = 0;
     if (attr_span(tag, "viewBox", &value, &len)) {
@@ -712,9 +715,9 @@ static void parse_root_geometry(reticle_parser *p, const svg_tag *tag) {
     }
     float width = 0.0f, height = 0.0f;
     if (attr_span(tag, "width", &value, &len))
-        (void)svg__parse_length(value, len, 0.0f, &width);
+        (void)reticle_priv_parse_length(value, len, 0.0f, &width);
     if (attr_span(tag, "height", &value, &len))
-        (void)svg__parse_length(value, len, 0.0f, &height);
+        (void)reticle_priv_parse_length(value, len, 0.0f, &height);
     if (width > 0.0f && height > 0.0f) {
         p->viewport = (flux_rect){0.0f, 0.0f, width, height};
         p->saw_root = true;
@@ -723,36 +726,37 @@ static void parse_root_geometry(reticle_parser *p, const svg_tag *tag) {
 
 /* ---- Gradient collection ----------------------------------------- */
 
-static bool begin_gradient(reticle_parser *p, const svg_tag *tag, svg_gradient_kind kind) {
+static bool begin_gradient(reticle_parser *p, const reticle_tag *tag, reticle_gradient_kind kind) {
     if (p->gradient_count >= p->limits.max_gradients)
         return false;
     free_gradient(&p->gradient);
-    p->gradient = (svg_raw_gradient){
+    p->gradient = (reticle_raw_gradient){
         .kind = kind,
-        .units = SVG__UNITS_OBJECT_BBOX,
+        .units = RETICLE_INTERNAL_UNITS_OBJECT_BBOX,
         /* An absent gradientTransform is the identity, not the zero matrix: a
          * zero matrix collapses every endpoint onto the origin and silently
          * paints a flat colour. */
-        .transform = svg__xform_identity(),
+        .transform = reticle_priv_xform_identity(),
     };
     const char *value = nullptr;
     size_t len = 0;
     if (attr_span(tag, "id", &value, &len)) {
-        p->gradient.id = svg__strndup(value, len);
+        p->gradient.id = reticle_priv_strndup(value, len);
         if (!p->gradient.id)
             return false;
     }
     if (attr_span(tag, "href", &value, &len) || attr_span(tag, "xlink:href", &value, &len)) {
         if (len > 0 && value[0] == '#') {
-            p->gradient.href = svg__strndup(value + 1, len - 1);
+            p->gradient.href = reticle_priv_strndup(value + 1, len - 1);
             if (!p->gradient.href)
                 return false;
         }
     }
     if (attr_span(tag, "gradientUnits", &value, &len)) {
-        p->gradient.units =
-            span_eq(value, len, "userSpaceOnUse") ? SVG__UNITS_USER_SPACE : SVG__UNITS_OBJECT_BBOX;
-        p->gradient.present |= SVG__FIELD_UNITS;
+        p->gradient.units = span_eq(value, len, "userSpaceOnUse")
+                                ? RETICLE_INTERNAL_UNITS_USER_SPACE
+                                : RETICLE_INTERNAL_UNITS_OBJECT_BBOX;
+        p->gradient.present |= RETICLE_INTERNAL_FIELD_UNITS;
     }
     /* Defaults per spec, only relevant when nothing in the href chain sets
      * them; `present` keeps the distinction. */
@@ -763,23 +767,30 @@ static bool begin_gradient(reticle_parser *p, const svg_tag *tag, svg_gradient_k
     p->gradient.cx = 0.5f;
     p->gradient.cy = 0.5f;
     p->gradient.r = 0.5f;
-    if (attr_span(tag, "x1", &value, &len) && svg__parse_length(value, len, 0.0f, &p->gradient.x1))
-        p->gradient.present |= SVG__FIELD_X1;
-    if (attr_span(tag, "y1", &value, &len) && svg__parse_length(value, len, 0.0f, &p->gradient.y1))
-        p->gradient.present |= SVG__FIELD_Y1;
-    if (attr_span(tag, "x2", &value, &len) && svg__parse_length(value, len, 0.0f, &p->gradient.x2))
-        p->gradient.present |= SVG__FIELD_X2;
-    if (attr_span(tag, "y2", &value, &len) && svg__parse_length(value, len, 0.0f, &p->gradient.y2))
-        p->gradient.present |= SVG__FIELD_Y2;
-    if (attr_span(tag, "cx", &value, &len) && svg__parse_length(value, len, 0.0f, &p->gradient.cx))
-        p->gradient.present |= SVG__FIELD_CX;
-    if (attr_span(tag, "cy", &value, &len) && svg__parse_length(value, len, 0.0f, &p->gradient.cy))
-        p->gradient.present |= SVG__FIELD_CY;
-    if (attr_span(tag, "r", &value, &len) && svg__parse_length(value, len, 0.0f, &p->gradient.r))
-        p->gradient.present |= SVG__FIELD_R;
+    if (attr_span(tag, "x1", &value, &len) &&
+        reticle_priv_parse_length(value, len, 0.0f, &p->gradient.x1))
+        p->gradient.present |= RETICLE_INTERNAL_FIELD_X1;
+    if (attr_span(tag, "y1", &value, &len) &&
+        reticle_priv_parse_length(value, len, 0.0f, &p->gradient.y1))
+        p->gradient.present |= RETICLE_INTERNAL_FIELD_Y1;
+    if (attr_span(tag, "x2", &value, &len) &&
+        reticle_priv_parse_length(value, len, 0.0f, &p->gradient.x2))
+        p->gradient.present |= RETICLE_INTERNAL_FIELD_X2;
+    if (attr_span(tag, "y2", &value, &len) &&
+        reticle_priv_parse_length(value, len, 0.0f, &p->gradient.y2))
+        p->gradient.present |= RETICLE_INTERNAL_FIELD_Y2;
+    if (attr_span(tag, "cx", &value, &len) &&
+        reticle_priv_parse_length(value, len, 0.0f, &p->gradient.cx))
+        p->gradient.present |= RETICLE_INTERNAL_FIELD_CX;
+    if (attr_span(tag, "cy", &value, &len) &&
+        reticle_priv_parse_length(value, len, 0.0f, &p->gradient.cy))
+        p->gradient.present |= RETICLE_INTERNAL_FIELD_CY;
+    if (attr_span(tag, "r", &value, &len) &&
+        reticle_priv_parse_length(value, len, 0.0f, &p->gradient.r))
+        p->gradient.present |= RETICLE_INTERNAL_FIELD_R;
     if (attr_span(tag, "gradientTransform", &value, &len) &&
-        svg__parse_transform(value, len, &p->gradient.transform))
-        p->gradient.present |= SVG__FIELD_TRANSFORM;
+        reticle_priv_parse_transform(value, len, &p->gradient.transform))
+        p->gradient.present |= RETICLE_INTERNAL_FIELD_TRANSFORM;
     if (attr_span(tag, "spreadMethod", &value, &len) &&
         (span_eq(value, len, "reflect") || span_eq(value, len, "repeat")))
         p->gradient.spread_reflect_or_repeat = true;
@@ -802,22 +813,22 @@ static bool commit_gradient(reticle_parser *p) {
         uint32_t cap = p->gradient_cap ? p->gradient_cap * 2u : 8u;
         if (cap > p->limits.max_gradients)
             cap = p->limits.max_gradients;
-        svg_raw_gradient *grown =
-            (svg_raw_gradient *)svg__realloc(p->gradients, (size_t)cap * sizeof *grown);
+        reticle_raw_gradient *grown =
+            (reticle_raw_gradient *)reticle_priv_realloc(p->gradients, (size_t)cap * sizeof *grown);
         if (!grown)
             return false;
         p->gradients = grown;
         p->gradient_cap = cap;
     }
     p->gradients[p->gradient_count++] = p->gradient;
-    p->gradient = (svg_raw_gradient){};
+    p->gradient = (reticle_raw_gradient){};
     return true;
 }
 
-static bool add_stop(reticle_parser *p, const svg_tag *tag) {
+static bool add_stop(reticle_parser *p, const reticle_tag *tag) {
     if (!p->in_gradient || !p->gradient_is_pending)
         return true;
-    if (p->gradient.stop_count >= SVG__MAX_STOPS)
+    if (p->gradient.stop_count >= RETICLE_INTERNAL_MAX_STOPS)
         return true;
     const char *value = nullptr;
     size_t len = 0;
@@ -825,7 +836,7 @@ static bool add_stop(reticle_parser *p, const svg_tag *tag) {
     if (attr_span(tag, "offset", &value, &len)) {
         bool percent = len > 0 && value[len - 1] == '%';
         bool ok = false;
-        float v = svg__parse_number(value, percent ? len - 1 : len, &ok);
+        float v = reticle_priv_parse_number(value, percent ? len - 1 : len, &ok);
         if (ok)
             offset = percent ? v / 100.0f : v;
         if (offset < 0.0f)
@@ -837,7 +848,7 @@ static bool add_stop(reticle_parser *p, const svg_tag *tag) {
     float opacity = 1.0f;
     if (attr_span(tag, "stop-color", &value, &len)) {
         if (!span_eq(value, len, "currentColor"))
-            (void)svg__parse_color(value, len, &r, &g, &b, &a);
+            (void)reticle_priv_parse_color(value, len, &r, &g, &b, &a);
     }
     if (attr_span(tag, "stop-opacity", &value, &len))
         (void)parse_opacity(value, len, &opacity);
@@ -869,14 +880,14 @@ static bool add_stop(reticle_parser *p, const svg_tag *tag) {
                 const size_t name_len = (size_t)(name_end - name);
                 const size_t val_len = (size_t)(val_end - val);
                 if (name_eq(name, name_len, "stop-color") && !span_eq(val, val_len, "currentColor"))
-                    (void)svg__parse_color(val, val_len, &r, &g, &b, &a);
+                    (void)reticle_priv_parse_color(val, val_len, &r, &g, &b, &a);
                 else if (name_eq(name, name_len, "stop-opacity"))
                     (void)parse_opacity(val, val_len, &opacity);
             }
             cursor = semi < decl_end ? semi + 1 : decl_end;
         }
     }
-    p->gradient.stops[p->gradient.stop_count] = (svg_stop){
+    p->gradient.stops[p->gradient.stop_count] = (reticle_stop){
         .offset = offset,
         .r = r,
         .g = g,
@@ -899,13 +910,14 @@ typedef enum attr_length_result {
     ATTR_LENGTH_INVALID = 2,
 } attr_length_result;
 
-static attr_length_result attr_length(const svg_tag *tag, const char *name, float percent_ref,
+static attr_length_result attr_length(const reticle_tag *tag, const char *name, float percent_ref,
                                       float *out) {
     const char *value = nullptr;
     size_t len = 0;
     if (!attr_span(tag, name, &value, &len))
         return ATTR_LENGTH_ABSENT;
-    return svg__parse_length(value, len, percent_ref, out) ? ATTR_LENGTH_OK : ATTR_LENGTH_INVALID;
+    return reticle_priv_parse_length(value, len, percent_ref, out) ? ATTR_LENGTH_OK
+                                                                   : ATTR_LENGTH_INVALID;
 }
 
 static bool parse_points(const char *value, size_t len, float **xy_out, uint32_t *count_out) {
@@ -913,7 +925,7 @@ static bool parse_points(const char *value, size_t len, float **xy_out, uint32_t
     const char *end = value + len;
     uint32_t cap = 16;
     uint32_t count = 0;
-    float *xy = (float *)svg__alloc((size_t)cap * sizeof *xy);
+    float *xy = (float *)reticle_priv_alloc((size_t)cap * sizeof *xy);
     if (!xy)
         return false;
     while (true) {
@@ -922,16 +934,16 @@ static bool parse_points(const char *value, size_t len, float **xy_out, uint32_t
         if (cursor >= end)
             break;
         bool ok = false;
-        float v = svg__parse_number(cursor, (size_t)(end - cursor), &ok);
+        float v = reticle_priv_parse_number(cursor, (size_t)(end - cursor), &ok);
         if (!ok)
             break;
         while (cursor < end && !is_ws(*cursor) && *cursor != ',')
             cursor++;
         if (count == cap) {
             cap *= 2u;
-            float *grown = (float *)svg__realloc(xy, (size_t)cap * sizeof *grown);
+            float *grown = (float *)reticle_priv_realloc(xy, (size_t)cap * sizeof *grown);
             if (!grown) {
-                svg__free(xy);
+                reticle_priv_free(xy);
                 return false;
             }
             xy = grown;
@@ -943,9 +955,9 @@ static bool parse_points(const char *value, size_t len, float **xy_out, uint32_t
     return true;
 }
 
-static bool emit_element_geometry(reticle_parser *p, const svg_tag *tag, const char *name,
+static bool emit_element_geometry(reticle_parser *p, const reticle_tag *tag, const char *name,
                                   size_t name_len) {
-    const svg_style *style = style_current(p);
+    const reticle_style *style = style_current(p);
     const float vw = p->viewport.w > 0.0f ? p->viewport.w : 1.0f;
     const float vh = p->viewport.h > 0.0f ? p->viewport.h : 1.0f;
     const uint32_t first = p->cmds.count;
@@ -964,7 +976,7 @@ static bool emit_element_geometry(reticle_parser *p, const svg_tag *tag, const c
             while (probe < probe_end && is_ws(*probe))
                 probe++;
             ok = probe == probe_end ||
-                 svg__parse_path_data(value, len, style->ctm, &p->cmds, &bounds);
+                 reticle_priv_parse_path_data(value, len, style->ctm, &p->cmds, &bounds);
         }
     } else if (name_eq(name, name_len, "rect")) {
         float x = 0.0f, y = 0.0f, w = 0.0f, h = 0.0f, rx = 0.0f, ry = 0.0f;
@@ -984,7 +996,7 @@ static bool emit_element_geometry(reticle_parser *p, const svg_tag *tag, const c
             ry = rx;
         else if (ry_result == ATTR_LENGTH_OK && rx_result == ATTR_LENGTH_ABSENT)
             rx = ry;
-        ok = svg__emit_rect(&p->cmds, style->ctm, x, y, w, h, rx, ry, &bounds);
+        ok = reticle_priv_emit_rect(&p->cmds, style->ctm, x, y, w, h, rx, ry, &bounds);
     } else if (name_eq(name, name_len, "circle")) {
         float cx = 0.0f, cy = 0.0f, r = 0.0f;
         if (attr_length(tag, "cx", vw, &cx) == ATTR_LENGTH_INVALID ||
@@ -992,7 +1004,7 @@ static bool emit_element_geometry(reticle_parser *p, const svg_tag *tag, const c
             return true;
         if (attr_length(tag, "r", vw, &r) != ATTR_LENGTH_OK)
             return true; /* `r` is mandatory; absent or invalid disables the circle */
-        ok = svg__emit_ellipse(&p->cmds, style->ctm, cx, cy, r, r, &bounds);
+        ok = reticle_priv_emit_ellipse(&p->cmds, style->ctm, cx, cy, r, r, &bounds);
     } else if (name_eq(name, name_len, "ellipse")) {
         float cx = 0.0f, cy = 0.0f, rx = 0.0f, ry = 0.0f;
         if (attr_length(tag, "cx", vw, &cx) == ATTR_LENGTH_INVALID ||
@@ -1001,7 +1013,7 @@ static bool emit_element_geometry(reticle_parser *p, const svg_tag *tag, const c
         if (attr_length(tag, "rx", vw, &rx) != ATTR_LENGTH_OK ||
             attr_length(tag, "ry", vh, &ry) != ATTR_LENGTH_OK)
             return true;
-        ok = svg__emit_ellipse(&p->cmds, style->ctm, cx, cy, rx, ry, &bounds);
+        ok = reticle_priv_emit_ellipse(&p->cmds, style->ctm, cx, cy, rx, ry, &bounds);
     } else if (name_eq(name, name_len, "line")) {
         float x1 = 0.0f, y1 = 0.0f, x2 = 0.0f, y2 = 0.0f;
         if (attr_length(tag, "x1", vw, &x1) == ATTR_LENGTH_INVALID ||
@@ -1009,7 +1021,7 @@ static bool emit_element_geometry(reticle_parser *p, const svg_tag *tag, const c
             attr_length(tag, "x2", vw, &x2) == ATTR_LENGTH_INVALID ||
             attr_length(tag, "y2", vh, &y2) == ATTR_LENGTH_INVALID)
             return true;
-        ok = svg__emit_line(&p->cmds, style->ctm, x1, y1, x2, y2, &bounds);
+        ok = reticle_priv_emit_line(&p->cmds, style->ctm, x1, y1, x2, y2, &bounds);
     } else if (name_eq(name, name_len, "polyline") || name_eq(name, name_len, "polygon")) {
         const char *value = nullptr;
         size_t len = 0;
@@ -1019,9 +1031,9 @@ static bool emit_element_geometry(reticle_parser *p, const svg_tag *tag, const c
         uint32_t count = 0;
         if (!parse_points(value, len, &xy, &count))
             return false;
-        ok = svg__emit_poly(&p->cmds, style->ctm, xy, count, name_eq(name, name_len, "polygon"),
-                            &bounds);
-        svg__free(xy);
+        ok = reticle_priv_emit_poly(&p->cmds, style->ctm, xy, count,
+                                    name_eq(name, name_len, "polygon"), &bounds);
+        reticle_priv_free(xy);
     } else {
         return true; /* not a geometry element */
     }
@@ -1070,7 +1082,7 @@ static bool is_gradient_element(const char *name, size_t len) {
     return name_eq(name, len, "linearGradient") || name_eq(name, len, "radialGradient");
 }
 
-static bool open_element(reticle_parser *p, const svg_tag *tag) {
+static bool open_element(reticle_parser *p, const reticle_tag *tag) {
     const char *name = tag->name;
     const size_t name_len = tag->name_len;
 
@@ -1078,7 +1090,7 @@ static bool open_element(reticle_parser *p, const svg_tag *tag) {
         if (!p->saw_root) {
             parse_root_geometry(p, tag);
             for (uint32_t i = 0; i < tag->attr_count; ++i) {
-                const svg_attr *attr = &tag->attrs[i];
+                const reticle_attr *attr = &tag->attrs[i];
                 /* Application metadata has no SVG vocabulary of its own, so it
                  * is carried on data-* attributes and read back verbatim. */
                 if (attr->name_len > 5 && memcmp(attr->name, "data-", 5) == 0) {
@@ -1087,7 +1099,7 @@ static bool open_element(reticle_parser *p, const svg_tag *tag) {
                 }
             }
         }
-        svg_style child = {};
+        reticle_style child = {};
         if (!style_clone(style_current(p), &child))
             return false;
         apply_tag_style(p, &child, tag);
@@ -1100,8 +1112,9 @@ static bool open_element(reticle_parser *p, const svg_tag *tag) {
 
     if (is_gradient_element(name, name_len)) {
         return begin_gradient(p, tag,
-                              name_eq(name, name_len, "linearGradient") ? SVG__GRADIENT_LINEAR
-                                                                        : SVG__GRADIENT_RADIAL);
+                              name_eq(name, name_len, "linearGradient")
+                                  ? RETICLE_INTERNAL_GRADIENT_LINEAR
+                                  : RETICLE_INTERNAL_GRADIENT_RADIAL);
     }
 
     if (name_eq(name, name_len, "stop")) {
@@ -1122,7 +1135,7 @@ static bool open_element(reticle_parser *p, const svg_tag *tag) {
     }
 
     if (name_eq(name, name_len, "g")) {
-        svg_style child = {};
+        reticle_style child = {};
         if (!style_clone(style_current(p), &child))
             return false;
         /* Group opacity cascades multiplicatively into each descendant. */
@@ -1130,9 +1143,9 @@ static bool open_element(reticle_parser *p, const svg_tag *tag) {
         const char *value = nullptr;
         size_t len = 0;
         if (attr_span(tag, "transform", &value, &len)) {
-            svg_transform transform;
-            if (svg__parse_transform(value, len, &transform))
-                child.ctm = svg__xform_mul(child.ctm, transform);
+            reticle_transform transform;
+            if (reticle_priv_parse_transform(value, len, &transform))
+                child.ctm = reticle_priv_xform_mul(child.ctm, transform);
         }
         if (!style_push(p, &child)) {
             style_dispose(&child);
@@ -1152,16 +1165,16 @@ static bool open_element(reticle_parser *p, const svg_tag *tag) {
          * so the picture looks plausible while the colours are the parent's.
          * Presentation attributes on the element are the near-universal style
          * idiom in cursor and icon sets, so this frame is not optional. */
-        svg_style local = {};
+        reticle_style local = {};
         if (!style_clone(style_current(p), &local))
             return false;
         apply_tag_style(p, &local, tag);
         const char *value = nullptr;
         size_t len = 0;
         if (attr_span(tag, "transform", &value, &len)) {
-            svg_transform transform;
-            if (svg__parse_transform(value, len, &transform))
-                local.ctm = svg__xform_mul(local.ctm, transform);
+            reticle_transform transform;
+            if (reticle_priv_parse_transform(value, len, &transform))
+                local.ctm = reticle_priv_xform_mul(local.ctm, transform);
         }
         if (!style_push(p, &local)) {
             style_dispose(&local);
@@ -1195,7 +1208,7 @@ static bool pushes_style_frame(const reticle_parser *p, const char *name, size_t
     return false;
 }
 
-static bool close_element(reticle_parser *p, const svg_tag *tag) {
+static bool close_element(reticle_parser *p, const reticle_tag *tag) {
     if (name_eq(tag->name, tag->name_len, "linearGradient") ||
         name_eq(tag->name, tag->name_len, "radialGradient")) {
         return commit_gradient(p);
@@ -1221,18 +1234,18 @@ static bool close_element(reticle_parser *p, const svg_tag *tag) {
 /* ------------------------------------------------------------------ */
 
 static void parser_deinit(reticle_parser *p) {
-    svg_cmd_buf_deinit(&p->cmds);
+    reticle_cmd_buf_deinit(&p->cmds);
     for (uint32_t i = 0; i < p->shape_count; ++i) {
         free_paint(&p->shapes[i].fill);
         free_paint(&p->shapes[i].stroke);
     }
-    svg__free(p->shapes);
+    reticle_priv_free(p->shapes);
     for (uint32_t i = 0; i < p->gradient_count; ++i)
         free_gradient(&p->gradients[i]);
-    svg__free(p->gradients);
+    reticle_priv_free(p->gradients);
     free_gradient(&p->gradient);
     free_tag_attrs(p);
-    svg__free(p->attrs);
+    reticle_priv_free(p->attrs);
     while (p->stack.depth > 0) {
         p->stack.depth--;
         style_dispose(&p->stack.frames[p->stack.depth]);
@@ -1249,21 +1262,21 @@ static bool parse_into(reticle_parser *p) {
         /* Comments, processing instructions, doctype and CDATA are skipped
          * wholesale; none of them can contribute geometry. */
         if (p->end - p->p >= 4 && memcmp(p->p, "<!--", 4) == 0) {
-            const char *close = svg__find(p->p + 4, (size_t)(p->end - p->p - 4), "-->");
+            const char *close = reticle_priv_find(p->p + 4, (size_t)(p->end - p->p - 4), "-->");
             if (!close)
                 return false;
             p->p = close + 3;
             continue;
         }
         if (p->end - p->p >= 2 && memcmp(p->p, "<?", 2) == 0) {
-            const char *close = svg__find(p->p + 2, (size_t)(p->end - p->p - 2), "?>");
+            const char *close = reticle_priv_find(p->p + 2, (size_t)(p->end - p->p - 2), "?>");
             if (!close)
                 return false;
             p->p = close + 2;
             continue;
         }
         if (p->end - p->p >= 9 && memcmp(p->p, "<![CDATA[", 9) == 0) {
-            const char *close = svg__find(p->p + 9, (size_t)(p->end - p->p - 9), "]]>");
+            const char *close = reticle_priv_find(p->p + 9, (size_t)(p->end - p->p - 9), "]]>");
             if (!close)
                 return false;
             p->p = close + 3;
@@ -1277,7 +1290,7 @@ static bool parse_into(reticle_parser *p) {
             continue;
         }
 
-        svg_tag tag = {};
+        reticle_tag tag = {};
         if (!read_tag(&p->p, p->end, &tag))
             return false;
         p->saw_markup = true;
@@ -1374,16 +1387,16 @@ flux_result reticle_parse(const reticle_parse_opts *opts, reticle_document **out
     size_t length = opts->length;
     if (length == RETICLE_LENGTH_MEASURE)
         length = strlen(opts->text);
-    if (length == 0 || length > SVG__MAX_INPUT_BYTES)
+    if (length == 0 || length > RETICLE_MAX_INPUT_BYTES)
         return FLUX_ERROR_INVALID_ARGUMENT;
 
     reticle_parser parser = {};
     parser.limits = (reticle_parse_limits){
-        .max_shapes = SVG__DEFAULT_MAX_SHAPES,
-        .max_commands = SVG__DEFAULT_MAX_COMMANDS,
-        .max_gradients = SVG__DEFAULT_MAX_GRADIENTS,
-        .max_elements = SVG__DEFAULT_MAX_ELEMENTS,
-        .max_depth = SVG__DEFAULT_MAX_DEPTH,
+        .max_shapes = RETICLE_INTERNAL_DEFAULT_MAX_SHAPES,
+        .max_commands = RETICLE_INTERNAL_DEFAULT_MAX_COMMANDS,
+        .max_gradients = RETICLE_INTERNAL_DEFAULT_MAX_GRADIENTS,
+        .max_elements = RETICLE_INTERNAL_DEFAULT_MAX_ELEMENTS,
+        .max_depth = RETICLE_INTERNAL_DEFAULT_MAX_DEPTH,
     };
     if (opts->limits) {
         if (opts->limits->max_shapes)
@@ -1403,7 +1416,7 @@ flux_result reticle_parse(const reticle_parse_opts *opts, reticle_document **out
      * ceiling before the parse loop gets a chance to notice. */
     parser.cmds.limit = parser.limits.max_commands;
 
-    svg_style root = {};
+    reticle_style root = {};
     seed_root_style(&parser, &root);
     if (!style_push(&parser, &root)) {
         style_dispose(&root);
@@ -1420,7 +1433,7 @@ flux_result reticle_parse(const reticle_parse_opts *opts, reticle_document **out
         return FLUX_ERROR_INVALID_ARGUMENT;
     }
 
-    reticle_document *doc = (reticle_document *)svg__alloc(sizeof *doc);
+    reticle_document *doc = (reticle_document *)reticle_priv_alloc(sizeof *doc);
     if (!doc) {
         parser_deinit(&parser);
         return FLUX_ERROR_OUT_OF_MEMORY;
@@ -1439,7 +1452,7 @@ flux_result reticle_parse(const reticle_parse_opts *opts, reticle_document **out
         .attr_count = parser.attr_count,
     };
     /* Ownership moved into the document; stop the parser from freeing it. */
-    parser.cmds = (svg_cmd_buf){};
+    parser.cmds = (reticle_cmd_buf){};
     parser.shapes = nullptr;
     parser.shape_count = 0;
     parser.shape_cap = 0;
@@ -1451,14 +1464,14 @@ flux_result reticle_parse(const reticle_parse_opts *opts, reticle_document **out
     parser.attr_cap = 0;
     parser_deinit(&parser);
 
-    if (!svg__resolve_paints(doc)) {
+    if (!reticle_priv_resolve_paints(doc)) {
         reticle_release(doc);
         return FLUX_ERROR_OUT_OF_MEMORY;
     }
     /* The raw gradient table is only needed for resolution. */
     for (uint32_t i = 0; i < doc->raw_gradient_count; ++i)
         free_gradient(&doc->raw_gradients[i]);
-    svg__free(doc->raw_gradients);
+    reticle_priv_free(doc->raw_gradients);
     doc->raw_gradients = nullptr;
     doc->raw_gradient_count = 0;
 
@@ -1490,16 +1503,16 @@ void reticle_release(reticle_document *doc) {
         free_paint(&doc->raw_shapes[i].fill);
         free_paint(&doc->raw_shapes[i].stroke);
     }
-    svg__free(doc->raw_shapes);
-    svg__free(doc->shapes);
-    svg__free(doc->cmds);
-    svg__free(doc->gradients);
+    reticle_priv_free(doc->raw_shapes);
+    reticle_priv_free(doc->shapes);
+    reticle_priv_free(doc->cmds);
+    reticle_priv_free(doc->gradients);
     for (uint32_t i = 0; i < doc->attr_count; ++i) {
-        svg__free(doc->attrs[i].name);
-        svg__free(doc->attrs[i].value);
+        reticle_priv_free(doc->attrs[i].name);
+        reticle_priv_free(doc->attrs[i].value);
     }
-    svg__free(doc->attrs);
-    svg__free(doc);
+    reticle_priv_free(doc->attrs);
+    reticle_priv_free(doc);
     __atomic_sub_fetch(&g_live_documents, 1u, __ATOMIC_RELAXED);
 }
 
@@ -1534,7 +1547,7 @@ flux_result reticle_gradient_at(const reticle_document *doc, uint32_t index,
                                 reticle_gradient_view *out) {
     if (!doc || !out || index >= doc->gradient_count)
         return FLUX_ERROR_OUT_OF_RANGE;
-    const svg_gradient *gradient = &doc->gradients[index];
+    const reticle_gradient *gradient = &doc->gradients[index];
     out->stop_count = gradient->stop_count;
     for (uint32_t i = 0; i < gradient->stop_count; ++i)
         out->stops[i] = gradient->stops[i];

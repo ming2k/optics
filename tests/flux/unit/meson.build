@@ -1,45 +1,24 @@
-# Unit tests: no Vulkan ICD required, no window system. Run on any
-# build host. The custom_target SPIR-V binaries used only by
-# integration tests are defined in tests/meson.build (parent) and
-# pulled in here as plain variables (subdir() shares scope).
+# Unit tests: no Vulkan ICD required, no window system. Run on any build host.
+# The SPIR-V custom targets below are defined in tests/flux/meson.build; they
+# are inherited through scope, and only device-bound tests consume them.
 
 test_smoke = executable('test_smoke',
   'test_smoke.c',
-  dependencies : [test_helpers_dep],
+  dependencies : [flux_unit_support_dep],
 )
 test('smoke', test_smoke, suite : 'unit')
-
-# Observation-plane ledger (ADR-0129): unconditional counting, peak
-# surviving drain, unmatched-release rejection, bounded interning that
-# reports its own truncation, and the report's structured return shape.
-test_observe = executable('test_observe',
-  'test_observe.c',
-  dependencies : [test_helpers_dep],
-)
-test('observe', test_observe, suite : 'unit')
 
 # Profiler telemetry facade (ADR-0138): zero-overhead macros,
 # query API descriptor compliance, and active/passive telemetry states.
 test_profile = executable('test_profile',
   'test_profile.c',
-  dependencies : [test_helpers_dep],
+  dependencies : [flux_unit_support_dep],
 )
 test('profile', test_profile, suite : 'unit')
 
-# One versioning scheme across every library: macros round-trip through
-# the runtime accessors, packed numbers agree, and the version_string()
-# output is derived from the macros (a hard-coded literal like the
-# scene-graph "0.0.29" incident fails here). CPU-only.
-test_version_lockstep = executable('test_version_lockstep',
-  'test_version_lockstep.c',
-  dependencies : [test_helpers_dep, transit_dep, prism_dep, iris_dep,
-                  vista_dep, lens_dep, glyph_dep],
-)
-test('version_lockstep', test_version_lockstep, suite : 'unit')
-
 test_math = executable('test_math',
   'test_math.c',
-  dependencies : [test_helpers_dep],
+  dependencies : [flux_unit_support_dep],
 )
 test('math', test_math, suite : 'unit')
 
@@ -48,7 +27,7 @@ test('math', test_math, suite : 'unit')
 # winding under both fill rules. Pure CPU, no device.
 test_curve = executable('test_curve',
   'test_curve.c',
-  dependencies : [test_helpers_dep],
+  dependencies : [flux_unit_support_dep],
 )
 test('curve', test_curve, suite : 'unit')
 
@@ -57,14 +36,14 @@ test('curve', test_curve, suite : 'unit')
 # differential parity against the canvas SDF shader's expression.
 test_sdf = executable('test_sdf',
   'test_sdf.c',
-  dependencies : [test_helpers_dep],
+  dependencies : [flux_unit_support_dep],
 )
 test('sdf', test_sdf, suite : 'unit')
 
 # Algorithm Vault (ADR-0121): pure ear-clipping tessellation asset tests
 test_vault_tess = executable('test_vault_tess',
   'test_vault_tess.c',
-  dependencies : [test_helpers_dep],
+  dependencies : [flux_unit_support_dep],
 )
 test('vault_tess', test_vault_tess, suite : 'unit')
 
@@ -91,25 +70,25 @@ test('coverage_raster', test_coverage_raster, suite : 'unit')
 
 test_colorspace = executable('test_colorspace',
   'test_colorspace.c',
-  dependencies : [test_helpers_dep],
+  dependencies : [flux_unit_support_dep],
 )
 test('colorspace', test_colorspace, suite : 'unit')
 
 test_icc = executable('test_icc',
   'test_icc.c',
-  dependencies : [test_helpers_dep],
+  dependencies : [flux_unit_support_dep],
 )
 test('icc', test_icc, suite : 'unit')
 
 test_format = executable('test_format',
   'test_format.c',
-  dependencies : [test_helpers_dep],
+  dependencies : [flux_dep, vulkan_dep, m_dep, optics_test_dep],
 )
 test('format', test_format, suite : 'unit')
 
 test_canvas_paint = executable('test_canvas_paint',
   'test_canvas_paint.c',
-  dependencies : [test_helpers_dep],
+  dependencies : [flux_unit_support_dep],
 )
 test('canvas_paint', test_canvas_paint, suite : 'unit')
 
@@ -117,7 +96,7 @@ test('canvas_paint', test_canvas_paint, suite : 'unit')
 # (flux_canvas_backend_cpu) end to end with no Vulkan device.
 test_canvas_cpu = executable('test_canvas_cpu',
   'test_canvas_cpu.c',
-  dependencies : [test_helpers_dep],
+  dependencies : [flux_unit_support_dep],
 )
 test('canvas_cpu', test_canvas_cpu, suite : 'unit')
 
@@ -127,7 +106,7 @@ test('canvas_cpu', test_canvas_cpu, suite : 'unit')
 # independent of the sample count and would make this pass vacuously.
 test_canvas_coverage = executable('test_canvas_coverage',
   'test_canvas_coverage.c',
-  dependencies : [test_helpers_dep],
+  dependencies : [flux_unit_support_dep],
 )
 test('canvas_coverage', test_canvas_coverage, suite : 'unit')
 
@@ -135,23 +114,9 @@ test('canvas_coverage', test_canvas_coverage, suite : 'unit')
 # canvas via the host R8 coverage atlas path. Links glyph for shaping.
 test_canvas_cpu_text = executable('test_canvas_cpu_text',
   'test_canvas_cpu_text.c',
-  dependencies : [test_helpers_dep, glyph_dep],
+  dependencies : [flux_unit_support_dep, glyph_dep],
 )
 test('canvas_cpu_text', test_canvas_cpu_text, suite : 'unit')
-
-# Long-session text soak: drives the glyph cache past its live ceiling and
-# replays resident working sets, asserting the diagnostic counters (evictions,
-# hits vs misses, atlas pages/clears) stay in their documented steady states.
-# The soak's 9000-glyph working set needs a real CJK face; CI only guarantees
-# one on Linux (fonts-noto-cjk), while macOS fallback faces are not loadable
-# by FreeType and Windows runner fonts vary.
-if host_machine.system() == 'linux'
-  test_text_soak = executable('test_text_soak',
-    'test_text_soak.c',
-    dependencies : [test_helpers_dep, glyph_dep],
-  )
-  test('text_soak', test_text_soak, suite : 'unit', timeout : 120)
-endif
 
 # Atlas-clear invalidation: a segment recorded before an atlas_clear carries
 # pre-clear glyph UVs, so replay must be refused via the host-atlas
@@ -160,7 +125,7 @@ endif
 # with oversized (512px) glyph cells.
 test_canvas_text_atlas = executable('test_canvas_text_atlas',
   'test_canvas_text_atlas.c',
-  dependencies : [test_helpers_dep, glyph_dep],
+  dependencies : [flux_unit_support_dep, glyph_dep],
 )
 test('canvas_text_atlas', test_canvas_text_atlas, suite : 'unit')
 
@@ -169,13 +134,13 @@ test('canvas_text_atlas', test_canvas_text_atlas, suite : 'unit')
 # transform, released handle).
 test_canvas_record = executable('test_canvas_record',
   'test_canvas_record.c',
-  dependencies : [test_helpers_dep],
+  dependencies : [flux_unit_support_dep],
 )
 test('canvas_record', test_canvas_record, suite : 'unit')
 
 test_canvas_path = executable('test_canvas_path',
   'test_canvas_path.c',
-  dependencies : [test_helpers_dep],
+  dependencies : [flux_unit_support_dep],
 )
 test('canvas_path', test_canvas_path, suite : 'unit')
 
@@ -186,7 +151,7 @@ test('canvas_path', test_canvas_path, suite : 'unit')
 test_error_info = executable('test_error_info',
   'test_error_info.c',
   '../../../libs/flux/src/core/result.c',
-  dependencies : [test_helpers_dep],
+  dependencies : [flux_unit_support_dep],
   c_args : ['-DFLUX_STATIC=1'],
 )
 test('error_info', test_error_info, suite : 'unit')
@@ -198,7 +163,7 @@ test('error_info', test_error_info, suite : 'unit')
 test_canvas_tess = executable('test_canvas_tess',
   'test_canvas_tess.c',
   '../../../libs/flux/src/canvas/geometry_tess.c',
-  dependencies : [test_helpers_dep],
+  dependencies : [flux_unit_support_dep],
 )
 test('canvas_tess', test_canvas_tess, suite : 'unit')
 
@@ -207,7 +172,7 @@ test('canvas_tess', test_canvas_tess, suite : 'unit')
 # internal header. Links libflux normally (no source compiled in).
 test_canvas_tess_cache = executable('test_canvas_tess_cache',
   'test_canvas_tess_cache.c',
-  dependencies : [test_helpers_dep],
+  dependencies : [flux_unit_support_dep],
 )
 test('canvas_tess_cache', test_canvas_tess_cache, suite : 'unit')
 
@@ -216,7 +181,7 @@ test('canvas_tess_cache', test_canvas_tess_cache, suite : 'unit')
 test_canvas_flatten = executable('test_canvas_flatten',
   'test_canvas_flatten.c',
   '../../../libs/flux/src/canvas/curve_flatten.c',
-  dependencies : [test_helpers_dep],
+  dependencies : [flux_unit_support_dep],
 )
 test('canvas_flatten', test_canvas_flatten, suite : 'unit')
 
@@ -225,7 +190,7 @@ test('canvas_flatten', test_canvas_flatten, suite : 'unit')
 # following contour. Links libflux normally (public CPU-canvas API).
 test_canvas_stroke_degenerate = executable('test_canvas_stroke_degenerate',
   'test_canvas_stroke_degenerate.c',
-  dependencies : [test_helpers_dep],
+  dependencies : [flux_unit_support_dep],
 )
 test('canvas_stroke_degenerate', test_canvas_stroke_degenerate, suite : 'unit')
 
@@ -234,7 +199,7 @@ test('canvas_stroke_degenerate', test_canvas_stroke_degenerate, suite : 'unit')
 # is invisible for opaque paint but shows as a darker seam under translucency.
 test_canvas_stroke_region = executable('test_canvas_stroke_region',
   'test_canvas_stroke_region.c',
-  dependencies : [test_helpers_dep],
+  dependencies : [flux_unit_support_dep],
 )
 test('canvas_stroke_region', test_canvas_stroke_region, suite : 'unit')
 
@@ -243,43 +208,27 @@ test('canvas_stroke_region', test_canvas_stroke_region, suite : 'unit')
 # materials describe one shape rather than two.
 test_canvas_squircle = executable('test_canvas_squircle',
   'test_canvas_squircle.c',
-  dependencies : [test_helpers_dep],
+  dependencies : [flux_unit_support_dep],
 )
 test('canvas_squircle', test_canvas_squircle, suite : 'unit')
 
 test_scene_camera = executable('test_scene_camera',
   'test_scene_camera.c',
-  dependencies : [test_helpers_dep],
+  dependencies : [flux_unit_support_dep],
 )
 test('scene_camera', test_scene_camera, suite : 'unit')
 
-# glyph_cache compiles its source files directly (matching the
-# test_canvas_tess pattern). The cache is a pure data structure with no
-# Vulkan / Fontconfig dependencies, so the cache half runs on any build
-# host and gates the "candidates lag after a while" regression described
-# in CHANGELOG-TEXT.md. The atlas half drives the shelf packer's page
-# state machine, which needs the FreeType headers text_internal.h
-# includes (no FreeType calls execute on these paths).
-# The cache TU now carries allocation attribution, so it links flux for the
-# allocator entry points even though the test only exercises the hash table
-# (ADR-0135).
-test_glyph_cache = executable('test_glyph_cache',
-  'test_glyph_cache.c',
-  dependencies : [flux_dep],
-)
-test('glyph_cache', test_glyph_cache, suite : 'unit')
-
-shape_test = executable('test_canvas_shapes', 'test_canvas_shapes.c', dependencies : [test_helpers_dep])
+shape_test = executable('test_canvas_shapes', 'test_canvas_shapes.c', dependencies : [flux_unit_support_dep])
 test('canvas_shapes', shape_test, suite : 'unit')
 
 test_rfc0094 = executable('test_rfc0094_contracts',
   'test_rfc0094_contracts.c',
-  dependencies : [test_helpers_dep, glyph_dep],
+  dependencies : [flux_unit_support_dep, glyph_dep],
 )
 test('rfc0094_contracts', test_rfc0094, suite : 'unit')
 
 test_display_list = executable('test_display_list', 'test_display_list.c',
-  dependencies : [test_helpers_dep],
+  dependencies : [flux_unit_support_dep],
 )
 test('display_list', test_display_list, suite : 'unit')
 
@@ -289,12 +238,12 @@ test('display_list', test_display_list, suite : 'unit')
 test_render_plan = executable('test_render_plan',
   ['test_render_plan.c', '../../../libs/flux/src/core/render_plan.c'],
   include_directories : [include_directories('../../../libs/flux/src/core')],
-  dependencies : [test_helpers_dep],
+  dependencies : [flux_unit_support_dep],
 )
 test('render_plan', test_render_plan, suite : 'unit')
 
 test_public_contracts = executable('test_public_contracts',
-  'test_public_contracts.c', dependencies : [test_helpers_dep])
+  'test_public_contracts.c', dependencies : [flux_unit_support_dep])
 test('public_contracts', test_public_contracts, suite : 'unit')
 
 # ADR-0149: the write-epoch history a swapchain rotation is repaired from.
@@ -306,6 +255,6 @@ test('public_contracts', test_public_contracts, suite : 'unit')
 test_damage_history = executable('test_damage_history',
   ['test_damage_history.c', '../../../libs/flux/src/core/damage_history.c'],
   include_directories : [include_directories('../../../libs/flux/src/core')],
-  dependencies : [flux_dep],
+  dependencies : [flux_dep, optics_test_dep],
 )
 test('damage_history', test_damage_history, suite : 'unit')

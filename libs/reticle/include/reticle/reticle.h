@@ -1,5 +1,5 @@
 /*
- * svg/svg.h — SVG vector-document compiler: parse once, paint anywhere.
+ * reticle/reticle.h — SVG vector-document compiler: parse once, paint anywhere.
  *
  * Library position: a Layer-0 sibling of `flux`. It owns exactly one domain —
  * turning SVG 1.1 *static vector art* into flux draw primitives — and owns
@@ -100,7 +100,7 @@ typedef struct reticle_parse_opts {
 
 /* The only value of `reticle_parse_opts.length` meaning "measure this
  * NUL-terminated buffer". It is the maximum `size_t` so that it can never
- * collide with a real byte count; `SVG__MAX_INPUT_BYTES` rejects it as an
+ * collide with a real byte count; `RETICLE_MAX_INPUT_BYTES` rejects it as an
  * input length anyway. */
 #define RETICLE_LENGTH_MEASURE ((size_t)-1)
 
@@ -116,7 +116,7 @@ RETICLE_API reticle_document *reticle_retain(reticle_document *doc);
 RETICLE_API void reticle_release(reticle_document *doc);
 
 /* Live document count for the whole process. This is the drain counter for the
- * `svg` resource kind (INV-ARCH-LEDGER): a document is device-less, so no device
+ * `reticle` resource kind (INV-ARCH-LEDGER): a document is device-less, so no device
  * ledger can own it, and the only way to prove the release path balances is to
  * read the counter before and after. Counting is unconditional and lock-free. */
 RETICLE_API uint32_t reticle_live_documents(void);

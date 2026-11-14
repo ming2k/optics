@@ -1,22 +1,30 @@
-# Integration tests: require a Vulkan ICD (lavapipe on headless CI,
-# real drivers on developer hosts). Each test gracefully skips with
-# PASS when its required environment is absent — no need for a
-# separate gating mechanism. The shared SPIR-V custom_targets come
-# from the parent tests/meson.build via subdir() scope.
+# Integration tests: require a Vulkan ICD (lavapipe on headless CI, real
+# drivers on developer hosts). A test whose environment is absent reports a
+# Meson SKIP (exit 77) through OT_SKIP, never a silent PASS. The shared SPIR-V
+# custom targets come from tests/flux/meson.build via subdir() scope.
 
 test_device = executable('test_device',
   'test_device.c',
-  dependencies : [test_helpers_dep],
+  dependencies : [flux_test_support_dep],
 )
-# device_create/release is pure ABI plumbing; group it with the
-# other unit-scope checks so the unit suite stays green on hosts
-# that happen to have an ICD but cannot run the heavier integration
-# tests (e.g. lavapipe-only CI nodes).
-test('device', test_device, suite : 'unit')
+# device_create/release touches the Vulkan loader, so this is an integration
+# test even though it is light. It skips when no device can be created.
+test('device', test_device, suite : 'integration')
+
+# Observation-plane ledger (ADR-0129): unconditional counting, peak
+# surviving drain, unmatched-release rejection, bounded interning that
+# reports its own truncation, and the report's structured return shape.
+# The ledger rows are device-scoped, so this binary belongs to the boundary
+# layer even though its assertions are deterministic.
+test_observe = executable('test_observe',
+  'test_observe.c',
+  dependencies : [flux_test_support_dep],
+)
+test('observe', test_observe, suite : 'integration')
 
 test_buffer = executable('test_buffer',
   'test_buffer.c',
-  dependencies : [test_helpers_dep],
+  dependencies : [flux_test_support_dep],
 )
 test('buffer', test_buffer, suite : 'integration')
 
@@ -26,60 +34,60 @@ test('buffer', test_buffer, suite : 'integration')
 test_buffer_retire = executable('test_buffer_retire',
   'test_buffer_retire.c',
   triangle_attr_vert_spv, triangle_frag_spv,
-  dependencies : [test_helpers_dep],
+  dependencies : [flux_test_support_dep],
   c_args       : tests_embed_dir_arg,
 )
 test('buffer_retire', test_buffer_retire, suite : 'integration')
 
 test_bindless = executable('test_bindless',
   'test_bindless.c',
-  dependencies : [test_helpers_dep],
+  dependencies : [flux_test_support_dep],
 )
 test('bindless', test_bindless, suite : 'integration')
 
 test_sampler = executable('test_sampler',
   'test_sampler.c',
-  dependencies : [test_helpers_dep],
+  dependencies : [flux_test_support_dep],
 )
 test('sampler', test_sampler, suite : 'integration')
 
 test_image_update = executable('test_image_update',
   'test_image_update.c',
-  dependencies : [test_helpers_dep],
+  dependencies : [flux_test_support_dep],
 )
 test('image_update', test_image_update, suite : 'integration')
 
 test_render_plan_frame = executable('test_render_plan_frame',
   'test_render_plan_frame.c',
-  dependencies : [test_helpers_dep],
+  dependencies : [flux_test_support_dep],
 )
 test('render_plan_frame', test_render_plan_frame, suite : 'integration')
 
 if host_machine.system() == 'linux'
   test_dmabuf = executable('test_dmabuf',
     'test_dmabuf.c',
-    dependencies : [test_helpers_dep],
+    dependencies : [flux_test_support_dep],
   )
   test('dmabuf', test_dmabuf, suite : 'integration')
 endif
 
 test_compute = executable('test_compute',
   'test_compute.c',
-  dependencies : [test_helpers_dep],
+  dependencies : [flux_test_support_dep],
 )
 test('compute', test_compute, suite : 'integration')
 
 test_graphics_pipeline = executable('test_graphics_pipeline',
   'test_graphics_pipeline.c',
   triangle_vert_spv, triangle_frag_spv,
-  dependencies : [test_helpers_dep],
+  dependencies : [flux_test_support_dep],
   c_args       : tests_embed_dir_arg,
 )
 test('graphics_pipeline', test_graphics_pipeline, suite : 'integration')
 
 test_scene_mesh = executable('test_scene_mesh',
   'test_scene_mesh.c',
-  dependencies : [test_helpers_dep],
+  dependencies : [flux_test_support_dep],
 )
 test('scene_mesh', test_scene_mesh, suite : 'integration')
 
@@ -88,13 +96,13 @@ test('scene_mesh', test_scene_mesh, suite : 'integration')
 if opt_scene
   test_mesh_retire = executable('test_mesh_retire',
     'test_mesh_retire.c',
-    dependencies : [test_helpers_dep],
+    dependencies : [flux_test_support_dep],
   )
   test('mesh_retire', test_mesh_retire, suite : 'integration')
 
   test_material_retire = executable('test_material_retire',
     'test_material_retire.c',
-    dependencies : [test_helpers_dep],
+    dependencies : [flux_test_support_dep],
   )
   test('material_retire', test_material_retire, suite : 'integration')
 endif
@@ -105,14 +113,14 @@ endif
 if opt_scene
   test_scene_render = executable('test_scene_render',
     'test_scene_render.c',
-    dependencies : [test_helpers_dep],
+    dependencies : [flux_test_support_dep],
   )
   test('scene_render', test_scene_render, suite : 'integration')
 endif
 
 test_allocator = executable('test_allocator',
   'test_allocator.c',
-  dependencies : [test_helpers_dep],
+  dependencies : [flux_test_support_dep],
 )
 test('allocator', test_allocator, suite : 'integration')
 
@@ -123,7 +131,7 @@ test('allocator', test_allocator, suite : 'integration')
 test_resource_leak = executable('test_resource_leak',
   'test_resource_leak.c',
   triangle_attr_vert_spv, triangle_frag_spv,
-  dependencies : [test_helpers_dep],
+  dependencies : [flux_test_support_dep],
   c_args       : tests_embed_dir_arg,
 )
 test('resource_leak', test_resource_leak, suite : 'integration')
@@ -131,7 +139,7 @@ test('resource_leak', test_resource_leak, suite : 'integration')
 # assertion that a label ever reached the driver; this counts them.
 test_pass_labels = executable('test_pass_labels',
   'test_pass_labels.c',
-  dependencies : [test_helpers_dep],
+  dependencies : [flux_test_support_dep],
 )
 test('pass_labels', test_pass_labels, suite : 'integration')
 # Hostile-allocator contract test (ADR-0135): the `core.h` rule that peer code
@@ -139,7 +147,7 @@ test('pass_labels', test_pass_labels, suite : 'integration')
 # allocator that sees everything and requires prism/lens to pass through it.
 test_hostile_allocator = executable('test_hostile_allocator',
   'test_hostile_allocator.c',
-  dependencies : [test_helpers_dep, prism_dep, lens_dep],
+  dependencies : [flux_test_support_dep, prism_dep, lens_dep],
 )
 test('hostile_allocator', test_hostile_allocator, suite : 'integration')
 
@@ -149,7 +157,7 @@ test('hostile_allocator', test_hostile_allocator, suite : 'integration')
 # must be sane on supporting drivers and zeroed cleanly elsewhere.
 test_memory_budget = executable('test_memory_budget',
   'test_memory_budget.c',
-  dependencies : [test_helpers_dep],
+  dependencies : [flux_test_support_dep],
 )
 test('memory_budget', test_memory_budget, suite : 'integration')
 
@@ -159,7 +167,7 @@ test('memory_budget', test_memory_budget, suite : 'integration')
 if host_machine.system() == 'linux'
   test_alloc_fault = executable('test_alloc_fault',
     'test_alloc_fault.c',
-    dependencies : [test_helpers_dep, dl_dep],
+    dependencies : [flux_test_support_dep, dl_dep],
   )
   test('alloc_fault', test_alloc_fault, suite : 'integration')
 endif
@@ -169,7 +177,7 @@ endif
 if opt_canvas
   test_upload_batch = executable('test_upload_batch',
     'test_upload_batch.c',
-    dependencies : [test_helpers_dep],
+    dependencies : [flux_test_support_dep],
   )
   test('upload_batch', test_upload_batch, suite : 'integration')
 endif
@@ -191,7 +199,7 @@ test_sdf_parity = executable('test_sdf_parity',
   'test_sdf_parity.c',
   sdf_parity_spv,
   sdf_parity_spv_h,
-  dependencies : [test_helpers_dep],
+  dependencies : [flux_test_support_dep],
   c_args       : tests_embed_dir_arg,
 )
 test('sdf_parity', test_sdf_parity, suite : 'integration')
@@ -201,7 +209,7 @@ test('sdf_parity', test_sdf_parity, suite : 'integration')
 test_compute_golden = executable('test_compute_golden',
   'test_compute_golden.c',
   fill_pattern_spv,
-  dependencies : [test_helpers_dep],
+  dependencies : [flux_test_support_dep],
   c_args       : tests_embed_dir_arg,
 )
 test('compute_golden', test_compute_golden, suite : 'integration')
@@ -209,7 +217,7 @@ test('compute_golden', test_compute_golden, suite : 'integration')
 test_validation = executable('test_validation',
   'test_validation.c',
   fill_pattern_spv,
-  dependencies : [test_helpers_dep],
+  dependencies : [flux_test_support_dep],
   c_args       : tests_embed_dir_arg,
 )
 test('validation', test_validation, suite : 'integration', timeout : 30)
@@ -217,7 +225,7 @@ test('validation', test_validation, suite : 'integration', timeout : 30)
 test_soak = executable('test_soak',
   'test_soak.c',
   triangle_vert_spv, triangle_frag_spv,
-  dependencies : [test_helpers_dep],
+  dependencies : [flux_test_support_dep],
   c_args       : tests_embed_dir_arg,
 )
 test('soak', test_soak, suite : 'integration', timeout : 60)
@@ -227,7 +235,7 @@ test('soak', test_soak, suite : 'integration', timeout : 60)
 if opt_canvas
   test_offscreen = executable('test_offscreen',
     'test_offscreen.c',
-    dependencies : [test_helpers_dep],
+    dependencies : [flux_test_support_dep],
   )
   test('offscreen', test_offscreen, suite : 'integration')
 
@@ -237,7 +245,7 @@ if opt_canvas
   # per-image ledger.
   test_frame_damage = executable('test_frame_damage',
     'test_frame_damage.c',
-    dependencies : [test_helpers_dep],
+    dependencies : [flux_test_support_dep],
   )
   test('frame_damage', test_frame_damage, suite : 'integration')
 
@@ -245,7 +253,7 @@ if opt_canvas
   # hole-bridging fill (ADR-0011), asserted by read-back pixel.
   test_canvas_render = executable('test_canvas_render',
     'test_canvas_render.c',
-    dependencies : [test_helpers_dep, glyph_dep],
+    dependencies : [flux_test_support_dep, glyph_dep],
   )
   test('canvas_render', test_canvas_render, suite : 'integration')
 
@@ -254,7 +262,7 @@ if opt_canvas
   # is the test that proves a Windows/macOS port renders identically.
   test_canvas_consistency = executable('test_canvas_consistency',
     'test_canvas_consistency.c',
-    dependencies : [test_helpers_dep],
+    dependencies : [flux_test_support_dep],
   )
   test('canvas_consistency', test_canvas_consistency, suite : 'integration')
 
@@ -264,14 +272,14 @@ if opt_canvas
   # the assertion rather than going unnoticed.
   test_canvas_coverage_ceiling = executable('test_canvas_coverage_ceiling',
     'test_canvas_coverage_ceiling.c',
-    dependencies : [test_helpers_dep],
+    dependencies : [flux_test_support_dep],
   )
   test('canvas_coverage_ceiling', test_canvas_coverage_ceiling, suite : 'integration')
 
   # Real-driver hardware assertion (ADR-0120 Phase B0 gate)
   test_device_hardware = executable('test_device_hardware',
     'test_device_hardware.c',
-    dependencies : [test_helpers_dep],
+    dependencies : [flux_test_support_dep],
   )
   test('device_hardware', test_device_hardware, suite : 'integration')
 
@@ -280,7 +288,7 @@ if opt_canvas
     'test_tile_b1_upload.c',
     '../../../libs/flux/src/canvas/canvas_tile.c',
     '../../../libs/flux/src/canvas/curve_flatten.c',
-    dependencies : [test_helpers_dep],
+    dependencies : [flux_test_support_dep],
   )
   test('tile_b1_upload', test_tile_b1_upload, suite : 'integration')
 
@@ -288,7 +296,7 @@ if opt_canvas
   test_tile_b2_coarse = executable('test_tile_b2_coarse',
     'test_tile_b2_coarse.c',
     '../../../libs/flux/src/canvas/canvas_tile.c',
-    dependencies : [test_helpers_dep],
+    dependencies : [flux_test_support_dep],
   )
   test('tile_b2_coarse', test_tile_b2_coarse, suite : 'integration')
 
@@ -296,7 +304,7 @@ if opt_canvas
   test_tile_b3_backdrop = executable('test_tile_b3_backdrop',
     'test_tile_b3_backdrop.c',
     '../../../libs/flux/src/canvas/canvas_tile.c',
-    dependencies : [test_helpers_dep],
+    dependencies : [flux_test_support_dep],
   )
   test('tile_b3_backdrop', test_tile_b3_backdrop, suite : 'integration')
 
@@ -305,7 +313,7 @@ if opt_canvas
     'test_tile_b4_fine.c',
     '../../../libs/flux/src/canvas/canvas_tile.c',
     '../../../libs/flux/src/canvas/coverage_raster.c',
-    dependencies : [test_helpers_dep],
+    dependencies : [flux_test_support_dep],
   )
   test('tile_b4_fine', test_tile_b4_fine, suite : 'integration')
 
@@ -313,7 +321,7 @@ if opt_canvas
   # (ADR-0147).
   test_plan_prune = executable('test_plan_prune',
     'test_plan_prune.c',
-    dependencies : [test_helpers_dep, prism_dep],
+    dependencies : [flux_test_support_dep, prism_dep],
   )
   test('plan_prune', test_plan_prune, suite : 'integration')
 
@@ -322,7 +330,7 @@ if opt_canvas
     'test_tile_b5_renderplan.c',
     '../../../libs/flux/src/canvas/canvas_tile.c',
     '../../../libs/flux/src/canvas/curve_flatten.c',
-    dependencies : [test_helpers_dep],
+    dependencies : [flux_test_support_dep],
   )
   test('tile_b5_renderplan', test_tile_b5_renderplan, suite : 'integration')
 
@@ -336,14 +344,14 @@ if opt_canvas
     'test_tile_gpu_compute.c',
     '../../../libs/flux/src/canvas/canvas_tile.c',
     canvas_tile_raster_comp_spv_h,
-    dependencies : [test_helpers_dep],
+    dependencies : [flux_test_support_dep],
   )
   test('tile_gpu_compute', test_tile_gpu_compute, suite : 'integration')
 
   # Perspective-correct vector coverage in scene material (ADR-0117)
   test_scene_vector = executable('test_scene_vector',
     'test_scene_vector.c',
-    dependencies : [test_helpers_dep],
+    dependencies : [flux_test_support_dep],
   )
   test('scene_vector', test_scene_vector, suite : 'integration')
 
@@ -352,7 +360,7 @@ if opt_canvas
   # by offscreen readback against the public colour math API.
   test_color_management = executable('test_color_management',
     'test_color_management.c',
-    dependencies : [test_helpers_dep],
+    dependencies : [flux_test_support_dep],
   )
   test('color_management', test_color_management, suite : 'integration')
 
@@ -361,7 +369,7 @@ if opt_canvas
   # frame, and the other slots must not present a stale one.
   test_partial_paint = executable('test_partial_paint',
     'test_partial_paint.c',
-    dependencies : [test_helpers_dep],
+    dependencies : [flux_test_support_dep],
   )
   test('partial_paint', test_partial_paint, suite : 'integration')
 
@@ -370,7 +378,7 @@ if opt_canvas
   # missing bindless-slot recycle fails loudly.
   test_image_retire = executable('test_image_retire',
     'test_image_retire.c',
-    dependencies : [test_helpers_dep],
+    dependencies : [flux_test_support_dep],
   )
   test('image_retire', test_image_retire, suite : 'integration')
 
@@ -380,7 +388,7 @@ if opt_canvas
   # return to baseline.
   test_text_atlas_leak = executable('test_text_atlas_leak',
     'test_text_atlas_leak.c',
-    dependencies : [test_helpers_dep, glyph_dep],
+    dependencies : [flux_test_support_dep, glyph_dep],
   )
   test('text_atlas_leak', test_text_atlas_leak,
     suite       : 'integration',
@@ -391,7 +399,7 @@ if opt_canvas
   # frozen watermark must force a full drain, not unbounded growth.
   test_retire_backpressure = executable('test_retire_backpressure',
     'test_retire_backpressure.c',
-    dependencies : [test_helpers_dep],
+    dependencies : [flux_test_support_dep],
   )
   test('retire_backpressure', test_retire_backpressure,
     suite       : 'integration',
@@ -403,41 +411,41 @@ endif
 if opt_effect
   test_effect_blur = executable('test_effect_blur',
     'test_effect_blur.c',
-    dependencies : [test_helpers_dep],
+    dependencies : [flux_test_support_dep],
   )
   test('effect_blur', test_effect_blur, suite : 'integration')
 
   # ADR-0205: the transient pool is bounded by bytes, not entry count.
   test_effect_pool = executable('test_effect_pool',
     'test_effect_pool.c',
-    dependencies : [test_helpers_dep],
+    dependencies : [flux_test_support_dep],
   )
   test('effect_pool', test_effect_pool, suite : 'integration')
 
   # ADR-0074: drop-shadow operator.
   test_effect_shadow = executable('test_effect_shadow',
     'test_effect_shadow.c',
-    dependencies : [test_helpers_dep],
+    dependencies : [flux_test_support_dep],
   )
   test('effect_shadow', test_effect_shadow, suite : 'integration')
 
   # Render-target capture (ADR-0017): capture -> blur -> composite.
   test_canvas_target = executable('test_canvas_target',
     'test_canvas_target.c',
-    dependencies : [test_helpers_dep],
+    dependencies : [flux_test_support_dep],
   )
   test('canvas_target', test_canvas_target, suite : 'integration')
 
   # Bucketed target-attachment pool: a size sweep must not churn allocations.
   test_canvas_target_pool = executable('test_canvas_target_pool',
     'test_canvas_target_pool.c',
-    dependencies : [test_helpers_dep],
+    dependencies : [flux_test_support_dep],
   )
   test('canvas_target_pool', test_canvas_target_pool, suite : 'integration')
 endif
 
 test_image_update_strided = executable('test_image_update_strided',
   'test_image_update_strided.c',
-  dependencies : [test_helpers_dep],
+  dependencies : [flux_test_support_dep],
 )
 test('image_update_strided', test_image_update_strided, suite : 'integration')

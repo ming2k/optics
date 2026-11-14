@@ -1,6 +1,7 @@
 /* test_user_widget_kind.c — the host-reserved widget-kind range (ADR-0073). */
 
-#include "test_helpers.h"
+#include "lens_test.h"
+#include "optics_test.h"
 
 #include <lens/lens.h>
 
@@ -40,38 +41,38 @@ static void my_dial(lens *ui, const char *id) {
 }
 
 int main(void) {
-    CHECK((uint32_t)LENS_WIDGET_KIND_USER_BASE == 0x40000000u);
-    CHECK((uint32_t)LENS_WIDGET_KIND_COUNT < (uint32_t)LENS_WIDGET_KIND_USER_BASE);
+    OT_EXPECT((uint32_t)LENS_WIDGET_KIND_USER_BASE == 0x40000000u);
+    OT_EXPECT((uint32_t)LENS_WIDGET_KIND_COUNT < (uint32_t)LENS_WIDGET_KIND_USER_BASE);
 
     lens *ui = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
 
     lens_set_skin_userdata(ui, MY_DIAL_KIND, dial_skin, (void *)0xC0FFEE);
     lens_begin(ui, NULL);
     my_dial(ui, "dial");
-    test_end(ui);
-    CHECK(dial_emissions == 1);
-    CHECK(last_user == (void *)0xC0FFEE);
-    CHECK(last_kind == MY_DIAL_KIND);
+    lens_test_end(ui);
+    OT_EXPECT(dial_emissions == 1);
+    OT_EXPECT(last_user == (void *)0xC0FFEE);
+    OT_EXPECT(last_kind == MY_DIAL_KIND);
 
     lens_begin(ui, NULL);
     lens_button(ui, &(lens_button_opts){.label = "OK"});
-    test_end(ui);
-    CHECK(dial_emissions == 1);
+    lens_test_end(ui);
+    OT_EXPECT(dial_emissions == 1);
 
     lens_set_skin_userdata(ui, MY_DIAL_KIND, NULL, NULL);
     lens_begin(ui, NULL);
     my_dial(ui, "dial");
-    test_end(ui);
-    CHECK(dial_emissions == 1);
+    lens_test_end(ui);
+    OT_EXPECT(dial_emissions == 1);
 
     lens_skin_emit_user(ui, lens_root(ui), LENS_WIDGET_BUTTON, (lens_widget_record){0});
-    CHECK(dial_emissions == 1);
+    OT_EXPECT(dial_emissions == 1);
 
     lens_skin_emit_user(ui, NULL, MY_DIAL_KIND, (lens_widget_record){0});
-    CHECK(dial_emissions == 1);
+    OT_EXPECT(dial_emissions == 1);
 
     lens_release(ui);
-    printf("user_widget_kind: %d checks, %d failures\n", g_checks, g_fails);
-    return g_fails ? 1 : 0;
+    printf("user_widget_kind: %d checks, %d failures\n", OT_CHECKS(), OT_FAILURES());
+    return OT_FAILURES() ? 1 : 0;
 }

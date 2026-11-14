@@ -1,6 +1,6 @@
 //! Build script for `iris-sys`.
 //!
-//! Strategy mirrors flux-rs / lens-rs (out-of-tree, openssl-sys convention):
+//! Strategy mirrors `flux-sys` / `lens-sys` (out-of-tree, openssl-sys convention):
 //!   1. Locate libiris via pkg-config. Two modes:
 //!        - Installed (default): the standard pkg-config database finds
 //!          `iris.pc` after `meson install` into a prefix on

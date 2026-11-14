@@ -16,7 +16,7 @@
  * several times over. Skips gracefully when no shaping backend is
  * present (same gate as test_canvas_cpu_text).
  */
-#include "test_helpers.h"
+#include "optics_test.h"
 #include <flux/canvas.h>
 #include <flux/canvas_cpu.h>
 #include <flux/math.h>
@@ -33,9 +33,9 @@
 static uint8_t *snapshot(flux_canvas *c) {
     uint32_t w = 0, h = 0, stride = 0;
     const uint8_t *fb = flux_canvas_cpu_pixels(c, &w, &h, &stride);
-    EXPECT(fb != nullptr && w == W && h == H && stride == W * 4);
+    OT_EXPECT(fb != nullptr && w == W && h == H && stride == W * 4);
     uint8_t *out = malloc((size_t)h * stride);
-    EXPECT(out != nullptr);
+    OT_EXPECT(out != nullptr);
     if (out)
         memcpy(out, fb, (size_t)h * stride);
     return out;
@@ -43,24 +43,24 @@ static uint8_t *snapshot(flux_canvas *c) {
 
 static void begin_clear(flux_canvas *c) {
     flux_color clear = flux_color_rgba_premul(0, 0, 0, 255);
-    EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
-                                                         .clear_color = &clear}) == FLUX_OK);
+    OT_EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                            .clear_color = &clear}) == FLUX_OK);
 }
 
 int main(void) {
     glyph_ctx *t = nullptr;
-    EXPECT(glyph_create(&(glyph_desc){.device = nullptr, .scale = 1.0f}, &t) == FLUX_OK);
-    EXPECT(t != nullptr);
+    OT_EXPECT(glyph_create(&(glyph_desc){.device = nullptr, .scale = 1.0f}, &t) == FLUX_OK);
+    OT_EXPECT(t != nullptr);
 
     /* No shaping backend → measure-only context → nothing to check. */
     glyph_metrics m = glyph_measure(t, "A", 1, nullptr);
     if (m.width <= 0.0f) {
         glyph_release(t);
-        TEST_SUMMARY();
+        OT_SKIP("no shaping backend");
     }
 
     flux_canvas *c = nullptr;
-    EXPECT(flux_canvas_create_cpu(W, H, SCALE, &c) == FLUX_OK);
+    OT_EXPECT(flux_canvas_create_cpu(W, H, SCALE, &c) == FLUX_OK);
 
     glyph_style style = {0};
     style.size_px = 64.0f;
@@ -71,19 +71,19 @@ int main(void) {
 
     /* Frame 1: record two glyphs. */
     begin_clear(c);
-    EXPECT(flux_canvas_cache_begin(c));
+    OT_EXPECT(flux_canvas_cache_begin(c));
     glyph_draw(t, c, nullptr, 4.0f, 4.0f, "Hg", 2, &style);
     flux_canvas_cache_entry rec = flux_canvas_cache_end(c);
-    EXPECT(rec.slot != nullptr);
-    EXPECT(flux_canvas_end(c) == FLUX_OK);
+    OT_EXPECT(rec.slot != nullptr);
+    OT_EXPECT(flux_canvas_end(c) == FLUX_OK);
     uint8_t *live = snapshot(c);
 
     /* Frame 2: replay is faithful while the atlas is untouched. */
     begin_clear(c);
-    EXPECT(flux_canvas_cache_replay(c, rec));
-    EXPECT(flux_canvas_end(c) == FLUX_OK);
+    OT_EXPECT(flux_canvas_cache_replay(c, rec));
+    OT_EXPECT(flux_canvas_end(c) == FLUX_OK);
     uint8_t *replayed = snapshot(c);
-    EXPECT(memcmp(live, replayed, (size_t)W * H * 4) == 0);
+    OT_EXPECT(memcmp(live, replayed, (size_t)W * H * 4) == 0);
     free(replayed);
 
     /* Force atlas_clear at least once: printable ASCII at a handful of
@@ -100,24 +100,24 @@ int main(void) {
             break;
         glyph_draw(t, c, nullptr, 0.13f * (float)k, 4.0f, filler, 94, &style);
     }
-    EXPECT(flux_canvas_end(c) == FLUX_OK);
+    OT_EXPECT(flux_canvas_end(c) == FLUX_OK);
     glyph_get_stats(t, &st_after);
     /* atlas_clears keeps its counting semantics (consumers poll it as a
      * generation signal). */
-    EXPECT(st_after.atlas_clears > st_before.atlas_clears);
+    OT_EXPECT(st_after.atlas_clears > st_before.atlas_clears);
 
     /* The canvas learns a producer's newest generation from the runs it
      * draws; draw once more so the refusal below keys on the post-clear
      * generation even when the final filler draw triggered the clear. */
     begin_clear(c);
     glyph_draw(t, c, nullptr, 4.0f, 4.0f, "x", 1, &style);
-    EXPECT(flux_canvas_end(c) == FLUX_OK);
+    OT_EXPECT(flux_canvas_end(c) == FLUX_OK);
 
     /* Frame 3: the pre-clear segment must be REFUSED — its baked UVs name
      * rearranged texels. Nothing is drawn. */
     begin_clear(c);
-    EXPECT(!flux_canvas_cache_replay(c, rec));
-    EXPECT(flux_canvas_end(c) == FLUX_OK);
+    OT_EXPECT(!flux_canvas_cache_replay(c, rec));
+    OT_EXPECT(flux_canvas_end(c) == FLUX_OK);
     uint8_t *blank = snapshot(c);
     uint8_t all_black[W * 4];
     for (uint32_t x = 0; x < W; ++x) {
@@ -127,33 +127,33 @@ int main(void) {
         all_black[x * 4 + 3] = 255; /* opaque black clear */
     }
     for (uint32_t y = 0; y < H; ++y)
-        EXPECT(memcmp(blank + (size_t)y * W * 4, all_black, sizeof all_black) == 0);
+        OT_EXPECT(memcmp(blank + (size_t)y * W * 4, all_black, sizeof all_black) == 0);
     free(blank);
 
     /* Frame 4: live re-draw re-rasterises into the new atlas generation
      * and reproduces the recorded pixels exactly. */
     begin_clear(c);
     glyph_draw(t, c, nullptr, 4.0f, 4.0f, "Hg", 2, &style);
-    EXPECT(flux_canvas_end(c) == FLUX_OK);
+    OT_EXPECT(flux_canvas_end(c) == FLUX_OK);
     uint8_t *redrawn = snapshot(c);
-    EXPECT(memcmp(live, redrawn, (size_t)W * H * 4) == 0);
+    OT_EXPECT(memcmp(live, redrawn, (size_t)W * H * 4) == 0);
     free(redrawn);
     free(live);
 
     /* A segment recorded after the clear replays normally. */
     begin_clear(c);
-    EXPECT(flux_canvas_cache_begin(c));
+    OT_EXPECT(flux_canvas_cache_begin(c));
     glyph_draw(t, c, nullptr, 4.0f, 4.0f, "Hg", 2, &style);
     flux_canvas_cache_entry rec2 = flux_canvas_cache_end(c);
-    EXPECT(rec2.slot != nullptr);
-    EXPECT(flux_canvas_end(c) == FLUX_OK);
+    OT_EXPECT(rec2.slot != nullptr);
+    OT_EXPECT(flux_canvas_end(c) == FLUX_OK);
     begin_clear(c);
-    EXPECT(flux_canvas_cache_replay(c, rec2));
-    EXPECT(flux_canvas_end(c) == FLUX_OK);
+    OT_EXPECT(flux_canvas_cache_replay(c, rec2));
+    OT_EXPECT(flux_canvas_end(c) == FLUX_OK);
 
     flux_canvas_cache_release(c, rec);
     flux_canvas_cache_release(c, rec2);
     flux_canvas_release(c);
     glyph_release(t);
-    TEST_SUMMARY();
+    return OT_REPORT();
 }

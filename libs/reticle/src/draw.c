@@ -71,7 +71,7 @@ static bool resolve_fill_color(flux_color theme, const reticle_paint *paint,
  * transformed here and flux interpolates in the destination space. */
 static bool build_brush(const reticle_document *doc, const reticle_paint *paint,
                         reticle_paint_mode mode, flux_color theme, float global_alpha,
-                        svg_transform fit, flux_brush *out) {
+                        reticle_transform fit, flux_brush *out) {
     flux_color solid = 0;
     if (resolve_fill_color(theme, paint, mode, global_alpha, &solid)) {
         *out = flux_brush_solid(solid);
@@ -89,14 +89,14 @@ static bool build_brush(const reticle_document *doc, const reticle_paint *paint,
 
     /* Gradients must be unique per shape, so they are not actually shared in the
      * flux brush: each draw gets its own value. */
-    svg_gradient resolved = {};
+    reticle_gradient resolved = {};
     resolved.stop_count = gradient.stop_count;
     for (uint32_t i = 0; i < gradient.stop_count; ++i)
         resolved.stops[i] = gradient.stops[i];
 
     float sx = 0.0f, sy = 0.0f, ex = 0.0f, ey = 0.0f;
-    svg__xform_point(fit, gradient.start.x, gradient.start.y, &sx, &sy);
-    svg__xform_point(fit, gradient.end.x, gradient.end.y, &ex, &ey);
+    reticle_priv_xform_point(fit, gradient.start.x, gradient.start.y, &sx, &sy);
+    reticle_priv_xform_point(fit, gradient.end.x, gradient.end.y, &ex, &ey);
     resolved.start = (flux_point){sx, sy};
     resolved.end = (flux_point){ex, ey};
     /* A radial gradient's radius scales with the fit's uniform factor; the fit
@@ -124,8 +124,8 @@ static bool build_brush(const reticle_document *doc, const reticle_paint *paint,
 }
 
 /* The transform mapping the document viewport into `bounds`. */
-static svg_transform fit_transform(flux_rect viewport, flux_rect bounds, reticle_fit fit,
-                                   float *scale_out) {
+static reticle_transform fit_transform(flux_rect viewport, flux_rect bounds, reticle_fit fit,
+                                       float *scale_out) {
     float view_w = viewport.w > 0.0f ? viewport.w : 1.0f;
     float view_h = viewport.h > 0.0f ? viewport.h : 1.0f;
     if (fit == RETICLE_FIT_STRETCH) {
@@ -133,10 +133,10 @@ static svg_transform fit_transform(flux_rect viewport, flux_rect bounds, reticle
         float sy = bounds.h / view_h;
         if (scale_out)
             *scale_out = 0.5f * (sx + sy);
-        svg_transform transform =
-            svg__xform_mul(svg__xform_translate(bounds.x, bounds.y),
-                           svg__xform_mul(svg__xform_scale(sx, sy),
-                                          svg__xform_translate(-viewport.x, -viewport.y)));
+        reticle_transform transform = reticle_priv_xform_mul(
+            reticle_priv_xform_translate(bounds.x, bounds.y),
+            reticle_priv_xform_mul(reticle_priv_xform_scale(sx, sy),
+                                   reticle_priv_xform_translate(-viewport.x, -viewport.y)));
         return transform;
     }
     float scale = view_w > 0.0f ? bounds.w / view_w : 1.0f;
@@ -149,24 +149,25 @@ static svg_transform fit_transform(flux_rect viewport, flux_rect bounds, reticle
     float drawn_h = view_h * scale;
     float offset_x = bounds.x + (bounds.w - drawn_w) * 0.5f;
     float offset_y = bounds.y + (bounds.h - drawn_h) * 0.5f;
-    return svg__xform_mul(svg__xform_translate(offset_x, offset_y),
-                          svg__xform_mul(svg__xform_scale(scale, scale),
-                                         svg__xform_translate(-viewport.x, -viewport.y)));
+    return reticle_priv_xform_mul(
+        reticle_priv_xform_translate(offset_x, offset_y),
+        reticle_priv_xform_mul(reticle_priv_xform_scale(scale, scale),
+                               reticle_priv_xform_translate(-viewport.x, -viewport.y)));
 }
 
-typedef struct svg_sink {
+typedef struct reticle_sink {
     flux_canvas *canvas;
     flux_encoder *encoder;
-} svg_sink;
+} reticle_sink;
 
-static void sink_draw(svg_sink sink, const flux_geometry *geometry, const flux_brush *brush) {
+static void sink_draw(reticle_sink sink, const flux_geometry *geometry, const flux_brush *brush) {
     if (sink.canvas)
         flux_canvas_draw_geometry(sink.canvas, geometry, brush);
     else
         flux_encoder_draw_geometry(sink.encoder, geometry, brush);
 }
 
-static void sink_transform(svg_sink sink, svg_transform transform) {
+static void sink_transform(reticle_sink sink, reticle_transform transform) {
     flux_mat3x2 matrix = {
         .m = {transform.a, transform.b, transform.c, transform.d, transform.e, transform.f},
     };
@@ -176,21 +177,21 @@ static void sink_transform(svg_sink sink, svg_transform transform) {
         flux_encoder_transform(sink.encoder, matrix);
 }
 
-static void sink_save(svg_sink sink) {
+static void sink_save(reticle_sink sink) {
     if (sink.canvas)
         flux_canvas_save(sink.canvas);
     else
         flux_encoder_save(sink.encoder);
 }
 
-static void sink_restore(svg_sink sink) {
+static void sink_restore(reticle_sink sink) {
     if (sink.canvas)
         flux_canvas_restore(sink.canvas);
     else
         flux_encoder_restore(sink.encoder);
 }
 
-static void sink_clip(svg_sink sink, flux_rect rect) {
+static void sink_clip(reticle_sink sink, flux_rect rect) {
     if (sink.canvas)
         flux_canvas_clip_rect(sink.canvas, rect);
     else
@@ -228,9 +229,9 @@ flux_result reticle_draw(const reticle_draw_opts *opts) {
 
     const flux_rect viewport = doc->viewport;
     float uniform_scale = 1.0f;
-    const svg_transform fit = fit_transform(viewport, opts->bounds, opts->fit, &uniform_scale);
+    const reticle_transform fit = fit_transform(viewport, opts->bounds, opts->fit, &uniform_scale);
 
-    svg_sink sink = {.canvas = opts->canvas, .encoder = opts->encoder};
+    reticle_sink sink = {.canvas = opts->canvas, .encoder = opts->encoder};
     sink_save(sink);
     /* Containment box: a document must never paint outside the box it was asked
      * to fill, even when a shape's stroke or a mis-declared viewBox reaches

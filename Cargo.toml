@@ -1,0 +1,13 @@
+[workspace]
+resolver = "3"
+members = ["bindings/crates/*"]
+
+[workspace.package]
+version = "0.0.79"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/ming2k/optics"
+rust-version = "1.85"
+
+[profile.dev]
+opt-level = 0

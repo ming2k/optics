@@ -9,7 +9,7 @@
  * directly with varying scales.
  */
 #include "../../../libs/flux/src/canvas/internal.h"
-#include "test_helpers.h"
+#include "optics_test.h"
 #include <flux/flux.h>
 
 /* `curve_flatten.c` (and the kernel it calls) use FLUX_FAIL on scratch
@@ -40,7 +40,7 @@ static uint32_t flatten_circle(flux_arena *arena, float radius, float pixel_scal
 
 int main(void) {
     flux_arena arena;
-    EXPECT(flux_arena_init(&arena, 65536, nullptr) == FLUX_OK);
+    OT_EXPECT(flux_arena_init(&arena, 65536, nullptr) == FLUX_OK);
 
     flux_point pts[FLUX_CANVAS_PATH_SCRATCH_CAP];
 
@@ -56,9 +56,9 @@ int main(void) {
     flux_arena_reset(&arena);
     uint32_t high_n = flatten_circle(&arena, 1.0f, 50.0f, pts, FLUX_CANVAS_PATH_SCRATCH_CAP);
 
-    EXPECT(low_n > 0);
-    EXPECT(mid_n > low_n); /* tighter tolerance → more points  */
-    EXPECT(high_n > mid_n);
+    OT_EXPECT(low_n > 0);
+    OT_EXPECT(mid_n > low_n); /* tighter tolerance → more points  */
+    OT_EXPECT(high_n > mid_n);
 
     /* --- equivalence: same screen scale, varying object radius ---
      * A 1px circle drawn at 100× and a 100px circle drawn at 1× both
@@ -69,13 +69,13 @@ int main(void) {
     uint32_t small_high = flatten_circle(&arena, 1.0f, 100.0f, pts, FLUX_CANVAS_PATH_SCRATCH_CAP);
     flux_arena_reset(&arena);
     uint32_t big_low = flatten_circle(&arena, 100.0f, 1.0f, pts, FLUX_CANVAS_PATH_SCRATCH_CAP);
-    EXPECT(small_high == big_low);
+    OT_EXPECT(small_high == big_low);
 
     /* --- mat3x2 scale extraction --- */
-    EXPECT_NEAR(flux_canvas_mat3x2_pixel_scale(flux_mat3x2_identity()), 1.0f, 1e-5);
-    EXPECT_NEAR(flux_canvas_mat3x2_pixel_scale(flux_mat3x2_scale(3.0f, 3.0f)), 3.0f, 1e-5);
+    OT_EXPECT_NEAR(flux_canvas_mat3x2_pixel_scale(flux_mat3x2_identity()), 1.0f, 1e-5);
+    OT_EXPECT_NEAR(flux_canvas_mat3x2_pixel_scale(flux_mat3x2_scale(3.0f, 3.0f)), 3.0f, 1e-5);
     /* rotation preserves the operator norm (=1 for pure rotation). */
-    EXPECT_NEAR(flux_canvas_mat3x2_pixel_scale(flux_mat3x2_rotate(0.7f)), 1.0f, 1e-5);
+    OT_EXPECT_NEAR(flux_canvas_mat3x2_pixel_scale(flux_mat3x2_rotate(0.7f)), 1.0f, 1e-5);
 
     /* --- degenerate (all-coincident) cubic/quad emits nothing ---
      * Before the guard, a zero-length cubic recursed to the depth cap
@@ -86,7 +86,7 @@ int main(void) {
     flux_arena_reset(&arena);
     {
         flux_path *p = nullptr;
-        EXPECT(flux_path_create(&p, &arena) == FLUX_OK);
+        OT_EXPECT(flux_path_create(&p, &arena) == FLUX_OK);
         flux_path_move_to(p, 10.0f, 10.0f);
         flux_path_line_to(p, 20.0f, 10.0f);
         /* all four anchors coincident: a point, not a curve */
@@ -101,14 +101,14 @@ int main(void) {
         flux_canvas_contour cons[FLUX_CANVAS_MAX_CONTOURS];
         flatten_multi r = flatten_path_to_contours(p, 1.0f, pts, FLUX_CANVAS_PATH_SCRATCH_CAP, cons,
                                                    FLUX_CANVAS_MAX_CONTOURS);
-        EXPECT(r.contour_count == 2);
-        EXPECT(r.point_count < 16); /* 2^16-duplicate flood would hit the cap */
-        EXPECT(cons[1].count == 2); /* the trailing subpath kept both points */
+        OT_EXPECT(r.contour_count == 2);
+        OT_EXPECT(r.point_count < 16); /* 2^16-duplicate flood would hit the cap */
+        OT_EXPECT(cons[1].count == 2); /* the trailing subpath kept both points */
         flux_point tail = pts[cons[1].start + cons[1].count - 1];
-        EXPECT_NEAR(tail.x, 60.0f, 1e-4);
-        EXPECT_NEAR(tail.y, 40.0f, 1e-4);
+        OT_EXPECT_NEAR(tail.x, 60.0f, 1e-4);
+        OT_EXPECT_NEAR(tail.y, 40.0f, 1e-4);
     }
 
     flux_arena_deinit(&arena);
-    TEST_SUMMARY();
+    return OT_REPORT();
 }

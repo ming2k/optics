@@ -2,7 +2,8 @@
  * begin gating, anchored placement (with flip), band-order occlusion of base
  * widgets, click-outside and Escape dismissal, and centered placement. */
 
-#include "test_helpers.h"
+#include "lens_test.h"
+#include "optics_test.h"
 #include <lens/lens.h>
 
 static const lens_input ZERO_IN = {.display_size = {400, 300}, .dt_seconds = 0.016f};
@@ -25,20 +26,20 @@ static lens_place_opts anchored(const char *id, flux_rect anchor, float pad, flo
 
 static void test_open_close_persist(void) {
     lens *ui = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
 
     lens_begin(ui, &ZERO_IN);
-    CHECK(lens_place_is_open(ui, "menu") == false);
+    OT_EXPECT(lens_place_is_open(ui, "menu") == false);
     lens_place_open(ui, "menu");
-    CHECK(lens_place_is_open(ui, "menu") == true);
-    test_end(ui);
+    OT_EXPECT(lens_place_is_open(ui, "menu") == true);
+    lens_test_end(ui);
 
     /* persists across frames */
     lens_begin(ui, &ZERO_IN);
-    CHECK(lens_place_is_open(ui, "menu") == true);
+    OT_EXPECT(lens_place_is_open(ui, "menu") == true);
     lens_place_close(ui, "menu");
-    CHECK(lens_place_is_open(ui, "menu") == false);
-    test_end(ui);
+    OT_EXPECT(lens_place_is_open(ui, "menu") == false);
+    lens_test_end(ui);
 
     lens_release(ui);
 }
@@ -46,7 +47,7 @@ static void test_open_close_persist(void) {
 /* The body only enters when the transient node is currently open. */
 static void test_begin_gated_by_open_state(void) {
     lens *ui = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
 
     int body_runs = 0;
     lens_begin(ui, &ZERO_IN);
@@ -55,8 +56,8 @@ static void test_begin_gated_by_open_state(void) {
         body_runs++;
         lens_place_end(ui);
     }
-    test_end(ui);
-    CHECK(body_runs == 0); /* closed → skipped */
+    lens_test_end(ui);
+    OT_EXPECT(body_runs == 0); /* closed → skipped */
 
     lens_begin(ui, &ZERO_IN);
     lens_place_open(ui, "m");
@@ -66,15 +67,15 @@ static void test_begin_gated_by_open_state(void) {
         lens_label(ui, &(lens_label_opts){.text = "item"});
         lens_place_end(ui);
     }
-    test_end(ui);
-    CHECK(body_runs == 1); /* open → entered */
+    lens_test_end(ui);
+    OT_EXPECT(body_runs == 1); /* open → entered */
 
     lens_release(ui);
 }
 
 static void test_open_place_reports_hover_for_its_whole_surface(void) {
     lens *ui = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
 
     lens_begin(ui, &ZERO_IN);
     lens_place_open(ui, "hover-card");
@@ -83,20 +84,20 @@ static void test_open_place_reports_hover_for_its_whole_surface(void) {
         lens_label(ui, &(lens_label_opts){.text = "value"});
         lens_place_end(ui);
     }
-    test_end(ui);
+    lens_test_end(ui);
 
     lens_input hover = ZERO_IN;
     hover.cursor = (flux_point){50, 75};
     lens_begin(ui, &hover);
-    CHECK(lens_place_hovered(ui, "hover-card"));
+    OT_EXPECT(lens_place_hovered(ui, "hover-card"));
     if (lens_place_begin(ui, &o)) {
         lens_label(ui, &(lens_label_opts){.text = "value"});
         lens_place_end(ui);
     }
-    test_end(ui);
+    lens_test_end(ui);
 
     lens_place_close(ui, "hover-card");
-    CHECK(!lens_place_hovered(ui, "hover-card"));
+    OT_EXPECT(!lens_place_hovered(ui, "hover-card"));
     lens_release(ui);
 }
 
@@ -104,7 +105,7 @@ static void test_open_place_reports_hover_for_its_whole_surface(void) {
  * there's no room. */
 static void test_anchor_placement_and_flip(void) {
     lens *ui = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
 
     flux_rect bounds_below = {0, 0, 0, 0};
     flux_rect bounds_flip = {0, 0, 0, 0};
@@ -119,7 +120,7 @@ static void test_anchor_placement_and_flip(void) {
         lens_label(ui, &(lens_label_opts){.text = "row2"});
         lens_place_end(ui);
     }
-    test_end(ui);
+    lens_test_end(ui);
     lens_begin(ui, &ZERO_IN);
     if (lens_place_begin(ui, &o_top)) {
         lens_label(ui, &(lens_label_opts){.text = "row1"});
@@ -127,8 +128,8 @@ static void test_anchor_placement_and_flip(void) {
         lens_label(ui, &(lens_label_opts){.text = "row2"});
         lens_place_end(ui);
     }
-    test_end(ui);
-    CHECK(bounds_below.y >= 44.0f); /* below the anchor (20+24=44) */
+    lens_test_end(ui);
+    OT_EXPECT(bounds_below.y >= 44.0f); /* below the anchor (20+24=44) */
 
     /* Now anchor at the bottom; the popup should flip ABOVE. */
     flux_rect anchor_bot = {50, 280, 100, 18}; /* y+h = 298 (near 300 bottom) */
@@ -140,7 +141,7 @@ static void test_anchor_placement_and_flip(void) {
         lens_label(ui, &(lens_label_opts){.text = "row2-bot"});
         lens_place_end(ui);
     }
-    test_end(ui);
+    lens_test_end(ui);
     lens_begin(ui, &ZERO_IN);
     if (lens_place_begin(ui, &o_bot)) {
         lens_label(ui, &(lens_label_opts){.text = "row1-bot"});
@@ -148,8 +149,8 @@ static void test_anchor_placement_and_flip(void) {
         lens_label(ui, &(lens_label_opts){.text = "row2-bot"});
         lens_place_end(ui);
     }
-    test_end(ui);
-    CHECK(bounds_flip.y < anchor_bot.y); /* flipped above */
+    lens_test_end(ui);
+    OT_EXPECT(bounds_flip.y < anchor_bot.y); /* flipped above */
 
     lens_release(ui);
 }
@@ -158,7 +159,7 @@ static void test_anchor_placement_and_flip(void) {
  * is not hovered/clicked. */
 static void test_higher_band_blocks_base(void) {
     lens *ui = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
 
     lens_place_opts cover = anchored("cov", (flux_rect){0, 0, 200, 200}, 8, 200);
     cover.layout.bg = flux_color_rgba_premul(0, 0, 0, 255);
@@ -171,7 +172,7 @@ static void test_higher_band_blocks_base(void) {
         (void)lens_button(ui, &(lens_button_opts){.label = "Top"});
         lens_place_end(ui);
     }
-    test_end(ui);
+    lens_test_end(ui);
 
     /* Frame 2: layout is settled. Press inside the popup area. The
      * base button must NOT report a click. */
@@ -185,8 +186,8 @@ static void test_higher_band_blocks_base(void) {
         (void)lens_button(ui, &(lens_button_opts){.label = "Top"});
         lens_place_end(ui);
     }
-    test_end(ui);
-    CHECK(base_clicked == false); /* occluded by the POPUP band */
+    lens_test_end(ui);
+    OT_EXPECT(base_clicked == false); /* occluded by the POPUP band */
 
     lens_release(ui);
 }
@@ -194,7 +195,7 @@ static void test_higher_band_blocks_base(void) {
 /* Click outside an open transient closes it (with a same-frame grace). */
 static void test_click_outside_dismisses(void) {
     lens *ui = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
 
     lens_place_opts o = anchored("m", (flux_rect){100, 100, 80, 24}, 4, 100);
     lens_begin(ui, &ZERO_IN);
@@ -203,8 +204,8 @@ static void test_click_outside_dismisses(void) {
         lens_label(ui, &(lens_label_opts){.text = "a"});
         lens_place_end(ui);
     }
-    test_end(ui);
-    CHECK(lens_place_is_open(ui, "m") == true);
+    lens_test_end(ui);
+    OT_EXPECT(lens_place_is_open(ui, "m") == true);
 
     /* Frame 2: previous frame's open_frame < current frame, so the grace
      * no longer applies; the outside press closes. */
@@ -217,8 +218,8 @@ static void test_click_outside_dismisses(void) {
         lens_label(ui, &(lens_label_opts){.text = "a"});
         lens_place_end(ui);
     }
-    test_end(ui);
-    CHECK(lens_place_is_open(ui, "m") == false); /* dismissed */
+    lens_test_end(ui);
+    OT_EXPECT(lens_place_is_open(ui, "m") == false); /* dismissed */
 
     lens_release(ui);
 }
@@ -226,22 +227,22 @@ static void test_click_outside_dismisses(void) {
 /* Escape closes the top open transient. */
 static void test_escape_dismisses_top(void) {
     lens *ui = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
 
     lens_begin(ui, &ZERO_IN);
     lens_place_open(ui, "a");
     lens_place_open(ui, "b");
-    test_end(ui);
-    CHECK(lens_place_is_open(ui, "a"));
-    CHECK(lens_place_is_open(ui, "b"));
+    lens_test_end(ui);
+    OT_EXPECT(lens_place_is_open(ui, "a"));
+    OT_EXPECT(lens_place_is_open(ui, "b"));
 
     lens_input in = ZERO_IN;
     in.key_count = 1;
     in.keys[0] = (lens_key_event){.key = LENS_KEY_ESCAPE, .pressed = true};
     lens_begin(ui, &in);
-    test_end(ui);
-    CHECK(lens_place_is_open(ui, "b") == false); /* top closed */
-    CHECK(lens_place_is_open(ui, "a") == true);  /* below stays */
+    lens_test_end(ui);
+    OT_EXPECT(lens_place_is_open(ui, "b") == false); /* top closed */
+    OT_EXPECT(lens_place_is_open(ui, "a") == true);  /* below stays */
 
     lens_release(ui);
 }
@@ -250,7 +251,7 @@ static void test_escape_dismisses_top(void) {
  * content path). */
 static void test_centered_on_display(void) {
     lens *ui = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
 
     lens_begin(ui, &ZERO_IN);
     lens_place_open(ui, "m");
@@ -262,14 +263,14 @@ static void test_centered_on_display(void) {
         lens_label(ui, &(lens_label_opts){.text = "body"});
         lens_place_end(ui);
     }
-    test_end(ui);
+    lens_test_end(ui);
 
     lens_node *content = lens_find(ui, lens_current_id(ui, "m"));
-    CHECK(content != NULL);
+    OT_EXPECT(content != NULL);
     flux_rect r = lens_node_bounds(content);
-    CHECK_NEAR(r.x + r.w * 0.5f, 200.0f, 0.01f); /* centred in 400 */
-    CHECK_NEAR(r.y + r.h * 0.5f, 150.0f, 0.01f); /* centred in 300 */
-    CHECK_NEAR(r.w, 200.0f, 0.01f);              /* min_width fixed the width */
+    OT_EXPECT_NEAR(r.x + r.w * 0.5f, 200.0f, 0.01f); /* centred in 400 */
+    OT_EXPECT_NEAR(r.y + r.h * 0.5f, 150.0f, 0.01f); /* centred in 300 */
+    OT_EXPECT_NEAR(r.w, 200.0f, 0.01f);              /* min_width fixed the width */
 
     lens_release(ui);
 }
@@ -278,7 +279,7 @@ static void test_centered_on_display(void) {
  * a11y walk under its real semantic ancestor, not bolted onto the root. */
 static void test_placed_node_parents_into_tree(void) {
     lens *ui = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
 
     lens_begin(ui, &ZERO_IN);
     lens_place_open(ui, "pp");
@@ -287,18 +288,18 @@ static void test_placed_node_parents_into_tree(void) {
         lens_label(ui, &(lens_label_opts){.text = "inside"});
         lens_place_end(ui);
     }
-    test_end(ui);
+    lens_test_end(ui);
 
     /* The placed node is a child of the implicit root container in the
      * tree (its declaration site), and its children hang under it. */
     lens_node *root = lens_root(ui);
-    CHECK(root != NULL);
+    OT_EXPECT(root != NULL);
     lens_node *popup = lens_find(ui, lens_current_id(ui, "pp"));
-    CHECK(popup != NULL);
-    CHECK(lens_node_parent(popup) == root);
+    OT_EXPECT(popup != NULL);
+    OT_EXPECT(lens_node_parent(popup) == root);
     lens_node *label = lens_node_first_child(popup);
-    CHECK(label != NULL);
-    CHECK(lens_node_parent(label) == popup);
+    OT_EXPECT(label != NULL);
+    OT_EXPECT(lens_node_parent(label) == popup);
 
     lens_release(ui);
 }
@@ -313,5 +314,5 @@ int main(void) {
     test_escape_dismisses_top();
     test_centered_on_display();
     test_placed_node_parents_into_tree();
-    return TEST_REPORT();
+    return OT_REPORT();
 }

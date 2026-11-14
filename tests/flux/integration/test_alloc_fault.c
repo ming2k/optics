@@ -15,7 +15,8 @@
  *   C. dedicated-path failure (>= 16 MiB) -> FLUX_ERROR_OUT_OF_MEMORY
  *      after both the attempt and the reclaim-retry are failed
  */
-#include "test_helpers.h"
+#include "flux_test.h"
+#include "optics_test.h"
 #include <flux/flux.h>
 #include <flux/vulkan.h>
 
@@ -50,10 +51,10 @@ static void fail_next(int n) {
 }
 
 int main(void) {
-    flux_device *d = test_helpers_make_headless_device();
+    flux_device *d = flux_test_make_headless_device();
     if (!d) {
         fprintf(stderr, "test_alloc_fault: no Vulkan device available; skipping\n");
-        return 0;
+        OT_SKIP("no Vulkan device");
     }
 
     /* --- A: pool-block vkAllocateMemory failure is reported as
@@ -70,21 +71,21 @@ int main(void) {
         bd.usage = FLUX_BUFFER_USAGE_UNIFORM;
         bd.location = FLUX_BUFFER_HOST_VISIBLE;
         flux_buffer *b = NULL;
-        EXPECT(flux_buffer_create(d, &bd, &b) == FLUX_ERROR_OUT_OF_MEMORY);
-        EXPECT(b == NULL);
+        OT_EXPECT(flux_buffer_create(d, &bd, &b) == FLUX_ERROR_OUT_OF_MEMORY);
+        OT_EXPECT(b == NULL);
 
         flux_error_info err;
         flux_get_last_error(&err);
-        EXPECT(err.code == FLUX_ERROR_OUT_OF_MEMORY);
-        EXPECT(err.backend_code == VK_ERROR_OUT_OF_DEVICE_MEMORY);
+        OT_EXPECT(err.code == FLUX_ERROR_OUT_OF_MEMORY);
+        OT_EXPECT(err.backend_code == VK_ERROR_OUT_OF_DEVICE_MEMORY);
 
         flux_memory_stats after;
         flux_device_memory_stats(d, &after);
-        EXPECT(after.live_allocations == before.live_allocations);
-        EXPECT(after.bytes_in_use == before.bytes_in_use);
+        OT_EXPECT(after.live_allocations == before.live_allocations);
+        OT_EXPECT(after.bytes_in_use == before.bytes_in_use);
 
         /* No injection left: the same request succeeds. */
-        EXPECT(flux_buffer_create(d, &bd, &b) == FLUX_OK);
+        OT_EXPECT(flux_buffer_create(d, &bd, &b) == FLUX_OK);
         flux_buffer_release(b);
     }
 
@@ -99,7 +100,7 @@ int main(void) {
         bd.usage = FLUX_BUFFER_USAGE_UNIFORM;
         bd.location = FLUX_BUFFER_HOST_VISIBLE;
         flux_buffer *empty = NULL;
-        EXPECT(flux_buffer_create(d, &bd, &empty) == FLUX_OK);
+        OT_EXPECT(flux_buffer_create(d, &bd, &empty) == FLUX_OK);
         flux_buffer_release(empty);
 
         /* Advance the graphics serial past the buffer's retire zombie:
@@ -111,7 +112,7 @@ int main(void) {
             .format = FLUX_FORMAT_RGBA8_UNORM,
         };
         flux_image *sweeper = NULL;
-        EXPECT(flux_image_create(d, &sweep_desc, &sweeper) == FLUX_OK);
+        OT_EXPECT(flux_image_create(d, &sweep_desc, &sweeper) == FLUX_OK);
 
         flux_memory_stats before;
         flux_device_memory_stats(d, &before);
@@ -119,15 +120,15 @@ int main(void) {
         fail_next(1);
         flux_image *img = NULL;
         flux_result r = flux_image_create(d, &sweep_desc, &img);
-        EXPECT(r == FLUX_OK); /* retry after reclaim recovered */
-        EXPECT(img != NULL);
-        EXPECT(atomic_load(&g_injected_calls) > 0);
+        OT_EXPECT(r == FLUX_OK); /* retry after reclaim recovered */
+        OT_EXPECT(img != NULL);
+        OT_EXPECT(atomic_load(&g_injected_calls) > 0);
 
         /* No unbounded growth: the retried block replaced the reclaimed
          * one rather than piling on. */
         flux_memory_stats after;
         flux_device_memory_stats(d, &after);
-        EXPECT(after.live_allocations == before.live_allocations + 1);
+        OT_EXPECT(after.live_allocations == before.live_allocations + 1);
 
         flux_image_release(img);
         flux_image_release(sweeper);
@@ -146,19 +147,19 @@ int main(void) {
         bd.usage = FLUX_BUFFER_USAGE_STORAGE;
         bd.location = FLUX_BUFFER_GPU_LOCAL;
         flux_buffer *big = NULL;
-        EXPECT(flux_buffer_create(d, &bd, &big) == FLUX_ERROR_OUT_OF_MEMORY);
-        EXPECT(big == NULL);
+        OT_EXPECT(flux_buffer_create(d, &bd, &big) == FLUX_ERROR_OUT_OF_MEMORY);
+        OT_EXPECT(big == NULL);
 
         flux_memory_stats after;
         flux_device_memory_stats(d, &after);
-        EXPECT(after.live_allocations == before.live_allocations);
-        EXPECT(after.bytes_in_use == before.bytes_in_use);
+        OT_EXPECT(after.live_allocations == before.live_allocations);
+        OT_EXPECT(after.bytes_in_use == before.bytes_in_use);
 
         /* Healthy again afterwards. */
-        EXPECT(flux_buffer_create(d, &bd, &big) == FLUX_OK);
+        OT_EXPECT(flux_buffer_create(d, &bd, &big) == FLUX_OK);
         flux_buffer_release(big);
     }
 
     flux_device_release(d);
-    TEST_SUMMARY();
+    return OT_REPORT();
 }

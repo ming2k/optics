@@ -4,7 +4,8 @@
  * known pattern. Closest thing to a render-to-image golden test
  * without a swapchain.
  */
-#include "test_helpers.h"
+#include "flux_test.h"
+#include "optics_test.h"
 #include <flux/compute.h>
 #include <flux/flux.h>
 #include <flux/vulkan.h>
@@ -40,10 +41,10 @@ typedef struct push_constants {
 } push_constants;
 
 int main(void) {
-    flux_device *d = test_helpers_make_headless_device();
+    flux_device *d = flux_test_make_headless_device();
     if (!d) {
         fprintf(stderr, "test_compute_golden: no Vulkan device; skipping\n");
-        TEST_SUMMARY();
+        OT_SKIP("no Vulkan device");
     }
 
     VkDevice vk = flux_device_vk_device(d);
@@ -61,14 +62,14 @@ int main(void) {
             .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
             .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
         };
-        EXPECT(vkCreateBuffer(vk, &bci, nullptr, &buffer) == VK_SUCCESS);
+        OT_EXPECT(vkCreateBuffer(vk, &bci, nullptr, &buffer) == VK_SUCCESS);
 
         VkMemoryRequirements mr;
         vkGetBufferMemoryRequirements(vk, buffer, &mr);
-        uint32_t mt = test_helpers_find_memory_type(d, mr.memoryTypeBits,
-                                                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                                                        VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-        EXPECT(mt != UINT32_MAX);
+        uint32_t mt = flux_test_find_memory_type(d, mr.memoryTypeBits,
+                                                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                                     VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+        OT_EXPECT(mt != UINT32_MAX);
 
         VkMemoryAllocateFlagsInfo afi = {
             .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO,
@@ -80,7 +81,7 @@ int main(void) {
             .allocationSize = mr.size,
             .memoryTypeIndex = mt,
         };
-        EXPECT(vkAllocateMemory(vk, &mai, nullptr, &memory) == VK_SUCCESS);
+        OT_EXPECT(vkAllocateMemory(vk, &mai, nullptr, &memory) == VK_SUCCESS);
         vkBindBufferMemory(vk, buffer, memory, 0);
         vkMapMemory(vk, memory, 0, VK_WHOLE_SIZE, 0, &mapped);
         memset(mapped, 0xCD, BYTES); /* poison so the dispatch writes are observable */
@@ -91,7 +92,7 @@ int main(void) {
         .buffer = buffer,
     };
     uint64_t buffer_addr = vkGetBufferDeviceAddress(vk, &bdai);
-    EXPECT(buffer_addr != 0);
+    OT_EXPECT(buffer_addr != 0);
 
     /* --- pipeline --- */
     flux_compute_pipeline_desc pdesc = FLUX_COMPUTE_PIPELINE_DESC_INIT;
@@ -100,8 +101,8 @@ int main(void) {
     pdesc.entry_point = "main";
     pdesc.push_constant_bytes = sizeof(push_constants);
     flux_compute_pipeline *pipe = nullptr;
-    EXPECT(flux_compute_pipeline_create(d, &pdesc, &pipe) == FLUX_OK);
-    EXPECT(pipe != nullptr);
+    OT_EXPECT(flux_compute_pipeline_create(d, &pdesc, &pipe) == FLUX_OK);
+    OT_EXPECT(pipe != nullptr);
 
     /* --- one-shot command buffer --- */
     VkCommandPool pool = VK_NULL_HANDLE;
@@ -168,7 +169,7 @@ int main(void) {
     const float *out = mapped;
     for (uint32_t i = 0; i < COUNT; ++i) {
         float want = (float)i * 0.01f;
-        EXPECT_NEAR(out[i], want, 1e-3f);
+        OT_EXPECT_NEAR(out[i], want, 1e-3f);
     }
 
     vkDestroyCommandPool(vk, pool, nullptr);
@@ -180,5 +181,5 @@ int main(void) {
     if (buffer)
         vkDestroyBuffer(vk, buffer, nullptr);
     flux_device_release(d);
-    TEST_SUMMARY();
+    return OT_REPORT();
 }

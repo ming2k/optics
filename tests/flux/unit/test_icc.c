@@ -7,9 +7,13 @@
  *   - a table-TRC matrix profile falls to the LUT bake;
  *   - an mft1 LUT profile bakes a LUT (parametric query declines);
  *   - malformed inputs fail with the right error codes.
+ *
+ * Image color-space snapshot/COW is device-bound and lives in
+ * tests/flux/integration/test_color_management.c; this file stays device-free
+ * by construction so the unit suite has no Vulkan dependency.
  */
-#include "icc_testkit.h"
-#include "test_helpers.h"
+#include "../icc_testkit.h"
+#include "optics_test.h"
 #include <flux/flux.h>
 
 #include <string.h>
@@ -32,10 +36,10 @@ int main(void) {
         uint32_t n = icc_build_matrix_tags(data, defs, 0, &dlen);
         size_t size = icc_build_profile(profile, "mntr", "XYZ ", data, dlen, defs, n);
         flux_icc_profile *p = nullptr;
-        EXPECT(flux_icc_profile_create(profile, size, &p) == FLUX_OK);
+        OT_EXPECT(flux_icc_profile_create(profile, size, &p) == FLUX_OK);
         flux_color_space cs;
-        EXPECT(flux_icc_profile_color_space(p, &cs));
-        EXPECT(flux_color_space_equal(cs, (flux_color_space)FLUX_COLOR_SPACE_SRGB));
+        OT_EXPECT(flux_icc_profile_color_space(p, &cs));
+        OT_EXPECT(flux_color_space_equal(cs, (flux_color_space)FLUX_COLOR_SPACE_SRGB));
         flux_icc_profile_release(p);
     }
 
@@ -44,12 +48,12 @@ int main(void) {
         uint32_t n = icc_build_matrix_tags(data, defs, 1, &dlen);
         size_t size = icc_build_profile(profile, "mntr", "XYZ ", data, dlen, defs, n);
         flux_icc_profile *p = nullptr;
-        EXPECT(flux_icc_profile_create(profile, size, &p) == FLUX_OK);
+        OT_EXPECT(flux_icc_profile_create(profile, size, &p) == FLUX_OK);
         flux_color_space cs;
-        EXPECT(flux_icc_profile_color_space(p, &cs));
-        EXPECT(cs.primaries == FLUX_PRIMARIES_BT709);
-        EXPECT(cs.transfer == FLUX_TRANSFER_GAMMA);
-        EXPECT(feq(cs.gamma, 2.19921875f, 1e-4f));
+        OT_EXPECT(flux_icc_profile_color_space(p, &cs));
+        OT_EXPECT(cs.primaries == FLUX_PRIMARIES_BT709);
+        OT_EXPECT(cs.transfer == FLUX_TRANSFER_GAMMA);
+        OT_EXPECT(feq(cs.gamma, 2.19921875f, 1e-4f));
         flux_icc_profile_release(p);
     }
 
@@ -58,9 +62,9 @@ int main(void) {
         uint32_t n = icc_build_matrix_tags(data, defs, 2, &dlen);
         size_t size = icc_build_profile(profile, "mntr", "XYZ ", data, dlen, defs, n);
         flux_icc_profile *p = nullptr;
-        EXPECT(flux_icc_profile_create(profile, size, &p) == FLUX_OK);
+        OT_EXPECT(flux_icc_profile_create(profile, size, &p) == FLUX_OK);
         flux_color_space cs;
-        EXPECT(!flux_icc_profile_color_space(p, &cs));
+        OT_EXPECT(!flux_icc_profile_color_space(p, &cs));
         flux_icc_profile_release(p);
     }
 
@@ -69,28 +73,28 @@ int main(void) {
         size_t len = icc_build_mft1_constant_white(data, &defs[0]);
         size_t size = icc_build_profile(profile, "mntr", "XYZ ", data, len, defs, 1);
         flux_icc_profile *p = nullptr;
-        EXPECT(flux_icc_profile_create(profile, size, &p) == FLUX_OK);
+        OT_EXPECT(flux_icc_profile_create(profile, size, &p) == FLUX_OK);
         flux_color_space cs;
-        EXPECT(!flux_icc_profile_color_space(p, &cs));
+        OT_EXPECT(!flux_icc_profile_color_space(p, &cs));
         flux_icc_profile_release(p);
     }
 
     /* --- 5. malformed inputs --- */
     {
         flux_icc_profile *p = nullptr;
-        EXPECT(flux_icc_profile_create(nullptr, 0, &p) == FLUX_ERROR_INVALID_ARGUMENT);
-        EXPECT(flux_icc_profile_create(profile, 64, &p) == FLUX_ERROR_INVALID_ARGUMENT);
+        OT_EXPECT(flux_icc_profile_create(nullptr, 0, &p) == FLUX_ERROR_INVALID_ARGUMENT);
+        OT_EXPECT(flux_icc_profile_create(profile, 64, &p) == FLUX_ERROR_INVALID_ARGUMENT);
         uint8_t bad_sig[256];
         memset(bad_sig, 0, sizeof(bad_sig));
-        EXPECT(flux_icc_profile_create(bad_sig, sizeof(bad_sig), &p) ==
-               FLUX_ERROR_INVALID_ARGUMENT);
+        OT_EXPECT(flux_icc_profile_create(bad_sig, sizeof(bad_sig), &p) ==
+                  FLUX_ERROR_INVALID_ARGUMENT);
         /* Wrong device class (printer) -> UNSUPPORTED. */
         uint32_t n = icc_build_matrix_tags(data, defs, 0, &dlen);
         size_t size = icc_build_profile(profile, "prtr", "XYZ ", data, dlen, defs, n);
-        EXPECT(flux_icc_profile_create(profile, size, &p) == FLUX_ERROR_UNSUPPORTED);
+        OT_EXPECT(flux_icc_profile_create(profile, size, &p) == FLUX_ERROR_UNSUPPORTED);
         /* Truncated: declared size exceeds the buffer. */
         size = icc_build_profile(profile, "mntr", "XYZ ", data, dlen, defs, n);
-        EXPECT(flux_icc_profile_create(profile, size / 2, &p) == FLUX_ERROR_INVALID_ARGUMENT);
+        OT_EXPECT(flux_icc_profile_create(profile, size / 2, &p) == FLUX_ERROR_INVALID_ARGUMENT);
     }
 
     /* --- 6. 'chad' = Bradford D65->D50: extraction still lands on sRGB --- */
@@ -98,10 +102,10 @@ int main(void) {
         uint32_t n = icc_build_matrix_tags_ex(data, defs, 0, ICC_CHAD_BRADFORD_D65_D50, &dlen);
         size_t size = icc_build_profile(profile, "mntr", "XYZ ", data, dlen, defs, n);
         flux_icc_profile *p = nullptr;
-        EXPECT(flux_icc_profile_create(profile, size, &p) == FLUX_OK);
+        OT_EXPECT(flux_icc_profile_create(profile, size, &p) == FLUX_OK);
         flux_color_space cs;
-        EXPECT(flux_icc_profile_color_space(p, &cs));
-        EXPECT(flux_color_space_equal(cs, (flux_color_space)FLUX_COLOR_SPACE_SRGB));
+        OT_EXPECT(flux_icc_profile_color_space(p, &cs));
+        OT_EXPECT(flux_color_space_equal(cs, (flux_color_space)FLUX_COLOR_SPACE_SRGB));
         flux_icc_profile_release(p);
     }
 
@@ -115,10 +119,10 @@ int main(void) {
         uint32_t n = icc_build_matrix_tags_ex(data, defs, 0, weird_chad, &dlen);
         size_t size = icc_build_profile(profile, "mntr", "XYZ ", data, dlen, defs, n);
         flux_icc_profile *p = nullptr;
-        EXPECT(flux_icc_profile_create(profile, size, &p) == FLUX_OK);
+        OT_EXPECT(flux_icc_profile_create(profile, size, &p) == FLUX_OK);
         flux_color_space cs;
         if (flux_icc_profile_color_space(p, &cs))
-            EXPECT(cs.primaries == FLUX_PRIMARIES_CUSTOM);
+            OT_EXPECT(cs.primaries == FLUX_PRIMARIES_CUSTOM);
         flux_icc_profile_release(p);
     }
 
@@ -127,10 +131,10 @@ int main(void) {
         uint32_t n = icc_build_matrix_tags(data, defs, 3, &dlen);
         size_t size = icc_build_profile(profile, "mntr", "XYZ ", data, dlen, defs, n);
         flux_icc_profile *p = nullptr;
-        EXPECT(flux_icc_profile_create(profile, size, &p) == FLUX_OK);
+        OT_EXPECT(flux_icc_profile_create(profile, size, &p) == FLUX_OK);
         /* para type 1 is outside the extraction set -> LUT bake. */
         flux_color_space cs;
-        EXPECT(!flux_icc_profile_color_space(p, &cs));
+        OT_EXPECT(!flux_icc_profile_color_space(p, &cs));
         flux_icc_profile_release(p);
     }
 
@@ -139,19 +143,19 @@ int main(void) {
         size_t len = icc_build_mab_identity(data, &defs[0], 3, 3);
         size_t size = icc_build_profile(profile, "mntr", "XYZ ", data, len, defs, 1);
         flux_icc_profile *p = nullptr;
-        EXPECT(flux_icc_profile_create(profile, size, &p) == FLUX_OK);
+        OT_EXPECT(flux_icc_profile_create(profile, size, &p) == FLUX_OK);
         flux_icc_profile_release(p);
 
         /* 4-channel input/output is not an RGB profile flux can consume. */
         len = icc_build_mab_identity(data, &defs[0], 4, 3);
         size = icc_build_profile(profile, "mntr", "XYZ ", data, len, defs, 1);
         p = nullptr;
-        EXPECT(flux_icc_profile_create(profile, size, &p) == FLUX_ERROR_UNSUPPORTED);
+        OT_EXPECT(flux_icc_profile_create(profile, size, &p) == FLUX_ERROR_UNSUPPORTED);
 
         len = icc_build_mab_identity(data, &defs[0], 3, 4);
         size = icc_build_profile(profile, "mntr", "XYZ ", data, len, defs, 1);
         p = nullptr;
-        EXPECT(flux_icc_profile_create(profile, size, &p) == FLUX_ERROR_UNSUPPORTED);
+        OT_EXPECT(flux_icc_profile_create(profile, size, &p) == FLUX_ERROR_UNSUPPORTED);
     }
 
     /* --- 10. v2 / v4 Lab PCS mft2 profiles both parse and bake --- */
@@ -160,53 +164,18 @@ int main(void) {
         size_t size = icc_build_profile(profile, "mntr", "Lab ", data, len, defs, 1);
         profile[8] = 0x02; /* ICC v2 */
         flux_icc_profile *v2 = nullptr;
-        EXPECT(flux_icc_profile_create(profile, size, &v2) == FLUX_OK);
+        OT_EXPECT(flux_icc_profile_create(profile, size, &v2) == FLUX_OK);
         flux_color_space cs;
-        EXPECT(!flux_icc_profile_color_space(v2, &cs));
+        OT_EXPECT(!flux_icc_profile_color_space(v2, &cs));
 
         len = icc_build_mft2_constant_lab(data, &defs[0], 50.0, 0.0, 0.0, false);
         size = icc_build_profile(profile, "mntr", "Lab ", data, len, defs, 1);
         flux_icc_profile *v4 = nullptr;
-        EXPECT(flux_icc_profile_create(profile, size, &v4) == FLUX_OK);
-        EXPECT(!flux_icc_profile_color_space(v4, &cs));
+        OT_EXPECT(flux_icc_profile_create(profile, size, &v4) == FLUX_OK);
+        OT_EXPECT(!flux_icc_profile_color_space(v4, &cs));
         flux_icc_profile_release(v2);
         flux_icc_profile_release(v4);
     }
 
-    /* --- 11. An ICC LUT-tagged image snapshots and COWs without dropping
-     * or duplicating its color state (ADR-0090). --- */
-    {
-        size_t len = icc_build_mft1_constant_white(data, &defs[0]);
-        size_t size = icc_build_profile(profile, "mntr", "XYZ ", data, len, defs, 1);
-        flux_icc_profile *p = nullptr;
-        EXPECT(flux_icc_profile_create(profile, size, &p) == FLUX_OK);
-        flux_device *d = test_helpers_make_headless_device();
-        if (d) {
-            flux_image_color_space_desc cs = {
-                .type = FLUX_TYPE_IMAGE_COLOR_SPACE_DESC,
-                .icc = p,
-            };
-            uint32_t pixels[4] = {0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu};
-            flux_image_desc idesc = {
-                .type = FLUX_TYPE_IMAGE_DESC,
-                .next = &cs,
-                .width = 2,
-                .height = 2,
-                .format = FLUX_FORMAT_RGBA8_UNORM,
-                .initial_data = pixels,
-            };
-            flux_image *image = nullptr;
-            EXPECT(flux_image_create(d, &idesc, &image) == FLUX_OK);
-            flux_image *snapshot = nullptr;
-            EXPECT(flux_image_snapshot(image, &snapshot) == FLUX_OK);
-            uint32_t update[4] = {0xFF0000FFu, 0xFF0000FFu, 0xFF0000FFu, 0xFF0000FFu};
-            EXPECT(flux_image_update_region(image, 0, 0, 2, 2, update, sizeof update) == FLUX_OK);
-            flux_image_release(snapshot);
-            flux_image_release(image);
-            flux_device_release(d);
-        }
-        flux_icc_profile_release(p);
-    }
-
-    TEST_SUMMARY();
+    return OT_REPORT();
 }

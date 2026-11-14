@@ -8,7 +8,8 @@
  *   - Frame slot cycling: multi-frame execution is stable with zero flickering.
  */
 
-#include "test_helpers.h"
+#include "flux_test.h"
+#include "optics_test.h"
 #include <flux/flux.h>
 #include <flux/vulkan.h>
 #include <prism/prism.h>
@@ -27,58 +28,57 @@ static uint32_t render_frosted_frame(flux_surface *surface, flux_canvas *canvas,
                                      flux_image *blurred, prism_frosted_filter *filter,
                                      const prism_frosted_desc *desc, uint8_t *pixels) {
     flux_frame *frame = nullptr;
-    EXPECT(flux_surface_begin_frame(surface, nullptr, &frame) == FLUX_OK);
+    OT_EXPECT(flux_surface_begin_frame(surface, nullptr, &frame) == FLUX_OK);
     uint32_t slot = flux_frame_index(frame);
 
     prism_material_output out = {0};
-    EXPECT(prism_frosted_filter_apply(filter, frame, desc, &out) == FLUX_OK);
-    EXPECT(out.image != nullptr);
+    OT_EXPECT(prism_frosted_filter_apply(filter, frame, desc, &out) == FLUX_OK);
+    OT_EXPECT(out.image != nullptr);
 
     flux_color clear_col = flux_color_rgba(0, 0, 0, 0);
-    EXPECT(flux_canvas_begin(canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
-                                                              .frame = frame,
-                                                              .clear_color = &clear_col}) ==
-           FLUX_OK);
+    OT_EXPECT(flux_canvas_begin(canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                                 .frame = frame,
+                                                                 .clear_color = &clear_col}) ==
+              FLUX_OK);
     test_draw_material(canvas, out);
-    EXPECT(flux_canvas_end(canvas) == FLUX_OK);
+    OT_EXPECT(flux_canvas_end(canvas) == FLUX_OK);
 
-    EXPECT(flux_frame_submit(frame) == FLUX_OK);
-    EXPECT(flux_frame_present(frame) == FLUX_OK);
+    OT_EXPECT(flux_frame_submit(frame) == FLUX_OK);
+    OT_EXPECT(flux_frame_present(frame) == FLUX_OK);
     memset(pixels, 0, BYTES);
-    EXPECT(flux_surface_read_pixels(surface, pixels, BYTES) == FLUX_OK);
+    OT_EXPECT(flux_surface_read_pixels(surface, pixels, BYTES) == FLUX_OK);
     return slot;
 }
 
 int main(void) {
-    flux_device *d = test_helpers_make_headless_device();
+    flux_device *d = flux_test_make_headless_device();
     if (!d) {
         fprintf(stderr, "test_frosted: no Vulkan device; skipping\n");
-        TEST_SUMMARY();
-        return 0;
+        OT_SKIP("no Vulkan device");
     }
 
     /* 1. Lifecycle test */
     prism_frosted_filter *filter = nullptr;
-    EXPECT(prism_frosted_filter_create(d, &filter) == FLUX_OK);
-    EXPECT(filter != nullptr);
-    EXPECT(prism_frosted_filter_retain(filter) == filter);
+    OT_EXPECT(prism_frosted_filter_create(d, &filter) == FLUX_OK);
+    OT_EXPECT(filter != nullptr);
+    OT_EXPECT(prism_frosted_filter_retain(filter) == filter);
     prism_frosted_filter_release(filter);
     prism_frosted_filter_release(filter);
 
     /* Recreate for rendering tests */
-    EXPECT(prism_frosted_filter_create(d, &filter) == FLUX_OK);
-    EXPECT(prism_frosted_filter_warmup(nullptr, nullptr) == FLUX_ERROR_INVALID_ARGUMENT);
-    EXPECT(prism_frosted_filter_warmup(filter, nullptr) == FLUX_OK);
+    OT_EXPECT(prism_frosted_filter_create(d, &filter) == FLUX_OK);
+    OT_EXPECT(prism_frosted_filter_warmup(nullptr, nullptr) == FLUX_ERROR_INVALID_ARGUMENT);
+    OT_EXPECT(prism_frosted_filter_warmup(filter, nullptr) == FLUX_OK);
 
     flux_surface_desc sd = FLUX_SURFACE_DESC_INIT;
     sd.width = W;
     sd.height = H;
     flux_surface *s = nullptr;
-    EXPECT(flux_surface_create(d, &sd, &s) == FLUX_OK);
+    OT_EXPECT(flux_surface_create(d, &sd, &s) == FLUX_OK);
 
     flux_canvas_desc cd = {.type = FLUX_TYPE_CANVAS_DESC, .surface = s};
     flux_canvas *c = nullptr;
-    EXPECT(flux_canvas_create(&cd, &c) == FLUX_OK);
+    OT_EXPECT(flux_canvas_create(&cd, &c) == FLUX_OK);
 
     /* Backdrop input texture */
     uint8_t *input_pixels = malloc(BYTES);
@@ -95,10 +95,10 @@ int main(void) {
     id.format = FLUX_FORMAT_RGBA8_UNORM;
     id.initial_data = input_pixels;
     flux_image *input = nullptr;
-    EXPECT(flux_image_create(d, &id, &input) == FLUX_OK);
+    OT_EXPECT(flux_image_create(d, &id, &input) == FLUX_OK);
 
     flux_image *blurred = nullptr;
-    EXPECT(flux_image_create(d, &id, &blurred) == FLUX_OK);
+    OT_EXPECT(flux_image_create(d, &id, &blurred) == FLUX_OK);
     free(input_pixels);
 
     uint8_t *pixels = malloc(BYTES);
@@ -125,20 +125,20 @@ int main(void) {
 
         /* Outside should remain clear */
         uint32_t corner_idx = (2 * W + 2) * 4;
-        EXPECT(pixels[corner_idx + 3] == 0);
+        OT_EXPECT(pixels[corner_idx + 3] == 0);
 
         /* Inside center should have solid alpha */
         uint32_t center_idx = (32 * W + 32) * 4;
-        EXPECT(pixels[center_idx + 3] > 200);
+        OT_EXPECT(pixels[center_idx + 3] > 200);
 
         if (f == 0) {
             memcpy(first_center, &pixels[center_idx], 4);
         } else {
             /* Zero flickering across frames: pixels must stay identical */
-            EXPECT(abs((int)pixels[center_idx + 0] - (int)first_center[0]) <= 1);
-            EXPECT(abs((int)pixels[center_idx + 1] - (int)first_center[1]) <= 1);
-            EXPECT(abs((int)pixels[center_idx + 2] - (int)first_center[2]) <= 1);
-            EXPECT(abs((int)pixels[center_idx + 3] - (int)first_center[3]) <= 1);
+            OT_EXPECT(abs((int)pixels[center_idx + 0] - (int)first_center[0]) <= 1);
+            OT_EXPECT(abs((int)pixels[center_idx + 1] - (int)first_center[1]) <= 1);
+            OT_EXPECT(abs((int)pixels[center_idx + 2] - (int)first_center[2]) <= 1);
+            OT_EXPECT(abs((int)pixels[center_idx + 3] - (int)first_center[3]) <= 1);
         }
     }
 
@@ -150,6 +150,5 @@ int main(void) {
     prism_frosted_filter_release(filter);
     flux_device_release(d);
 
-    TEST_SUMMARY();
-    return 0;
+    return OT_REPORT();
 }

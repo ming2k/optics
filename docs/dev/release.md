@@ -14,7 +14,7 @@ The repository contains related but distinct versions:
 |---------|-------------------|
 | Root Meson distribution, C shared objects, and `.pc` files | `project(version:)` in `meson.build` |
 | C API compile-time/runtime version helpers | `*_VERSION_MAJOR`, `*_MINOR`, and `*_PATCH` in public headers |
-| Rust crates | `[workspace.package].version` in `bindings/Cargo.toml` |
+| Rust crates | `[workspace.package].version` in the repository-root `Cargo.toml` |
 
 Choose which surfaces are part of the release and update them intentionally.
 Do not assume changing the root Meson version updates public header macros or
@@ -37,16 +37,16 @@ Use clean release build directories:
 meson setup build-release --buildtype=release \
   -Dexamples=true -Dtests=true
 meson compile -C build-release
-meson test -C build-release --no-suite bench
+meson test -C build-release --no-suite bench --no-suite fuzz
 
 meson setup build-release-asan -Dtests=true \
   -Db_sanitize=address,undefined
 meson compile -C build-release-asan
-meson test -C build-release-asan --no-suite bench
+meson test -C build-release-asan --no-suite bench --no-suite fuzz
 ```
 
-Point the binding build scripts at `build-release` and run every Cargo
-workspace under `bindings/` as described in [Testing](testing.md#rust-workspaces). Follow the
+Point the binding build scripts at `build-release` and run the repository-root
+Cargo workspace as described in [Testing](testing.md#rust-workspaces). Follow the
 [Pre-release smoke verification checklist](manual-testing.md#7-pre-release-smoke-verification-checklist)
 to manually verify interactive `flux`, `prism`, and `iris` applications.
 
@@ -72,7 +72,10 @@ git push origin main v<VERSION>
 Create the repository release from that tag, attach the verified Meson archive
 and checksum, and publish the prepared release notes. Publishing Rust crates or
 system packages is a separate action and must use the versions recorded in
-their manifests and metadata.
+their manifests and metadata. The Rust crates remain Git/path-distributed until
+the publication gate in [Rust Bindings](../explanation/rust-bindings.md#publication-gate)
+is met; do not publish a `-sys` crate that still requires `libclang` on the
+consumer's build host.
 
 ## Post-release Checks
 

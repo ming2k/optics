@@ -1,7 +1,8 @@
 /*
  * flux_sampler lifecycle + bindless auto-registration.
  */
-#include "test_helpers.h"
+#include "flux_test.h"
+#include "optics_test.h"
 #include <flux/canvas.h>
 #include <flux/flux.h>
 #include <flux/vulkan.h>
@@ -10,14 +11,14 @@ int main(void) {
     /* --- NULL / wrong-tag rejection (no device) --- */
     {
         flux_sampler *s = nullptr;
-        EXPECT(flux_sampler_create(nullptr, nullptr, &s) == FLUX_ERROR_INVALID_ARGUMENT);
-        EXPECT(s == nullptr);
+        OT_EXPECT(flux_sampler_create(nullptr, nullptr, &s) == FLUX_ERROR_INVALID_ARGUMENT);
+        OT_EXPECT(s == nullptr);
     }
 
-    flux_device *d = test_helpers_make_headless_device();
+    flux_device *d = flux_test_make_headless_device();
     if (!d) {
         fprintf(stderr, "test_sampler: no Vulkan device; skipping\n");
-        TEST_SUMMARY();
+        OT_SKIP("no Vulkan device");
     }
 
     /* --- happy path: linear + clamp --- */
@@ -32,13 +33,13 @@ int main(void) {
         sd.max_anisotropy = 1.0f;
 
         flux_sampler *s = nullptr;
-        EXPECT(flux_sampler_create(d, &sd, &s) == FLUX_OK);
-        EXPECT(s != nullptr);
-        EXPECT(flux_sampler_vk_sampler(s) != VK_NULL_HANDLE);
-        EXPECT(flux_sampler_bindless_handle(s) != FLUX_BINDLESS_INVALID);
+        OT_EXPECT(flux_sampler_create(d, &sd, &s) == FLUX_OK);
+        OT_EXPECT(s != nullptr);
+        OT_EXPECT(flux_sampler_vk_sampler(s) != VK_NULL_HANDLE);
+        OT_EXPECT(flux_sampler_bindless_handle(s) != FLUX_BINDLESS_INVALID);
 
         /* retain/release pair shouldn't free. */
-        EXPECT(flux_sampler_retain(s) == s);
+        OT_EXPECT(flux_sampler_retain(s) == s);
         flux_sampler_release(s); /* drop the extra ref */
         flux_sampler_release(s); /* final release */
     }
@@ -54,7 +55,7 @@ int main(void) {
         sd.address_w = FLUX_ADDRESS_REPEAT;
 
         flux_sampler *s = nullptr;
-        EXPECT(flux_sampler_create(d, &sd, &s) == FLUX_OK);
+        OT_EXPECT(flux_sampler_create(d, &sd, &s) == FLUX_OK);
         flux_sampler_release(s);
     }
 
@@ -70,7 +71,7 @@ int main(void) {
         sd.max_anisotropy = 1.0e6f;
 
         flux_sampler *s = nullptr;
-        EXPECT(flux_sampler_create(d, &sd, &s) == FLUX_OK);
+        OT_EXPECT(flux_sampler_create(d, &sd, &s) == FLUX_OK);
         flux_sampler_release(s);
     }
 
@@ -78,14 +79,14 @@ int main(void) {
     {
         flux_sampler_desc sd = {.type = FLUX_TYPE_UNKNOWN};
         flux_sampler *s = nullptr;
-        EXPECT(flux_sampler_create(d, &sd, &s) == FLUX_ERROR_INVALID_ARGUMENT);
-        EXPECT(s == nullptr);
+        OT_EXPECT(flux_sampler_create(d, &sd, &s) == FLUX_ERROR_INVALID_ARGUMENT);
+        OT_EXPECT(s == nullptr);
     }
 
     /* --- NULL-safe accessors --- */
-    EXPECT(flux_sampler_vk_sampler(nullptr) == VK_NULL_HANDLE);
-    EXPECT(flux_sampler_bindless_handle(nullptr) == FLUX_BINDLESS_INVALID);
-    EXPECT(flux_sampler_retain(nullptr) == nullptr);
+    OT_EXPECT(flux_sampler_vk_sampler(nullptr) == VK_NULL_HANDLE);
+    OT_EXPECT(flux_sampler_bindless_handle(nullptr) == FLUX_BINDLESS_INVALID);
+    OT_EXPECT(flux_sampler_retain(nullptr) == nullptr);
     flux_sampler_release(nullptr);
 
     /* --- flux_canvas_draw_image_sampled NULL safety ---
@@ -101,12 +102,12 @@ int main(void) {
         flux_surface_desc sdesc = FLUX_SURFACE_DESC_INIT;
         sdesc.width = 64;
         sdesc.height = 64;
-        EXPECT(flux_surface_create(d, &sdesc, &surface) == FLUX_OK);
+        OT_EXPECT(flux_surface_create(d, &sdesc, &surface) == FLUX_OK);
 
         flux_canvas *canvas = nullptr;
         flux_canvas_desc cdesc = FLUX_CANVAS_DESC_INIT;
         cdesc.surface = surface;
-        EXPECT(flux_canvas_create(&cdesc, &canvas) == FLUX_OK);
+        OT_EXPECT(flux_canvas_create(&cdesc, &canvas) == FLUX_OK);
 
         uint32_t pixels[16 * 16];
         for (int i = 0; i < 16 * 16; ++i)
@@ -117,7 +118,7 @@ int main(void) {
         im_desc.format = FLUX_FORMAT_RGBA8_UNORM;
         im_desc.initial_data = pixels;
         flux_image *img = nullptr;
-        EXPECT(flux_image_create(d, &im_desc, &img) == FLUX_OK);
+        OT_EXPECT(flux_image_create(d, &im_desc, &img) == FLUX_OK);
 
         /* Case 1: Sampler released immediately after recording draw call.
          * The frame holds a reference until fence retirement. */
@@ -126,24 +127,24 @@ int main(void) {
             sd.min_filter = FLUX_FILTER_LINEAR;
             sd.mag_filter = FLUX_FILTER_LINEAR;
             flux_sampler *s = nullptr;
-            EXPECT(flux_sampler_create(d, &sd, &s) == FLUX_OK);
+            OT_EXPECT(flux_sampler_create(d, &sd, &s) == FLUX_OK);
 
             flux_frame *frame = nullptr;
-            EXPECT(flux_surface_begin_frame(surface, nullptr, &frame) == FLUX_OK);
+            OT_EXPECT(flux_surface_begin_frame(surface, nullptr, &frame) == FLUX_OK);
             flux_color clear = flux_color_rgba(0, 0, 0, 255);
-            EXPECT(flux_canvas_begin(canvas,
-                                     &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
-                                                              .frame = frame,
-                                                              .clear_color = &clear}) == FLUX_OK);
+            OT_EXPECT(flux_canvas_begin(
+                          canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                           .frame = frame,
+                                                           .clear_color = &clear}) == FLUX_OK);
 
             flux_canvas_draw_image_sampled(canvas, img, s, (flux_rect){0, 0, 32, 32}, nullptr);
 
             /* Caller drops ownership right away while frame is in-flight. */
             flux_sampler_release(s);
 
-            EXPECT(flux_canvas_end(canvas) == FLUX_OK);
-            EXPECT(flux_frame_submit(frame) == FLUX_OK);
-            EXPECT(flux_frame_present(frame) == FLUX_OK);
+            OT_EXPECT(flux_canvas_end(canvas) == FLUX_OK);
+            OT_EXPECT(flux_frame_submit(frame) == FLUX_OK);
+            OT_EXPECT(flux_frame_present(frame) == FLUX_OK);
         }
 
         /* Case 2: DisplayList with sampler submitted and released immediately.
@@ -153,10 +154,10 @@ int main(void) {
             sd.min_filter = FLUX_FILTER_NEAREST;
             sd.mag_filter = FLUX_FILTER_NEAREST;
             flux_sampler *s = nullptr;
-            EXPECT(flux_sampler_create(d, &sd, &s) == FLUX_OK);
+            OT_EXPECT(flux_sampler_create(d, &sd, &s) == FLUX_OK);
 
             flux_encoder *enc = nullptr;
-            EXPECT(flux_encoder_create(nullptr, &enc) == FLUX_OK);
+            OT_EXPECT(flux_encoder_create(nullptr, &enc) == FLUX_OK);
             flux_geometry geom = flux_geom_rect((flux_rect){10, 10, 20, 20});
             flux_brush brush = {
                 .kind = FLUX_BRUSH_IMAGE_PATTERN,
@@ -173,24 +174,24 @@ int main(void) {
             flux_sampler_release(s);
 
             flux_display_list *dl = nullptr;
-            EXPECT(flux_encoder_finish(enc, &dl) == FLUX_OK);
+            OT_EXPECT(flux_encoder_finish(enc, &dl) == FLUX_OK);
             flux_encoder_destroy(enc);
 
             flux_frame *frame = nullptr;
-            EXPECT(flux_surface_begin_frame(surface, nullptr, &frame) == FLUX_OK);
+            OT_EXPECT(flux_surface_begin_frame(surface, nullptr, &frame) == FLUX_OK);
             flux_color clear = flux_color_rgba(0, 0, 0, 255);
-            EXPECT(flux_canvas_begin(canvas,
-                                     &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
-                                                              .frame = frame,
-                                                              .clear_color = &clear}) == FLUX_OK);
+            OT_EXPECT(flux_canvas_begin(
+                          canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                           .frame = frame,
+                                                           .clear_color = &clear}) == FLUX_OK);
 
-            EXPECT(flux_canvas_submit_display_list(canvas, dl) == FLUX_OK);
+            OT_EXPECT(flux_canvas_submit_display_list(canvas, dl) == FLUX_OK);
             /* Caller drops ownership right away while frame is in-flight. */
             flux_display_list_release(dl);
 
-            EXPECT(flux_canvas_end(canvas) == FLUX_OK);
-            EXPECT(flux_frame_submit(frame) == FLUX_OK);
-            EXPECT(flux_frame_present(frame) == FLUX_OK);
+            OT_EXPECT(flux_canvas_end(canvas) == FLUX_OK);
+            OT_EXPECT(flux_frame_submit(frame) == FLUX_OK);
+            OT_EXPECT(flux_frame_present(frame) == FLUX_OK);
         }
 
         flux_image_release(img);
@@ -199,5 +200,5 @@ int main(void) {
     }
 
     flux_device_release(d);
-    TEST_SUMMARY();
+    return OT_REPORT();
 }

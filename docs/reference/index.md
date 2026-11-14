@@ -9,7 +9,8 @@ Technical descriptions of C APIs, exported symbols, material properties, effect 
 | Reference | Purpose & Scope |
 | :--- | :--- |
 | **[Public API Architecture](api.md)** | Core C API conventions, lifecycle contracts, and header structure. |
-| **[Exported Symbol Index](symbols.md)** | Complete authoritative index of all exported C symbols, generated from public headers. |
+| **[Exported Symbol Index](symbols.md)** | Index of exported C symbols, grouped by public header. |
+| **[Reticle Document Compiler](reticle.md)** | SVG parse/paint/rasterize contracts, flat shape IR, ownership, and resource limits. |
 | **[Prism Material System](prism.md)** | Technical specification for physical materials: Liquid Glass, Frosted Glass, Acrylic, and Mica. |
 | **[Image Effect Operators](effect.md)** | Pixel operators, blur algorithms, tone mapping, and scratch render target rules in `flux_effect`. |
 | **[Thread Safety & Concurrency](thread-safety.md)** | Thread-safety contracts across `flux_device`, surfaces, frame loops, and presentation. |

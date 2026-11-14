@@ -12,7 +12,7 @@
  *   - the smoother converges, and widens its tau while the input moves.
  */
 
-#include "test_helpers.h"
+#include "optics_test.h"
 
 #include <transit/transit.h>
 
@@ -21,15 +21,15 @@
 /* ---- dt clamp --------------------------------------------------------- */
 
 static void test_dt_clamp(void) {
-    CHECK_NEAR(transit_dt_clamp(0.0f), 0.0f, 0.0);
-    CHECK_NEAR(transit_dt_clamp(-1.0f), 0.0f, 0.0);
-    CHECK(isnan(transit_dt_clamp(NAN)) == false); /* NaN is "not > 0" → 0 */
-    CHECK_NEAR(transit_dt_clamp(NAN), 0.0f, 0.0);
+    OT_EXPECT_NEAR(transit_dt_clamp(0.0f), 0.0f, 0.0);
+    OT_EXPECT_NEAR(transit_dt_clamp(-1.0f), 0.0f, 0.0);
+    OT_EXPECT(isnan(transit_dt_clamp(NAN)) == false); /* NaN is "not > 0" → 0 */
+    OT_EXPECT_NEAR(transit_dt_clamp(NAN), 0.0f, 0.0);
     /* NaN dt integrates nothing, same as 0 — the guard is !(x > 0). */
-    CHECK_NEAR(transit_dt_clamp(0.016f), 0.016f, 1e-6);
-    CHECK_NEAR(transit_dt_clamp(1.0f), TRANSIT_DT_MAX, 1e-6);
-    CHECK_NEAR(transit_dt_clamp(100.0f), TRANSIT_DT_MAX, 1e-6);
-    CHECK(transit_dt_clamp(TRANSIT_DT_MAX) == TRANSIT_DT_MAX);
+    OT_EXPECT_NEAR(transit_dt_clamp(0.016f), 0.016f, 1e-6);
+    OT_EXPECT_NEAR(transit_dt_clamp(1.0f), TRANSIT_DT_MAX, 1e-6);
+    OT_EXPECT_NEAR(transit_dt_clamp(100.0f), TRANSIT_DT_MAX, 1e-6);
+    OT_EXPECT(transit_dt_clamp(TRANSIT_DT_MAX) == TRANSIT_DT_MAX);
 }
 
 /* ---- spring: boundedness and convergence ------------------------------ */
@@ -43,11 +43,11 @@ static void test_spring_bounded_under_adversarial_dt(void) {
         transit_spring_params p = transit_spring_bouncy(); /* most overshoot */
         for (int f = 0; f < 64; f++)
             transit_spring_advance(&s, 100.0f, p, dts[i], false);
-        CHECK(isfinite(s.value));
-        CHECK(isfinite(s.velocity));
+        OT_EXPECT(isfinite(s.value));
+        OT_EXPECT(isfinite(s.velocity));
         /* Bounded well away from divergence: the analytic solution's
          * envelope is target ± initial displacement. */
-        CHECK(s.value > -50.0f && s.value < 250.0f);
+        OT_EXPECT(s.value > -50.0f && s.value < 250.0f);
     }
 }
 
@@ -56,12 +56,12 @@ static void test_spring_nan_input_does_not_poison(void) {
     transit_spring_params p = transit_spring_snappy();
     /* A NaN target means "no target this frame": the state stands. */
     float v = transit_spring_advance(&s, NAN, p, 1.0f / 60.0f, false);
-    CHECK(isfinite(v));
-    CHECK_NEAR(v, 0.0f, 0.0);
-    CHECK_NEAR(s.velocity, 0.0f, 0.0);
+    OT_EXPECT(isfinite(v));
+    OT_EXPECT_NEAR(v, 0.0f, 0.0);
+    OT_EXPECT_NEAR(s.velocity, 0.0f, 0.0);
     /* And it does not poison the next finite call. */
     v = transit_spring_advance(&s, 10.0f, p, 1.0f / 60.0f, false);
-    CHECK(isfinite(v));
+    OT_EXPECT(isfinite(v));
 }
 
 static void test_spring_converges(void) {
@@ -69,9 +69,9 @@ static void test_spring_converges(void) {
     transit_spring_params p = transit_spring_snappy();
     for (int f = 0; f < 240; f++)
         transit_spring_advance(&s, 1.0f, p, 1.0f / 60.0f, false);
-    CHECK_NEAR(s.value, 1.0f, 1e-3);
-    CHECK_NEAR(s.velocity, 0.0f, 1e-3);
-    CHECK(transit_spring_settled(&s, 1.0f, 1e-3f, 1e-3f));
+    OT_EXPECT_NEAR(s.value, 1.0f, 1e-3);
+    OT_EXPECT_NEAR(s.velocity, 0.0f, 1e-3);
+    OT_EXPECT(transit_spring_settled(&s, 1.0f, 1e-3f, 1e-3f));
 }
 
 static void test_spring_energy_never_increases(void) {
@@ -86,7 +86,7 @@ static void test_spring_energy_never_increases(void) {
         for (int f = 0; f < 200; f++) {
             transit_spring_advance(&s, 0.0f, p, dts[i], false);
             float e = 0.5f * p.stiffness * s.value * s.value + 0.5f * s.velocity * s.velocity;
-            CHECK(e <= prev + 1e-2f);
+            OT_EXPECT(e <= prev + 1e-2f);
             prev = e;
         }
     }
@@ -96,8 +96,8 @@ static void test_spring_reduced_motion_one_step(void) {
     transit_spring s = transit_spring_at(0.0f);
     transit_spring_params p = transit_spring_bouncy();
     float v = transit_spring_advance(&s, 1.0f, p, 1.0f / 60.0f, true);
-    CHECK_NEAR(v, 1.0f, 0.0);
-    CHECK_NEAR(s.velocity, 0.0f, 0.0);
+    OT_EXPECT_NEAR(v, 1.0f, 0.0);
+    OT_EXPECT_NEAR(s.velocity, 0.0f, 0.0);
 }
 
 static void test_spring_zero_dt_integrates_nothing(void) {
@@ -105,57 +105,57 @@ static void test_spring_zero_dt_integrates_nothing(void) {
     s.velocity = 2.0f;
     transit_spring_params p = transit_spring_snappy();
     float v = transit_spring_advance(&s, 1.0f, p, 0.0f, false);
-    CHECK_NEAR(v, 0.25f, 0.0);
-    CHECK_NEAR(s.velocity, 2.0f, 0.0);
+    OT_EXPECT_NEAR(v, 0.25f, 0.0);
+    OT_EXPECT_NEAR(s.velocity, 2.0f, 0.0);
 }
 
 /* ---- approach / decay --------------------------------------------------- */
 
 static void test_approach_and_decay(void) {
-    CHECK_NEAR(transit_approach(0.0f, 1.0f, 10.0f, 0.0f, false), 0.0f, 0.0);
+    OT_EXPECT_NEAR(transit_approach(0.0f, 1.0f, 10.0f, 0.0f, false), 0.0f, 0.0);
     /* Half-life: rate·dt = ln2 of the remaining distance, measured in
      * clamped dt. dt 0.693 clamps to 1/30, so use a rate whose clamped
      * step covers half the distance: rate = ln2/(1/30). */
     float half = transit_approach(0.0f, 1.0f, 0.693147f * 30.0f, TRANSIT_DT_MAX, false);
-    CHECK_NEAR(half, 0.5f, 1e-3);
+    OT_EXPECT_NEAR(half, 0.5f, 1e-3);
     /* Clamped dt: a stall still progresses only by 1/30 s. */
     float stalled = transit_approach(0.0f, 1.0f, 1.0f, 5.0f, false);
-    CHECK_NEAR(stalled, transit_approach(0.0f, 1.0f, 1.0f, TRANSIT_DT_MAX, false), 1e-6);
-    CHECK_NEAR(transit_decay(1.0f, 0.693147f * 30.0f, TRANSIT_DT_MAX, false), 0.5f, 1e-3);
-    CHECK_NEAR(transit_decay(1.0f, 1.0f, 0.0f, false), 1.0f, 0.0);
-    CHECK_NEAR(transit_approach(0.3f, 0.3f, 5.0f, 0.016f, false), 0.3f, 0.0);
+    OT_EXPECT_NEAR(stalled, transit_approach(0.0f, 1.0f, 1.0f, TRANSIT_DT_MAX, false), 1e-6);
+    OT_EXPECT_NEAR(transit_decay(1.0f, 0.693147f * 30.0f, TRANSIT_DT_MAX, false), 0.5f, 1e-3);
+    OT_EXPECT_NEAR(transit_decay(1.0f, 1.0f, 0.0f, false), 1.0f, 0.0);
+    OT_EXPECT_NEAR(transit_approach(0.3f, 0.3f, 5.0f, 0.016f, false), 0.3f, 0.0);
 }
 
 static void test_approach_and_decay_reduced_motion_one_step(void) {
     /* Reduced motion resolves to the end state in a single step, regardless
      * of dt — the ADR-0029 rule, applied uniformly to the follow primitives. */
-    CHECK_NEAR(transit_approach(0.0f, 1.0f, 1.0f, 0.0f, true), 1.0f, 0.0);
-    CHECK_NEAR(transit_approach(0.7f, -0.3f, 0.5f, TRANSIT_DT_MAX, true), -0.3f, 0.0);
-    CHECK_NEAR(transit_decay(0.9f, 0.5f, 0.0f, true), 0.0f, 0.0);
-    CHECK_NEAR(transit_decay(0.9f, 3.0f, TRANSIT_DT_MAX, true), 0.0f, 0.0);
+    OT_EXPECT_NEAR(transit_approach(0.0f, 1.0f, 1.0f, 0.0f, true), 1.0f, 0.0);
+    OT_EXPECT_NEAR(transit_approach(0.7f, -0.3f, 0.5f, TRANSIT_DT_MAX, true), -0.3f, 0.0);
+    OT_EXPECT_NEAR(transit_decay(0.9f, 0.5f, 0.0f, true), 0.0f, 0.0);
+    OT_EXPECT_NEAR(transit_decay(0.9f, 3.0f, TRANSIT_DT_MAX, true), 0.0f, 0.0);
 }
 
 /* ---- easing ------------------------------------------------------------- */
 
 static void test_easing_endpoints_and_monotone(void) {
     const float eps = 1e-5f;
-    CHECK_NEAR(transit_ease_out_cubic(0.0f), 0.0f, eps);
-    CHECK_NEAR(transit_ease_out_cubic(1.0f), 1.0f, eps);
-    CHECK_NEAR(transit_ease_in_cubic(0.0f), 0.0f, eps);
-    CHECK_NEAR(transit_ease_in_cubic(1.0f), 1.0f, eps);
-    CHECK_NEAR(transit_ease_in_out_cubic(0.0f), 0.0f, eps);
-    CHECK_NEAR(transit_ease_in_out_cubic(1.0f), 1.0f, eps);
-    CHECK_NEAR(transit_ease_in_out_cubic(0.5f), 0.5f, eps);
-    CHECK_NEAR(transit_ease_out_back(0.0f), 0.0f, 1e-4f);
-    CHECK_NEAR(transit_ease_out_back(1.0f), 1.0f, 1e-4f);
+    OT_EXPECT_NEAR(transit_ease_out_cubic(0.0f), 0.0f, eps);
+    OT_EXPECT_NEAR(transit_ease_out_cubic(1.0f), 1.0f, eps);
+    OT_EXPECT_NEAR(transit_ease_in_cubic(0.0f), 0.0f, eps);
+    OT_EXPECT_NEAR(transit_ease_in_cubic(1.0f), 1.0f, eps);
+    OT_EXPECT_NEAR(transit_ease_in_out_cubic(0.0f), 0.0f, eps);
+    OT_EXPECT_NEAR(transit_ease_in_out_cubic(1.0f), 1.0f, eps);
+    OT_EXPECT_NEAR(transit_ease_in_out_cubic(0.5f), 0.5f, eps);
+    OT_EXPECT_NEAR(transit_ease_out_back(0.0f), 0.0f, 1e-4f);
+    OT_EXPECT_NEAR(transit_ease_out_back(1.0f), 1.0f, 1e-4f);
     /* Out-of-range inputs clamp, never extrapolate. */
-    CHECK_NEAR(transit_ease_out_cubic(-1.0f), 0.0f, eps);
-    CHECK_NEAR(transit_ease_out_cubic(2.0f), 1.0f, eps);
+    OT_EXPECT_NEAR(transit_ease_out_cubic(-1.0f), 0.0f, eps);
+    OT_EXPECT_NEAR(transit_ease_out_cubic(2.0f), 1.0f, eps);
     /* ease_out_cubic is monotone non-decreasing. */
     float prev = -1.0f;
     for (int i = 0; i <= 20; i++) {
         float v = transit_ease_out_cubic(i / 20.0f);
-        CHECK(v >= prev - 1e-6f);
+        OT_EXPECT(v >= prev - 1e-6f);
         prev = v;
     }
 }
@@ -170,7 +170,7 @@ static void test_hysteresis_dwell_blocks_flip(void) {
     /* Disagree for 4 frames (~67 ms) with a 150 ms dwell: no flip. */
     for (int f = 0; f < 4; f++)
         transit_hysteresis_step(&h, false, 0.38f, 0.42f, 0.30f, 0.150f, dt, false);
-    CHECK(h.high == true);
+    OT_EXPECT(h.high == true);
     /* Disagree past the dwell: flips exactly once. */
     int flips = 0;
     bool prev = h.high;
@@ -180,8 +180,8 @@ static void test_hysteresis_dwell_blocks_flip(void) {
             flips++;
         prev = now;
     }
-    CHECK(flips == 1);
-    CHECK(h.high == false);
+    OT_EXPECT(flips == 1);
+    OT_EXPECT(h.high == false);
 }
 
 static void test_hysteresis_dead_band_holds(void) {
@@ -190,24 +190,24 @@ static void test_hysteresis_dead_band_holds(void) {
     transit_hysteresis h = transit_hysteresis_init(false);
     for (int f = 0; f < 60; f++)
         transit_hysteresis_step(&h, true, 0.38f, 0.42f, 0.40f, 0.0f, 1.0f / 60.0f, false);
-    CHECK(h.high == false); /* 0.40 is inside [0.38, 0.42): stays low */
+    OT_EXPECT(h.high == false); /* 0.40 is inside [0.38, 0.42): stays low */
 }
 
 static void test_hysteresis_zero_dwell_tracks_input(void) {
     transit_hysteresis h = transit_hysteresis_init(false);
     bool v = transit_hysteresis_step(&h, true, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f / 60.0f, false);
-    CHECK(v == true);
+    OT_EXPECT(v == true);
 }
 
 static void test_hysteresis_reduced_motion_latches_in_one_step(void) {
     /* A long dwell must not delay the latch under reduced motion: the state
      * resolves to the request immediately. */
     transit_hysteresis h = transit_hysteresis_init(false);
-    CHECK(transit_hysteresis_step(&h, true, 0.0f, 0.0f, 0.0f, 10.0f, 0.0f, true) == true);
-    CHECK(h.high == true);
-    CHECK(h.dwell == 0.0f);
-    CHECK(transit_hysteresis_step(&h, false, 0.0f, 0.0f, 0.0f, 10.0f, 0.0f, true) == false);
-    CHECK(h.high == false);
+    OT_EXPECT(transit_hysteresis_step(&h, true, 0.0f, 0.0f, 0.0f, 10.0f, 0.0f, true) == true);
+    OT_EXPECT(h.high == true);
+    OT_EXPECT(h.dwell == 0.0f);
+    OT_EXPECT(transit_hysteresis_step(&h, false, 0.0f, 0.0f, 0.0f, 10.0f, 0.0f, true) == false);
+    OT_EXPECT(h.high == false);
 }
 
 /* ---- smoother ------------------------------------------------------------- */
@@ -216,7 +216,7 @@ static void test_smoother_converges_and_widens_under_motion(void) {
     transit_smoother s = transit_smoother_init(0.0f);
     for (int f = 0; f < 240; f++)
         transit_smoother_step(&s, 1.0f, 0.05f, 8.0f, 0.05f, 1.0f / 60.0f, false);
-    CHECK_NEAR(s.value, 1.0f, 1e-3);
+    OT_EXPECT_NEAR(s.value, 1.0f, 1e-3);
 
     /* Same tau, no motion scaling: must be FASTER to settle on a step
      * (the adaptive path is the one that lags by design). */
@@ -226,8 +226,8 @@ static void test_smoother_converges_and_widens_under_motion(void) {
         transit_smoother_step(&plain, 1.0f, 0.05f, 1.0f, 1e9f, 1.0f / 60.0f, false);
         transit_smoother_step(&adaptive, 1.0f, 0.05f, 8.0f, 0.05f, 1.0f / 60.0f, false);
     }
-    CHECK(plain.value > adaptive.value); /* adaptive lags while moving */
-    CHECK(adaptive.value > 0.0f);        /* but still progresses */
+    OT_EXPECT(plain.value > adaptive.value); /* adaptive lags while moving */
+    OT_EXPECT(adaptive.value > 0.0f);        /* but still progresses */
 }
 
 static void test_smoother_step_change_is_bounded(void) {
@@ -235,29 +235,29 @@ static void test_smoother_step_change_is_bounded(void) {
     transit_smoother s = transit_smoother_init(0.0f);
     for (int f = 0; f < 32; f++) {
         transit_smoother_step(&s, 1.0f, 0.02f, 8.0f, 0.05f, TRANSIT_DT_MAX, false);
-        CHECK(s.value <= 1.0f + 1e-4f);
-        CHECK(isfinite(s.value));
+        OT_EXPECT(s.value <= 1.0f + 1e-4f);
+        OT_EXPECT(isfinite(s.value));
     }
 }
 
 static void test_smoother_reduced_motion_resolves_in_one_step(void) {
     transit_smoother s = transit_smoother_init(0.0f);
-    CHECK_NEAR(transit_smoother_step(&s, 1.0f, 0.05f, 8.0f, 0.05f, 0.0f, true), 1.0f, 0.0);
-    CHECK_NEAR(s.value, 1.0f, 0.0);
-    CHECK_NEAR(s.velocity, 0.0f, 0.0);
+    OT_EXPECT_NEAR(transit_smoother_step(&s, 1.0f, 0.05f, 8.0f, 0.05f, 0.0f, true), 1.0f, 0.0);
+    OT_EXPECT_NEAR(s.value, 1.0f, 0.0);
+    OT_EXPECT_NEAR(s.velocity, 0.0f, 0.0);
 }
 
 static void test_smoothstep(void) {
-    CHECK_NEAR(transit_smoothstep(0.0f), 0.0f, 1e-6);
-    CHECK_NEAR(transit_smoothstep(1.0f), 1.0f, 1e-6);
-    CHECK_NEAR(transit_smoothstep(0.5f), 0.5f, 1e-6);
+    OT_EXPECT_NEAR(transit_smoothstep(0.0f), 0.0f, 1e-6);
+    OT_EXPECT_NEAR(transit_smoothstep(1.0f), 1.0f, 1e-6);
+    OT_EXPECT_NEAR(transit_smoothstep(0.5f), 0.5f, 1e-6);
     /* Symmetry about 0.5 */
-    CHECK_NEAR(transit_smoothstep(0.2f) + transit_smoothstep(0.8f), 1.0f, 1e-6);
+    OT_EXPECT_NEAR(transit_smoothstep(0.2f) + transit_smoothstep(0.8f), 1.0f, 1e-6);
     /* Clamping */
-    CHECK_NEAR(transit_smoothstep(-0.5f), 0.0f, 1e-6);
-    CHECK_NEAR(transit_smoothstep(1.5f), 1.0f, 1e-6);
+    OT_EXPECT_NEAR(transit_smoothstep(-0.5f), 0.0f, 1e-6);
+    OT_EXPECT_NEAR(transit_smoothstep(1.5f), 1.0f, 1e-6);
     /* Monotonicity */
-    CHECK(transit_smoothstep(0.3f) < transit_smoothstep(0.4f));
+    OT_EXPECT(transit_smoothstep(0.3f) < transit_smoothstep(0.4f));
 }
 
 static void test_spring_advance_substep(void) {
@@ -267,35 +267,37 @@ static void test_spring_advance_substep(void) {
 
     /* Sub-stepping with a large dt advances stably without discrete jump */
     float v1 = transit_spring_advance_substep(&s1, 100.0f, p, 0.050f, 0.016f, false);
-    CHECK(isfinite(v1));
-    CHECK(v1 > 0.0f && v1 < 100.0f);
+    OT_EXPECT(isfinite(v1));
+    OT_EXPECT(v1 > 0.0f && v1 < 100.0f);
 
     /* Verify equivalent manual stepping matches substep result exactly */
     transit_spring_advance(&s2, 100.0f, p, 0.016f, false);
     transit_spring_advance(&s2, 100.0f, p, 0.016f, false);
     transit_spring_advance(&s2, 100.0f, p, 0.016f, false);
     transit_spring_advance(&s2, 100.0f, p, 0.002f, false);
-    CHECK_NEAR(v1, s2.value, 1e-6);
-    CHECK_NEAR(s1.value, s2.value, 1e-6);
-    CHECK_NEAR(s1.velocity, s2.velocity, 1e-6);
+    OT_EXPECT_NEAR(v1, s2.value, 1e-6);
+    OT_EXPECT_NEAR(s1.value, s2.value, 1e-6);
+    OT_EXPECT_NEAR(s1.velocity, s2.velocity, 1e-6);
 
     /* Reduced motion snaps to target in one step */
     transit_spring s_red = transit_spring_at(0.0f);
     float v_red = transit_spring_advance_substep(&s_red, 50.0f, p, 0.050f, 0.016f, true);
-    CHECK_NEAR(v_red, 50.0f, 1e-6);
-    CHECK_NEAR(s_red.value, 50.0f, 1e-6);
-    CHECK_NEAR(s_red.velocity, 0.0f, 1e-6);
+    OT_EXPECT_NEAR(v_red, 50.0f, 1e-6);
+    OT_EXPECT_NEAR(s_red.value, 50.0f, 1e-6);
+    OT_EXPECT_NEAR(s_red.velocity, 0.0f, 1e-6);
 }
 
 /* ---- NULL safety ---------------------------------------------------------- */
 
 static void test_null_safety(void) {
-    CHECK(transit_spring_advance(nullptr, 1.0f, transit_spring_snappy(), 0.016f, false) == 1.0f);
-    CHECK(transit_spring_settled(nullptr, 0.0f, 0.0f, 0.0f) == false);
-    CHECK(transit_hysteresis_step(nullptr, true, 0.0f, 0.0f, 0.0f, 0.0f, 0.016f, false) == false);
-    CHECK(transit_smoother_step(nullptr, 1.0f, 0.05f, 4.0f, 0.05f, 0.016f, false) == 1.0f);
+    OT_EXPECT(transit_spring_advance(nullptr, 1.0f, transit_spring_snappy(), 0.016f, false) ==
+              1.0f);
+    OT_EXPECT(transit_spring_settled(nullptr, 0.0f, 0.0f, 0.0f) == false);
+    OT_EXPECT(transit_hysteresis_step(nullptr, true, 0.0f, 0.0f, 0.0f, 0.0f, 0.016f, false) ==
+              false);
+    OT_EXPECT(transit_smoother_step(nullptr, 1.0f, 0.05f, 4.0f, 0.05f, 0.016f, false) == 1.0f);
     /* nullptr is safe in the reduced-motion branch too. */
-    CHECK(transit_smoother_step(nullptr, 1.0f, 0.05f, 4.0f, 0.05f, 0.016f, true) == 1.0f);
+    OT_EXPECT(transit_smoother_step(nullptr, 1.0f, 0.05f, 4.0f, 0.05f, 0.016f, true) == 1.0f);
 }
 
 int main(void) {
@@ -319,5 +321,5 @@ int main(void) {
     test_smoother_step_change_is_bounded();
     test_smoother_reduced_motion_resolves_in_one_step();
     test_null_safety();
-    return TEST_REPORT();
+    return OT_REPORT();
 }

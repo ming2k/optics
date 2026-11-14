@@ -6,7 +6,8 @@
  * disabled does.
  */
 
-#include "test_helpers.h"
+#include "lens_test.h"
+#include "optics_test.h"
 #include <lens/lens.h>
 
 static const lens_input IN0 = {.display_size = {400, 200}, .dt_seconds = 0.016f};
@@ -17,36 +18,36 @@ static lens_id build_button_frame(lens *ui, bool *clicked) {
     lens_begin(ui, &IN0);
     *clicked = lens_button(ui, &(lens_button_opts){.label = "OK"}).clicked;
     lens_id id = lens_get_response(ui).id;
-    test_end(ui);
+    lens_test_end(ui);
     return id;
 }
 
 /* Activation fires on the next frame, moves focus, and is single-shot. */
 static void test_activate_fires_and_focuses(void) {
     lens *ui = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
 
     bool clicked = false;
     lens_id id = build_button_frame(ui, &clicked);
-    CHECK(id != 0);
-    CHECK(!clicked);
-    CHECK(!lens_focused(ui, id));
+    OT_EXPECT(id != 0);
+    OT_EXPECT(!clicked);
+    OT_EXPECT(!lens_focused(ui, id));
 
     /* The request lands between frames (the AT-SPI pump runs after
      * lens_end); the upcoming build must report the click. */
     lens_a11y_activate(ui, id);
     clicked = false;
     build_button_frame(ui, &clicked);
-    CHECK(clicked);
-    CHECK(lens_focused(ui, id));
+    OT_EXPECT(clicked);
+    OT_EXPECT(lens_focused(ui, id));
 
     /* Single-shot: the following frames see no further clicks. */
     clicked = false;
     build_button_frame(ui, &clicked);
-    CHECK(!clicked);
+    OT_EXPECT(!clicked);
     clicked = false;
     build_button_frame(ui, &clicked);
-    CHECK(!clicked);
+    OT_EXPECT(!clicked);
 
     lens_release(ui);
 }
@@ -54,7 +55,7 @@ static void test_activate_fires_and_focuses(void) {
 /* A request for a nonexistent id is dropped at frame end and never fires. */
 static void test_activate_unknown_id_dropped(void) {
     lens *ui = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
 
     bool clicked = false;
     lens_id id = build_button_frame(ui, &clicked);
@@ -63,11 +64,11 @@ static void test_activate_unknown_id_dropped(void) {
     lens_a11y_activate(ui, 0xDEADBEEF);
     clicked = false;
     build_button_frame(ui, &clicked);
-    CHECK(!clicked);
+    OT_EXPECT(!clicked);
     /* …and does not linger into a later frame either. */
     clicked = false;
     build_button_frame(ui, &clicked);
-    CHECK(!clicked);
+    OT_EXPECT(!clicked);
 
     lens_release(ui);
 }
@@ -75,7 +76,7 @@ static void test_activate_unknown_id_dropped(void) {
 /* A newer request replaces an unconsumed older one (single pending slot). */
 static void test_activate_replaces_pending(void) {
     lens *ui = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
 
     bool clicked = false;
     lens_id id = build_button_frame(ui, &clicked);
@@ -84,7 +85,7 @@ static void test_activate_replaces_pending(void) {
     lens_a11y_activate(ui, id);
     clicked = false;
     build_button_frame(ui, &clicked);
-    CHECK(clicked);
+    OT_EXPECT(clicked);
 
     lens_release(ui);
 }
@@ -93,7 +94,7 @@ static void test_activate_replaces_pending(void) {
  * it cannot fire later if the widget becomes enabled again mid-frame. */
 static void test_activate_disabled_blocked(void) {
     lens *ui = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
 
     bool disabled = true;
     lens_id id = 0;
@@ -104,35 +105,35 @@ static void test_activate_disabled_blocked(void) {
     clicked =
         lens_button(ui, &(lens_button_opts){.box = {.disabled = disabled}, .label = "No"}).clicked;
     id = lens_get_response(ui).id;
-    test_end(ui);
-    CHECK(id != 0);
-    CHECK(!clicked);
+    lens_test_end(ui);
+    OT_EXPECT(id != 0);
+    OT_EXPECT(!clicked);
 
     /* activation request → blocked by disabled; no focus move */
     lens_a11y_activate(ui, id);
     lens_begin(ui, &IN0);
     clicked =
         lens_button(ui, &(lens_button_opts){.box = {.disabled = disabled}, .label = "No"}).clicked;
-    test_end(ui);
-    CHECK(!clicked);
-    CHECK(!lens_focused(ui, id));
+    lens_test_end(ui);
+    OT_EXPECT(!clicked);
+    OT_EXPECT(!lens_focused(ui, id));
 
     /* enabled again: the dropped request must NOT fire retroactively */
     disabled = false;
     lens_begin(ui, &IN0);
     clicked =
         lens_button(ui, &(lens_button_opts){.box = {.disabled = disabled}, .label = "No"}).clicked;
-    test_end(ui);
-    CHECK(!clicked);
+    lens_test_end(ui);
+    OT_EXPECT(!clicked);
 
     /* fresh request now fires */
     lens_a11y_activate(ui, id);
     lens_begin(ui, &IN0);
     clicked =
         lens_button(ui, &(lens_button_opts){.box = {.disabled = disabled}, .label = "No"}).clicked;
-    test_end(ui);
-    CHECK(clicked);
-    CHECK(lens_focused(ui, id));
+    lens_test_end(ui);
+    OT_EXPECT(clicked);
+    OT_EXPECT(lens_focused(ui, id));
 
     lens_release(ui);
 }
@@ -141,7 +142,7 @@ static void test_activate_disabled_blocked(void) {
  * button swallows its pointer interaction but not the a11y request. */
 static void test_activate_bypasses_occlusion(void) {
     lens *ui = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
 
     /* frame 1: button under an open full-window popup (POPUP band
      * occludes; a BACKDROP would be hit-transparent) */
@@ -159,8 +160,8 @@ static void test_activate_bypasses_occlusion(void) {
         lens_label(ui, &(lens_label_opts){.text = "cover"});
         lens_place_end(ui);
     }
-    test_end(ui);
-    CHECK(!clicked);
+    lens_test_end(ui);
+    OT_EXPECT(!clicked);
 
     /* frame 2: pointer press over the covered button — occluded, and the
      * press is inside the popup so it does not even dismiss it */
@@ -179,9 +180,9 @@ static void test_activate_bypasses_occlusion(void) {
         lens_label(ui, &(lens_label_opts){.text = "cover"});
         lens_place_end(ui);
     }
-    test_end(ui);
-    CHECK(!clicked);
-    CHECK(!pressed);
+    lens_test_end(ui);
+    OT_EXPECT(!clicked);
+    OT_EXPECT(!pressed);
 
     /* frame 3: AT activation fires anyway */
     lens_a11y_activate(ui, id);
@@ -196,8 +197,8 @@ static void test_activate_bypasses_occlusion(void) {
         lens_label(ui, &(lens_label_opts){.text = "cover"});
         lens_place_end(ui);
     }
-    test_end(ui);
-    CHECK(clicked);
+    lens_test_end(ui);
+    OT_EXPECT(clicked);
 
     lens_release(ui);
 }
@@ -208,5 +209,5 @@ int main(void) {
     test_activate_replaces_pending();
     test_activate_disabled_blocked();
     test_activate_bypasses_occlusion();
-    return TEST_REPORT();
+    return OT_REPORT();
 }

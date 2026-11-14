@@ -3,7 +3,8 @@
  * the embedded test triangle shaders, exercises retain/release, and
  * covers the rejection paths. Skips if no Vulkan device.
  */
-#include "test_helpers.h"
+#include "flux_test.h"
+#include "optics_test.h"
 #include <flux/flux.h>
 #include <flux/vulkan.h>
 
@@ -49,25 +50,26 @@ int main(void) {
     /* --- NULL rejection without a device --- */
     {
         flux_graphics_pipeline *p = nullptr;
-        EXPECT(flux_graphics_pipeline_create(nullptr, nullptr, &p) == FLUX_ERROR_INVALID_ARGUMENT);
+        OT_EXPECT(flux_graphics_pipeline_create(nullptr, nullptr, &p) ==
+                  FLUX_ERROR_INVALID_ARGUMENT);
     }
 
-    flux_device *d = test_helpers_make_headless_device();
+    flux_device *d = flux_test_make_headless_device();
     if (!d) {
         fprintf(stderr, "test_graphics_pipeline: no Vulkan device; skipping\n");
-        TEST_SUMMARY();
+        OT_SKIP("no Vulkan device");
     }
 
     /* --- happy path --- */
     {
         flux_graphics_pipeline_desc desc = base_desc();
         flux_graphics_pipeline *p = nullptr;
-        EXPECT(flux_graphics_pipeline_create(d, &desc, &p) == FLUX_OK);
-        EXPECT(p != nullptr);
-        EXPECT(flux_graphics_pipeline_vk_pipeline(p) != VK_NULL_HANDLE);
-        EXPECT(flux_graphics_pipeline_vk_layout(p) != VK_NULL_HANDLE);
+        OT_EXPECT(flux_graphics_pipeline_create(d, &desc, &p) == FLUX_OK);
+        OT_EXPECT(p != nullptr);
+        OT_EXPECT(flux_graphics_pipeline_vk_pipeline(p) != VK_NULL_HANDLE);
+        OT_EXPECT(flux_graphics_pipeline_vk_layout(p) != VK_NULL_HANDLE);
 
-        EXPECT(flux_graphics_pipeline_retain(p) == p);
+        OT_EXPECT(flux_graphics_pipeline_retain(p) == p);
         flux_graphics_pipeline_release(p); /* drop the retain */
         flux_graphics_pipeline_release(p); /* final */
     }
@@ -78,7 +80,7 @@ int main(void) {
             flux_graphics_pipeline_desc desc = base_desc();
             desc.blend = (flux_blend_preset)bp;
             flux_graphics_pipeline *p = nullptr;
-            EXPECT(flux_graphics_pipeline_create(d, &desc, &p) == FLUX_OK);
+            OT_EXPECT(flux_graphics_pipeline_create(d, &desc, &p) == FLUX_OK);
             flux_graphics_pipeline_release(p);
         }
     }
@@ -89,7 +91,7 @@ int main(void) {
         desc.depth = FLUX_DEPTH_TEST_AND_WRITE;
         desc.depth_format = FLUX_FORMAT_D32_SFLOAT;
         flux_graphics_pipeline *p = nullptr;
-        EXPECT(flux_graphics_pipeline_create(d, &desc, &p) == FLUX_OK);
+        OT_EXPECT(flux_graphics_pipeline_create(d, &desc, &p) == FLUX_OK);
         flux_graphics_pipeline_release(p);
     }
 
@@ -107,7 +109,7 @@ int main(void) {
         flux_graphics_pipeline_desc desc = base_desc();
         desc.vertex_binding = &binding;
         flux_graphics_pipeline *p = nullptr;
-        EXPECT(flux_graphics_pipeline_create(d, &desc, &p) == FLUX_OK);
+        OT_EXPECT(flux_graphics_pipeline_create(d, &desc, &p) == FLUX_OK);
         flux_graphics_pipeline_release(p);
     }
 
@@ -116,7 +118,7 @@ int main(void) {
         flux_graphics_pipeline_desc desc = base_desc();
         desc.type = FLUX_TYPE_UNKNOWN;
         flux_graphics_pipeline *p = nullptr;
-        EXPECT(flux_graphics_pipeline_create(d, &desc, &p) == FLUX_ERROR_INVALID_ARGUMENT);
+        OT_EXPECT(flux_graphics_pipeline_create(d, &desc, &p) == FLUX_ERROR_INVALID_ARGUMENT);
     }
 
     /* --- missing shaders rejected --- */
@@ -124,7 +126,7 @@ int main(void) {
         flux_graphics_pipeline_desc desc = base_desc();
         desc.vertex_spirv = nullptr;
         flux_graphics_pipeline *p = nullptr;
-        EXPECT(flux_graphics_pipeline_create(d, &desc, &p) == FLUX_ERROR_INVALID_ARGUMENT);
+        OT_EXPECT(flux_graphics_pipeline_create(d, &desc, &p) == FLUX_ERROR_INVALID_ARGUMENT);
     }
 
     /* --- missing colour format rejected --- */
@@ -132,7 +134,7 @@ int main(void) {
         flux_graphics_pipeline_desc desc = base_desc();
         desc.color_format = FLUX_FORMAT_UNDEFINED;
         flux_graphics_pipeline *p = nullptr;
-        EXPECT(flux_graphics_pipeline_create(d, &desc, &p) == FLUX_ERROR_INVALID_ARGUMENT);
+        OT_EXPECT(flux_graphics_pipeline_create(d, &desc, &p) == FLUX_ERROR_INVALID_ARGUMENT);
     }
 
     /* --- push constants over device cap rejected --- */
@@ -140,15 +142,15 @@ int main(void) {
         flux_graphics_pipeline_desc desc = base_desc();
         desc.push_constant_bytes = 1u << 20; /* 1 MiB — no driver allows */
         flux_graphics_pipeline *p = nullptr;
-        EXPECT(flux_graphics_pipeline_create(d, &desc, &p) == FLUX_ERROR_INVALID_ARGUMENT);
+        OT_EXPECT(flux_graphics_pipeline_create(d, &desc, &p) == FLUX_ERROR_INVALID_ARGUMENT);
     }
 
     /* --- NULL-safe accessors and release --- */
-    EXPECT(flux_graphics_pipeline_vk_pipeline(nullptr) == VK_NULL_HANDLE);
-    EXPECT(flux_graphics_pipeline_vk_layout(nullptr) == VK_NULL_HANDLE);
-    EXPECT(flux_graphics_pipeline_retain(nullptr) == nullptr);
+    OT_EXPECT(flux_graphics_pipeline_vk_pipeline(nullptr) == VK_NULL_HANDLE);
+    OT_EXPECT(flux_graphics_pipeline_vk_layout(nullptr) == VK_NULL_HANDLE);
+    OT_EXPECT(flux_graphics_pipeline_retain(nullptr) == nullptr);
     flux_graphics_pipeline_release(nullptr);
 
     flux_device_release(d);
-    TEST_SUMMARY();
+    return OT_REPORT();
 }

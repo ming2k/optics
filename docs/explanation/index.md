@@ -15,6 +15,6 @@ Discursive documentation explaining the design rationale, mathematical models, p
 | **[Geometry & Coverage Algorithms](geometry-and-coverage.md)** | Map of 2D geometry representations: Bézier curves, analytic curve kernels, distance fields, and rasterization coverage. |
 | **[Vulkan Backend Architecture](vulkan-backend.md)** | Pure Vulkan 1.3 RHI design, dynamic rendering, timeline semaphores, descriptor sets, and pipeline caches. |
 | **[Scene Snapshots & Presentation](scene-snapshots.md)** | Frame snapshot generation, multi-layer compositing, overlay z-bands, and decoupling UI from rendering. |
-| **[Rust Bindings Architecture](rust-bindings.md)** | Design of idiomatic, safe Rust wrapper crates in `bindings/` with zero-overhead C ABI interop. |
+| **[Rust Bindings Architecture](rust-bindings.md)** | Design of idiomatic, safe Rust wrapper crates under `bindings/crates/` with zero-overhead C ABI interop. |
 
 For ratified architectural decisions and historical context, consult the [Architecture Decision Records](../adr/index.md).

@@ -12,7 +12,8 @@
  */
 
 #include "../../libs/lens/src/internal.h"
-#include "test_helpers.h"
+#include "lens_test.h"
+#include "optics_test.h"
 #include <lens/lens.h>
 
 static const lens_input IN0 = {.display_size = {200, 100}, .dt_seconds = 0.016f};
@@ -45,25 +46,25 @@ static bool frame_with_cmd(lens *ui, lens_draw_cmd cmd) {
 
 int main(void) {
     lens *ui = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
 
     /* frame 1: first geometry — always changed */
-    CHECK(frame_with_cmd(ui, base_cmd()) == true);
+    OT_EXPECT(frame_with_cmd(ui, base_cmd()) == true);
     /* frame 2: identical command — hash stable, subtree unchanged */
-    CHECK(frame_with_cmd(ui, base_cmd()) == false);
+    OT_EXPECT(frame_with_cmd(ui, base_cmd()) == false);
 
     /* flags-only change must mark the subtree changed… */
     lens_draw_cmd cmd = base_cmd();
     cmd.flags = LENSI_TAB_CONNECT_LEFT | LENSI_TAB_CONNECT_RIGHT;
-    CHECK(frame_with_cmd(ui, cmd) == true);
+    OT_EXPECT(frame_with_cmd(ui, cmd) == true);
     /* …and settle back once the change is one frame old */
-    CHECK(frame_with_cmd(ui, cmd) == false);
+    OT_EXPECT(frame_with_cmd(ui, cmd) == false);
 
     /* image-pointer-only change */
     cmd = base_cmd();
     cmd.image = (flux_image *)(uintptr_t)0x2000u;
-    CHECK(frame_with_cmd(ui, cmd) == true);
-    CHECK(frame_with_cmd(ui, cmd) == false);
+    OT_EXPECT(frame_with_cmd(ui, cmd) == true);
+    OT_EXPECT(frame_with_cmd(ui, cmd) == false);
 
     /* text_weight-only change on a text command */
     lens_draw_cmd text = {
@@ -74,20 +75,20 @@ int main(void) {
         .text_size = 14.0f,
         .text_weight = 400.0f,
     };
-    CHECK(frame_with_cmd(ui, text) == true);  /* kind/image change too */
-    CHECK(frame_with_cmd(ui, text) == false); /* identical → unchanged */
+    OT_EXPECT(frame_with_cmd(ui, text) == true);  /* kind/image change too */
+    OT_EXPECT(frame_with_cmd(ui, text) == false); /* identical → unchanged */
     text.text_weight = 700.0f;
-    CHECK(frame_with_cmd(ui, text) == true); /* weight-only → changed */
-    CHECK(frame_with_cmd(ui, text) == false);
+    OT_EXPECT(frame_with_cmd(ui, text) == true); /* weight-only → changed */
+    OT_EXPECT(frame_with_cmd(ui, text) == false);
 
     /* Foreground-contour changes must invalidate recorded pixels too. */
     text.outline_color = 0x80000000u;
-    CHECK(frame_with_cmd(ui, text) == true);
-    CHECK(frame_with_cmd(ui, text) == false);
+    OT_EXPECT(frame_with_cmd(ui, text) == true);
+    OT_EXPECT(frame_with_cmd(ui, text) == false);
     text.outline_width = 0.75f;
-    CHECK(frame_with_cmd(ui, text) == true);
-    CHECK(frame_with_cmd(ui, text) == false);
+    OT_EXPECT(frame_with_cmd(ui, text) == true);
+    OT_EXPECT(frame_with_cmd(ui, text) == false);
 
     lens_release(ui);
-    return TEST_REPORT();
+    return OT_REPORT();
 }

@@ -22,10 +22,10 @@
 
 /* ---- Emit helpers ----------------------------------------------------- */
 
-static bool emit(svg_cmd_buf *out, uint8_t verb, float a, float b, float c, float d, float e,
+static bool emit(reticle_cmd_buf *out, uint8_t verb, float a, float b, float c, float d, float e,
                  float f) {
     reticle_path_cmd cmd = {.verb = verb, .params = {a, b, c, d, e, f}};
-    return svg_cmd_buf_push(out, cmd);
+    return reticle_cmd_buf_push(out, cmd);
 }
 
 typedef struct bounds_tracker {
@@ -93,7 +93,7 @@ static void track_cubic(bounds_tracker *t, float x0, float y0, float x1, float y
 
 /* Endpoint → centre parameterisation, per SVG 1.1 implementation notes
  * F.6.5/F.6.6. Returns the number of ≤90° cubic segments emitted. */
-static uint32_t emit_arc(svg_cmd_buf *out, svg_transform ctm, float x0, float y0, float rx,
+static uint32_t emit_arc(reticle_cmd_buf *out, reticle_transform ctm, float x0, float y0, float rx,
                          float ry, float rotation_deg, bool large_arc, bool sweep, float x, float y,
                          bounds_tracker *tracker) {
     if (x0 == x && y0 == y)
@@ -102,7 +102,7 @@ static uint32_t emit_arc(svg_cmd_buf *out, svg_transform ctm, float x0, float y0
     float ry_abs = fabsf(ry);
     if (rx_abs < 1e-9f || ry_abs < 1e-9f) {
         float px = 0.0f, py = 0.0f;
-        svg__xform_point(ctm, x, y, &px, &py);
+        reticle_priv_xform_point(ctm, x, y, &px, &py);
         if (!emit(out, RETICLE_PATH_LINE, px, py, 0.0f, 0.0f, 0.0f, 0.0f))
             return 0;
         track(tracker, px, py);
@@ -195,12 +195,12 @@ static uint32_t emit_arc(svg_cmd_buf *out, svg_transform ctm, float x0, float y0
         float p3y = sin_phi * u3 + cos_phi * v3 + cy;
 
         float t1x = 0.0f, t1y = 0.0f, t2x = 0.0f, t2y = 0.0f, t3x = 0.0f, t3y = 0.0f;
-        svg__xform_point(ctm, p1x, p1y, &t1x, &t1y);
-        svg__xform_point(ctm, p2x, p2y, &t2x, &t2y);
-        svg__xform_point(ctm, p3x, p3y, &t3x, &t3y);
+        reticle_priv_xform_point(ctm, p1x, p1y, &t1x, &t1y);
+        reticle_priv_xform_point(ctm, p2x, p2y, &t2x, &t2y);
+        reticle_priv_xform_point(ctm, p3x, p3y, &t3x, &t3y);
 
         float start_x = 0.0f, start_y = 0.0f;
-        svg__xform_point(ctm, prev_x, prev_y, &start_x, &start_y);
+        reticle_priv_xform_point(ctm, prev_x, prev_y, &start_x, &start_y);
         if (!emit(out, RETICLE_PATH_CUBIC, t1x, t1y, t2x, t2y, t3x, t3y))
             return i;
         track_cubic(tracker, start_x, start_y, t1x, t1y, t2x, t2y, t3x, t3y);
@@ -302,8 +302,8 @@ static bool next_command(path_cursor *c, char *out) {
     return true;
 }
 
-bool svg__parse_path_data(const char *d, size_t len, svg_transform ctm, svg_cmd_buf *out,
-                          flux_rect *bounds) {
+bool reticle_priv_parse_path_data(const char *d, size_t len, reticle_transform ctm,
+                                  reticle_cmd_buf *out, flux_rect *bounds) {
     path_cursor c = {.p = d, .end = d + len};
     bounds_tracker tracker = {};
     /* Current point and the last control point, both in *pre-transform* user
@@ -348,7 +348,7 @@ bool svg__parse_path_data(const char *d, size_t len, svg_transform ctm, svg_cmd_
             start_x = x;
             start_y = y;
             float tx = 0.0f, ty = 0.0f;
-            svg__xform_point(ctm, x, y, &tx, &ty);
+            reticle_priv_xform_point(ctm, x, y, &tx, &ty);
             if (!emit(out, RETICLE_PATH_MOVE, tx, ty, 0.0f, 0.0f, 0.0f, 0.0f))
                 return false;
             track(&tracker, tx, ty);
@@ -369,7 +369,7 @@ bool svg__parse_path_data(const char *d, size_t len, svg_transform ctm, svg_cmd_
             cx = x;
             cy = y;
             float tx = 0.0f, ty = 0.0f;
-            svg__xform_point(ctm, x, y, &tx, &ty);
+            reticle_priv_xform_point(ctm, x, y, &tx, &ty);
             if (!emit(out, RETICLE_PATH_LINE, tx, ty, 0.0f, 0.0f, 0.0f, 0.0f))
                 return false;
             track(&tracker, tx, ty);
@@ -386,7 +386,7 @@ bool svg__parse_path_data(const char *d, size_t len, svg_transform ctm, svg_cmd_
                 x += cx;
             cx = x;
             float tx = 0.0f, ty = 0.0f;
-            svg__xform_point(ctm, cx, cy, &tx, &ty);
+            reticle_priv_xform_point(ctm, cx, cy, &tx, &ty);
             if (!emit(out, RETICLE_PATH_LINE, tx, ty, 0.0f, 0.0f, 0.0f, 0.0f))
                 return false;
             track(&tracker, tx, ty);
@@ -403,7 +403,7 @@ bool svg__parse_path_data(const char *d, size_t len, svg_transform ctm, svg_cmd_
                 y += cy;
             cy = y;
             float tx = 0.0f, ty = 0.0f;
-            svg__xform_point(ctm, cx, cy, &tx, &ty);
+            reticle_priv_xform_point(ctm, cx, cy, &tx, &ty);
             if (!emit(out, RETICLE_PATH_LINE, tx, ty, 0.0f, 0.0f, 0.0f, 0.0f))
                 return false;
             track(&tracker, tx, ty);
@@ -427,10 +427,10 @@ bool svg__parse_path_data(const char *d, size_t len, svg_transform ctm, svg_cmd_
             }
             float p0x = 0.0f, p0y = 0.0f, p1x = 0.0f, p1y = 0.0f;
             float p2x = 0.0f, p2y = 0.0f, p3x = 0.0f, p3y = 0.0f;
-            svg__xform_point(ctm, cx, cy, &p0x, &p0y);
-            svg__xform_point(ctm, x1, y1, &p1x, &p1y);
-            svg__xform_point(ctm, x2, y2, &p2x, &p2y);
-            svg__xform_point(ctm, x, y, &p3x, &p3y);
+            reticle_priv_xform_point(ctm, cx, cy, &p0x, &p0y);
+            reticle_priv_xform_point(ctm, x1, y1, &p1x, &p1y);
+            reticle_priv_xform_point(ctm, x2, y2, &p2x, &p2y);
+            reticle_priv_xform_point(ctm, x, y, &p3x, &p3y);
             if (!emit(out, RETICLE_PATH_CUBIC, p1x, p1y, p2x, p2y, p3x, p3y))
                 return false;
             track_cubic(&tracker, p0x, p0y, p1x, p1y, p2x, p2y, p3x, p3y);
@@ -460,10 +460,10 @@ bool svg__parse_path_data(const char *d, size_t len, svg_transform ctm, svg_cmd_
             float y1 = reflect ? 2.0f * cy - last_cubic_y : cy;
             float p0x = 0.0f, p0y = 0.0f, p1x = 0.0f, p1y = 0.0f;
             float p2x = 0.0f, p2y = 0.0f, p3x = 0.0f, p3y = 0.0f;
-            svg__xform_point(ctm, cx, cy, &p0x, &p0y);
-            svg__xform_point(ctm, x1, y1, &p1x, &p1y);
-            svg__xform_point(ctm, x2, y2, &p2x, &p2y);
-            svg__xform_point(ctm, x, y, &p3x, &p3y);
+            reticle_priv_xform_point(ctm, cx, cy, &p0x, &p0y);
+            reticle_priv_xform_point(ctm, x1, y1, &p1x, &p1y);
+            reticle_priv_xform_point(ctm, x2, y2, &p2x, &p2y);
+            reticle_priv_xform_point(ctm, x, y, &p3x, &p3y);
             if (!emit(out, RETICLE_PATH_CUBIC, p1x, p1y, p2x, p2y, p3x, p3y))
                 return false;
             track_cubic(&tracker, p0x, p0y, p1x, p1y, p2x, p2y, p3x, p3y);
@@ -488,14 +488,14 @@ bool svg__parse_path_data(const char *d, size_t len, svg_transform ctm, svg_cmd_
                 y += cy;
             }
             float p1x = 0.0f, p1y = 0.0f, p2x = 0.0f, p2y = 0.0f;
-            svg__xform_point(ctm, x1, y1, &p1x, &p1y);
-            svg__xform_point(ctm, x, y, &p2x, &p2y);
+            reticle_priv_xform_point(ctm, x1, y1, &p1x, &p1y);
+            reticle_priv_xform_point(ctm, x, y, &p2x, &p2y);
             if (!emit(out, RETICLE_PATH_QUAD, p1x, p1y, p2x, p2y, 0.0f, 0.0f))
                 return false;
             /* Flatten the quad's hull for bounds: exact enough, and quads in
              * icon art are small. */
             float p0x = 0.0f, p0y = 0.0f;
-            svg__xform_point(ctm, cx, cy, &p0x, &p0y);
+            reticle_priv_xform_point(ctm, cx, cy, &p0x, &p0y);
             track(&tracker, p0x, p0y);
             track(&tracker, p1x, p1y);
             track(&tracker, p2x, p2y);
@@ -521,12 +521,12 @@ bool svg__parse_path_data(const char *d, size_t len, svg_transform ctm, svg_cmd_
             float x1 = reflect ? 2.0f * cx - last_quad_x : cx;
             float y1 = reflect ? 2.0f * cy - last_quad_y : cy;
             float p1x = 0.0f, p1y = 0.0f, p2x = 0.0f, p2y = 0.0f;
-            svg__xform_point(ctm, x1, y1, &p1x, &p1y);
-            svg__xform_point(ctm, x, y, &p2x, &p2y);
+            reticle_priv_xform_point(ctm, x1, y1, &p1x, &p1y);
+            reticle_priv_xform_point(ctm, x, y, &p2x, &p2y);
             if (!emit(out, RETICLE_PATH_QUAD, p1x, p1y, p2x, p2y, 0.0f, 0.0f))
                 return false;
             float p0x = 0.0f, p0y = 0.0f;
-            svg__xform_point(ctm, cx, cy, &p0x, &p0y);
+            reticle_priv_xform_point(ctm, cx, cy, &p0x, &p0y);
             track(&tracker, p0x, p0y);
             track(&tracker, p1x, p1y);
             track(&tracker, p2x, p2y);
@@ -588,9 +588,9 @@ bool svg__parse_path_data(const char *d, size_t len, svg_transform ctm, svg_cmd_
 
 /* Elliptical arc from angle a0 to a1 as ≤90° cubics, emitted already
  * transformed. Shared by ellipse and rounded rect. */
-static bool emit_elliptic_arc(svg_cmd_buf *out, svg_transform ctm, float cx, float cy, float rx,
-                              float ry, float a0, float a1, bounds_tracker *tracker, float from_x,
-                              float from_y) {
+static bool emit_elliptic_arc(reticle_cmd_buf *out, reticle_transform ctm, float cx, float cy,
+                              float rx, float ry, float a0, float a1, bounds_tracker *tracker,
+                              float from_x, float from_y) {
     const float half_pi = 3.14159265358979323846f * 0.5f;
     float delta = a1 - a0;
     /* The tolerance is load-bearing: 4*half_pi - 3*half_pi evaluates to
@@ -619,11 +619,11 @@ static bool emit_elliptic_arc(svg_cmd_buf *out, svg_transform ctm, float cx, flo
         float u3 = rx * cos2;
         float v3 = ry * sin2;
         float p1x = 0.0f, p1y = 0.0f, p2x = 0.0f, p2y = 0.0f, p3x = 0.0f, p3y = 0.0f;
-        svg__xform_point(ctm, cx + u1, cy + v1, &p1x, &p1y);
-        svg__xform_point(ctm, cx + u2, cy + v2, &p2x, &p2y);
-        svg__xform_point(ctm, cx + u3, cy + v3, &p3x, &p3y);
+        reticle_priv_xform_point(ctm, cx + u1, cy + v1, &p1x, &p1y);
+        reticle_priv_xform_point(ctm, cx + u2, cy + v2, &p2x, &p2y);
+        reticle_priv_xform_point(ctm, cx + u3, cy + v3, &p3x, &p3y);
         float s0x = 0.0f, s0y = 0.0f;
-        svg__xform_point(ctm, prev_x, prev_y, &s0x, &s0y);
+        reticle_priv_xform_point(ctm, prev_x, prev_y, &s0x, &s0y);
         if (!emit(out, RETICLE_PATH_CUBIC, p1x, p1y, p2x, p2y, p3x, p3y))
             return false;
         track_cubic(tracker, s0x, s0y, p1x, p1y, p2x, p2y, p3x, p3y);
@@ -633,8 +633,8 @@ static bool emit_elliptic_arc(svg_cmd_buf *out, svg_transform ctm, float cx, flo
     return true;
 }
 
-bool svg__emit_rect(svg_cmd_buf *out, svg_transform ctm, float x, float y, float w, float h,
-                    float rx, float ry, flux_rect *bounds) {
+bool reticle_priv_emit_rect(reticle_cmd_buf *out, reticle_transform ctm, float x, float y, float w,
+                            float h, float rx, float ry, flux_rect *bounds) {
     if (!isfinite(x) || !isfinite(y) || !isfinite(w) || !isfinite(h))
         return false;
     /* SVG: a negative/zero extent disables the element entirely. */
@@ -647,10 +647,10 @@ bool svg__emit_rect(svg_cmd_buf *out, svg_transform ctm, float x, float y, float
     if (rx <= 0.0f && ry <= 0.0f) {
         float ax = 0.0f, ay = 0.0f, bx = 0.0f, by = 0.0f, cx2 = 0.0f, cy2 = 0.0f, dx = 0.0f,
               dy = 0.0f;
-        svg__xform_point(ctm, x, y, &ax, &ay);
-        svg__xform_point(ctm, x + w, y, &bx, &by);
-        svg__xform_point(ctm, x + w, y + h, &cx2, &cy2);
-        svg__xform_point(ctm, x, y + h, &dx, &dy);
+        reticle_priv_xform_point(ctm, x, y, &ax, &ay);
+        reticle_priv_xform_point(ctm, x + w, y, &bx, &by);
+        reticle_priv_xform_point(ctm, x + w, y + h, &cx2, &cy2);
+        reticle_priv_xform_point(ctm, x, y + h, &dx, &dy);
         bounds_tracker tracker = {};
         track(&tracker, ax, ay);
         track(&tracker, bx, by);
@@ -680,42 +680,42 @@ bool svg__emit_rect(svg_cmd_buf *out, svg_transform ctm, float x, float y, float
     bounds_tracker tracker = {};
     float start_x = x + rx, start_y = y;
     float tx = 0.0f, ty = 0.0f;
-    svg__xform_point(ctm, start_x, start_y, &tx, &ty);
+    reticle_priv_xform_point(ctm, start_x, start_y, &tx, &ty);
     track(&tracker, tx, ty);
     if (!emit(out, RETICLE_PATH_MOVE, tx, ty, 0, 0, 0, 0))
         return false;
 
     /* Top edge, top-right arc, right edge, bottom-right arc, bottom edge,
      * bottom-left arc, left edge, top-left arc, close. */
-    svg__xform_point(ctm, x + w - rx, y, &tx, &ty);
+    reticle_priv_xform_point(ctm, x + w - rx, y, &tx, &ty);
     track(&tracker, tx, ty);
     if (!emit(out, RETICLE_PATH_LINE, tx, ty, 0, 0, 0, 0))
         return false;
     if (!emit_elliptic_arc(out, ctm, x + w - rx, y + ry, rx, ry, -half_pi, 0.0f, &tracker,
                            x + w - rx, y))
         return false;
-    svg__xform_point(ctm, x + w, y + h - ry, &tx, &ty);
+    reticle_priv_xform_point(ctm, x + w, y + h - ry, &tx, &ty);
     track(&tracker, tx, ty);
     if (!emit(out, RETICLE_PATH_LINE, tx, ty, 0, 0, 0, 0))
         return false;
     if (!emit_elliptic_arc(out, ctm, x + w - rx, y + h - ry, rx, ry, 0.0f, half_pi, &tracker, x + w,
                            y + h - ry))
         return false;
-    svg__xform_point(ctm, x + rx, y + h, &tx, &ty);
+    reticle_priv_xform_point(ctm, x + rx, y + h, &tx, &ty);
     track(&tracker, tx, ty);
     if (!emit(out, RETICLE_PATH_LINE, tx, ty, 0, 0, 0, 0))
         return false;
     if (!emit_elliptic_arc(out, ctm, x + rx, y + h - ry, rx, ry, half_pi, 2.0f * half_pi, &tracker,
                            x + rx, y + h))
         return false;
-    svg__xform_point(ctm, x, y + ry, &tx, &ty);
+    reticle_priv_xform_point(ctm, x, y + ry, &tx, &ty);
     track(&tracker, tx, ty);
     if (!emit(out, RETICLE_PATH_LINE, tx, ty, 0, 0, 0, 0))
         return false;
     if (!emit_elliptic_arc(out, ctm, x + rx, y + ry, rx, ry, 2.0f * half_pi, 3.0f * half_pi,
                            &tracker, x, y + ry))
         return false;
-    svg__xform_point(ctm, x + rx, y, &tx, &ty);
+    reticle_priv_xform_point(ctm, x + rx, y, &tx, &ty);
     track(&tracker, tx, ty);
     if (!emit(out, RETICLE_PATH_CLOSE, 0, 0, 0, 0, 0, 0))
         return false;
@@ -724,8 +724,8 @@ bool svg__emit_rect(svg_cmd_buf *out, svg_transform ctm, float x, float y, float
     return true;
 }
 
-bool svg__emit_ellipse(svg_cmd_buf *out, svg_transform ctm, float cx, float cy, float rx, float ry,
-                       flux_rect *bounds) {
+bool reticle_priv_emit_ellipse(reticle_cmd_buf *out, reticle_transform ctm, float cx, float cy,
+                               float rx, float ry, flux_rect *bounds) {
     if (!isfinite(cx) || !isfinite(cy) || !isfinite(rx) || !isfinite(ry))
         return false;
     /* SVG: a zero radius disables the element; a negative one is an error that
@@ -735,7 +735,7 @@ bool svg__emit_ellipse(svg_cmd_buf *out, svg_transform ctm, float cx, float cy, 
     bounds_tracker tracker = {};
     float start_x = cx + rx, start_y = cy;
     float tx = 0.0f, ty = 0.0f;
-    svg__xform_point(ctm, start_x, start_y, &tx, &ty);
+    reticle_priv_xform_point(ctm, start_x, start_y, &tx, &ty);
     track(&tracker, tx, ty);
     if (!emit(out, RETICLE_PATH_MOVE, tx, ty, 0, 0, 0, 0))
         return false;
@@ -758,14 +758,14 @@ bool svg__emit_ellipse(svg_cmd_buf *out, svg_transform ctm, float cx, float cy, 
     return true;
 }
 
-bool svg__emit_line(svg_cmd_buf *out, svg_transform ctm, float x1, float y1, float x2, float y2,
-                    flux_rect *bounds) {
+bool reticle_priv_emit_line(reticle_cmd_buf *out, reticle_transform ctm, float x1, float y1,
+                            float x2, float y2, flux_rect *bounds) {
     if (!isfinite(x1) || !isfinite(y1) || !isfinite(x2) || !isfinite(y2))
         return false;
     bounds_tracker tracker = {};
     float ax = 0.0f, ay = 0.0f, bx = 0.0f, by = 0.0f;
-    svg__xform_point(ctm, x1, y1, &ax, &ay);
-    svg__xform_point(ctm, x2, y2, &bx, &by);
+    reticle_priv_xform_point(ctm, x1, y1, &ax, &ay);
+    reticle_priv_xform_point(ctm, x2, y2, &bx, &by);
     track(&tracker, ax, ay);
     track(&tracker, bx, by);
     if (!emit(out, RETICLE_PATH_MOVE, ax, ay, 0, 0, 0, 0) ||
@@ -776,14 +776,14 @@ bool svg__emit_line(svg_cmd_buf *out, svg_transform ctm, float x1, float y1, flo
     return true;
 }
 
-bool svg__emit_poly(svg_cmd_buf *out, svg_transform ctm, const float *xy, uint32_t points,
-                    bool closed, flux_rect *bounds) {
+bool reticle_priv_emit_poly(reticle_cmd_buf *out, reticle_transform ctm, const float *xy,
+                            uint32_t points, bool closed, flux_rect *bounds) {
     if (!xy || points == 0)
         return true;
     bounds_tracker tracker = {};
     for (uint32_t i = 0; i < points; ++i) {
         float tx = 0.0f, ty = 0.0f;
-        svg__xform_point(ctm, xy[i * 2], xy[i * 2 + 1], &tx, &ty);
+        reticle_priv_xform_point(ctm, xy[i * 2], xy[i * 2 + 1], &tx, &ty);
         if (!isfinite(tx) || !isfinite(ty))
             return false;
         track(&tracker, tx, ty);

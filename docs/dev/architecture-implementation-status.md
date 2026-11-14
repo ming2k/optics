@@ -1,5 +1,12 @@
 # Architecture implementation status
 
+> Historical ledger. This document records what was implemented and verified
+> before the ADR-0162 test migration. Commands and guardrail filenames under
+> `tools/gate` and `tools/guardrails/` were retired with that migration; current
+> verification is `meson test -C build --suite ...` plus the `tools/check_*.py`
+> gates. Treat the validation snapshots below as decision history, not a current
+> runbook.
+
 Updated 2026-11-10. This matrix tracks the requirements in ADR-0089 through
 ADR-0094 and the curve-rendering program ADR-0115 through ADR-0117. Acceptance
 of an ADR is a design decision, not implementation acceptance. The earlier
@@ -16,7 +23,7 @@ and have been withdrawn. Shader paths reflect the Slang migration (ADR-0156).
 | Explicit presentation activation | Snapshot-owned bounds, clips, overlay order and semantic strings; context and node-incarnation validation; input, scrollbar hit geometry and accessibility consume activated metadata | `tests/lens/test_snapshot.c`: delayed presentation, old geometry, old semantic content, foreign snapshot rejection, replay after UI destruction |
 | Failed publication cannot publish partial visuals | Subtree compiler and text recorder propagate failures; scratch is restored; child cache replacement occurs only after successful capture | `tests/lens/test_snapshot.c`: scratch failure, empty output, successful retry |
 | Unpresented work stays dirty | Visual revision and presentation baseline are separate from cache creation | `tests/lens/test_snapshot.c`: unpublished content remains dirty |
-| Headless activation is explicit | Test hosts publish and activate through a fixture; build-only hashing tests do not publish fake resource handles | `tests/lens/test_helpers.h`, `test_drawlist_hash.c` |
+| Headless activation is explicit | Test hosts publish and activate through a fixture; build-only hashing tests do not publish fake resource handles | `tests/support/lens_test.h`, `test_drawlist_hash.c` |
 | Frame-level resource retention & retirement | Frames track referenced samplers and display lists during recording and submission; in-flight execution holds ownership through fence retirement even if caller immediately releases handles | `tests/flux/integration/test_sampler.c`: sampler and display list frame tracking across begin/draw/release/submit/present |
 
 `lens_snapshot_create` reads the mutable UI after `lens_end`; it must not run

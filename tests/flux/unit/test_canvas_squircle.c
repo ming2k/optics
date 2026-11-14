@@ -17,7 +17,7 @@
  * curvature never jumps), the corner's diagonal bulge equals the field's
  * diagonal radius at every curvature, and the straight edges are untouched.
  */
-#include "test_helpers.h"
+#include "optics_test.h"
 
 #include "../../../libs/flux/src/canvas/internal.h"
 #include <flux/canvas.h>
@@ -140,8 +140,8 @@ static void test_analytic_dispatch_matches_path(void) {
         float curv = curvatures[k];
         flux_canvas *analytic = nullptr;
         flux_canvas *tessellated = nullptr;
-        EXPECT(flux_canvas_create_cpu(144, 112, 1.0f, &analytic) == FLUX_OK);
-        EXPECT(flux_canvas_create_cpu(144, 112, 1.0f, &tessellated) == FLUX_OK);
+        OT_EXPECT(flux_canvas_create_cpu(144, 112, 1.0f, &analytic) == FLUX_OK);
+        OT_EXPECT(flux_canvas_create_cpu(144, 112, 1.0f, &tessellated) == FLUX_OK);
         if (!analytic || !tessellated)
             return;
 
@@ -150,30 +150,30 @@ static void test_analytic_dispatch_matches_path(void) {
         flux_geometry geom = flux_geom_squircle(box, radius, curv);
 
         /* Analytic: the geometry takes the SDF pipeline. */
-        EXPECT(flux_canvas_begin(analytic,
-                                 &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
-                                                          .clear_color = &clear}) == FLUX_OK);
+        OT_EXPECT(flux_canvas_begin(analytic,
+                                    &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                             .clear_color = &clear}) == FLUX_OK);
         flux_canvas_draw_geometry(analytic, &geom, &brush);
-        EXPECT(flux_canvas_end(analytic) == FLUX_OK);
+        OT_EXPECT(flux_canvas_end(analytic) == FLUX_OK);
 
         /* Tessellated: force the path route by drawing a gradient-free but
          * non-solid-equivalent paint? No — draw the path explicitly, which is
          * the independent pipeline. */
         flux_arena local;
-        EXPECT(flux_arena_init(&local, 1u << 16, nullptr) == FLUX_OK);
+        OT_EXPECT(flux_arena_init(&local, 1u << 16, nullptr) == FLUX_OK);
         flux_path *p = nullptr;
-        EXPECT(flux_path_create(&p, &local) == FLUX_OK);
+        OT_EXPECT(flux_path_create(&p, &local) == FLUX_OK);
         flux_path_add_squircle(p, box, radius, curv);
-        EXPECT(flux_canvas_begin(tessellated,
-                                 &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
-                                                          .clear_color = &clear}) == FLUX_OK);
+        OT_EXPECT(flux_canvas_begin(tessellated,
+                                    &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                             .clear_color = &clear}) == FLUX_OK);
         flux_canvas_fill_path(tessellated, p, FLUX_FILL_NON_ZERO, &brush);
-        EXPECT(flux_canvas_end(tessellated) == FLUX_OK);
+        OT_EXPECT(flux_canvas_end(tessellated) == FLUX_OK);
 
         uint32_t w = 0, h = 0;
         const uint8_t *a = flux_canvas_cpu_pixels(analytic, &w, &h, nullptr);
         const uint8_t *b = flux_canvas_cpu_pixels(tessellated, &w, &h, nullptr);
-        EXPECT(a != nullptr && b != nullptr);
+        OT_EXPECT(a != nullptr && b != nullptr);
         if (a && b) {
             long ink_analytic = 0, ink_path = 0;
             int disagree = 0, aa = 0;
@@ -201,12 +201,12 @@ static void test_analytic_dispatch_matches_path(void) {
             long diff = ink_analytic - ink_path;
             if (diff < 0)
                 diff = -diff;
-            EXPECT(diff * 1000 <= ink_analytic * 25 + 1000);
+            OT_EXPECT(diff * 1000 <= ink_analytic * 25 + 1000);
             /* No pixel is emphatically on the wrong side: the two paths draw
              * the same shape, not merely a similar area. */
-            EXPECT(disagree == 0);
+            OT_EXPECT(disagree == 0);
             /* Both paths really did anti-alias something. */
-            EXPECT(aa > 100);
+            OT_EXPECT(aa > 100);
         }
 
         flux_canvas_release(analytic);
@@ -230,8 +230,8 @@ static void run_dispatch_case(flux_mat3x2 tx, float curvature, bool expect_analy
 
     flux_canvas *analytic = nullptr;
     flux_canvas *tessellated = nullptr;
-    EXPECT(flux_canvas_create_cpu(144, 112, 1.0f, &analytic) == FLUX_OK);
-    EXPECT(flux_canvas_create_cpu(144, 112, 1.0f, &tessellated) == FLUX_OK);
+    OT_EXPECT(flux_canvas_create_cpu(144, 112, 1.0f, &analytic) == FLUX_OK);
+    OT_EXPECT(flux_canvas_create_cpu(144, 112, 1.0f, &tessellated) == FLUX_OK);
     if (!analytic || !tessellated)
         return;
 
@@ -239,28 +239,29 @@ static void run_dispatch_case(flux_mat3x2 tx, float curvature, bool expect_analy
     flux_brush brush = flux_brush_solid(flux_color_rgba_premul(255, 255, 255, 255));
     flux_geometry geom = flux_geom_squircle(box, radius, curvature);
 
-    EXPECT(flux_canvas_begin(analytic, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
-                                                                .clear_color = &clear}) == FLUX_OK);
+    OT_EXPECT(
+        flux_canvas_begin(analytic, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                             .clear_color = &clear}) == FLUX_OK);
     flux_canvas_transform(analytic, tx);
     flux_canvas_draw_geometry(analytic, &geom, &brush);
-    EXPECT(flux_canvas_end(analytic) == FLUX_OK);
+    OT_EXPECT(flux_canvas_end(analytic) == FLUX_OK);
 
     flux_arena local;
-    EXPECT(flux_arena_init(&local, 1u << 16, nullptr) == FLUX_OK);
+    OT_EXPECT(flux_arena_init(&local, 1u << 16, nullptr) == FLUX_OK);
     flux_path *p = nullptr;
-    EXPECT(flux_path_create(&p, &local) == FLUX_OK);
+    OT_EXPECT(flux_path_create(&p, &local) == FLUX_OK);
     flux_path_add_squircle(p, box, radius, curvature);
-    EXPECT(
+    OT_EXPECT(
         flux_canvas_begin(tessellated, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
                                                                 .clear_color = &clear}) == FLUX_OK);
     flux_canvas_transform(tessellated, tx);
     flux_canvas_fill_path(tessellated, p, FLUX_FILL_NON_ZERO, &brush);
-    EXPECT(flux_canvas_end(tessellated) == FLUX_OK);
+    OT_EXPECT(flux_canvas_end(tessellated) == FLUX_OK);
 
     uint32_t w = 0, h = 0;
     const uint8_t *a = flux_canvas_cpu_pixels(analytic, &w, &h, nullptr);
     const uint8_t *b = flux_canvas_cpu_pixels(tessellated, &w, &h, nullptr);
-    EXPECT(a != nullptr && b != nullptr);
+    OT_EXPECT(a != nullptr && b != nullptr);
     if (a && b) {
         long ink_a = 0, ink_b = 0;
         int disagree = 0, aa = 0;
@@ -275,17 +276,17 @@ static void run_dispatch_case(flux_mat3x2 tx, float curvature, bool expect_analy
             if ((ca > 15 && ca < 240) || (cb > 15 && cb < 240))
                 aa++;
         }
-        EXPECT(ink_a > 0); /* something was drawn at all */
+        OT_EXPECT(ink_a > 0); /* something was drawn at all */
         if (expect_analytic) {
             /* Independently computed shapes: same side of every boundary,
              * and both really did anti-alias. */
-            EXPECT(disagree == 0);
-            EXPECT(aa > 100);
+            OT_EXPECT(disagree == 0);
+            OT_EXPECT(aa > 100);
         } else {
             /* Not a similarity, so the dispatch must keep both drawings on the
              * tessellation path. Identical output is the evidence: an
              * approximated field would differ from the polygon. */
-            EXPECT(ink_a == ink_b);
+            OT_EXPECT(ink_a == ink_b);
         }
     }
 
@@ -322,7 +323,7 @@ static void test_rotation_and_shear_dispatch(void) {
 
 int main(void) {
     flux_arena arena;
-    EXPECT(flux_arena_init(&arena, 1u << 18, nullptr) == FLUX_OK);
+    OT_EXPECT(flux_arena_init(&arena, 1u << 18, nullptr) == FLUX_OK);
 
     const flux_rect box = {0.0f, 0.0f, 200.0f, 120.0f};
     const flux_point centre = {100.0f, 60.0f};
@@ -335,12 +336,12 @@ int main(void) {
     for (unsigned i = 0; i < sizeof(curvatures) / sizeof(curvatures[0]); ++i) {
         float c = curvatures[i];
         flux_path *p = nullptr;
-        EXPECT(flux_path_create(&p, &arena) == FLUX_OK);
+        OT_EXPECT(flux_path_create(&p, &arena) == FLUX_OK);
         flux_path_add_squircle(p, box, radius, c);
         uint32_t n = sample_path(p, g_pts, PATH_POINTS);
-        EXPECT(n > 100);
+        OT_EXPECT(n > 100);
         float dev = path_field_deviation(p, centre, box, radius, c);
-        EXPECT(dev <= 0.01f * radius);
+        OT_EXPECT(dev <= 0.01f * radius);
         flux_arena_reset(&arena);
     }
 
@@ -348,12 +349,12 @@ int main(void) {
     {
         flux_path *sq = nullptr;
         flux_path *rr = nullptr;
-        EXPECT(flux_path_create(&sq, &arena) == FLUX_OK);
-        EXPECT(flux_path_create(&rr, &arena) == FLUX_OK);
+        OT_EXPECT(flux_path_create(&sq, &arena) == FLUX_OK);
+        OT_EXPECT(flux_path_create(&rr, &arena) == FLUX_OK);
         flux_path_add_squircle(sq, box, radius, 0.0f);
         flux_path_add_round_rect(rr, box, radius);
-        EXPECT(sq->count == rr->count);
-        EXPECT(path_field_deviation(sq, centre, box, radius, 0.0f) <= 0.01f * radius);
+        OT_EXPECT(sq->count == rr->count);
+        OT_EXPECT(path_field_deviation(sq, centre, box, radius, 0.0f) <= 0.01f * radius);
         flux_arena_reset(&arena);
     }
 
@@ -368,17 +369,17 @@ int main(void) {
             if (c < 0.005f)
                 c = 0.005f; /* the <= 0.001 case is the round rectangle */
             flux_path *p = nullptr;
-            EXPECT(flux_path_create(&p, &arena) == FLUX_OK);
+            OT_EXPECT(flux_path_create(&p, &arena) == FLUX_OK);
             flux_path_add_squircle(p, box, radius, c);
             float bulge = diagonal_bulge(p, tr_centre);
             float expect = radius * (1.0f + (k45_max - 1.0f) * c);
-            EXPECT_NEAR(bulge, expect, radius * 0.01f); /* 1% */
-            EXPECT(bulge >= prev - 1e-3f);              /* monotone */
+            OT_EXPECT_NEAR(bulge, expect, radius * 0.01f); /* 1% */
+            OT_EXPECT(bulge >= prev - 1e-3f);              /* monotone */
             prev = bulge;
             flux_arena_reset(&arena);
         }
         /* The family ends at the L4 diagonal radius. */
-        EXPECT_NEAR(prev, radius * k45_max, radius * 0.01f);
+        OT_EXPECT_NEAR(prev, radius * k45_max, radius * 0.01f);
     }
 
     /* --- The straight edges are untouched by curvature. --- */
@@ -387,7 +388,7 @@ int main(void) {
         if (c < 0.005f)
             c = 0.005f;
         flux_path *p = nullptr;
-        EXPECT(flux_path_create(&p, &arena) == FLUX_OK);
+        OT_EXPECT(flux_path_create(&p, &arena) == FLUX_OK);
         flux_path_add_squircle(p, box, radius, c);
         uint32_t n = sample_path(p, g_pts, PATH_POINTS);
         bool inside = true;
@@ -405,9 +406,9 @@ int main(void) {
             if (fabsf(g_pts[i].x - box.w * 0.5f) < 0.5f && g_pts[i].y < top_y)
                 top_y = g_pts[i].y;
         }
-        EXPECT(inside);
+        OT_EXPECT(inside);
         /* The mid-top point is still exactly on the top edge. */
-        EXPECT_NEAR(top_y, 0.0f, 1e-3);
+        OT_EXPECT_NEAR(top_y, 0.0f, 1e-3);
         flux_arena_reset(&arena);
     }
 
@@ -415,5 +416,5 @@ int main(void) {
 
     test_analytic_dispatch_matches_path();
     test_rotation_and_shear_dispatch();
-    TEST_SUMMARY();
+    return OT_REPORT();
 }

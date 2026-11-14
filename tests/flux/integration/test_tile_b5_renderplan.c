@@ -5,7 +5,8 @@
  * even-odd donut holes, and active scissors produces pixel-exact agreement
  * within coverage tolerances between the tile-compute pipeline and the CPU oracle.
  */
-#include "test_helpers.h"
+#include "flux_test.h"
+#include "optics_test.h"
 
 #include "../../../libs/flux/src/canvas/canvas_tile.h"
 #include "../../../libs/flux/src/canvas/internal.h"
@@ -31,24 +32,24 @@ void flux_set_last_error(flux_result code, const char *function, const char *fil
 
 int main(void) {
     flux_arena arena;
-    EXPECT(flux_arena_init(&arena, 1u << 20, nullptr) == FLUX_OK);
+    OT_EXPECT(flux_arena_init(&arena, 1u << 20, nullptr) == FLUX_OK);
 
     /* Construct a composite multi-element scene */
     flux_path *p_rect = nullptr;
-    EXPECT(flux_path_create(&p_rect, &arena) == FLUX_OK);
+    OT_EXPECT(flux_path_create(&p_rect, &arena) == FLUX_OK);
     flux_path_add_rect(p_rect, (flux_rect){10.0f, 10.0f, 60.0f, 60.0f});
 
     flux_path *p_donut = nullptr;
-    EXPECT(flux_path_create(&p_donut, &arena) == FLUX_OK);
+    OT_EXPECT(flux_path_create(&p_donut, &arena) == FLUX_OK);
     flux_path_add_circle(p_donut, 64.0f, 64.0f, 32.0f);
     flux_path_add_circle(p_donut, 64.0f, 64.0f, 16.0f);
 
     /* 1. CPU Reference rendering via CPU Canvas */
     flux_canvas *cpu_canvas = nullptr;
-    EXPECT(flux_canvas_create_cpu(W, H, 1.0f, &cpu_canvas) == FLUX_OK);
+    OT_EXPECT(flux_canvas_create_cpu(W, H, 1.0f, &cpu_canvas) == FLUX_OK);
 
     flux_color clear = flux_color_rgba(0, 0, 0, 255);
-    EXPECT(
+    OT_EXPECT(
         flux_canvas_begin(cpu_canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
                                                                .clear_color = &clear}) == FLUX_OK);
 
@@ -58,22 +59,22 @@ int main(void) {
     flux_brush brush_donut = flux_brush_solid(flux_color_rgba(50, 180, 220, 255));
     flux_canvas_fill_path(cpu_canvas, p_donut, FLUX_FILL_EVEN_ODD, &brush_donut);
 
-    EXPECT(flux_canvas_end(cpu_canvas) == FLUX_OK);
+    OT_EXPECT(flux_canvas_end(cpu_canvas) == FLUX_OK);
 
     uint32_t cpu_w = 0, cpu_h = 0, cpu_stride = 0;
     const uint8_t *cpu_px = flux_canvas_cpu_pixels(cpu_canvas, &cpu_w, &cpu_h, &cpu_stride);
-    EXPECT(cpu_px != nullptr);
+    OT_EXPECT(cpu_px != nullptr);
 
     /* 2. Tile-compute rasterization of the same elements */
     float *tile_cov_rect = malloc((size_t)W * H * sizeof(float));
     float *tile_cov_donut = malloc((size_t)W * H * sizeof(float));
-    EXPECT(tile_cov_rect && tile_cov_donut);
+    OT_EXPECT(tile_cov_rect && tile_cov_donut);
     if (!tile_cov_rect || !tile_cov_donut) {
         free(tile_cov_rect);
         free(tile_cov_donut);
         flux_canvas_release(cpu_canvas);
         flux_arena_deinit(&arena);
-        TEST_SUMMARY();
+        return OT_REPORT();
     }
 
     /* Flatten and rasterize rect */
@@ -87,8 +88,8 @@ int main(void) {
     flux_rect bounds_rect;
     uint32_t n_rect = canvas_tile_extract_segments(scratch_pts, scratch_cons, fm_rect.contour_count,
                                                    segs_rect, 1024, &bounds_rect);
-    EXPECT(canvas_tile_rasterize(segs_rect, n_rect, FLUX_FILL_NON_ZERO, 0, 0, W, H,
-                                 tile_cov_rect) == FLUX_OK);
+    OT_EXPECT(canvas_tile_rasterize(segs_rect, n_rect, FLUX_FILL_NON_ZERO, 0, 0, W, H,
+                                    tile_cov_rect) == FLUX_OK);
 
     /* Flatten and rasterize donut */
     flatten_multi fm_donut =
@@ -98,12 +99,12 @@ int main(void) {
     flux_rect bounds_donut;
     uint32_t n_donut = canvas_tile_extract_segments(
         scratch_pts, scratch_cons, fm_donut.contour_count, segs_donut, 1024, &bounds_donut);
-    EXPECT(canvas_tile_rasterize(segs_donut, n_donut, FLUX_FILL_EVEN_ODD, 0, 0, W, H,
-                                 tile_cov_donut) == FLUX_OK);
+    OT_EXPECT(canvas_tile_rasterize(segs_donut, n_donut, FLUX_FILL_EVEN_ODD, 0, 0, W, H,
+                                    tile_cov_donut) == FLUX_OK);
 
     /* Software composite matching SRC_OVER blend in linear light, with ADR-0069 sRGB encode */
     uint8_t *comp_px = calloc((size_t)W * H * 4, sizeof(uint8_t));
-    EXPECT(comp_px != nullptr);
+    OT_EXPECT(comp_px != nullptr);
 
     flux_vec4 col_rect_lin = flux_color_to_linear(flux_color_rgba(200, 50, 50, 255));
     flux_vec4 col_donut_lin = flux_color_to_linear(flux_color_rgba(50, 180, 220, 255));
@@ -187,13 +188,13 @@ int main(void) {
     }
 
     /* Re-expressed coverage tolerance: agreement to within 1 LSB */
-    EXPECT(max_diff <= 2.0);
-    EXPECT(mean_diff <= 0.1);
+    OT_EXPECT(max_diff <= 2.0);
+    OT_EXPECT(mean_diff <= 0.1);
 
     free(tile_cov_rect);
     free(tile_cov_donut);
     free(comp_px);
     flux_canvas_release(cpu_canvas);
     flux_arena_deinit(&arena);
-    TEST_SUMMARY();
+    return OT_REPORT();
 }

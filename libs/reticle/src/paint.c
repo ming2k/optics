@@ -14,16 +14,16 @@
 
 /* ---- Names ------------------------------------------------------------ */
 
-typedef struct svg_named_color {
+typedef struct reticle_named_color {
     const char *name;
     uint8_t r, g, b;
-} svg_named_color;
+} reticle_named_color;
 
 /* The CSS/SVG colour keywords. Hex and rgb()/rgba() cover generated art, but
  * hand-authored SVG uses names, and a name table that is nearly complete is
  * worse than none: it silently paints the wrong colour for the one keyword it
  * forgot. This is the whole list. */
-static const svg_named_color NAMED_COLORS[] = {
+static const reticle_named_color NAMED_COLORS[] = {
     {"aliceblue", 240, 248, 255},
     {"antiquewhite", 250, 235, 215},
     {"aqua", 0, 255, 255},
@@ -232,7 +232,7 @@ static bool scan_number(const char **cursor, const char *end, float *out) {
     return true;
 }
 
-float svg__parse_number(const char *value, size_t len, bool *ok) {
+float reticle_priv_parse_number(const char *value, size_t len, bool *ok) {
     const char *end = value + len;
     const char *cursor = value;
     float v = 0.0f;
@@ -242,7 +242,7 @@ float svg__parse_number(const char *value, size_t len, bool *ok) {
     return good ? v : 0.0f;
 }
 
-bool svg__parse_length(const char *value, size_t len, float percent_ref, float *out) {
+bool reticle_priv_parse_length(const char *value, size_t len, float percent_ref, float *out) {
     const char *end = value + len;
     const char *cursor = value;
     float v = 0.0f;
@@ -295,8 +295,8 @@ static int hex_digit(char c) {
     return -1;
 }
 
-bool svg__parse_color(const char *value, size_t len, uint8_t *r, uint8_t *g, uint8_t *b,
-                      uint8_t *a) {
+bool reticle_priv_parse_color(const char *value, size_t len, uint8_t *r, uint8_t *g, uint8_t *b,
+                              uint8_t *a) {
     const char *end = value + len;
     const char *p = skip_space(value, end);
     while (end > p && is_space(end[-1]))
@@ -428,20 +428,20 @@ static bool close_fn(const char **cursor, const char *end) {
     return true;
 }
 
-bool svg__parse_transform(const char *value, size_t len, svg_transform *out) {
+bool reticle_priv_parse_transform(const char *value, size_t len, reticle_transform *out) {
     const char *end = value + len;
     const char *cursor = value;
-    svg_transform acc = svg__xform_identity();
+    reticle_transform acc = reticle_priv_xform_identity();
     bool any = false;
     cursor = skip_space(cursor, end);
     while (cursor < end) {
-        svg_transform step;
+        reticle_transform step;
         float args[6];
         if (expect_fn(&cursor, end, "matrix")) {
             for (uint32_t argc = 0; argc < 6; ++argc)
                 if (!scan_number(&cursor, end, &args[argc]))
                     return false;
-            step = (svg_transform){args[0], args[1], args[2], args[3], args[4], args[5]};
+            step = (reticle_transform){args[0], args[1], args[2], args[3], args[4], args[5]};
         } else if (expect_fn(&cursor, end, "translate")) {
             if (!scan_number(&cursor, end, &args[0]))
                 return false;
@@ -451,15 +451,15 @@ bool svg__parse_transform(const char *value, size_t len, svg_transform *out) {
                 if (!scan_number(&cursor, end, &args[1]))
                     return false;
             }
-            step = svg__xform_translate(args[0], args[1]);
+            step = reticle_priv_xform_translate(args[0], args[1]);
         } else if (expect_fn(&cursor, end, "translateX")) {
             if (!scan_number(&cursor, end, &args[0]))
                 return false;
-            step = svg__xform_translate(args[0], 0.0f);
+            step = reticle_priv_xform_translate(args[0], 0.0f);
         } else if (expect_fn(&cursor, end, "translateY")) {
             if (!scan_number(&cursor, end, &args[0]))
                 return false;
-            step = svg__xform_translate(0.0f, args[0]);
+            step = reticle_priv_xform_translate(0.0f, args[0]);
         } else if (expect_fn(&cursor, end, "scale")) {
             if (!scan_number(&cursor, end, &args[0]))
                 return false;
@@ -469,15 +469,15 @@ bool svg__parse_transform(const char *value, size_t len, svg_transform *out) {
                 if (!scan_number(&cursor, end, &args[1]))
                     return false;
             }
-            step = svg__xform_scale(args[0], args[1]);
+            step = reticle_priv_xform_scale(args[0], args[1]);
         } else if (expect_fn(&cursor, end, "scaleX")) {
             if (!scan_number(&cursor, end, &args[0]))
                 return false;
-            step = svg__xform_scale(args[0], 1.0f);
+            step = reticle_priv_xform_scale(args[0], 1.0f);
         } else if (expect_fn(&cursor, end, "scaleY")) {
             if (!scan_number(&cursor, end, &args[0]))
                 return false;
-            step = svg__xform_scale(1.0f, args[0]);
+            step = reticle_priv_xform_scale(1.0f, args[0]);
         } else if (expect_fn(&cursor, end, "rotate")) {
             if (!scan_number(&cursor, end, &args[0]))
                 return false;
@@ -490,23 +490,23 @@ bool svg__parse_transform(const char *value, size_t len, svg_transform *out) {
                 return false;
             float radians = args[0] * 3.14159265358979323846f / 180.0f;
             float s = sinf(radians), c = cosf(radians);
-            svg_transform rotate = (svg_transform){c, s, -s, c, 0.0f, 0.0f};
+            reticle_transform rotate = (reticle_transform){c, s, -s, c, 0.0f, 0.0f};
             if (about_point) {
-                step =
-                    svg__xform_mul(svg__xform_mul(svg__xform_translate(args[1], args[2]), rotate),
-                                   svg__xform_translate(-args[1], -args[2]));
+                step = reticle_priv_xform_mul(
+                    reticle_priv_xform_mul(reticle_priv_xform_translate(args[1], args[2]), rotate),
+                    reticle_priv_xform_translate(-args[1], -args[2]));
             } else {
                 step = rotate;
             }
         } else if (expect_fn(&cursor, end, "skewX")) {
             if (!scan_number(&cursor, end, &args[0]))
                 return false;
-            step = (svg_transform){1.0f, 0.0f, tanf(args[0] * 3.14159265358979323846f / 180.0f),
-                                   1.0f, 0.0f, 0.0f};
+            step = (reticle_transform){1.0f, 0.0f, tanf(args[0] * 3.14159265358979323846f / 180.0f),
+                                       1.0f, 0.0f, 0.0f};
         } else if (expect_fn(&cursor, end, "skewY")) {
             if (!scan_number(&cursor, end, &args[0]))
                 return false;
-            step = (svg_transform){
+            step = (reticle_transform){
                 1.0f, tanf(args[0] * 3.14159265358979323846f / 180.0f), 0.0f, 1.0f, 0.0f, 0.0f};
         } else {
             /* Unknown transform function: refuse the whole attribute, so the
@@ -515,7 +515,7 @@ bool svg__parse_transform(const char *value, size_t len, svg_transform *out) {
         }
         if (!close_fn(&cursor, end))
             return false;
-        acc = svg__xform_mul(acc, step);
+        acc = reticle_priv_xform_mul(acc, step);
         any = true;
         cursor = skip_space(cursor, end);
         if (cursor < end && *cursor == ',')
@@ -529,7 +529,7 @@ bool svg__parse_transform(const char *value, size_t len, svg_transform *out) {
 
 /* ---- Paint references ------------------------------------------------- */
 
-bool svg__parse_gradient_ref(const char *value, size_t len, char **id_out) {
+bool reticle_priv_parse_gradient_ref(const char *value, size_t len, char **id_out) {
     const char *end = value + len;
     const char *p = skip_space(value, end);
     while (end > p && is_space(end[-1]))
@@ -554,17 +554,17 @@ bool svg__parse_gradient_ref(const char *value, size_t len, char **id_out) {
     size_t n = (size_t)(p - start);
     if (n == 0)
         return false;
-    *id_out = svg__strndup(start, n);
+    *id_out = reticle_priv_strndup(start, n);
     return *id_out != nullptr;
 }
 
 /* ---- Gradient resolution ---------------------------------------------- */
 
-static const svg_raw_gradient *find_raw_gradient(const reticle_document *doc, const char *id) {
+static const reticle_raw_gradient *find_raw_gradient(const reticle_document *doc, const char *id) {
     if (!id)
         return nullptr;
     for (uint32_t i = 0; i < doc->raw_gradient_count; ++i) {
-        const svg_raw_gradient *g = &doc->raw_gradients[i];
+        const reticle_raw_gradient *g = &doc->raw_gradients[i];
         if (g->id && strcmp(g->id, id) == 0)
             return g;
     }
@@ -573,9 +573,9 @@ static const svg_raw_gradient *find_raw_gradient(const reticle_document *doc, co
 
 /* href chains may be arbitrarily deep (in a hostile document, cyclic). The walk
  * is bounded by the table size, so a cycle terminates instead of hanging. */
-static void find_stop_source(const reticle_document *doc, const svg_raw_gradient *start,
-                             const svg_stop **stop_source, uint32_t *stop_count) {
-    const svg_raw_gradient *current = start;
+static void find_stop_source(const reticle_document *doc, const reticle_raw_gradient *start,
+                             const reticle_stop **stop_source, uint32_t *stop_count) {
+    const reticle_raw_gradient *current = start;
     *stop_source = nullptr;
     *stop_count = 0;
     for (uint32_t depth = 0; depth <= doc->raw_gradient_count; ++depth) {
@@ -586,7 +586,7 @@ static void find_stop_source(const reticle_document *doc, const svg_raw_gradient
         }
         if (!current->href)
             return;
-        const svg_raw_gradient *next = find_raw_gradient(doc, current->href);
+        const reticle_raw_gradient *next = find_raw_gradient(doc, current->href);
         if (!next || next == start)
             return;
         current = next;
@@ -596,15 +596,15 @@ static void find_stop_source(const reticle_document *doc, const svg_raw_gradient
 /* Present-on-this-element wins; otherwise the first ancestor that wrote the
  * field. Geometry falls back to the SVG defaults only when nothing in the chain
  * specified it. */
-static const svg_raw_gradient *find_field_owner(const reticle_document *doc,
-                                                const svg_raw_gradient *start, uint32_t field) {
-    const svg_raw_gradient *current = start;
+static const reticle_raw_gradient *
+find_field_owner(const reticle_document *doc, const reticle_raw_gradient *start, uint32_t field) {
+    const reticle_raw_gradient *current = start;
     for (uint32_t depth = 0; depth <= doc->raw_gradient_count; ++depth) {
         if (current->present & field)
             return current;
         if (!current->href)
             break;
-        const svg_raw_gradient *next = find_raw_gradient(doc, current->href);
+        const reticle_raw_gradient *next = find_raw_gradient(doc, current->href);
         if (!next || next == start)
             break;
         current = next;
@@ -612,15 +612,15 @@ static const svg_raw_gradient *find_field_owner(const reticle_document *doc,
     return start;
 }
 
-static const svg_raw_gradient *find_units_owner(const reticle_document *doc,
-                                                const svg_raw_gradient *start) {
-    return find_field_owner(doc, start, SVG__FIELD_UNITS);
+static const reticle_raw_gradient *find_units_owner(const reticle_document *doc,
+                                                    const reticle_raw_gradient *start) {
+    return find_field_owner(doc, start, RETICLE_INTERNAL_FIELD_UNITS);
 }
 
-bool svg__intern_gradient(reticle_document *doc, const svg_gradient *gradient,
-                          uint32_t *index_out) {
+bool reticle_priv_intern_gradient(reticle_document *doc, const reticle_gradient *gradient,
+                                  uint32_t *index_out) {
     for (uint32_t i = 0; i < doc->gradient_count; ++i) {
-        const svg_gradient *existing = &doc->gradients[i];
+        const reticle_gradient *existing = &doc->gradients[i];
         if (existing->stop_count != gradient->stop_count)
             continue;
         if (existing->start.x != gradient->start.x || existing->start.y != gradient->start.y)
@@ -639,7 +639,7 @@ bool svg__intern_gradient(reticle_document *doc, const svg_gradient *gradient,
             return true;
         }
     }
-    svg_gradient *grown = (svg_gradient *)svg__realloc(
+    reticle_gradient *grown = (reticle_gradient *)reticle_priv_realloc(
         doc->gradients, (size_t)(doc->gradient_count + 1u) * sizeof *grown);
     if (!grown)
         return false;
@@ -651,30 +651,31 @@ bool svg__intern_gradient(reticle_document *doc, const svg_gradient *gradient,
 
 /* Build the flux-facing gradient for `raw` as referenced by a shape whose
  * user-space bounds are `bounds`. */
-static bool build_gradient(const reticle_document *doc, const svg_raw_gradient *raw,
-                           flux_rect bounds, float paint_opacity, svg_gradient *out) {
-    const svg_stop *stops = nullptr;
+static bool build_gradient(const reticle_document *doc, const reticle_raw_gradient *raw,
+                           flux_rect bounds, float paint_opacity, reticle_gradient *out) {
+    const reticle_stop *stops = nullptr;
     uint32_t stop_count = 0;
     find_stop_source(doc, raw, &stops, &stop_count);
     if (stop_count == 0)
         return false; /* SVG: a gradient with no stops paints nothing */
 
-    const svg_raw_gradient *units_owner = find_units_owner(doc, raw);
-    const bool bbox = units_owner->units == SVG__UNITS_OBJECT_BBOX;
-    const svg_raw_gradient *xform_owner = find_field_owner(doc, raw, SVG__FIELD_TRANSFORM);
-    svg_transform xform = xform_owner->transform;
+    const reticle_raw_gradient *units_owner = find_units_owner(doc, raw);
+    const bool bbox = units_owner->units == RETICLE_INTERNAL_UNITS_OBJECT_BBOX;
+    const reticle_raw_gradient *xform_owner =
+        find_field_owner(doc, raw, RETICLE_INTERNAL_FIELD_TRANSFORM);
+    reticle_transform xform = xform_owner->transform;
 
     /* In user space the geometry attributes are user units; in objectBoundingBox
      * space they are fractions of the shape's bounds. Baking the mapping into
      * `start`/`end`/`radius` is what lets flux paint a gradient without knowing
      * what an objectBoundingBox is. */
-    float x1 = find_field_owner(doc, raw, SVG__FIELD_X1)->x1;
-    float y1 = find_field_owner(doc, raw, SVG__FIELD_Y1)->y1;
-    float x2 = find_field_owner(doc, raw, SVG__FIELD_X2)->x2;
-    float y2 = find_field_owner(doc, raw, SVG__FIELD_Y2)->y2;
-    float cx = find_field_owner(doc, raw, SVG__FIELD_CX)->cx;
-    float cy = find_field_owner(doc, raw, SVG__FIELD_CY)->cy;
-    float radius = find_field_owner(doc, raw, SVG__FIELD_R)->r;
+    float x1 = find_field_owner(doc, raw, RETICLE_INTERNAL_FIELD_X1)->x1;
+    float y1 = find_field_owner(doc, raw, RETICLE_INTERNAL_FIELD_Y1)->y1;
+    float x2 = find_field_owner(doc, raw, RETICLE_INTERNAL_FIELD_X2)->x2;
+    float y2 = find_field_owner(doc, raw, RETICLE_INTERNAL_FIELD_Y2)->y2;
+    float cx = find_field_owner(doc, raw, RETICLE_INTERNAL_FIELD_CX)->cx;
+    float cy = find_field_owner(doc, raw, RETICLE_INTERNAL_FIELD_CY)->cy;
+    float radius = find_field_owner(doc, raw, RETICLE_INTERNAL_FIELD_R)->r;
 
     if (bbox) {
         /* A degenerate box makes objectBoundingBox meaningless; skip the
@@ -694,9 +695,9 @@ static bool build_gradient(const reticle_document *doc, const svg_raw_gradient *
     }
 
     float p1x = 0.0f, p1y = 0.0f, p2x = 0.0f, p2y = 0.0f, centre_x = 0.0f, centre_y = 0.0f;
-    svg__xform_point(xform, x1, y1, &p1x, &p1y);
-    svg__xform_point(xform, x2, y2, &p2x, &p2y);
-    svg__xform_point(xform, cx, cy, &centre_x, &centre_y);
+    reticle_priv_xform_point(xform, x1, y1, &p1x, &p1y);
+    reticle_priv_xform_point(xform, x2, y2, &p2x, &p2y);
+    reticle_priv_xform_point(xform, cx, cy, &centre_x, &centre_y);
 
     out->stop_count = 0;
     float previous_t = 0.0f;
@@ -731,7 +732,7 @@ static bool build_gradient(const reticle_document *doc, const svg_raw_gradient *
         out->stop_count = 2;
     }
 
-    if (raw->kind == SVG__GRADIENT_LINEAR) {
+    if (raw->kind == RETICLE_INTERNAL_GRADIENT_LINEAR) {
         out->start = (flux_point){p1x, p1y};
         out->end = (flux_point){p2x, p2y};
         out->radius = 0.0f;
@@ -760,7 +761,7 @@ static bool build_gradient(const reticle_document *doc, const svg_raw_gradient *
  * A paint that cannot be resolved degrades to RETICLE_PAINT_NONE: the shape keeps
  * its geometry (a caller may still tint it) but paints nothing by default, which
  * is what a dangling `url(#missing)` means in SVG anyway. */
-static void resolve_paint(reticle_document *doc, const svg_raw_paint *raw, flux_rect bounds,
+static void resolve_paint(reticle_document *doc, const reticle_raw_paint *raw, flux_rect bounds,
                           reticle_paint *out) {
     out->kind = raw->kind;
     out->color = 0;
@@ -779,22 +780,23 @@ static void resolve_paint(reticle_document *doc, const svg_raw_paint *raw, flux_
         return;
     case RETICLE_PAINT_LINEAR_GRADIENT:
     case RETICLE_PAINT_RADIAL_GRADIENT: {
-        const svg_raw_gradient *raw_gradient = find_raw_gradient(doc, raw->gradient_id);
+        const reticle_raw_gradient *raw_gradient = find_raw_gradient(doc, raw->gradient_id);
         if (!raw_gradient || raw->opacity <= 0.0f)
             break;
         /* The reference parser cannot know whether `url(#x)` names a linear or a
          * radial gradient; the definition decides, so the kind is corrected
          * here rather than guessed at paint time. */
-        out->kind = raw_gradient->kind == SVG__GRADIENT_RADIAL ? RETICLE_PAINT_RADIAL_GRADIENT
-                                                               : RETICLE_PAINT_LINEAR_GRADIENT;
+        out->kind = raw_gradient->kind == RETICLE_INTERNAL_GRADIENT_RADIAL
+                        ? RETICLE_PAINT_RADIAL_GRADIENT
+                        : RETICLE_PAINT_LINEAR_GRADIENT;
         /* Gradient alpha already folds the paint opacity into every stop, so
          * the paint's own opacity is 1 here: a recolouring consumer must not be
          * able to apply it a second time. */
-        svg_gradient gradient = {};
+        reticle_gradient gradient = {};
         if (!build_gradient(doc, raw_gradient, bounds, raw->opacity, &gradient))
             break;
         uint32_t index = 0;
-        if (!svg__intern_gradient(doc, &gradient, &index))
+        if (!reticle_priv_intern_gradient(doc, &gradient, &index))
             break;
         out->gradient = index;
         out->opacity = 1.0f;
@@ -807,14 +809,15 @@ static void resolve_paint(reticle_document *doc, const svg_raw_paint *raw, flux_
     out->gradient = 0;
 }
 
-bool svg__resolve_paints(reticle_document *doc) {
+bool reticle_priv_resolve_paints(reticle_document *doc) {
     if (doc->shape_count == 0)
         return true;
-    doc->shapes = (reticle_shape_view *)svg__alloc((size_t)doc->shape_count * sizeof *doc->shapes);
+    doc->shapes =
+        (reticle_shape_view *)reticle_priv_alloc((size_t)doc->shape_count * sizeof *doc->shapes);
     if (!doc->shapes)
         return false;
     for (uint32_t i = 0; i < doc->shape_count; ++i) {
-        const svg_raw_shape *raw = &doc->raw_shapes[i];
+        const reticle_raw_shape *raw = &doc->raw_shapes[i];
         reticle_shape_view *view = &doc->shapes[i];
         view->cmds = &doc->cmds[raw->cmd_first];
         view->cmd_count = raw->cmd_count;

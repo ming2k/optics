@@ -9,7 +9,8 @@
  * register/release pairs total, exercising the slot pool. Skips if
  * no Vulkan device.
  */
-#include "test_helpers.h"
+#include "flux_test.h"
+#include "optics_test.h"
 #include <flux/flux.h>
 #include <flux/vulkan.h>
 
@@ -42,10 +43,10 @@ alignas(uint32_t) static const unsigned char frag_spv[] = {
 #define IMG_H 8
 
 int main(void) {
-    flux_device *d = test_helpers_make_headless_device();
+    flux_device *d = flux_test_make_headless_device();
     if (!d) {
         fprintf(stderr, "test_soak: no Vulkan device; skipping\n");
-        TEST_SUMMARY();
+        OT_SKIP("no Vulkan device");
     }
 
     uint32_t pixels[IMG_W * IMG_H];
@@ -59,7 +60,7 @@ int main(void) {
         id.format = FLUX_FORMAT_RGBA8_UNORM;
         id.initial_data = pixels;
         flux_image *img = nullptr;
-        EXPECT(flux_image_create(d, &id, &img) == FLUX_OK);
+        OT_EXPECT(flux_image_create(d, &id, &img) == FLUX_OK);
 
         /* Sampler — exercises bindless SAMPLER slot. */
         flux_sampler_desc sd = FLUX_SAMPLER_DESC_INIT;
@@ -70,7 +71,7 @@ int main(void) {
         sd.address_v = FLUX_ADDRESS_REPEAT;
         sd.address_w = FLUX_ADDRESS_REPEAT;
         flux_sampler *smp = nullptr;
-        EXPECT(flux_sampler_create(d, &sd, &smp) == FLUX_OK);
+        OT_EXPECT(flux_sampler_create(d, &sd, &smp) == FLUX_OK);
 
         /* Buffer — host-visible w/ BDA. */
         flux_buffer_desc bd = FLUX_BUFFER_DESC_INIT;
@@ -79,7 +80,7 @@ int main(void) {
         bd.location = FLUX_BUFFER_HOST_VISIBLE;
         bd.device_address = true;
         flux_buffer *buf = nullptr;
-        EXPECT(flux_buffer_create(d, &bd, &buf) == FLUX_OK);
+        OT_EXPECT(flux_buffer_create(d, &bd, &buf) == FLUX_OK);
 
         /* Graphics pipeline — exercises shader-module path + pipeline cache. */
         flux_graphics_pipeline_desc pd = FLUX_GRAPHICS_PIPELINE_DESC_INIT;
@@ -94,7 +95,7 @@ int main(void) {
         pd.color_format = FLUX_FORMAT_BGRA8_UNORM;
         pd.depth_format = FLUX_FORMAT_UNDEFINED;
         flux_graphics_pipeline *gp = nullptr;
-        EXPECT(flux_graphics_pipeline_create(d, &pd, &gp) == FLUX_OK);
+        OT_EXPECT(flux_graphics_pipeline_create(d, &pd, &gp) == FLUX_OK);
 
         /* Release in reverse — verifies the orderings don't snag. */
         flux_graphics_pipeline_release(gp);
@@ -111,13 +112,13 @@ int main(void) {
             id2.height = IMG_H;
             id2.format = FLUX_FORMAT_RGBA8_UNORM;
             flux_image *im2 = nullptr;
-            EXPECT(flux_image_create(d, &id2, &im2) == FLUX_OK);
-            EXPECT(flux_image_retain(im2) == im2);
+            OT_EXPECT(flux_image_create(d, &id2, &im2) == FLUX_OK);
+            OT_EXPECT(flux_image_retain(im2) == im2);
             flux_image_release(im2);
             flux_image_release(im2);
         }
     }
 
     flux_device_release(d);
-    TEST_SUMMARY();
+    return OT_REPORT();
 }

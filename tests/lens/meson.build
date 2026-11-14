@@ -19,10 +19,10 @@ tests = ['test_id', 'test_store', 'test_layout', 'test_input',
 
 foreach t : tests
   exe = executable(t, t + '.c',
-    dependencies        : [lens_dep, m_dep],
+    dependencies        : [lens_dep, m_dep, optics_test_dep],
     include_directories : lens_inc,
   )
-  test(t, exe)
+  test(t, exe, suite : 'unit')
 endforeach
 
 # drawlist.c is compiled into the test binary directly (same pattern
@@ -32,10 +32,10 @@ endforeach
 test_drawlist_hash = executable('test_drawlist_hash',
   'test_drawlist_hash.c',
   '../../libs/lens/src/render/drawlist.c',
-  dependencies        : [lens_dep, m_dep],
+  dependencies        : [lens_dep, m_dep, optics_test_dep],
   include_directories : lens_inc,
 )
-test('drawlist_hash', test_drawlist_hash)
+test('drawlist_hash', test_drawlist_hash, suite : 'unit')
 
 # style.c is compiled into the test binary directly (same pattern as
 # test_drawlist_hash): lensi_style_resolve is a hidden symbol, so the
@@ -43,30 +43,30 @@ test('drawlist_hash', test_drawlist_hash)
 test_state_style = executable('test_state_style',
   'test_state_style.c',
   '../../libs/lens/src/style/style.c',
-  dependencies        : [lens_dep, m_dep],
+  dependencies        : [lens_dep, m_dep, optics_test_dep],
   include_directories : lens_inc,
 )
-test('state_style', test_state_style)
+test('state_style', test_state_style, suite : 'unit')
 
 # Same pattern as test_state_style: test_text_scale asserts the resolved
 # font_size carries the accessibility text factor, so it links style.c too.
 test_text_scale = executable('test_text_scale',
   'test_text_scale.c',
   '../../libs/lens/src/style/style.c',
-  dependencies        : [lens_dep, m_dep],
+  dependencies        : [lens_dep, m_dep, optics_test_dep],
   include_directories : lens_inc,
 )
-test('text_scale', test_text_scale)
+test('text_scale', test_text_scale, suite : 'unit')
 
 # Same pattern as test_state_style: the cascade helpers (merge/effective)
 # are hidden symbols, so the test links its own copy of style.c.
 test_style_cascade = executable('test_style_cascade',
   'test_style_cascade.c',
   '../../libs/lens/src/style/style.c',
-  dependencies        : [lens_dep, m_dep],
+  dependencies        : [lens_dep, m_dep, optics_test_dep],
   include_directories : lens_inc,
 )
-test('style_cascade', test_style_cascade)
+test('style_cascade', test_style_cascade, suite : 'unit')
 
 # ADR-0084 borrow-checker self-test. The registry accessors are hidden
 # symbols, so this test links borrow.c directly (same direct-link
@@ -78,11 +78,11 @@ if host_machine.system() == 'linux'
   test_borrow_check = executable('test_borrow_check',
     'test_borrow_check.c',
     '../../libs/lens/src/core/borrow.c',
-    dependencies        : [lens_dep, m_dep],
+    dependencies        : [lens_dep, m_dep, optics_test_dep],
     include_directories : lens_inc,
     c_args              : ['-DLENS_DEBUG_BORROWS=1'],
   )
-  test('borrow_check', test_borrow_check)
+  test('borrow_check', test_borrow_check, suite : 'unit')
 endif
 
 # Icon coverage-mask cache (ADR-0112): bake sizing, key identity, layer
@@ -102,11 +102,11 @@ test_icon_mask = executable('test_icon_mask',
   '../../libs/lens/src/render/icon_mask.c',
   '../../libs/lens/src/icon_runtime.c',
   '../../libs/lens/src/icon_data.c',
-  dependencies        : [lens_dep, m_dep],
+  dependencies        : [lens_dep, m_dep, optics_test_dep],
   include_directories : [lens_inc, flux_inc],
   c_args              : ['-DLENS_STATIC=1'],
 )
-test('icon_mask', test_icon_mask)
+test('icon_mask', test_icon_mask, suite : 'unit')
 
 # End-to-end runtime-icon rendering through the PUBLIC API only (ADR-0112).
 # Links solely against the shared libraries: compiling any icon registry source
@@ -117,10 +117,10 @@ test('icon_mask', test_icon_mask)
 # observe the real registry.
 test_icon_mask_render = executable('test_icon_mask_render',
   'test_icon_mask_render.c',
-  dependencies        : [lens_dep, m_dep],
+  dependencies        : [lens_dep, m_dep, optics_test_dep],
   include_directories : lens_inc,
 )
-test('icon_mask_render', test_icon_mask_render)
+test('icon_mask_render', test_icon_mask_render, suite : 'integration')
 
 # Content of registered runtime-icon streams. Compiles the registration
 # sources directly (same pattern as test_drawlist_hash): the registry
@@ -129,11 +129,11 @@ test_icon_runtime_content = executable('test_icon_runtime_content',
   'test_icon_runtime_content.c',
   '../../libs/lens/src/icon_runtime.c',
   '../../libs/lens/src/icon_data.c',
-  dependencies        : [lens_dep, m_dep],
+  dependencies        : [lens_dep, m_dep, optics_test_dep],
   include_directories : lens_inc,
   c_args              : ['-DLENS_STATIC=1'],
 )
-test('icon_runtime_content', test_icon_runtime_content)
+test('icon_runtime_content', test_icon_runtime_content, suite : 'unit')
 
 # Per-shape colour runs recorded by runtime SVG registration. Same
 # direct-link pattern as test_icon_runtime_content.
@@ -141,21 +141,21 @@ test_icon_runtime_runs = executable('test_icon_runtime_runs',
   'test_icon_runtime_runs.c',
   '../../libs/lens/src/icon_runtime.c',
   '../../libs/lens/src/icon_data.c',
-  dependencies        : [lens_dep, m_dep],
+  dependencies        : [lens_dep, m_dep, optics_test_dep],
   include_directories : lens_inc,
   c_args              : ['-DLENS_STATIC=1'],
 )
-test('icon_runtime_runs', test_icon_runtime_runs)
+test('icon_runtime_runs', test_icon_runtime_runs, suite : 'unit')
 
 if get_option('fuzz')
   subdir('fuzz')
 endif
 
-contract_test = executable('test_contracts', 'test_contracts.c', dependencies : [lens_dep, m_dep])
-test('lens_contracts', contract_test)
+contract_test = executable('test_contracts', 'test_contracts.c', dependencies : [lens_dep, m_dep, optics_test_dep])
+test('lens_contracts', contract_test, suite : 'unit')
 store_fault_test = executable('test_store_fault', 'test_store_fault.c',
-  '../../libs/lens/src/store/store.c', dependencies : [lens_dep, m_dep])
-test('lens_store_fault', store_fault_test)
+  '../../libs/lens/src/store/store.c', dependencies : [lens_dep, m_dep, optics_test_dep])
+test('lens_store_fault', store_fault_test, suite : 'unit')
 
-snapshot_test = executable('test_snapshot', 'test_snapshot.c', dependencies : [lens_dep, m_dep])
-test('lens_snapshot', snapshot_test)
+snapshot_test = executable('test_snapshot', 'test_snapshot.c', dependencies : [lens_dep, m_dep, optics_test_dep])
+test('lens_snapshot', snapshot_test, suite : 'integration')

@@ -19,7 +19,8 @@
  * child process (abort) checked by exit status.
  */
 #include "../../libs/lens/src/internal.h"
-#include "test_helpers.h"
+#include "lens_test.h"
+#include "optics_test.h"
 #include <lens/lens.h>
 
 #include <signal.h>
@@ -53,7 +54,7 @@ int main(int argc, char **argv) {
 
     /* --- legitimate patterns, in-process -------------------------------- */
     lens *ui = NULL;
-    CHECK(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
 
     static char persistent_label[] = "persistent-label"; /* static storage: always fine */
 
@@ -83,13 +84,13 @@ int main(int argc, char **argv) {
                               .placeholder = stack_placeholder,
                           });
 
-        test_end(ui);
+        lens_test_end(ui);
     }
-    CHECK(!lens_overflowed(ui));
+    OT_EXPECT(!lens_overflowed(ui));
 
     /* --- the violation, as a child process ------------------------------- */
     pid_t pid = fork();
-    CHECK(pid >= 0);
+    OT_EXPECT(pid >= 0);
     if (pid == 0) {
         execl("/proc/self/exe", argv[0], "--violation", (char *)NULL);
         _exit(127);
@@ -97,8 +98,8 @@ int main(int argc, char **argv) {
     int status = 0;
     waitpid(pid, &status, 0);
     /* The checker aborts => abnormal termination (SIGABRT). */
-    CHECK(WIFSIGNALED(status) && WTERMSIG(status) == SIGABRT);
+    OT_EXPECT(WIFSIGNALED(status) && WTERMSIG(status) == SIGABRT);
 
     lens_release(ui);
-    return TEST_REPORT();
+    return OT_REPORT();
 }
