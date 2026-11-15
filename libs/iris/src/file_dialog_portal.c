@@ -29,7 +29,7 @@
 /* mode: 0 = OpenFile (single), 1 = OpenFile (multiple), 2 = OpenFile (folder), 3 = SaveFile
  * Defined outside the IRIS_HAVE_PORTAL_WATCH gate: the stub pick_uri below
  * uses the same type. */
-typedef enum {
+typedef enum : uint32_t {
     PICK_OPEN,
     PICK_OPEN_MULTI,
     PICK_FOLDER,
@@ -178,13 +178,13 @@ static int on_picker_response(sd_bus_message *message, void *userdata, sd_bus_er
         rc = sd_bus_message_enter_container(message, SD_BUS_TYPE_DICT_ENTRY, "sv");
         if (rc <= 0)
             break;
-        const char *key = NULL;
+        const char *key = nullptr;
         if (sd_bus_message_read(message, "s", &key) < 0)
             break;
         if (key && strcmp(key, "uris") == 0) {
             if (sd_bus_message_enter_container(message, SD_BUS_TYPE_VARIANT, "as") >= 0 &&
                 sd_bus_message_enter_container(message, SD_BUS_TYPE_ARRAY, "s") >= 0) {
-                const char *uri = NULL;
+                const char *uri = nullptr;
                 while (sd_bus_message_read(message, "s", &uri) > 0 && uri) {
                     size_t len = strlen(uri);
                     /* +1 for the NUL terminator (single) or separator (multi). */
@@ -251,10 +251,10 @@ static int pick_uri(const iris_file_dialog_opts *opts, pick_mode mode, const cha
         break;
     }
 
-    sd_bus *bus = NULL;
-    sd_bus_message *call = NULL;
-    sd_bus_message *reply = NULL;
-    sd_bus_slot *slot = NULL;
+    sd_bus *bus = nullptr;
+    sd_bus_message *call = nullptr;
+    sd_bus_message *reply = nullptr;
+    sd_bus_slot *slot = nullptr;
     sd_bus_error error = SD_BUS_ERROR_NULL;
     int result = IRIS_PICK_UNAVAILABLE; /* bus/portal setup failures */
 
@@ -282,7 +282,7 @@ static int pick_uri(const iris_file_dialog_opts *opts, pick_mode mode, const cha
     if (rc < 0)
         goto cleanup;
 
-    struct timespec now = {0};
+    struct timespec now = {};
     (void)clock_gettime(CLOCK_MONOTONIC, &now);
     char token[64];
     (void)snprintf(token, sizeof token, "iris_%ld_%ld", (long)now.tv_sec, now.tv_nsec);
@@ -318,7 +318,7 @@ static int pick_uri(const iris_file_dialog_opts *opts, pick_mode mode, const cha
      * allowed to emit Response immediately, before the method reply reaches
      * us. This dedicated bus connection has only this one picker request, so
      * matching any Request.Response path is both safe and race-free. */
-    rc = sd_bus_match_signal(bus, &slot, "org.freedesktop.portal.Desktop", NULL,
+    rc = sd_bus_match_signal(bus, &slot, "org.freedesktop.portal.Desktop", nullptr,
                              "org.freedesktop.portal.Request", "Response", on_picker_response,
                              &response);
     if (rc < 0)
@@ -327,7 +327,7 @@ static int pick_uri(const iris_file_dialog_opts *opts, pick_mode mode, const cha
     rc = sd_bus_call(bus, call, 0, &error, &reply);
     if (rc < 0)
         goto cleanup;
-    const char *request_path = NULL;
+    const char *request_path = nullptr;
     rc = sd_bus_message_read(reply, "o", &request_path);
     if (rc < 0 || !request_path)
         goto cleanup;
@@ -342,7 +342,7 @@ static int pick_uri(const iris_file_dialog_opts *opts, pick_mode mode, const cha
      * The 250 ms cap only keeps the sd-bus poll masks fresh. */
     while (!response.done) {
         do {
-            rc = sd_bus_process(bus, NULL);
+            rc = sd_bus_process(bus, nullptr);
         } while (rc > 0 && !response.done);
         if (rc < 0)
             goto cleanup;
@@ -433,34 +433,42 @@ static int pick_uri(const iris_file_dialog_opts *opts, pick_mode mode, const cha
  * never widens into a multi-select because the caller happened to leave
  * multiple_selection set — the option belongs to iris_pick_files. */
 static iris_file_dialog_opts irisi_single_opts(const iris_file_dialog_opts *opts) {
-    iris_file_dialog_opts o = opts ? *opts : (iris_file_dialog_opts){0};
+    iris_file_dialog_opts o = opts ? *opts : (iris_file_dialog_opts){};
     o.multiple_selection = false;
     return o;
 }
 
-IRIS_API int iris_pick_file(const iris_file_dialog_opts *opts, char *out_path, size_t out_cap) {
+IRIS_API int iris_pick_file(const iris_file_dialog_opts *opts) {
+    if (!opts)
+        return IRIS_PICK_UNAVAILABLE;
     iris_file_dialog_opts o = irisi_single_opts(opts);
-    return pick_uri(&o, PICK_OPEN, NULL, out_path, out_cap, NULL, NULL);
+    return pick_uri(&o, PICK_OPEN, nullptr, opts->out_path, opts->out_cap, nullptr, nullptr);
 }
 
-IRIS_API int iris_pick_folder(const iris_file_dialog_opts *opts, char *out_path, size_t out_cap) {
+IRIS_API int iris_pick_folder(const iris_file_dialog_opts *opts) {
+    if (!opts)
+        return IRIS_PICK_UNAVAILABLE;
     iris_file_dialog_opts o = irisi_single_opts(opts);
-    return pick_uri(&o, PICK_FOLDER, NULL, out_path, out_cap, NULL, NULL);
+    return pick_uri(&o, PICK_FOLDER, nullptr, opts->out_path, opts->out_cap, nullptr, nullptr);
 }
 
-IRIS_API int iris_pick_save_path(const iris_file_dialog_opts *opts, const char *default_name,
-                                 char *out_path, size_t out_cap) {
+IRIS_API int iris_pick_save_path(const iris_file_dialog_opts *opts) {
+    if (!opts)
+        return IRIS_PICK_UNAVAILABLE;
     iris_file_dialog_opts o = irisi_single_opts(opts);
-    return pick_uri(&o, PICK_SAVE, default_name, out_path, out_cap, NULL, NULL);
+    return pick_uri(&o, PICK_SAVE, opts->default_name, opts->out_path, opts->out_cap, nullptr,
+                    nullptr);
 }
 
 /* Success path returns the count; every documented failure propagates its
  * code (IRIS_PICK_*). The old wrapper folded every non-zero rc into 0,
  * which made buffer-overflow indistinguishable from a user cancel. */
-IRIS_API int iris_pick_files(const iris_file_dialog_opts *opts, char *out_paths, size_t out_cap,
-                             size_t *out_bytes_used) {
+IRIS_API int iris_pick_files(const iris_file_dialog_opts *opts) {
+    if (!opts)
+        return IRIS_PICK_UNAVAILABLE;
     int count = 0;
-    int rc = pick_uri(opts, PICK_OPEN_MULTI, NULL, out_paths, out_cap, out_bytes_used, &count);
+    int rc = pick_uri(opts, PICK_OPEN_MULTI, nullptr, opts->out_path, opts->out_cap,
+                      opts->out_bytes_used, &count);
     if (rc != 0)
         return rc;
     return count;

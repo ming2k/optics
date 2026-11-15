@@ -34,9 +34,10 @@ int main(void) {
     };
     for (unsigned i = 0; i < 3; i++) {
         OT_EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
-                                                                .clear_color = &(flux_color){0}}) ==
+                                                                .clear_color = &(flux_color){}}) ==
                   FLUX_OK);
-        flux_canvas_draw_geometry(c, &geoms[i], &gradient);
+        flux_canvas_draw_geometry(
+            c, &(flux_canvas_draw_geometry_opts){.geom = &geoms[i], .brush = &gradient});
         OT_EXPECT(flux_canvas_end(c) == FLUX_OK);
         const uint8_t *left = pixel(c, 16, 32);
         OT_EXPECT(left[0] > left[2] && left[3] > 250);
@@ -50,9 +51,10 @@ int main(void) {
     flux_geometry stroked_rect = flux_geom_rect((flux_rect){16, 16, 32, 32});
     stroked_rect.stroke.width = 8;
     OT_EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
-                                                            .clear_color = &(flux_color){0}}) ==
+                                                            .clear_color = &(flux_color){}}) ==
               FLUX_OK);
-    flux_canvas_draw_geometry(c, &stroked_rect, &white);
+    flux_canvas_draw_geometry(
+        c, &(flux_canvas_draw_geometry_opts){.geom = &stroked_rect, .brush = &white});
     OT_EXPECT(flux_canvas_end(c) == FLUX_OK);
     OT_EXPECT(pixel(c, 32, 32)[3] == 0);
     OT_EXPECT(pixel(c, 18, 32)[3] > 250);
@@ -60,29 +62,35 @@ int main(void) {
     flux_geometry line = flux_geom_line(8, 32, 56, 32);
     line.stroke.width = 10;
     OT_EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
-                                                            .clear_color = &(flux_color){0}}) ==
+                                                            .clear_color = &(flux_color){}}) ==
               FLUX_OK);
-    flux_canvas_draw_geometry(c, &line, &gradient);
+    flux_canvas_draw_geometry(c,
+                              &(flux_canvas_draw_geometry_opts){.geom = &line, .brush = &gradient});
     OT_EXPECT(flux_canvas_end(c) == FLUX_OK);
     OT_EXPECT(pixel(c, 32, 35)[3] > 250);
     OT_EXPECT(pixel(c, 32, 40)[3] == 0);
 
     /* Unsupported / invalid combinations poison the pass; the next pass recovers. */
     OT_EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
-                                                            .clear_color = &(flux_color){0}}) ==
+                                                            .clear_color = &(flux_color){}}) ==
               FLUX_OK);
-    flux_canvas_draw_geometry(c, &(flux_geometry){.kind = FLUX_GEOM_PATH}, &white);
+    flux_canvas_draw_geometry(
+        c, &(flux_canvas_draw_geometry_opts){.geom = &(flux_geometry){.kind = FLUX_GEOM_PATH},
+                                             .brush = &white});
     OT_EXPECT(flux_canvas_end(c) == FLUX_ERROR_INVALID_ARGUMENT);
     OT_EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
-                                                            .clear_color = &(flux_color){0}}) ==
+                                                            .clear_color = &(flux_color){}}) ==
               FLUX_OK);
-    flux_canvas_draw_geometry(c, &(flux_geometry){.kind = FLUX_GEOM_LINE, .stroke.width = 0},
-                              &white);
+    flux_canvas_draw_geometry(
+        c,
+        &(flux_canvas_draw_geometry_opts){
+            .geom = &(flux_geometry){.kind = FLUX_GEOM_LINE, .stroke.width = 0}, .brush = &white});
     OT_EXPECT(flux_canvas_end(c) == FLUX_ERROR_INVALID_ARGUMENT);
     OT_EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
-                                                            .clear_color = &(flux_color){0}}) ==
+                                                            .clear_color = &(flux_color){}}) ==
               FLUX_OK);
-    flux_canvas_draw_geometry(c, &geoms[1], &white);
+    flux_canvas_draw_geometry(
+        c, &(flux_canvas_draw_geometry_opts){.geom = &geoms[1], .brush = &white});
     OT_EXPECT(flux_canvas_end(c) == FLUX_OK);
     OT_EXPECT(pixel(c, 32, 32)[3] > 250);
     flux_canvas_release(c);

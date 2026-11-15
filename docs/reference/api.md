@@ -21,6 +21,16 @@ lookup surfaces for this checkout.
 | `<glyph/glyph.h>`     | Iff `-Dglyph=true`   | Sibling library: shaping, glyph atlas, text measure/draw.          |
 | `<vista/vista.h>`     | Iff `-Dvista=true`   | Sibling library: glTF/GLB loading, animation, materials.           |
 | `<reticle/reticle.h>` | Iff `-Dreticle=true` | Document compiler: SVG parse, flat shape IR, paint and CPU rasterize. |
+| `<lens/lens.h>` | Iff `OPTICS_HAVE_LENS` | Immediate-mode UI, layout, widget and snapshot surface. |
+| `<iris/iris.h>` | Iff `OPTICS_HAVE_IRIS` | Native window shell, event pump and desktop integration. |
+
+`<optics/optics.h>` exposes optional layers only when `optics.pc` supplies the
+matching `-DOPTICS_HAVE_<MODULE>=1` compile definition. Header presence on the
+host is not feature detection; see [ADR-0164](../adr/0164-umbrella-feature-detection-flags.md).
+
+`glyph` and `reticle` require `canvas`; `lens` requires all three, and `iris`
+follows `lens`. Disabling any of them removes the UI stack from the default
+build rather than leaving unresolved symbols behind.
 
 `<flux/core.h>` and `<flux/math.h>` do **not** include `<vulkan/vulkan.h>`.
 Include `<flux/vulkan.h>` at the seam where you hand flux a `VkSurfaceKHR`
@@ -80,8 +90,8 @@ until the frame consuming it has been submitted and presented:
 | `flux_canvas_fill_path(c, path, paint)`       | `path`, `paint`        |
 | `flux_canvas_stroke_path(c, path, paint)`     | `path`, `paint`        |
 | `flux_canvas_fill_rect(c, r, paint)`          | `paint`                |
-| `flux_scene_draw_mesh(f, cam, w, mesh, mat)`  | `mesh`, `material`     |
-| `flux_compute_dispatch(cmd, pipe, push, ...)` | `pipe`, `push_constants` |
+| `flux_scene_draw_mesh(f, opts)`               | `mesh`, `material`     |
+| `flux_compute_dispatch(cmd, opts)`            | `pipeline`, `push_constants` |
 
 The safest pattern is: keep dependencies retained for the lifetime of
 the canvas / scene that uses them, releasing only after
@@ -150,9 +160,10 @@ encoding with immutable publication (ADR-0089 through ADR-0094):
 ## Scene-graph content layer (vista)
 
 `vista` preserves glTF primitive material indices. C hosts install
-an index-aligned material table with `vista_scene_set_materials`; a NULL
-`vista_draw_opts.material` selects that table, while a non-NULL value
-overrides the complete scene.
+an index-aligned material table with `vista_scene_set_materials`; a null
+`vista_draw_opts.material` selects that table, while a non-null value
+overrides the complete scene. `vista_draw_opts` also carries the camera and
+scene, so the draw call itself takes only the frame context and one descriptor.
 
 The safe Rust binding exposes
 `Scene::from_glb_with_materials(device, bytes, MaterialTarget)` and

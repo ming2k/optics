@@ -237,7 +237,8 @@ flux_result lensi_compile_commands(lens *ui, flux_encoder *enc, flux_rect box, f
             flux_geometry g =
                 (c->radius > 0.5f) ? flux_geom_rrect(r, c->radius) : flux_geom_rect(r);
             flux_brush b = flux_brush_solid(c->color);
-            flux_encoder_draw_geometry(enc, &g, &b);
+            flux_encoder_draw_geometry(enc,
+                                       &(flux_encoder_draw_geometry_opts){.geom = &g, .brush = &b});
             break;
         }
         case LENS_DRAW_BORDER: {
@@ -248,7 +249,8 @@ flux_result lensi_compile_commands(lens *ui, flux_encoder *enc, flux_rect box, f
                 (c->radius > 0.5f) ? flux_geom_rrect(r, c->radius) : flux_geom_rect(r);
             g.stroke.width = bw;
             flux_brush b = flux_brush_solid(c->color);
-            flux_encoder_draw_geometry(enc, &g, &b);
+            flux_encoder_draw_geometry(enc,
+                                       &(flux_encoder_draw_geometry_opts){.geom = &g, .brush = &b});
             break;
         }
         case LENS_DRAW_TAB_INDICATOR: {
@@ -257,7 +259,8 @@ flux_result lensi_compile_commands(lens *ui, flux_encoder *enc, flux_rect box, f
             indicator = snap_rect(indicator, scale);
             flux_geometry g = flux_geom_rrect(indicator, thickness * 0.5f);
             flux_brush b = flux_brush_solid(c->color);
-            flux_encoder_draw_geometry(enc, &g, &b);
+            flux_encoder_draw_geometry(enc,
+                                       &(flux_encoder_draw_geometry_opts){.geom = &g, .brush = &b});
             break;
         }
         case LENS_DRAW_CONNECTED_TAB: {
@@ -268,7 +271,7 @@ flux_result lensi_compile_commands(lens *ui, flux_encoder *enc, flux_rect box, f
             bool connect_left = (c->flags & LENSI_TAB_CONNECT_LEFT) != 0;
             bool connect_right = (c->flags & LENSI_TAB_CONNECT_RIGHT) != 0;
 
-            flux_path *p = NULL;
+            flux_path *p = nullptr;
             flux_result path_result = flux_path_create(&p, &ui->arena);
             if (path_result != FLUX_OK)
                 return path_result;
@@ -298,7 +301,8 @@ flux_result lensi_compile_commands(lens *ui, flux_encoder *enc, flux_rect box, f
 
                 flux_geometry g = {.kind = FLUX_GEOM_PATH, .path = {.path = p}};
                 flux_brush b = flux_brush_solid(c->color);
-                flux_encoder_draw_geometry(enc, &g, &b);
+                flux_encoder_draw_geometry(
+                    enc, &(flux_encoder_draw_geometry_opts){.geom = &g, .brush = &b});
             }
             break;
         }
@@ -316,9 +320,11 @@ flux_result lensi_compile_commands(lens *ui, flux_encoder *enc, flux_rect box, f
                         (flux_rect){r.x - edge, r.y - edge, r.w + edge * 2.0f, r.h + edge * 2.0f});
                     flux_brush outline = b;
                     outline.image.tint = c->outline_color;
-                    flux_encoder_draw_geometry(enc, &underlay, &outline);
+                    flux_encoder_draw_geometry(enc, &(flux_encoder_draw_geometry_opts){
+                                                        .geom = &underlay, .brush = &outline});
                 }
-                flux_encoder_draw_geometry(enc, &g, &b);
+                flux_encoder_draw_geometry(
+                    enc, &(flux_encoder_draw_geometry_opts){.geom = &g, .brush = &b});
             }
             break;
         }
@@ -442,10 +448,12 @@ flux_result lensi_compile_commands(lens *ui, flux_encoder *enc, flux_rect box, f
                     flux_geometry outline = g;
                     outline.stroke.width = g.stroke.width + c->outline_width * 2.0f;
                     flux_brush ob = flux_brush_solid(lensi_opacity_color(c->outline_color, alpha));
-                    flux_encoder_draw_geometry(enc, &outline, &ob);
+                    flux_encoder_draw_geometry(
+                        enc, &(flux_encoder_draw_geometry_opts){.geom = &outline, .brush = &ob});
                 }
                 flux_brush bb = flux_brush_solid(body);
-                flux_encoder_draw_geometry(enc, &g, &bb);
+                flux_encoder_draw_geometry(
+                    enc, &(flux_encoder_draw_geometry_opts){.geom = &g, .brush = &bb});
             }
             break;
         }
@@ -489,15 +497,15 @@ flux_result lensi_compile_commands(lens *ui, flux_encoder *enc, flux_rect box, f
                      * either of them re-shaping. */
                     const flux_rect run =
                         lensi_text_bounds(r, c->text_advance, c->rel.w < 0.0f, c->rel.h < 0.0f);
-                    flux_result result =
-                        glyph_record(ui->text, enc,
-                                     &(glyph_record_desc){.x = run.x,
-                                                          .y = run.y,
-                                                          .utf8 = c->text,
-                                                          .len = vlen,
-                                                          .style = style,
-                                                          .outline_color = c->outline_color,
-                                                          .outline_width = c->outline_width});
+                    flux_result result = glyph_record(
+                        ui->text, &(glyph_record_opts){.encoder = enc,
+                                                       .x = run.x,
+                                                       .y = run.y,
+                                                       .utf8 = c->text,
+                                                       .len = vlen,
+                                                       .style = style,
+                                                       .outline_color = c->outline_color,
+                                                       .outline_width = c->outline_width});
                     if (result != FLUX_OK)
                         return result;
                 }
@@ -597,7 +605,7 @@ static flux_result compile_visuals(lens *ui, flux_display_list **out_list) {
     bool scaled = ui->scale > 0.0f && ui->scale != 1.0f;
     if (scaled) {
         flux_encoder_save(enc);
-        flux_encoder_scale(enc, ui->scale, ui->scale);
+        flux_encoder_scale(enc, &(flux_encoder_scale_opts){.sx = ui->scale, .sy = ui->scale});
     }
     flux_rect no_clip = {-1e6f, -1e6f, 2e6f, 2e6f};
 
@@ -639,25 +647,27 @@ static flux_result compile_visuals(lens *ui, flux_display_list **out_list) {
         flux_geometry g_bg = flux_geom_rect(bg);
         flux_color tt_bg = t->color_surface_elevated ? t->color_surface_elevated : t->color_bg;
         flux_brush b_bg = flux_brush_solid(lensi_opacity_color(tt_bg, ui->tooltip.opacity));
-        flux_encoder_draw_geometry(enc, &g_bg, &b_bg);
+        flux_encoder_draw_geometry(
+            enc, &(flux_encoder_draw_geometry_opts){.geom = &g_bg, .brush = &b_bg});
 
         if (t->border_width > 0.0f && (t->color_border & 0xFF000000u) != 0) {
             flux_geometry g_border = flux_geom_rect(bg);
             g_border.stroke.width = t->border_width;
             flux_brush b_border =
                 flux_brush_solid(lensi_opacity_color(t->color_border, ui->tooltip.opacity));
-            flux_encoder_draw_geometry(enc, &g_border, &b_border);
+            flux_encoder_draw_geometry(
+                enc, &(flux_encoder_draw_geometry_opts){.geom = &g_border, .brush = &b_border});
         }
 
         if (ui->text) {
             glyph_style ts = {.size_px = size,
                               .color = lensi_opacity_color(t->color_fg, ui->tooltip.opacity)};
-            r = glyph_record(ui->text, enc,
-                             &(glyph_record_desc){.x = x + pad,
-                                                  .y = y + pad,
-                                                  .utf8 = ui->tooltip.text,
-                                                  .len = strlen(ui->tooltip.text),
-                                                  .style = ts});
+            r = glyph_record(ui->text, &(glyph_record_opts){.encoder = enc,
+                                                            .x = x + pad,
+                                                            .y = y + pad,
+                                                            .utf8 = ui->tooltip.text,
+                                                            .len = strlen(ui->tooltip.text),
+                                                            .style = ts});
             if (r != FLUX_OK)
                 goto done;
         }
@@ -773,7 +783,8 @@ uint64_t lens_snapshot_generation(const lens_scene_snapshot *snapshot) {
 flux_result lens_snapshot_submit(const lens_scene_snapshot *snapshot, flux_canvas *canvas) {
     if (!snapshot || !canvas)
         return FLUX_ERROR_INVALID_ARGUMENT;
-    return flux_canvas_submit_display_list(canvas, snapshot->display_list);
+    return flux_canvas_submit_display_list(
+        canvas, &(flux_canvas_submit_display_list_opts){.list = snapshot->display_list});
 }
 
 static flux_result capture_node(lens *ui, lens_scene_snapshot *s, lens_node *n, flux_rect clip,

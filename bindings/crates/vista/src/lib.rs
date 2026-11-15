@@ -103,14 +103,12 @@ pub struct Scene {
 impl Scene {
     pub fn from_glb(device: &Device, bytes: &[u8]) -> Result<Scene, Error> {
         let mut raw = std::ptr::null_mut();
-        check(unsafe {
-            sys::vista_load_glb(
-                device.as_raw(),
-                bytes.as_ptr().cast(),
-                bytes.len(),
-                &mut raw,
-            )
-        })?;
+        let opts = sys::vista_load_glb_opts {
+            bytes: bytes.as_ptr().cast(),
+            byte_count: bytes.len(),
+            out: &mut raw,
+        };
+        check(unsafe { sys::vista_load_glb(device.as_raw(), &opts) })?;
         Ok(Scene { raw })
     }
 
@@ -125,18 +123,16 @@ impl Scene {
         let scene = Self::from_glb(device, bytes)?;
         let raw_materials: Vec<*mut sys::flux_material> =
             materials.iter().map(|material| material.as_raw()).collect();
-        check(unsafe {
-            sys::vista_scene_set_materials(
-                scene.raw,
-                if raw_materials.is_empty() {
-                    std::ptr::null()
-                } else {
-                    raw_materials.as_ptr()
-                },
-                raw_materials.len() as u32,
-                fallback.as_raw(),
-            )
-        })?;
+        let opts = sys::vista_scene_set_materials_opts {
+            materials: if raw_materials.is_empty() {
+                std::ptr::null()
+            } else {
+                raw_materials.as_ptr()
+            },
+            material_count: raw_materials.len() as u32,
+            fallback: fallback.as_raw(),
+        };
+        check(unsafe { sys::vista_scene_set_materials(scene.raw, &opts) })?;
         Ok(scene)
     }
 
@@ -147,7 +143,11 @@ impl Scene {
     pub fn bounds(&self) -> Option<Bounds> {
         let mut min = sys::flux_vec3::default();
         let mut max = sys::flux_vec3::default();
-        if unsafe { sys::vista_scene_bounds(self.raw, &mut min, &mut max) } {
+        let opts = sys::vista_scene_bounds_opts {
+            out_min: &mut min,
+            out_max: &mut max,
+        };
+        if unsafe { sys::vista_scene_bounds(self.raw, &opts) } {
             Some(Bounds {
                 min: [min.x, min.y, min.z],
                 max: [max.x, max.y, max.z],
@@ -160,17 +160,22 @@ impl Scene {
     pub fn humanoid_bone_position(&self, bone_name: &str) -> Option<[f32; 3]> {
         let bone_name = std::ffi::CString::new(bone_name).ok()?;
         let mut position = sys::flux_vec3::default();
-        unsafe {
-            sys::vista_scene_humanoid_bone_position(self.raw, bone_name.as_ptr(), &mut position)
-        }
-        .then_some([position.x, position.y, position.z])
+        let opts = sys::vista_scene_humanoid_bone_position_opts {
+            bone_name: bone_name.as_ptr(),
+            out_position: &mut position,
+        };
+        unsafe { sys::vista_scene_humanoid_bone_position(self.raw, &opts) }
+            .then_some([position.x, position.y, position.z])
     }
 
     pub fn animation_from_glb(&self, bytes: &[u8]) -> Result<Animation, Error> {
         let mut raw = std::ptr::null_mut();
-        check(unsafe {
-            sys::vista_load_animation_glb(self.raw, bytes.as_ptr().cast(), bytes.len(), &mut raw)
-        })?;
+        let opts = sys::vista_load_animation_glb_opts {
+            bytes: bytes.as_ptr().cast(),
+            byte_count: bytes.len(),
+            out: &mut raw,
+        };
+        check(unsafe { sys::vista_load_animation_glb(self.raw, &opts) })?;
         Ok(Animation { raw })
     }
 
@@ -180,9 +185,12 @@ impl Scene {
         time_seconds: f32,
         looping: bool,
     ) -> Result<(), Error> {
-        check(unsafe {
-            sys::vista_scene_apply_animation(self.raw, animation.raw, time_seconds, looping)
-        })
+        let opts = sys::vista_scene_apply_animation_opts {
+            animation: animation.raw,
+            time_seconds,
+            loop_: looping,
+        };
+        check(unsafe { sys::vista_scene_apply_animation(self.raw, &opts) })
     }
 
     pub fn reset_pose(&mut self) {
@@ -198,13 +206,15 @@ impl Scene {
     ) {
         let raw_light = light.map(SceneLight::as_raw);
         let opts = sys::vista_draw_opts {
+            camera: camera.as_raw(),
+            scene: self.raw,
             material: material.as_raw(),
             light: raw_light
                 .as_ref()
                 .map(|value| value as *const _)
                 .unwrap_or(std::ptr::null()),
         };
-        unsafe { sys::vista_draw(pass.as_raw(), camera.as_raw(), self.raw, &opts) };
+        unsafe { sys::vista_draw(pass.as_raw(), &opts) };
     }
 
     pub fn draw_materials(
@@ -215,13 +225,15 @@ impl Scene {
     ) {
         let raw_light = light.map(SceneLight::as_raw);
         let opts = sys::vista_draw_opts {
+            camera: camera.as_raw(),
+            scene: self.raw,
             material: std::ptr::null_mut(),
             light: raw_light
                 .as_ref()
                 .map(|value| value as *const _)
                 .unwrap_or(std::ptr::null()),
         };
-        unsafe { sys::vista_draw(pass.as_raw(), camera.as_raw(), self.raw, &opts) };
+        unsafe { sys::vista_draw(pass.as_raw(), &opts) };
     }
 }
 

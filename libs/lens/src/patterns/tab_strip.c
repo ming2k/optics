@@ -45,7 +45,7 @@ lens_tab_action lens_tab_strip(lens *ui, const char *id_str, const lens_tab_item
         .gap = 4.0f,
         .pad = 3.0f,
         .cross = LENS_CENTER,
-        .bg = (flux_color){0},
+        .bg = (flux_color){},
     };
 
     lens_row_begin(ui, &strip_opts);
@@ -55,7 +55,7 @@ lens_tab_action lens_tab_strip(lens *ui, const char *id_str, const lens_tab_item
     lens_id drag_state_id = lens_current_id(ui, "drag_state");
     lens_node *drag_node = lensi_store_touch(ui, drag_state_id);
     tab_strip_drag *drag =
-        drag_node ? (tab_strip_drag *)lens_node_state(drag_node, sizeof(tab_strip_drag)) : NULL;
+        drag_node ? (tab_strip_drag *)lens_node_state(drag_node, sizeof(tab_strip_drag)) : nullptr;
 
     /* Model drift (close/new/reorder between press and release) invalidates
      * the armed drag: drop it rather than move a stale index. */
@@ -273,7 +273,7 @@ lens_tab_action lens_tab_strip(lens *ui, const char *id_str, const lens_tab_item
                     .height = tab_h,
                 },
             .icon = opts->new_icon,
-            .label = (opts->new_icon != LENS_ICON_INVALID) ? NULL : "+",
+            .label = (opts->new_icon != LENS_ICON_INVALID) ? nullptr : "+",
             .variant = LENS_BUTTON_SUBTLE,
         };
 

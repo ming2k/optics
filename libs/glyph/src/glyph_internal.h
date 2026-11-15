@@ -392,7 +392,7 @@ static inline void *txt_alloc(glyph_ctx *t, size_t bytes, const char *kind) {
                               .scope = FLUX_SCOPE_CONTEXT,
                           },
                           &p) != FLUX_OK)
-        return NULL;
+        return nullptr;
     return p;
 }
 
@@ -419,7 +419,7 @@ static inline void *txt_realloc(glyph_ctx *t, void *old, size_t old_bytes, size_
                                 const char *kind) {
     void *fresh = txt_alloc(t, new_bytes, kind);
     if (!fresh)
-        return NULL;
+        return nullptr;
     if (old) {
         memcpy(fresh, old, old_bytes < new_bytes ? old_bytes : new_bytes);
         txt_free(t, old, kind);
@@ -445,7 +445,7 @@ static inline void txt_observe_release(glyph_ctx *t, const char *kind, uint64_t 
 /* strdup is POSIX, not ISO C, and MSVC does not provide it. */
 static inline char *txt_strdup(const char *s) {
     if (!s)
-        return NULL;
+        return nullptr;
     size_t n = strlen(s) + 1;
     char *p = malloc(n);
     if (p)
@@ -580,7 +580,7 @@ static inline bool txt_face_set_px(txt_face *f, uint32_t px) {
      * its size_px key and hb_font unchanged. A later hit would then shape at
      * the keyed size but rasterise at the rewritten size. */
     FT_Size previous = f->face->size;
-    FT_Size sz = NULL;
+    FT_Size sz = nullptr;
     if (FT_New_Size(f->face, &sz) != 0 || !sz)
         return false;
     if (FT_Activate_Size(sz) != 0) {

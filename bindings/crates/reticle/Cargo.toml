@@ -1,6 +1,7 @@
 [package]
 name = "reticle"
 description = "Safe idiomatic Rust bindings to reticle, the Optics vector-document compiler"
+publish = false
 version.workspace = true
 edition.workspace = true
 license.workspace = true

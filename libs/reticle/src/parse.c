@@ -13,6 +13,7 @@
  * that exceeds one fails to parse; it never yields a truncated document. */
 
 #include "internal.h"
+#include <stdint.h>
 
 #include <math.h>
 #include <stdlib.h>
@@ -904,7 +905,7 @@ static bool add_stop(reticle_parser *p, const reticle_tag *tag) {
  * handling says a *present but invalid* geometry attribute disables the element,
  * while an *absent* one takes its specified default. Collapsing them (the usual
  * `bool` return) silently moves art to the origin. */
-typedef enum attr_length_result {
+typedef enum attr_length_result : uint32_t {
     ATTR_LENGTH_ABSENT = 0,
     ATTR_LENGTH_OK = 1,
     ATTR_LENGTH_INVALID = 2,

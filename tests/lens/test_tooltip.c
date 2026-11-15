@@ -9,8 +9,8 @@
 static const lens_input IN0 = {.display_size = {400, 200}, .dt_seconds = 0.016f};
 
 static void test_tooltip_no_hover_no_crash(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     lens_begin(ui, &IN0);
     lens_button(ui, &(lens_button_opts){.label = "btn", .box = {.tooltip = "Tip text"}});
@@ -21,8 +21,8 @@ static void test_tooltip_no_hover_no_crash(void) {
 }
 
 static void test_tooltip_hover_does_not_crash(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     /* frame 1: build button */
     lens_begin(ui, &IN0);
@@ -43,8 +43,8 @@ static void test_tooltip_hover_does_not_crash(void) {
 }
 
 static void test_tooltip_render_path(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     /* Two frames so prev_rect exists for hover hit-testing. */
     lens_begin(ui, &IN0);
@@ -60,7 +60,7 @@ static void test_tooltip_render_path(void) {
     OT_EXPECT(ui->tooltip.active);
     OT_EXPECT(strcmp(ui->tooltip.text, "Tip text") == 0);
 
-    flux_canvas *canvas = NULL;
+    flux_canvas *canvas = nullptr;
     OT_EXPECT(flux_canvas_create_cpu(200, 100, 1.0f, &canvas) == FLUX_OK);
     flux_color black = flux_color_rgba_premul(0, 0, 0, 255);
     OT_EXPECT(flux_canvas_begin(canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
@@ -71,7 +71,7 @@ static void test_tooltip_render_path(void) {
 
     uint32_t width = 0, height = 0, stride = 0;
     const uint8_t *fb = flux_canvas_cpu_pixels(canvas, &width, &height, &stride);
-    OT_EXPECT(fb != NULL && width == 200 && height == 100);
+    OT_EXPECT(fb != nullptr && width == 200 && height == 100);
 
     size_t lit_pixels = 0;
     for (uint32_t y = 0; y < height; y++) {

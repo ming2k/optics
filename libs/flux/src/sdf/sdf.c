@@ -22,6 +22,7 @@
  */
 
 #include <flux/sdf.h>
+#include <stdint.h>
 
 #include <math.h>
 
@@ -123,7 +124,7 @@ static float sdf_blend(float curvature) {
  * axis. Two answers are legitimate there and only one is shadable, so the
  * choice is a typed parameter on the single body rather than a second copy of
  * the body (INV-SDF-02: one evaluation, so host and device cannot drift). */
-typedef enum sdf_crease {
+typedef enum sdf_crease : uint32_t {
     SDF_CREASE_CONTINUUM, /* hard pick of the dominant edge: the exact limit */
     SDF_CREASE_SHADING,   /* the same, ramped over `aa` across the crease */
 } sdf_crease;

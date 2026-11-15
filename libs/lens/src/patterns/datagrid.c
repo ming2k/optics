@@ -62,7 +62,8 @@ lens_datagrid_action lens_datagrid(lens *ui, const char *id_str, lens_datagrid_c
                           });
 
     float scroll_x = 0.0f, scroll_y = 0.0f;
-    (void)lens_scroll_offset(ui, "grid_scroll", &scroll_x, &scroll_y);
+    (void)lens_scroll_offset(ui, &(lens_scroll_offset_opts){
+                                     .id = "grid_scroll", .out_x = &scroll_x, .out_y = &scroll_y});
 
     /* -------------------------------------------------------------- */
     /*  1. Header Row (Sticky in Y, synchronized in X)                */
@@ -72,7 +73,7 @@ lens_datagrid_action lens_datagrid(lens *ui, const char *id_str, lens_datagrid_c
                 .box = {.id = "grid_hdr_scroll", .width = total_table_w, .height = header_h},
                 .autohide = true,
             });
-    lens_scroll_to(ui, "grid_hdr_scroll", scroll_x, 0.0f);
+    lens_scroll_to(ui, &(lens_scroll_to_opts){.id = "grid_hdr_scroll", .x = scroll_x, .y = 0.0f});
 
     lens_row_begin(ui, &(lens_layout_opts){
                            .box = {.width = total_table_w, .height = header_h},
@@ -178,7 +179,7 @@ lens_datagrid_action lens_datagrid(lens *ui, const char *id_str, lens_datagrid_c
 
         flux_color row_bg = is_selected                 ? ui->theme.color_active
                             : (striped && (r % 2 == 1)) ? ui->theme.color_surface_sunken
-                                                        : (flux_color){0};
+                                                        : (flux_color){};
 
         lens_response row_resp = lens_pressable_begin(
             ui, &(lens_pressable_opts){

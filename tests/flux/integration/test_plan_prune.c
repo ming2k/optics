@@ -94,7 +94,9 @@ int main(void) {
         bd.input = target;
         bd.sigma = 6.0f;
         flux_image *blurred = nullptr;
-        OT_EXPECT(flux_blur_filter_apply(blur, frame, &bd, &blurred) == FLUX_OK);
+        OT_EXPECT(flux_blur_filter_apply(
+                      blur, &(flux_blur_filter_apply_opts){
+                                .frame = frame, .desc = &bd, .out = &blurred}) == FLUX_OK);
         OT_EXPECT(blurred != nullptr);
 
         /* Nothing samples `blurred`. Draw only the sharp capture, then
@@ -110,7 +112,7 @@ int main(void) {
 
         /* The plan's own accounting is the observable: the blur registered,
          * nothing executed it. */
-        flux_frame_plan_counters stats = {0};
+        flux_frame_plan_counters stats = {};
         OT_EXPECT(flux_frame_plan_stats(frame, &stats) == FLUX_OK);
         OT_EXPECT(stats.registered >= 1u);
         OT_EXPECT(stats.executed == 0u);
@@ -136,14 +138,16 @@ int main(void) {
         bd.input = target;
         bd.sigma = 6.0f;
         flux_image *blurred = nullptr;
-        OT_EXPECT(flux_blur_filter_apply(blur, frame, &bd, &blurred) == FLUX_OK);
+        OT_EXPECT(flux_blur_filter_apply(
+                      blur, &(flux_blur_filter_apply_opts){
+                                .frame = frame, .desc = &bd, .out = &blurred}) == FLUX_OK);
         OT_EXPECT(blurred != nullptr);
 
         /* Materialize before the pass that samples it: compute cannot be
          * inserted inside a render pass. */
         OT_EXPECT(flux_frame_materialize_image(frame, blurred) == FLUX_OK);
 
-        flux_frame_plan_counters stats = {0};
+        flux_frame_plan_counters stats = {};
         OT_EXPECT(flux_frame_plan_stats(frame, &stats) == FLUX_OK);
         OT_EXPECT(stats.executed >= 1u);
 
@@ -177,7 +181,9 @@ int main(void) {
         bd.input = target;
         bd.sigma = 4.0f;
         flux_image *blurred = nullptr;
-        OT_EXPECT(flux_blur_filter_apply(blur, frame, &bd, &blurred) == FLUX_OK);
+        OT_EXPECT(flux_blur_filter_apply(
+                      blur, &(flux_blur_filter_apply_opts){
+                                .frame = frame, .desc = &bd, .out = &blurred}) == FLUX_OK);
 
         flux_color black = flux_color_rgba(0, 0, 0, 255);
         OT_EXPECT(
@@ -186,7 +192,7 @@ int main(void) {
                                                                .clear_color = &black}) == FLUX_OK);
         /* The draw is dropped and the error names the contract. */
         flux_canvas_draw_image(canvas, blurred, (flux_rect){0, 0, (float)W, (float)H}, nullptr);
-        flux_error_info err = {0};
+        flux_error_info err = {};
         flux_get_last_error(&err);
         OT_EXPECT(err.code == FLUX_ERROR_INVALID_STATE);
         /* Materializing is refused for the same reason: a pass is active. */
@@ -217,7 +223,9 @@ int main(void) {
         bd.input = target;
         bd.sigma = 3.0f;
         flux_image *stage1 = nullptr;
-        OT_EXPECT(flux_blur_filter_apply(blur, frame, &bd, &stage1) == FLUX_OK);
+        OT_EXPECT(flux_blur_filter_apply(
+                      blur, &(flux_blur_filter_apply_opts){
+                                .frame = frame, .desc = &bd, .out = &stage1}) == FLUX_OK);
         OT_EXPECT(stage1 != nullptr);
 
         /* A second pass sampling the first one's output. */
@@ -225,11 +233,13 @@ int main(void) {
         bd2.input = stage1;
         bd2.sigma = 3.0f;
         flux_image *stage2 = nullptr;
-        OT_EXPECT(flux_blur_filter_apply(blur_b, frame, &bd2, &stage2) == FLUX_OK);
+        OT_EXPECT(flux_blur_filter_apply(
+                      blur_b, &(flux_blur_filter_apply_opts){
+                                  .frame = frame, .desc = &bd2, .out = &stage2}) == FLUX_OK);
         OT_EXPECT(stage2 != nullptr);
         OT_EXPECT(stage2 != stage1);
 
-        flux_frame_plan_counters stats = {0};
+        flux_frame_plan_counters stats = {};
         OT_EXPECT(flux_frame_plan_stats(frame, &stats) == FLUX_OK);
         OT_EXPECT(stats.registered == 2u);
         OT_EXPECT(stats.executed == 0u);
@@ -263,7 +273,9 @@ int main(void) {
         bd.input = target;
         bd.sigma = 4.0f;
         flux_image *blurred = nullptr;
-        OT_EXPECT(flux_blur_filter_apply(blur, frame, &bd, &blurred) == FLUX_OK);
+        OT_EXPECT(flux_blur_filter_apply(
+                      blur, &(flux_blur_filter_apply_opts){
+                                .frame = frame, .desc = &bd, .out = &blurred}) == FLUX_OK);
 
         /* Nothing required it yet, so nothing has been built or labelled. */
         OT_EXPECT(flux_device_labels_emitted(d) == labels_before);
@@ -312,7 +324,9 @@ int main(void) {
         bd.input = target;
         bd.sigma = 3.0f;
         flux_image *blurred = nullptr;
-        OT_EXPECT(flux_blur_filter_apply(blur, frame, &bd, &blurred) == FLUX_OK);
+        OT_EXPECT(flux_blur_filter_apply(
+                      blur, &(flux_blur_filter_apply_opts){
+                                .frame = frame, .desc = &bd, .out = &blurred}) == FLUX_OK);
         OT_EXPECT(flux_frame_materialize_image(frame, blurred) == FLUX_OK);
 
         prism_liquid_glass_shape shape = {
@@ -329,10 +343,12 @@ int main(void) {
         gd.groups = &group;
         gd.group_count = 1u;
         prism_material_output out = {};
-        OT_EXPECT(prism_liquid_glass_filter_apply(glass, frame, &gd, &out) == FLUX_OK);
+        OT_EXPECT(prism_liquid_glass_filter_apply(
+                      glass, &(prism_liquid_glass_filter_apply_opts){
+                                 .frame = frame, .desc = &gd, .out = &out}) == FLUX_OK);
         OT_EXPECT(out.image != nullptr);
 
-        flux_frame_plan_counters stats = {0};
+        flux_frame_plan_counters stats = {};
         OT_EXPECT(flux_frame_plan_stats(frame, &stats) == FLUX_OK);
         OT_EXPECT(stats.registered >= 2u);
         OT_EXPECT(stats.executed == 1u); /* the blur only: the material is still pending */
@@ -365,18 +381,22 @@ int main(void) {
         bd.input = target;
         bd.sigma = 4.0f;
         flux_image *deferred = nullptr;
-        OT_EXPECT(flux_blur_filter_apply(blur, frame, &bd, &deferred) == FLUX_OK);
+        OT_EXPECT(flux_blur_filter_apply(
+                      blur, &(flux_blur_filter_apply_opts){
+                                .frame = frame, .desc = &bd, .out = &deferred}) == FLUX_OK);
 
         VkCommandBuffer cmd = flux_frame_vk_command_buffer(frame);
         flux_effect_blur_desc one_shot = FLUX_EFFECT_BLUR_DESC_INIT;
         one_shot.input = deferred;
         one_shot.sigma = 4.0f;
         flux_image *out = nullptr;
-        OT_EXPECT(flux_effect_blur(cmd, &one_shot, &out) == FLUX_ERROR_INVALID_STATE);
+        OT_EXPECT(flux_effect_blur(&(flux_effect_blur_opts){
+                      .cmd = cmd, .desc = &one_shot, .out = &out}) == FLUX_ERROR_INVALID_STATE);
 
         /* Materialize, then the same primitive must accept the input. */
         OT_EXPECT(flux_frame_materialize_image(frame, deferred) == FLUX_OK);
-        OT_EXPECT(flux_effect_blur(cmd, &one_shot, &out) == FLUX_OK);
+        OT_EXPECT(flux_effect_blur(&(flux_effect_blur_opts){
+                      .cmd = cmd, .desc = &one_shot, .out = &out}) == FLUX_OK);
         OT_EXPECT(out != nullptr);
 
         OT_EXPECT(flux_frame_submit(frame) == FLUX_OK);
@@ -448,7 +468,7 @@ int main(void) {
         OT_EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
 
         /* Try to register a pass requesting 50 KiB (exceeding 48 KiB ceiling) */
-        char huge_params[64] = {0};
+        char huge_params[64] = {};
         flux_deferred_pass_desc desc = FLUX_DEFERRED_PASS_DESC_INIT;
         desc.record = dummy_pass_record;
         desc.output_count = 1u;

@@ -12,8 +12,8 @@ static const lens_input IN0 = {.display_size = {400, 200}, .dt_seconds = 0.016f}
 /* ---- state bits through synthetic frames ---------------------------- */
 
 static void test_hover_and_press_bits(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     lens_begin(ui, &IN0);
     lens_button(ui, &(lens_button_opts){.label = "OK"});
@@ -43,8 +43,8 @@ static void test_hover_and_press_bits(void) {
 }
 
 static void test_disabled_bit_excludes_hover_and_press(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     lens_begin(ui, &IN0);
     lens_button(ui, &(lens_button_opts){.label = "OK"});
@@ -65,8 +65,8 @@ static void test_disabled_bit_excludes_hover_and_press(void) {
 }
 
 static void test_focus_visible_is_keyboard_only(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     /* Frame 1: establish geometry and the tab order [A, B]. */
     lens_begin(ui, &IN0);
@@ -110,8 +110,8 @@ static void test_focus_visible_is_keyboard_only(void) {
 }
 
 static void test_widget_owned_bits(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     bool on = true;
     lens_begin(ui, &IN0);
@@ -133,10 +133,10 @@ static void test_widget_owned_bits(void) {
 /* ---- resolver: fallback, override, derivation, dim order ------------ */
 
 static void test_resolver_null_instance_is_verbatim_theme(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     lens_theme t = lens_theme_dark();
-    lens_style_resolved r = lensi_style_resolve(ui, NULL, &t,
+    lens_style_resolved r = lensi_style_resolve(ui, nullptr, &t,
                                                 LENS_STATE_HOVERED | LENS_STATE_PRESSED |
                                                     LENS_STATE_FOCUSED | LENS_STATE_DISABLED);
     OT_EXPECT(r.bg == t.color_bg);
@@ -156,8 +156,8 @@ static void test_resolver_null_instance_is_verbatim_theme(void) {
 }
 
 static void test_resolver_override_and_derivation(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     lens_theme t = lens_theme_dark();
     flux_color red = flux_color_rgba(0xc0, 0x20, 0x20, 0xff);
 
@@ -187,8 +187,8 @@ static void test_resolver_override_and_derivation(void) {
 }
 
 static void test_resolver_disabled_dims_last(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     lens_theme t = lens_theme_dark();
     flux_color red = flux_color_rgba(0xc0, 0x20, 0x20, 0xff);
 
@@ -248,8 +248,8 @@ static void test_minimalist_theme_defaults_and_borders(void) {
     OT_EXPECT(dark.color_surface_sunken != 0);
     OT_EXPECT(dark.color_surface_elevated != 0);
 
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     lens_input in = {.display_size = {800, 600}, .dt_seconds = 0.016f};
 
@@ -267,11 +267,11 @@ static void test_minimalist_theme_defaults_and_borders(void) {
     lens_node *n_chk = lens_find(ui, lens_current_id(ui, "chk1"));
     lens_node *n_tf = lens_find(ui, lens_current_id(ui, "tf1"));
 
-    OT_EXPECT(n_btn != NULL);
+    OT_EXPECT(n_btn != nullptr);
     OT_EXPECT(!has_border_cmd(n_btn));
-    OT_EXPECT(n_chk != NULL);
+    OT_EXPECT(n_chk != nullptr);
     OT_EXPECT(!has_border_cmd(n_chk));
-    OT_EXPECT(n_tf != NULL);
+    OT_EXPECT(n_tf != nullptr);
     OT_EXPECT(!has_border_cmd(n_tf));
 
     /* Frame 2: classic theme (border_width = 1.0) */
@@ -287,9 +287,9 @@ static void test_minimalist_theme_defaults_and_borders(void) {
     n_chk = lens_find(ui, lens_current_id(ui, "chk1"));
     n_tf = lens_find(ui, lens_current_id(ui, "tf1"));
 
-    OT_EXPECT(n_btn != NULL && has_border_cmd(n_btn));
-    OT_EXPECT(n_chk != NULL && has_border_cmd(n_chk));
-    OT_EXPECT(n_tf != NULL && has_border_cmd(n_tf));
+    OT_EXPECT(n_btn != nullptr && has_border_cmd(n_btn));
+    OT_EXPECT(n_chk != nullptr && has_border_cmd(n_chk));
+    OT_EXPECT(n_tf != nullptr && has_border_cmd(n_tf));
 
     /* Frame 3: default theme with focused textedit -> emits focus outline */
     lens_set_theme(ui, dark);
@@ -300,7 +300,7 @@ static void test_minimalist_theme_defaults_and_borders(void) {
     lens_test_end(ui);
 
     n_tf = lens_find(ui, lens_current_id(ui, "tf1"));
-    OT_EXPECT(n_tf != NULL && has_border_cmd(n_tf));
+    OT_EXPECT(n_tf != nullptr && has_border_cmd(n_tf));
 
     lens_release(ui);
 }

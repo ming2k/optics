@@ -28,14 +28,14 @@ static void plain_skin(lens *ui, lens_node *n, const lens_widget_record *rec) {
 }
 
 int main(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     plain_emissions = 0;
 
     /* Frame 1: userdata skin receives its pointer per emission. */
     spring_state spring = {0, 0.0f};
     lens_set_skin_userdata(ui, LENS_WIDGET_BUTTON, spring_skin, &spring);
-    lens_begin(ui, NULL);
+    lens_begin(ui, nullptr);
     lens_button(ui, &(lens_button_opts){.label = "Click"});
     lens_test_end(ui);
     OT_EXPECT(spring.emissions >= 1);
@@ -43,14 +43,14 @@ int main(void) {
 
     /* The userdata pointer is stable across frames (stored verbatim). */
     int before = spring.emissions;
-    lens_begin(ui, NULL);
+    lens_begin(ui, nullptr);
     lens_button(ui, &(lens_button_opts){.label = "Click"});
     lens_test_end(ui);
     OT_EXPECT(spring.emissions > before);
 
     /* Plain registration supersedes the userdata form for that kind. */
     lens_set_skin(ui, LENS_WIDGET_BUTTON, plain_skin);
-    lens_begin(ui, NULL);
+    lens_begin(ui, nullptr);
     lens_button(ui, &(lens_button_opts){.label = "Click"});
     lens_test_end(ui);
     OT_EXPECT(plain_emissions >= 1);
@@ -58,9 +58,9 @@ int main(void) {
     OT_EXPECT(frozen >= 1);
 
     /* NULL restores the built-in default for both forms. */
-    lens_set_skin(ui, LENS_WIDGET_BUTTON, NULL);
-    lens_set_skin_userdata(ui, LENS_WIDGET_BUTTON, NULL, NULL);
-    lens_begin(ui, NULL);
+    lens_set_skin(ui, LENS_WIDGET_BUTTON, nullptr);
+    lens_set_skin_userdata(ui, LENS_WIDGET_BUTTON, nullptr, nullptr);
+    lens_begin(ui, nullptr);
     lens_button(ui, &(lens_button_opts){.label = "Click"});
     lens_test_end(ui);
     OT_EXPECT(plain_emissions == 1); /* no more plain-skin emissions */

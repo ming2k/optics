@@ -549,7 +549,7 @@ flux_result flux_material_create(flux_device *d, const flux_material_desc *desc,
     if (surface) {
         m->base_color_image = flux_image_retain(surface->base_color_image);
         m->base_color_sampler =
-            m->base_color_image ? flux_sampler_retain(surface->base_color_sampler) : NULL;
+            m->base_color_image ? flux_sampler_retain(surface->base_color_sampler) : nullptr;
         m->uv_offset = surface->uv_offset;
         m->uv_scale = surface->uv_scale;
         m->uv_rotation = surface->uv_rotation;
@@ -766,7 +766,9 @@ static void scene_draw(flux_frame *f, const flux_camera *cam, flux_mat4 world, f
         if (joint_count != palette_bytes / sizeof(flux_mat4))
             return;
         flux_transient palette;
-        if (flux_frame_alloc_transient(f, palette_bytes, 16, &palette) != FLUX_OK)
+        if (flux_frame_alloc_transient(
+                f, &(flux_frame_alloc_transient_opts){
+                       .bytes = palette_bytes, .alignment = 16, .out = &palette}) != FLUX_OK)
             return;
         memcpy(palette.cpu, joint_matrices, palette_bytes);
         palette_address = palette.gpu_address;
@@ -798,7 +800,10 @@ static void scene_draw(flux_frame *f, const flux_camera *cam, flux_mat4 world, f
 
     if (material->kind == FLUX_MATERIAL_PHONG) {
         flux_transient slice;
-        if (flux_frame_alloc_transient(f, sizeof(scene_phong_params), 16, &slice) != FLUX_OK) {
+        if (flux_frame_alloc_transient(
+                f, &(flux_frame_alloc_transient_opts){.bytes = sizeof(scene_phong_params),
+                                                      .alignment = 16,
+                                                      .out = &slice}) != FLUX_OK) {
             return; /* draw dropped; alloc_transient set the error */
         }
         scene_phong_params *params = slice.cpu;
@@ -812,7 +817,10 @@ static void scene_draw(flux_frame *f, const flux_camera *cam, flux_mat4 world, f
         vkCmdPushConstants(cmd, material->layout, material->push_stages, 0, sizeof(pc), &pc);
     } else if (material->kind == FLUX_MATERIAL_VECTOR) {
         flux_transient slice;
-        if (flux_frame_alloc_transient(f, sizeof(scene_vector_params), 16, &slice) != FLUX_OK)
+        if (flux_frame_alloc_transient(
+                f, &(flux_frame_alloc_transient_opts){.bytes = sizeof(scene_vector_params),
+                                                      .alignment = 16,
+                                                      .out = &slice}) != FLUX_OK)
             return;
         scene_vector_params *params = slice.cpu;
         fill_surface_params(&params->surface, material);
@@ -822,13 +830,16 @@ static void scene_draw(flux_frame *f, const flux_camera *cam, flux_mat4 world, f
         params->_pad[0] = 0;
         params->_pad[1] = 0;
 
-        scene_params_push pc = {0};
+        scene_params_push pc = {};
         memcpy(pc.mvp, mvp.m, sizeof(pc.mvp));
         pc.params_address = slice.gpu_address;
         vkCmdPushConstants(cmd, material->layout, material->push_stages, 0, sizeof(pc), &pc);
     } else {
         flux_transient slice;
-        if (flux_frame_alloc_transient(f, sizeof(scene_unlit_params), 16, &slice) != FLUX_OK)
+        if (flux_frame_alloc_transient(
+                f, &(flux_frame_alloc_transient_opts){.bytes = sizeof(scene_unlit_params),
+                                                      .alignment = 16,
+                                                      .out = &slice}) != FLUX_OK)
             return;
         scene_unlit_params *params = slice.cpu;
         fill_surface_params(&params->surface, material);
@@ -836,7 +847,7 @@ static void scene_draw(flux_frame *f, const flux_camera *cam, flux_mat4 world, f
         params->joint_count = skinned ? joint_count : 0;
         params->_pad = 0;
 
-        scene_params_push pc = {0};
+        scene_params_push pc = {};
         memcpy(pc.mvp, mvp.m, sizeof(pc.mvp));
         pc.params_address = slice.gpu_address;
         vkCmdPushConstants(cmd, material->layout, material->push_stages, 0, sizeof(pc), &pc);
@@ -854,26 +865,9 @@ static void scene_draw(flux_frame *f, const flux_camera *cam, flux_mat4 world, f
     }
 }
 
-void flux_scene_draw_mesh(flux_frame *f, const flux_camera *cam, flux_mat4 world, flux_mesh *mesh,
-                          flux_material *material) {
-    scene_draw(f, cam, world, mesh, material, nullptr, nullptr, 0);
-}
-
-void flux_scene_draw_mesh_lit(flux_frame *f, const flux_camera *cam, flux_mat4 world,
-                              flux_mesh *mesh, flux_material *material,
-                              const flux_scene_light *light) {
-    scene_draw(f, cam, world, mesh, material, light, nullptr, 0);
-}
-
-void flux_scene_draw_mesh_skinned(flux_frame *f, const flux_camera *cam, flux_mat4 world,
-                                  flux_mesh *mesh, flux_material *material,
-                                  const flux_mat4 *joint_matrices, uint32_t joint_count) {
-    scene_draw(f, cam, world, mesh, material, nullptr, joint_matrices, joint_count);
-}
-
-void flux_scene_draw_mesh_skinned_lit(flux_frame *f, const flux_camera *cam, flux_mat4 world,
-                                      flux_mesh *mesh, flux_material *material,
-                                      const flux_scene_light *light,
-                                      const flux_mat4 *joint_matrices, uint32_t joint_count) {
-    scene_draw(f, cam, world, mesh, material, light, joint_matrices, joint_count);
+void flux_scene_draw_mesh(flux_frame *f, const flux_scene_draw_mesh_opts *opts) {
+    if (!opts)
+        return;
+    scene_draw(f, opts->camera, opts->world, opts->mesh, opts->material, opts->light,
+               opts->joint_matrices, opts->joint_count);
 }

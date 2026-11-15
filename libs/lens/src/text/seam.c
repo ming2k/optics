@@ -17,17 +17,13 @@ static lens_text_metrics to_fx(glyph_metrics m) {
     return (lens_text_metrics){m.width, m.height, m.baseline};
 }
 
-lens_text_metrics lens_text_measure_ex(lens *ui, lens_font *font, const char *utf8, float size_px,
-                                       float weight) {
-    (void)font;
-    if (!utf8 || !utf8[0])
-        return (lens_text_metrics){0};
-    glyph_style s = style_of(ui, size_px, weight);
-    return to_fx(glyph_measure(ui ? ui->text : NULL, utf8, strlen(utf8), &s));
-}
-
-lens_text_metrics lens_text_measure(lens *ui, lens_font *font, const char *utf8, float size_px) {
-    return lens_text_measure_ex(ui, font, utf8, size_px, 0.0f);
+lens_text_metrics lens_text_measure(lens *ui, const lens_text_measure_opts *opts) {
+    if (!opts || !opts->utf8 || !opts->utf8[0])
+        return (lens_text_metrics){};
+    glyph_style s = style_of(ui, opts->size_px, opts->weight);
+    return to_fx(glyph_measure(
+        ui ? ui->text : nullptr,
+        &(glyph_measure_opts){.utf8 = opts->utf8, .len = strlen(opts->utf8), .style = &s}));
 }
 
 /* Measure the visible prefix of a label (everything before "##"). glyph
@@ -35,19 +31,22 @@ lens_text_metrics lens_text_measure(lens *ui, lens_font *font, const char *utf8,
 lens_text_metrics lensi_text_measure_label(lens *ui, const char *label, float size_px,
                                            float weight) {
     if (!label)
-        return (lens_text_metrics){0};
+        return (lens_text_metrics){};
     size_t vlen = lensi_label_visible_len(label);
     if (vlen == 0)
-        return (lens_text_metrics){0};
+        return (lens_text_metrics){};
     glyph_style s = style_of(ui, size_px, weight);
-    return to_fx(glyph_measure(ui ? ui->text : NULL, label, vlen, &s));
+    return to_fx(glyph_measure(ui ? ui->text : nullptr,
+                               &(glyph_measure_opts){.utf8 = label, .len = vlen, .style = &s}));
 }
 
 float lensi_text_caret_x(lens *ui, const char *utf8, size_t byte, float size_px, float weight) {
     if (!utf8 || byte == 0)
         return 0.0f;
     glyph_style s = style_of(ui, size_px, weight);
-    return glyph_x_for_byte(ui ? ui->text : NULL, utf8, strlen(utf8), byte, &s);
+    return glyph_x_for_byte(
+        ui ? ui->text : nullptr,
+        &(glyph_x_for_byte_opts){.utf8 = utf8, .len = strlen(utf8), .byte = byte, .style = &s});
 }
 
 size_t lensi_text_caret_byte(lens *ui, const char *utf8, float local_x, float size_px,
@@ -55,7 +54,10 @@ size_t lensi_text_caret_byte(lens *ui, const char *utf8, float local_x, float si
     if (!utf8 || !utf8[0])
         return 0;
     glyph_style s = style_of(ui, size_px, weight);
-    return glyph_byte_for_x(ui ? ui->text : NULL, utf8, strlen(utf8), local_x, &s);
+    return glyph_byte_for_x(ui ? ui->text : nullptr, &(glyph_byte_for_x_opts){.utf8 = utf8,
+                                                                              .len = strlen(utf8),
+                                                                              .local_x = local_x,
+                                                                              .style = &s});
 }
 
 int lensi_text_sel_rects(lens *ui, const char *utf8, size_t lo, size_t hi, float size_px,
@@ -63,7 +65,14 @@ int lensi_text_sel_rects(lens *ui, const char *utf8, size_t lo, size_t hi, float
     if (!utf8 || lo >= hi || max <= 0)
         return 0;
     glyph_style s = style_of(ui, size_px, weight);
-    return glyph_selection_rects(ui ? ui->text : NULL, utf8, strlen(utf8), lo, hi, &s, out, max);
+    return glyph_selection_rects(ui ? ui->text : nullptr,
+                                 &(glyph_selection_rects_opts){.utf8 = utf8,
+                                                               .len = strlen(utf8),
+                                                               .lo = lo,
+                                                               .hi = hi,
+                                                               .style = &s,
+                                                               .out = out,
+                                                               .max = max});
 }
 
 size_t lensi_text_caret_visual(lens *ui, const char *utf8, size_t byte, bool forward, float size_px,
@@ -71,7 +80,10 @@ size_t lensi_text_caret_visual(lens *ui, const char *utf8, size_t byte, bool for
     if (!utf8)
         return byte;
     glyph_style s = style_of(ui, size_px, weight);
-    return glyph_visual_move(ui ? ui->text : NULL, utf8, strlen(utf8), byte, forward, &s);
+    return glyph_visual_move(
+        ui ? ui->text : nullptr,
+        &(glyph_visual_move_opts){
+            .utf8 = utf8, .len = strlen(utf8), .byte = byte, .forward = forward, .style = &s});
 }
 
 void lens_text_compact(lens *ui) {

@@ -50,7 +50,7 @@ static VkDeviceSize align_up(VkDeviceSize v, VkDeviceSize a) {
 static flux_vk_range *range_new(VkDeviceSize offset, VkDeviceSize size) {
     flux_vk_range *r = calloc(1, sizeof(*r));
     if (!r)
-        return NULL;
+        return nullptr;
     r->offset = offset;
     r->size = size;
     return r;
@@ -60,7 +60,7 @@ static flux_vk_range *range_new(VkDeviceSize offset, VkDeviceSize size) {
  * ranges. Returns true on success, false on OOM. */
 static bool range_insert_coalesce(flux_vk_range **head_ptr, VkDeviceSize offset,
                                   VkDeviceSize size) {
-    flux_vk_range *prev = NULL;
+    flux_vk_range *prev = nullptr;
     flux_vk_range *cur = *head_ptr;
     while (cur && cur->offset < offset) {
         prev = cur;
@@ -102,7 +102,7 @@ static bool range_insert_coalesce(flux_vk_range **head_ptr, VkDeviceSize offset,
  * free-list. Returns true and writes the offset; false if no fit. */
 static bool block_try_alloc(flux_vk_block *b, VkDeviceSize size, VkDeviceSize align,
                             VkDeviceSize *out_offset) {
-    flux_vk_range *prev = NULL;
+    flux_vk_range *prev = nullptr;
     for (flux_vk_range *cur = b->free_list; cur; prev = cur, cur = cur->next) {
         VkDeviceSize aligned = align_up(cur->offset, align);
         VkDeviceSize waste = aligned - cur->offset;
@@ -165,7 +165,7 @@ static flux_vk_block *block_create(flux_device *d, uint32_t memory_type, VkDevic
     flux_vk_block *b = calloc(1, sizeof(*b));
     if (!b) {
         *err = FLUX_ERROR_OUT_OF_MEMORY;
-        return NULL;
+        return nullptr;
     }
     b->size = size;
     b->memory_type = memory_type;
@@ -178,16 +178,16 @@ static flux_vk_block *block_create(flux_device *d, uint32_t memory_type, VkDevic
     };
     VkMemoryAllocateInfo mai = {
         .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-        .pNext = has_dev_addr ? &afi : NULL,
+        .pNext = has_dev_addr ? &afi : nullptr,
         .allocationSize = size,
         .memoryTypeIndex = memory_type,
     };
-    VkResult vr = vkAllocateMemory(d->device, &mai, NULL, &b->memory);
+    VkResult vr = vkAllocateMemory(d->device, &mai, nullptr, &b->memory);
     if (vr != VK_SUCCESS) {
         *err = result_from_vk_memory_failure(vr);
         FLUX_FAIL_VK(*err, "vkAllocateMemory (pool block) failed", vr);
         free(b);
-        return NULL;
+        return nullptr;
     }
 
     if (host_visible) {
@@ -195,9 +195,9 @@ static flux_vk_block *block_create(flux_device *d, uint32_t memory_type, VkDevic
         if (vr != VK_SUCCESS) {
             *err = result_from_vk_memory_failure(vr);
             FLUX_FAIL_VK(*err, "vkMapMemory (pool block) failed", vr);
-            vkFreeMemory(d->device, b->memory, NULL);
+            vkFreeMemory(d->device, b->memory, nullptr);
             free(b);
-            return NULL;
+            return nullptr;
         }
     }
 
@@ -207,9 +207,9 @@ static flux_vk_block *block_create(flux_device *d, uint32_t memory_type, VkDevic
         *err = FLUX_ERROR_OUT_OF_MEMORY;
         if (b->mapped)
             vkUnmapMemory(d->device, b->memory);
-        vkFreeMemory(d->device, b->memory, NULL);
+        vkFreeMemory(d->device, b->memory, nullptr);
         free(b);
-        return NULL;
+        return nullptr;
     }
     /* Ledger-derived per-instance name (ADR-0132). The block sequence number is
      * no longer formatted into a temporary: it lives in the ledger row, which
@@ -230,7 +230,7 @@ static void block_destroy(flux_device *d, flux_vk_block *b) {
     if (b->memory) {
         if (b->mapped)
             vkUnmapMemory(d->device, b->memory);
-        vkFreeMemory(d->device, b->memory, NULL);
+        vkFreeMemory(d->device, b->memory, nullptr);
     }
     free(b);
 }
@@ -251,11 +251,11 @@ flux_result flux_vk_allocator_init(flux_device *d) {
     if (d->physical_device) {
         uint32_t ext_count = 0;
         VkResult vr =
-            vkEnumerateDeviceExtensionProperties(d->physical_device, NULL, &ext_count, NULL);
+            vkEnumerateDeviceExtensionProperties(d->physical_device, nullptr, &ext_count, nullptr);
         if (vr == VK_SUCCESS && ext_count > 0) {
             VkExtensionProperties *exts = calloc(ext_count, sizeof(*exts));
             if (exts) {
-                vr = vkEnumerateDeviceExtensionProperties(d->physical_device, NULL, &ext_count,
+                vr = vkEnumerateDeviceExtensionProperties(d->physical_device, nullptr, &ext_count,
                                                           exts);
                 if (vr == VK_SUCCESS) {
                     for (uint32_t i = 0; i < ext_count; ++i) {
@@ -290,7 +290,7 @@ void flux_vk_allocator_destroy(flux_device *d) {
         block_destroy(d, b);
         b = next;
     }
-    a->blocks = NULL;
+    a->blocks = nullptr;
     flux_platform_mutex_destroy(&a->lock);
     a->lock_initialized = false;
 }
@@ -337,7 +337,7 @@ static flux_result do_dedicated(flux_device *d, VkDeviceSize size, uint32_t memo
         .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO,
         .flags = wants_device_address ? VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT : 0,
     };
-    const void *chain = NULL;
+    const void *chain = nullptr;
     if (dai.buffer != VK_NULL_HANDLE || dai.image != VK_NULL_HANDLE)
         chain = &dai;
     if (wants_device_address) {
@@ -351,19 +351,19 @@ static flux_result do_dedicated(flux_device *d, VkDeviceSize size, uint32_t memo
         .memoryTypeIndex = memory_type,
     };
     VkDeviceMemory mem = VK_NULL_HANDLE;
-    VkResult vr = vkAllocateMemory(d->device, &mai, NULL, &mem);
+    VkResult vr = vkAllocateMemory(d->device, &mai, nullptr, &mem);
     if (vr != VK_SUCCESS) {
         flux_result err = result_from_vk_memory_failure(vr);
         FLUX_FAIL_VK(err, "vkAllocateMemory (dedicated) failed", vr);
         return err;
     }
-    void *mapped = NULL;
+    void *mapped = nullptr;
     if (host_visible) {
         vr = vkMapMemory(d->device, mem, 0, VK_WHOLE_SIZE, 0, &mapped);
         if (vr != VK_SUCCESS) {
             flux_result err = result_from_vk_memory_failure(vr);
             FLUX_FAIL_VK(err, "vkMapMemory (dedicated) failed", vr);
-            vkFreeMemory(d->device, mem, NULL);
+            vkFreeMemory(d->device, mem, nullptr);
             return err;
         }
     }
@@ -371,7 +371,7 @@ static flux_result do_dedicated(flux_device *d, VkDeviceSize size, uint32_t memo
     out->offset = 0;
     out->size = size;
     out->mapped = mapped;
-    out->block = NULL;
+    out->block = nullptr;
     flux_vk_set_name_from_ledger(d, VK_OBJECT_TYPE_DEVICE_MEMORY, (uint64_t)mem, FLUX_SCOPE_DEVICE,
                                  "vk_memory", "flux/core");
     return FLUX_OK;
@@ -407,7 +407,7 @@ flux_result flux_vk_allocate(flux_device *d, VkMemoryRequirements mr,
                              flux_vk_alloc *out) {
     if (!d || !out)
         return FLUX_ERROR_INVALID_ARGUMENT;
-    *out = (flux_vk_alloc){0};
+    *out = (flux_vk_alloc){};
 
     uint32_t mt = pick_memory_type(d, mr.memoryTypeBits, wanted_flags);
     if (mt == UINT32_MAX) {
@@ -454,7 +454,7 @@ flux_result flux_vk_allocate(flux_device *d, VkMemoryRequirements mr,
     }
 
     /* Find or create a block matching (memory_type, is_image_pool, dev_addr). */
-    flux_vk_block *target = NULL;
+    flux_vk_block *target = nullptr;
     VkDeviceSize chosen_offset = 0;
     for (flux_vk_block *b = a->blocks; b; b = b->next) {
         if (b->memory_type != mt)
@@ -525,7 +525,7 @@ flux_result flux_vk_allocate(flux_device *d, VkMemoryRequirements mr,
     out->memory = target->memory;
     out->offset = chosen_offset;
     out->size = size;
-    out->mapped = target->mapped ? (uint8_t *)target->mapped + chosen_offset : NULL;
+    out->mapped = target->mapped ? (uint8_t *)target->mapped + chosen_offset : nullptr;
     out->block = target;
     target->allocated_bytes += size;
     target->live_allocations++;
@@ -552,9 +552,9 @@ void flux_vk_deallocate(flux_device *d, flux_vk_alloc *alloc) {
     const uint64_t ledger_bytes = (uint64_t)alloc->size;
     flux_platform_mutex_lock(&a->lock);
 
-    flux_vk_block *freed_block = NULL;
+    flux_vk_block *freed_block = nullptr;
 
-    if (alloc->block == NULL) {
+    if (alloc->block == nullptr) {
         /* Dedicated: free the standalone VkDeviceMemory entirely.
          * Double-free protection comes from the global live_allocations
          * counter — a second dealloc of the same handle would have
@@ -571,7 +571,7 @@ void flux_vk_deallocate(flux_device *d, flux_vk_alloc *alloc) {
         }
         if (alloc->mapped)
             vkUnmapMemory(d->device, alloc->memory);
-        vkFreeMemory(d->device, alloc->memory, NULL);
+        vkFreeMemory(d->device, alloc->memory, nullptr);
         a->bytes_in_use -= alloc->size;
         a->bytes_reserved -= alloc->size;
         a->live_allocations--;
@@ -621,7 +621,7 @@ void flux_vk_deallocate(flux_device *d, flux_vk_alloc *alloc) {
             freed_block = b;
     }
 
-    *alloc = (flux_vk_alloc){0};
+    *alloc = (flux_vk_alloc){};
     /* Accounted here, at the point the driver memory is actually returned.
      * This is the single chokepoint for VkDeviceMemory, so every path —
      * retired zombies, one-shot staging, reclaimed blocks — lands in one

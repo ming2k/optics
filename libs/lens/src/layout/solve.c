@@ -159,7 +159,7 @@ static void scroll_clamp_node(lens_node *n) {
          * reads as 800px of content) and the clamp then allows overshoot.
          * ABS children are placed outside the flow (ADR-0060) and never
          * count toward the scrollable content. */
-        lens_node *seed = NULL;
+        lens_node *seed = nullptr;
         for (lens_node *c = n->first_child; c; c = c->next_sibling) {
             if (c->place != LENS_PLACE_ABS) {
                 seed = c;

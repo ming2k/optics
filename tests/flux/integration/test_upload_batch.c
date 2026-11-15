@@ -41,9 +41,9 @@ static flux_image *make_solid(flux_device *d, uint8_t r, uint8_t g, uint8_t b) {
         .format = FLUX_FORMAT_RGBA8_UNORM,
         .initial_data = pixels,
     };
-    flux_image *img = NULL;
+    flux_image *img = nullptr;
     if (flux_image_create(d, &desc, &img) != FLUX_OK)
-        return NULL;
+        return nullptr;
     return img;
 }
 
@@ -79,7 +79,7 @@ int main(void) {
 
     /* --- bulk load inside one batch: 3 solid images + mesh + GPU_LOCAL
      *     buffer, then one flush. Pixels prove the copies landed. --- */
-    flux_image *red = NULL, *green = NULL, *blue = NULL;
+    flux_image *red = nullptr, *green = nullptr, *blue = nullptr;
     {
         OT_EXPECT(flux_uploads_begin(d) == FLUX_OK);
         red = make_solid(d, 255, 0, 0);
@@ -97,7 +97,7 @@ int main(void) {
             .vertices = verts,
             .vertex_count = 3,
         };
-        flux_mesh *mesh = NULL;
+        flux_mesh *mesh = nullptr;
         OT_EXPECT(flux_mesh_create(d, &mdesc, &mesh) == FLUX_OK);
 
         uint32_t payload[4] = {1, 2, 3, 4};
@@ -106,7 +106,7 @@ int main(void) {
         bd.usage = FLUX_BUFFER_USAGE_STORAGE;
         bd.location = FLUX_BUFFER_GPU_LOCAL;
         bd.initial_data = payload;
-        flux_buffer *buf = NULL;
+        flux_buffer *buf = nullptr;
         OT_EXPECT(flux_buffer_create(d, &bd, &buf) == FLUX_OK);
 
         OT_EXPECT(flux_uploads_flush(d) == FLUX_OK);
@@ -118,9 +118,9 @@ int main(void) {
             flux_canvas_begin(canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
                                                                .frame = frame,
                                                                .clear_color = &black}) == FLUX_OK);
-        flux_canvas_draw_image(canvas, red, (flux_rect){0, 0, 16, 16}, NULL);
-        flux_canvas_draw_image(canvas, green, (flux_rect){24, 0, 16, 16}, NULL);
-        flux_canvas_draw_image(canvas, blue, (flux_rect){48, 0, 16, 16}, NULL);
+        flux_canvas_draw_image(canvas, red, (flux_rect){0, 0, 16, 16}, nullptr);
+        flux_canvas_draw_image(canvas, green, (flux_rect){24, 0, 16, 16}, nullptr);
+        flux_canvas_draw_image(canvas, blue, (flux_rect){48, 0, 16, 16}, nullptr);
         OT_EXPECT(flux_canvas_end(canvas) == FLUX_OK);
         OT_EXPECT(flux_frame_submit(frame) == FLUX_OK);
         OT_EXPECT(flux_frame_present(frame) == FLUX_OK);
@@ -145,7 +145,7 @@ int main(void) {
     {
         OT_EXPECT(flux_uploads_begin(d) == FLUX_OK);
         flux_image *yellow = make_solid(d, 255, 255, 0);
-        OT_EXPECT(yellow != NULL);
+        OT_EXPECT(yellow != nullptr);
         /* deliberately no flux_uploads_flush */
 
         flux_frame *frame = nullptr;
@@ -155,7 +155,7 @@ int main(void) {
             flux_canvas_begin(canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
                                                                .frame = frame,
                                                                .clear_color = &black}) == FLUX_OK);
-        flux_canvas_draw_image(canvas, yellow, (flux_rect){24, 24, 16, 16}, NULL);
+        flux_canvas_draw_image(canvas, yellow, (flux_rect){24, 24, 16, 16}, nullptr);
         OT_EXPECT(flux_canvas_end(canvas) == FLUX_OK);
         OT_EXPECT(flux_frame_submit(frame) == FLUX_OK);
         OT_EXPECT(flux_frame_present(frame) == FLUX_OK);
@@ -214,7 +214,7 @@ int main(void) {
                 .format = FLUX_FORMAT_RGBA8_UNORM,
                 .initial_data = churn,
             };
-            flux_image *img = NULL;
+            flux_image *img = nullptr;
             OT_EXPECT(flux_image_create(d, &desc, &img) == FLUX_OK && img);
             OT_EXPECT(flux_uploads_flush(d) == FLUX_OK);
             flux_image_release(img);
@@ -230,7 +230,7 @@ int main(void) {
                 .format = FLUX_FORMAT_RGBA8_UNORM,
                 .initial_data = churn,
             };
-            flux_image *img = NULL;
+            flux_image *img = nullptr;
             OT_EXPECT(flux_image_create(d, &desc, &img) == FLUX_OK && img);
             OT_EXPECT(flux_uploads_flush(d) == FLUX_OK);
             flux_image_release(img);
@@ -245,7 +245,7 @@ int main(void) {
                 .format = FLUX_FORMAT_RGBA8_UNORM,
                 .initial_data = churn,
             };
-            flux_image *img = NULL;
+            flux_image *img = nullptr;
             OT_EXPECT(flux_image_create(d, &desc, &img) == FLUX_OK && img);
             OT_EXPECT(flux_uploads_flush(d) == FLUX_OK);
             flux_image_release(img);

@@ -12,6 +12,7 @@
 #define LENS_PATTERNS_H
 
 #include "lens.h"
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -55,12 +56,20 @@ typedef struct lens_virtual_grid_plan {
     float bottom_padding;       /* Spacer height after visible range */
 } lens_virtual_grid_plan;
 
+typedef struct lens_virtual_grid_calc_opts {
+    float available_width;
+    float viewport_height;
+    float scroll_y;
+    uint32_t total_items;
+    float min_col_width;
+    float max_col_width;
+    float item_height;
+    float target_gap;
+    uint32_t overscan_rows;
+} lens_virtual_grid_calc_opts;
+
 /* Compute exact virtual grid metrics for a given available width & scroll offset. */
-LENS_API lens_virtual_grid_plan lens_virtual_grid_calc(float available_width, float viewport_height,
-                                                       float scroll_y, uint32_t total_items,
-                                                       float min_col_width, float max_col_width,
-                                                       float item_height, float target_gap,
-                                                       uint32_t overscan_rows);
+LENS_API lens_virtual_grid_plan lens_virtual_grid_calc(const lens_virtual_grid_calc_opts *opts);
 
 /* ================================================================== */
 /*  Tab Strip Pattern (ADR-Pattern-003)                               */
@@ -72,7 +81,7 @@ typedef struct lens_tab_item {
     bool closable;
 } lens_tab_item;
 
-typedef enum lens_tab_action_kind {
+typedef enum lens_tab_action_kind : uint32_t {
     LENS_TAB_ACTION_NONE = 0,
     LENS_TAB_ACTION_SELECT,
     LENS_TAB_ACTION_CLOSE,
@@ -235,12 +244,19 @@ typedef struct lens_menubar_item {
     const char *menu_id;
 } lens_menubar_item;
 
+typedef struct lens_menubar_opts {
+    const char *id;
+    const lens_menubar_item *items;
+    uint32_t item_count;
+    flux_rect *out_anchor;
+} lens_menubar_opts;
+
 /* Render a horizontal menu bar.
  * When an item is clicked, its corresponding menu_id is opened/toggled in LENS_BAND_POPUP.
  * Returns index of currently open menu (or -1 if all closed).
- * `out_anchor` receives the bounding rectangle of the active menubar item for popup placement. */
-LENS_API int32_t lens_menubar(lens *ui, const char *id_str, const lens_menubar_item *items,
-                              uint32_t item_count, flux_rect *out_anchor);
+ * `opts->out_anchor` receives the bounding rectangle of the active menubar item for popup
+ * placement. */
+LENS_API int32_t lens_menubar(lens *ui, const lens_menubar_opts *opts);
 
 #ifdef __cplusplus
 }

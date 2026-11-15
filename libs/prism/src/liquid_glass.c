@@ -357,7 +357,7 @@ static flux_result liquid_glass_ensure_slot(prism_liquid_glass_filter *filter, u
         flux_image_release(slot->output);
     if (slot->stats)
         flux_buffer_release(slot->stats);
-    *slot = (liquid_glass_filter_slot){0};
+    *slot = (liquid_glass_filter_slot){};
     flux_result r =
         flux_image_create_compute_writable(filter->device, width, height, format, &slot->output);
     if (r != FLUX_OK)
@@ -497,7 +497,13 @@ static void record_storage_clear_regions(prism_liquid_glass_filter *filter, VkCo
         };
         uint32_t gx = (region.width + PRISM_GLASS_WG - 1u) / PRISM_GLASS_WG;
         uint32_t gy = (region.height + PRISM_GLASS_WG - 1u) / PRISM_GLASS_WG;
-        flux_compute_dispatch(command, clear_pipeline, &push, sizeof(push), gx, gy, 1u);
+        flux_compute_dispatch(&(flux_compute_dispatch_opts){.cmd = command,
+                                                            .pipeline = clear_pipeline,
+                                                            .push_constants = &push,
+                                                            .push_bytes = sizeof(push),
+                                                            .group_x = gx,
+                                                            .group_y = gy,
+                                                            .group_z = 1u});
     }
 }
 
@@ -570,8 +576,13 @@ static void glass_plan_record(void *raw, VkCommandBuffer command) {
                 .stats_address_lo = prism_address_lo(p->stats_address),
                 .stats_address_hi = prism_address_hi(p->stats_address),
             };
-            flux_compute_dispatch(command, filter->stats_pipeline, &spush, sizeof(spush), 1u, 1u,
-                                  1u);
+            flux_compute_dispatch(&(flux_compute_dispatch_opts){.cmd = command,
+                                                                .pipeline = filter->stats_pipeline,
+                                                                .push_constants = &spush,
+                                                                .push_bytes = sizeof(spush),
+                                                                .group_x = 1u,
+                                                                .group_y = 1u,
+                                                                .group_z = 1u});
         }
         if (p->stats_buffer != VK_NULL_HANDLE)
             barrier_stats_write_to_compute(command, p->stats_buffer);
@@ -596,12 +607,14 @@ static void glass_plan_record(void *raw, VkCommandBuffer command) {
         barrier_compute_write_to_read(command, output_image);
 }
 
-flux_result prism_liquid_glass_filter_apply(prism_liquid_glass_filter *filter, flux_frame *frame,
-                                            const prism_liquid_glass_desc *desc,
-                                            prism_material_output *out) {
-    if (!filter || !frame || !desc || !out)
+flux_result prism_liquid_glass_filter_apply(prism_liquid_glass_filter *filter,
+                                            const prism_liquid_glass_filter_apply_opts *opts) {
+    if (!filter || !opts || !opts->frame || !opts->desc || !opts->out)
         return FLUX_ERROR_INVALID_ARGUMENT;
-    *out = (prism_material_output){0};
+    flux_frame *frame = opts->frame;
+    const prism_liquid_glass_desc *desc = opts->desc;
+    prism_material_output *out = opts->out;
+    *out = (prism_material_output){};
     if (!valid_liquid_glass_desc(desc))
         return FLUX_ERROR_INVALID_ARGUMENT;
     if (flux_frame_get_state(frame) != FLUX_FRAME_STATE_RECORDING ||
@@ -908,11 +921,15 @@ flux_result prism_liquid_glass_filter_apply(prism_liquid_glass_filter *filter, f
     return FLUX_OK;
 }
 
-flux_result prism_liquid_glass_filter_stats(prism_liquid_glass_filter *filter, flux_frame *frame,
-                                            prism_backdrop_stat *out, uint32_t max_groups,
-                                            uint32_t *out_count) {
-    if (!filter || !frame || !out_count || (max_groups > 0u && !out))
+flux_result prism_liquid_glass_filter_stats(prism_liquid_glass_filter *filter,
+                                            const prism_liquid_glass_filter_stats_opts *opts) {
+    if (!filter || !opts || !opts->frame || !opts->out_count ||
+        (opts->max_groups > 0u && !opts->out))
         return FLUX_ERROR_INVALID_ARGUMENT;
+    flux_frame *frame = opts->frame;
+    prism_backdrop_stat *out = opts->out;
+    uint32_t max_groups = opts->max_groups;
+    uint32_t *out_count = opts->out_count;
     *out_count = 0u;
     if (flux_frame_device(frame) != filter->device)
         return FLUX_ERROR_INVALID_ARGUMENT;

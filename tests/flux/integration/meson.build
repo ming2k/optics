@@ -145,11 +145,13 @@ test('pass_labels', test_pass_labels, suite : 'integration')
 # Hostile-allocator contract test (ADR-0135): the `core.h` rule that peer code
 # must allocate through the device was never verified. This installs an
 # allocator that sees everything and requires prism/lens to pass through it.
-test_hostile_allocator = executable('test_hostile_allocator',
-  'test_hostile_allocator.c',
-  dependencies : [flux_test_support_dep, prism_dep, lens_dep],
-)
-test('hostile_allocator', test_hostile_allocator, suite : 'integration')
+if opt_lens and opt_prism
+  test_hostile_allocator = executable('test_hostile_allocator',
+    'test_hostile_allocator.c',
+    dependencies : [flux_test_support_dep, prism_dep, lens_dep],
+  )
+  test('hostile_allocator', test_hostile_allocator, suite : 'integration')
+endif
 
 
 
@@ -249,13 +251,15 @@ if opt_canvas
   )
   test('frame_damage', test_frame_damage, suite : 'integration')
 
-  # Canvas feature matrix on the GPU: gradients, strokes, and the
-  # hole-bridging fill (ADR-0011), asserted by read-back pixel.
-  test_canvas_render = executable('test_canvas_render',
-    'test_canvas_render.c',
-    dependencies : [flux_test_support_dep, glyph_dep],
-  )
-  test('canvas_render', test_canvas_render, suite : 'integration')
+  if opt_glyph
+    # Canvas feature matrix on the GPU: gradients, strokes, and the
+    # hole-bridging fill (ADR-0011), asserted by read-back pixel.
+    test_canvas_render = executable('test_canvas_render',
+      'test_canvas_render.c',
+      dependencies : [flux_test_support_dep, glyph_dep],
+    )
+    test('canvas_render', test_canvas_render, suite : 'integration')
+  endif
 
   # Cross-platform consistency gate: one fixed scene rendered by the GPU
   # backend and the CPU oracle (ADR-0019), compared pixel-by-pixel. This
@@ -318,12 +322,15 @@ if opt_canvas
   test('tile_b4_fine', test_tile_b4_fine, suite : 'integration')
 
   # Deferred pass plan: pruning, materialization, and the in-pass contract
-  # (ADR-0147).
-  test_plan_prune = executable('test_plan_prune',
-    'test_plan_prune.c',
-    dependencies : [flux_test_support_dep, prism_dep],
-  )
-  test('plan_prune', test_plan_prune, suite : 'integration')
+  # (ADR-0147). The test captures a prism material, so it is built only when
+  # prism is enabled.
+  if get_option('prism')
+    test_plan_prune = executable('test_plan_prune',
+      'test_plan_prune.c',
+      dependencies : [flux_test_support_dep, prism_dep],
+    )
+    test('plan_prune', test_plan_prune, suite : 'integration')
+  endif
 
   # Tile-compute blend and clip integration (ADR-0120 Phase B5 gate)
   test_tile_b5_renderplan = executable('test_tile_b5_renderplan',
@@ -382,18 +389,20 @@ if opt_canvas
   )
   test('image_retire', test_image_retire, suite : 'integration')
 
-  # Glyph-atlas image governance across atlas_clear: the retire loop once
-  # guarded page 0's release with `p > 0`, leaking a 16 MiB dedicated
-  # VkDeviceMemory per clear. Forces clears and asserts live allocations
-  # return to baseline.
-  test_text_atlas_leak = executable('test_text_atlas_leak',
-    'test_text_atlas_leak.c',
-    dependencies : [flux_test_support_dep, glyph_dep],
-  )
-  test('text_atlas_leak', test_text_atlas_leak,
-    suite       : 'integration',
-    is_parallel : false,
-  )
+  if opt_glyph
+    # Glyph-atlas image governance across atlas_clear: the retire loop once
+    # guarded page 0's release with `p > 0`, leaking a 16 MiB dedicated
+    # VkDeviceMemory per clear. Forces clears and asserts live allocations
+    # return to baseline.
+    test_text_atlas_leak = executable('test_text_atlas_leak',
+      'test_text_atlas_leak.c',
+      dependencies : [flux_test_support_dep, glyph_dep],
+    )
+    test('text_atlas_leak', test_text_atlas_leak,
+      suite       : 'integration',
+      is_parallel : false,
+    )
+  endif
 
   # Retire-FIFO backpressure: releasing past the pending bound with a
   # frozen watermark must force a full drain, not unbounded growth.

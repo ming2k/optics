@@ -20,6 +20,7 @@
 #define LENS_MATERIAL_H
 
 #include <flux/core.h>
+#include <flux/math.h> /* flux_color */
 #include <lens/export.h>
 #include <stdbool.h>
 #include <stdint.h>

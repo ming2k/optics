@@ -47,8 +47,8 @@ int main(void) {
     }
 
     /* NULL is tolerated. */
-    flux_device_memory_budget(d, NULL);
-    flux_device_memory_budget(NULL, &mb);
+    flux_device_memory_budget(d, nullptr);
+    flux_device_memory_budget(nullptr, &mb);
 
     flux_device_release(d);
     return OT_REPORT();

@@ -152,15 +152,13 @@ pub fn menubar(
         h: 0.0,
     };
 
-    let open_idx = unsafe {
-        lens_sys::lens_menubar(
-            frame.as_raw(),
-            id_c.as_ptr(),
-            raw_items.as_ptr(),
-            raw_items.len() as u32,
-            &mut anchor_rect,
-        )
+    let opts = lens_sys::lens_menubar_opts {
+        id: id_c.as_ptr(),
+        items: raw_items.as_ptr(),
+        item_count: raw_items.len() as u32,
+        out_anchor: &mut anchor_rect,
     };
+    let open_idx = unsafe { lens_sys::lens_menubar(frame.as_raw(), &opts) };
 
     if open_idx >= 0 {
         (Some(open_idx as usize), Some(Rect::from_raw(anchor_rect)))

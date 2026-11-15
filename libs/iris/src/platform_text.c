@@ -52,7 +52,7 @@ bool iris_text_memento_update(char **saved, size_t *saved_len, uint32_t *saved_c
 
 void iris_text_memento_clear(char **saved, size_t *saved_len, uint32_t *saved_cursor) {
     free(*saved);
-    *saved = NULL;
+    *saved = nullptr;
     *saved_len = 0;
     *saved_cursor = 0;
 }

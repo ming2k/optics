@@ -10,21 +10,6 @@ version_args = [
   '-DOPTICS_PROJECT_VERSION_MINOR=' + version_parts[1],
   '-DOPTICS_PROJECT_VERSION_PATCH=' + version_parts[2],
 ]
-if opt_glyph
-  version_args += '-DOPTICS_TEST_WITH_GLYPH=1'
-endif
-if opt_transit
-  version_args += '-DOPTICS_TEST_WITH_TRANSIT=1'
-endif
-if opt_vista
-  version_args += '-DOPTICS_TEST_WITH_VISTA=1'
-endif
-if get_option('prism')
-  version_args += '-DOPTICS_TEST_WITH_PRISM=1'
-endif
-if get_option('reticle')
-  version_args += '-DOPTICS_TEST_WITH_RETICLE=1'
-endif
 test_version_lockstep = executable('test_version_lockstep',
   'test_version_lockstep.c',
   dependencies : [optics_dep, optics_test_dep],
@@ -74,6 +59,24 @@ test(
 )
 
 test(
+  'c23_lexical',
+  py,
+  args : [files('../../tools/check_c23.py')],
+  workdir : meson.project_source_root(),
+  suite : 'lint',
+  timeout : 30,
+)
+
+test(
+  'api_surface',
+  py,
+  args : [files('../../tools/check_api.py')],
+  workdir : meson.project_source_root(),
+  suite : 'lint',
+  timeout : 30,
+)
+
+test(
   'docs_links',
   py,
   args : [files('../../tools/check_doc_links.py')],
@@ -106,15 +109,19 @@ test(
   timeout : 30,
 )
 
-# Umbrella Facade and Integrated Dependencies (ADR-0160)
-test_optics_facade_bin = executable(
-  'test_optics_facade',
-  files('test_optics_facade.c'),
-  dependencies : [optics_dep, optics_test_dep],
-)
+# Umbrella Facade and Integrated Dependencies (ADR-0160). The facade test
+# exercises lens/iris/transit through the umbrella, so it is meaningless when
+# the selected distribution omits any of them.
+if opt_lens and opt_transit
+  test_optics_facade_bin = executable(
+    'test_optics_facade',
+    files('test_optics_facade.c'),
+    dependencies : [optics_dep, optics_test_dep],
+  )
 
-test(
-  'optics_facade',
-  test_optics_facade_bin,
-  suite : 'integration',
-)
+  test(
+    'optics_facade',
+    test_optics_facade_bin,
+    suite : 'integration',
+  )
+endif

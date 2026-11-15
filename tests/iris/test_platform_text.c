@@ -64,7 +64,7 @@ int main(void) {
     OT_EXPECT_STR_EQ(buf, "h\xc3\xa9");
     iris_utf8_copy(buf, 3, "h\xc3\xa9llo"); /* cap-1 = 2: é splits → "h" */
     OT_EXPECT_STR_EQ(buf, "h");
-    iris_utf8_copy(buf, sizeof buf, NULL);
+    iris_utf8_copy(buf, sizeof buf, nullptr);
     OT_EXPECT_STR_EQ(buf, "");
 
     /* --- lens_input staging sizes (the buffers the backends clip into) ---
@@ -96,7 +96,7 @@ int main(void) {
     OT_EXPECT(memcmp(big + 252, "\xe6\x97\xa5", 3) == 0);
 
     /* --- text memento (report-only-on-change for IME surrounding text) --- */
-    char *mem = NULL;
+    char *mem = nullptr;
     size_t mem_len = 0;
     uint32_t mem_cursor = 0;
 
@@ -121,7 +121,7 @@ int main(void) {
     OT_EXPECT(iris_text_memento_update(&mem, &mem_len, &mem_cursor, "", 0, 0) == false);
     /* clear forgets the copy: the next report is due even if identical */
     iris_text_memento_clear(&mem, &mem_len, &mem_cursor);
-    OT_EXPECT(mem == NULL && mem_len == 0 && mem_cursor == 0);
+    OT_EXPECT(mem == nullptr && mem_len == 0 && mem_cursor == 0);
     OT_EXPECT(iris_text_memento_update(&mem, &mem_len, &mem_cursor, "", 0, 0) == true);
     iris_text_memento_clear(&mem, &mem_len, &mem_cursor);
 

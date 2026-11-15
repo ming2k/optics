@@ -114,8 +114,7 @@ int32_t lens_popup_menu(lens *ui, const char *menu_id, flux_rect anchor_rect,
         snprintf(item_id, sizeof(item_id), "m_%u", i);
 
         bool is_focused = (state && state->focused_index == (int32_t)i);
-        flux_color item_bg =
-            (is_focused && !it->disabled) ? ui->theme.color_hover : (flux_color){0};
+        flux_color item_bg = (is_focused && !it->disabled) ? ui->theme.color_hover : (flux_color){};
 
         lens_response r = lens_pressable_begin(ui, &(lens_pressable_opts){
                                                        .box =
@@ -182,10 +181,13 @@ int32_t lens_popup_menu(lens *ui, const char *menu_id, flux_rect anchor_rect,
     return activated;
 }
 
-int32_t lens_menubar(lens *ui, const char *id_str, const lens_menubar_item *items,
-                     uint32_t item_count, flux_rect *out_anchor) {
-    if (!ui || !items || item_count == 0)
+int32_t lens_menubar(lens *ui, const lens_menubar_opts *opts) {
+    if (!ui || !opts || !opts->items || opts->item_count == 0)
         return -1;
+    const char *id_str = opts->id;
+    const lens_menubar_item *items = opts->items;
+    uint32_t item_count = opts->item_count;
+    flux_rect *out_anchor = opts->out_anchor;
 
     int32_t current_open = -1;
     for (uint32_t i = 0; i < item_count; i++) {

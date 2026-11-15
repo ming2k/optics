@@ -81,21 +81,24 @@ static void on_build(lens *ui, const lens_input *in, void *user) {
 static void record_rect_color(flux_encoder *enc, flux_rect rect, flux_color color) {
     flux_geometry geom = flux_geom_rect(rect);
     flux_brush brush = flux_brush_solid(color);
-    flux_encoder_draw_geometry(enc, &geom, &brush);
+    flux_encoder_draw_geometry(enc,
+                               &(flux_encoder_draw_geometry_opts){.geom = &geom, .brush = &brush});
 }
 
 static void record_fill_path(flux_encoder *enc, const flux_path *path, flux_fill_rule rule,
                              const flux_brush *brush) {
     flux_geometry geom = flux_geom_path(path);
     geom.path.fill_rule = rule;
-    flux_encoder_draw_geometry(enc, &geom, brush);
+    flux_encoder_draw_geometry(enc,
+                               &(flux_encoder_draw_geometry_opts){.geom = &geom, .brush = brush});
 }
 
 static void record_stroke_path(flux_encoder *enc, const flux_path *path,
                                const flux_stroke_style *stroke, const flux_brush *brush) {
     flux_geometry geom = flux_geom_path(path);
     geom.stroke = stroke ? *stroke : (flux_stroke_style){.width = 1.0f};
-    flux_encoder_draw_geometry(enc, &geom, brush);
+    flux_encoder_draw_geometry(enc,
+                               &(flux_encoder_draw_geometry_opts){.geom = &geom, .brush = brush});
 }
 
 static void record_image(flux_encoder *enc, flux_image *image, flux_rect dst) {
@@ -106,7 +109,8 @@ static void record_image(flux_encoder *enc, flux_image *image, flux_rect dst) {
         .opacity = 1.0f,
         .image = {.image = image, .tint = flux_color_rgba_premul(255, 255, 255, 255)},
     };
-    flux_encoder_draw_geometry(enc, &geom, &brush);
+    flux_encoder_draw_geometry(enc,
+                               &(flux_encoder_draw_geometry_opts){.geom = &geom, .brush = &brush});
 }
 
 static void on_record(flux_encoder *enc, float scale, void *user) {
@@ -120,7 +124,7 @@ static void on_record(flux_encoder *enc, float scale, void *user) {
     float H = (float)log_h;
 
     flux_encoder_save(enc);
-    flux_encoder_scale(enc, scale, scale);
+    flux_encoder_scale(enc, &(flux_encoder_scale_opts){.sx = scale, .sy = scale});
 
     /* Backdrop tile pattern */
     for (int gy = 0; gy < 8; ++gy) {
@@ -149,7 +153,8 @@ static void on_record(flux_encoder *enc, float scale, void *user) {
         flux_brush g =
             flux_brush_linear_gradient((flux_point){640, 80}, (flux_point){920, 280}, stops, 3);
         flux_geometry geom = flux_geom_rect((flux_rect){640, 80, 280, 200});
-        flux_encoder_draw_geometry(enc, &geom, &g);
+        flux_encoder_draw_geometry(enc,
+                                   &(flux_encoder_draw_geometry_opts){.geom = &geom, .brush = &g});
     }
 
     /* Radial gradient over a circle path */
@@ -238,7 +243,7 @@ static void on_record(flux_encoder *enc, float scale, void *user) {
 }
 
 int main(void) {
-    canvas_hello_app app = {0};
+    canvas_hello_app app = {};
     printf("flux canvas_hello — native Iris window (Esc to quit)\n");
     return iris_app_run(&(iris_app_opts){
         .title = "flux canvas — hello",

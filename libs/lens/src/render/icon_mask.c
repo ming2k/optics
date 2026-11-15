@@ -83,7 +83,7 @@ void lensi_icon_mask_pool_destroy(lens *ui) {
         lensi_free(ui, m->host);
         if (m->image)
             flux_image_release(m->image);
-        *m = (lensi_icon_mask){0};
+        *m = (lensi_icon_mask){};
     }
     lensi_free(ui, ui->icon_masks.entries);
     ui->icon_masks.entries = nullptr;
@@ -150,7 +150,7 @@ static void bake_run_layer(flux_canvas *canvas, flux_arena *arena, const lens_ic
     /* White ink: a mask stores coverage only, and the draw-time per-quad tint
      * supplies the colour. Anything else would bake widget state into the cache. */
     flux_brush b = flux_brush_solid(flux_color_rgba_premul(255, 255, 255, 255));
-    flux_canvas_draw_geometry(canvas, &g, &b);
+    flux_canvas_draw_geometry(canvas, &(flux_canvas_draw_geometry_opts){.geom = &g, .brush = &b});
 }
 
 uint32_t lensi_icon_run_spans(const lens_icon_desc *desc, uint8_t mode, lensi_icon_run_span *out,
@@ -255,7 +255,7 @@ static lensi_icon_mask *pool_open(lens *ui) {
     lensi_free(ui, m->host);
     if (m->image)
         flux_image_release(m->image);
-    *m = (lensi_icon_mask){0};
+    *m = (lensi_icon_mask){};
     return m;
 }
 
@@ -333,7 +333,7 @@ lensi_icon_mask *lensi_icon_mask_acquire(lens *ui, int32_t icon_id, uint32_t dev
         return nullptr;
     }
 
-    flux_color transparent = {0};
+    flux_color transparent = {};
     bool baked = false;
     if (flux_canvas_begin(canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
                                                            .clear_color = &transparent}) ==
@@ -390,7 +390,12 @@ lensi_icon_mask *lensi_icon_mask_acquire(lens *ui, int32_t icon_id, uint32_t dev
             flux_canvas_release(canvas);
             return nullptr;
         }
-        flux_result up = flux_image_update_region(img, 0, 0, w, h, host_plane, (size_t)w * h);
+        flux_result up = flux_image_update_region(img, &(flux_image_update_region_opts){
+                                                           .width = w,
+                                                           .height = h,
+                                                           .data = host_plane,
+                                                           .bytes = (size_t)w * h,
+                                                       });
         if (up != FLUX_OK) {
             flux_image_release(img);
             lensi_free(ui, host_plane);

@@ -459,7 +459,12 @@ int main(void) {
         OT_EXPECT(flux_image_create(d, &idesc, &mab_img) == FLUX_OK);
         flux_image *mab_snapshot = nullptr;
         OT_EXPECT(flux_image_snapshot(mab_img, &mab_snapshot) == FLUX_OK);
-        OT_EXPECT(flux_image_update_region(mab_img, 0, 0, 1, 1, blue, sizeof blue) == FLUX_OK);
+        OT_EXPECT(
+            flux_image_update_region(
+                mab_img,
+                &(flux_image_update_region_opts){
+                    .x = 0, .y = 0, .width = 1, .height = 1, .data = blue, .bytes = sizeof blue}) ==
+            FLUX_OK);
 
         OT_EXPECT(render_frame(s, canvas, black, draw_image_full, mab_snapshot) == FLUX_OK);
         memset(px, 0xCD, BYTES);

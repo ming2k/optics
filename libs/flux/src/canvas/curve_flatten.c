@@ -129,7 +129,7 @@ static void flatten_cubic(flatten_state *st, flux_point p0, flux_point p1, flux_
 flatten_multi flatten_path_to_contours(const flux_path *p, float pixel_scale, flux_point *out_pts,
                                        uint32_t pts_cap, flux_canvas_contour *out_cons,
                                        uint32_t cons_cap) {
-    flatten_state st = {0};
+    flatten_state st = {};
     st.pts = out_pts;
     st.cons = out_cons;
     st.pts_cap = pts_cap;

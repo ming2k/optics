@@ -29,6 +29,8 @@ These run in the Meson `lint` suite and can also be invoked directly:
 python3 tools/check_versions.py        # Meson/C headers/Cargo lockstep
 python3 tools/check_library_purity.py  # no stdout in libs, no materials in flux
 python3 tools/check_doc_links.py       # relative links + public/dev firewall
+python3 tools/check_c23.py             # no NULL/{0}, typed enums
+python3 tools/check_api.py             # no prohibited public API suffixes
 ```
 
 ### Wayland Listener Slot Contract (ADR-0145)
@@ -49,6 +51,8 @@ tools/
 ├── check_versions.py       # Meson/C/Cargo version lockstep
 ├── check_library_purity.py # stdout + material-boundary checks
 ├── check_doc_links.py      # relative links + public/dev firewall
+├── check_c23.py            # C23 baseline (NULL/{0}/untyped enums)
+├── check_api.py            # public API suffix ratchet
 ├── README.md               # Tooling documentation
 │
 ├── ci/                     # CI Runners & Platform Emulation

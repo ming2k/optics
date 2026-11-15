@@ -126,8 +126,8 @@ int main(int argc, char **argv) {
     overlay_app_state state = {
         .dark_theme = true,
         .user_name = "Optics Developer",
-        .file_btn_rect = {0},
-        .edit_btn_rect = {0},
+        .file_btn_rect = {},
+        .edit_btn_rect = {},
         .smoke_mode = false,
         .smoke_frames = 0,
     };

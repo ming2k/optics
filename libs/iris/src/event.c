@@ -20,15 +20,15 @@ void iris__event_seam_configure(iris_event_fn fn, void *user) {
 }
 
 void iris__event_seam_clear(void) {
-    g_seam_fn = NULL;
-    g_seam_user = NULL;
+    g_seam_fn = nullptr;
+    g_seam_user = nullptr;
 }
 
 [[nodiscard]] bool iris__event_seam_emit(iris_event *ev) {
     ev->sequence = ++g_sequence;
 
     /* No seam: deliver unconditionally at zero cost. */
-    if (g_seam_fn == NULL)
+    if (g_seam_fn == nullptr)
         return true;
 
     /* Snapshot the undroppable flag before the callback: a host that

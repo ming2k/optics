@@ -308,9 +308,12 @@ impl LiquidGlassFilter {
             ..Default::default()
         };
         let mut out = sys::prism_material_output::default();
-        check(unsafe {
-            sys::prism_liquid_glass_filter_apply(self.raw, frame.as_raw(), &desc, &mut out)
-        })?;
+        let opts = sys::prism_liquid_glass_filter_apply_opts {
+            frame: frame.as_raw(),
+            desc: &desc,
+            out: &mut out,
+        };
+        check(unsafe { sys::prism_liquid_glass_filter_apply(self.raw, &opts) })?;
         Ok(LiquidGlassImage {
             raw: out.image,
             origin_x: out.origin_x,
@@ -327,15 +330,13 @@ impl LiquidGlassFilter {
         out: &mut [BackdropStats],
     ) -> Result<usize, Error> {
         let mut count = 0u32;
-        check(unsafe {
-            sys::prism_liquid_glass_filter_stats(
-                self.raw,
-                frame.as_raw(),
-                out.as_mut_ptr().cast::<sys::prism_backdrop_stat>(),
-                u32::try_from(out.len()).unwrap_or(u32::MAX),
-                &mut count,
-            )
-        })?;
+        let opts = sys::prism_liquid_glass_filter_stats_opts {
+            frame: frame.as_raw(),
+            out: out.as_mut_ptr().cast::<sys::prism_backdrop_stat>(),
+            max_groups: u32::try_from(out.len()).unwrap_or(u32::MAX),
+            out_count: &mut count,
+        };
+        check(unsafe { sys::prism_liquid_glass_filter_stats(self.raw, &opts) })?;
         Ok(count as usize)
     }
 }
@@ -400,7 +401,11 @@ fn draw_image_rect(
             },
         },
     };
-    unsafe { flux_sys::flux_canvas_draw_geometry(canvas.as_raw(), &geom, &brush) };
+    let opts = flux_sys::flux_canvas_draw_geometry_opts {
+        geom: &geom,
+        brush: &brush,
+    };
+    unsafe { flux_sys::flux_canvas_draw_geometry(canvas.as_raw(), &opts) };
 }
 
 impl LiquidGlassImage<'_> {
@@ -591,9 +596,12 @@ impl BackdropLayerFilter {
             ambient_fresnel: opts.params.ambient_fresnel,
         };
         let mut out = sys::prism_material_output::default();
-        check(unsafe {
-            sys::prism_backdrop_layer_filter_apply(self.raw, opts.frame.as_raw(), &desc, &mut out)
-        })?;
+        let apply_opts = sys::prism_backdrop_layer_filter_apply_opts {
+            frame: opts.frame.as_raw(),
+            desc: &desc,
+            out: &mut out,
+        };
+        check(unsafe { sys::prism_backdrop_layer_filter_apply(self.raw, &apply_opts) })?;
         Ok(BackdropLayerImage {
             raw: out.image,
             origin_x: out.origin_x,
@@ -612,15 +620,13 @@ impl BackdropLayerFilter {
         out: &mut [BackdropStats],
     ) -> Result<usize, Error> {
         let mut count = 0u32;
-        check(unsafe {
-            sys::prism_backdrop_layer_filter_stats(
-                self.raw,
-                frame.as_raw(),
-                out.as_mut_ptr().cast::<sys::prism_backdrop_stat>(),
-                u32::try_from(out.len()).unwrap_or(u32::MAX),
-                &mut count,
-            )
-        })?;
+        let opts = sys::prism_backdrop_layer_filter_stats_opts {
+            frame: frame.as_raw(),
+            out: out.as_mut_ptr().cast::<sys::prism_backdrop_stat>(),
+            max_groups: u32::try_from(out.len()).unwrap_or(u32::MAX),
+            out_count: &mut count,
+        };
+        check(unsafe { sys::prism_backdrop_layer_filter_stats(self.raw, &opts) })?;
         Ok(count as usize)
     }
 }
@@ -798,9 +804,12 @@ impl FrostedFilter {
             ..Default::default()
         };
         let mut out = sys::prism_material_output::default();
-        check(unsafe {
-            sys::prism_frosted_filter_apply(self.raw, frame.as_raw(), &desc, &mut out)
-        })?;
+        let opts = sys::prism_frosted_filter_apply_opts {
+            frame: frame.as_raw(),
+            desc: &desc,
+            out: &mut out,
+        };
+        check(unsafe { sys::prism_frosted_filter_apply(self.raw, &opts) })?;
         Ok(FrostedImage {
             raw: out.image,
             origin_x: out.origin_x,
@@ -988,9 +997,12 @@ impl AcrylicFilter {
             ..Default::default()
         };
         let mut out = sys::prism_material_output::default();
-        check(unsafe {
-            sys::prism_acrylic_filter_apply(self.raw, frame.as_raw(), &desc, &mut out)
-        })?;
+        let opts = sys::prism_acrylic_filter_apply_opts {
+            frame: frame.as_raw(),
+            desc: &desc,
+            out: &mut out,
+        };
+        check(unsafe { sys::prism_acrylic_filter_apply(self.raw, &opts) })?;
         Ok(AcrylicImage {
             raw: out.image,
             origin_x: out.origin_x,

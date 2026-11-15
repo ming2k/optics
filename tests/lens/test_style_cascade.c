@@ -65,8 +65,8 @@ static void test_merge_is_per_field(void) {
 /* ---- the scope stack ------------------------------------------------- */
 
 static void test_scope_reaches_terse_widgets(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     flux_color red = flux_color_rgba_premul(0xFF, 0x20, 0x20, 0xFF);
 
     lens_begin(ui, &IN0);
@@ -85,8 +85,8 @@ static void test_scope_reaches_terse_widgets(void) {
 }
 
 static void test_nested_scopes_merge_and_nearest_wins(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     flux_color red = flux_color_rgba_premul(0xFF, 0x20, 0x20, 0xFF);
     flux_color green = flux_color_rgba_premul(0x20, 0xC0, 0x20, 0xFF);
 
@@ -117,8 +117,8 @@ static void test_nested_scopes_merge_and_nearest_wins(void) {
 }
 
 static void test_forgotten_pop_cannot_leak_across_frames(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     flux_color red = flux_color_rgba_premul(0xFF, 0x20, 0x20, 0xFF);
 
     lens_begin(ui, &IN0);
@@ -156,8 +156,8 @@ static flux_color first_rect_color(const lens_node *n) {
 }
 
 static void test_box_style_beats_scope_beats_theme(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     flux_color red = flux_color_rgba_premul(0xC0, 0x20, 0x20, 0xFF);
     flux_color blue = flux_color_rgba_premul(0x20, 0x20, 0xC0, 0xFF);
 
@@ -179,8 +179,8 @@ static void test_box_style_beats_scope_beats_theme(void) {
 /* ---- outline atoms ---------------------------------------------------- */
 
 static void test_outline_atoms_reach_draw_commands(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     flux_color contour = flux_color_rgba_premul(0, 0, 0, 180);
 
     lens_style s = lens_style_init();
@@ -197,7 +197,7 @@ static void test_outline_atoms_reach_draw_commands(void) {
 
     lens_node *plain = find_widget(ui, "plain");
     lens_node *outlined = find_widget(ui, "12:34");
-    OT_EXPECT(plain != NULL && outlined != NULL);
+    OT_EXPECT(plain != nullptr && outlined != nullptr);
     if (plain && plain->cmd_count > 0) {
         OT_EXPECT(plain->cmds[0].outline_width == 0.0f); /* unset = no contour */
         OT_EXPECT(plain->cmds[0].outline_color == 0);
@@ -212,17 +212,17 @@ static void test_outline_atoms_reach_draw_commands(void) {
 /* ---- per-node scratch (ADR-0061 item 9) ------------------------------- */
 
 static void test_skin_scratch_lifecycle(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     lens_begin(ui, &IN0);
     lens_button(ui, &(lens_button_opts){.label = "Host"});
     lens_test_end(ui);
 
     lens_node *n = find_widget(ui, "Host");
-    OT_EXPECT(n != NULL);
+    OT_EXPECT(n != nullptr);
     float *scratch = lens_skin_scratch(ui, n);
-    OT_EXPECT(scratch != NULL);
+    OT_EXPECT(scratch != nullptr);
     /* Zeroed on first touch. */
     for (int i = 0; i < 4; i++)
         OT_EXPECT_NEAR(scratch[i], 0.0f, 0.0f);
@@ -234,9 +234,9 @@ static void test_skin_scratch_lifecycle(void) {
     lens_button(ui, &(lens_button_opts){.label = "Host"});
     lens_test_end(ui);
     n = find_widget(ui, "Host");
-    OT_EXPECT(n != NULL);
+    OT_EXPECT(n != nullptr);
     scratch = lens_skin_scratch(ui, n);
-    OT_EXPECT(scratch != NULL);
+    OT_EXPECT(scratch != nullptr);
     OT_EXPECT_NEAR(scratch[0], 12.5f, 0.0f);
     OT_EXPECT_NEAR(scratch[3], -4.25f, 0.0f);
 
@@ -248,8 +248,8 @@ static void test_skin_scratch_lifecycle(void) {
         lens_label(ui, &(lens_label_opts){.text = "unrelated"});
         lens_test_end(ui);
     }
-    OT_EXPECT(find_widget(ui, "Host") == NULL);
-    OT_EXPECT(lens_skin_scratch(ui, NULL) == NULL); /* NULL-safety */
+    OT_EXPECT(find_widget(ui, "Host") == nullptr);
+    OT_EXPECT(lens_skin_scratch(ui, nullptr) == nullptr); /* NULL-safety */
 
     lens_release(ui);
 }
@@ -276,8 +276,8 @@ static void test_material_theme_and_cascade_resolution(void) {
               light.materials.foundation.border_highlight);
 
     /* 2. Cascade style resolution: material kind -> mapped recipe */
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     lens_style s_acrylic = lens_style_init();
     s_acrylic.fields = LENS_STYLE_MATERIAL;

@@ -366,7 +366,7 @@ static flux_result layer_ensure_slot(prism_backdrop_layer_filter *filter, uint32
         flux_image_release(slot->scratch);
     if (slot->stats)
         flux_buffer_release(slot->stats);
-    *slot = (backdrop_layer_slot){0};
+    *slot = (backdrop_layer_slot){};
     flux_result r =
         flux_image_create_compute_writable(filter->device, width, height, format, &slot->output);
     if (r != FLUX_OK)
@@ -546,7 +546,13 @@ static void layer_record_base_material(
         .capture_width = (float)capture_width,
         .capture_height = (float)capture_height,
     };
-    flux_compute_dispatch(command, pipeline, &base, sizeof(base), gx_full, gy_full, 1u);
+    flux_compute_dispatch(&(flux_compute_dispatch_opts){.cmd = command,
+                                                        .pipeline = pipeline,
+                                                        .push_constants = &base,
+                                                        .push_bytes = sizeof(base),
+                                                        .group_x = gx_full,
+                                                        .group_y = gy_full,
+                                                        .group_z = 1u});
 
     /* Base and plates write overlapping pixels (each plate reads back what the
      * base wrote), so the base must be visible to the first plate's imageLoad.
@@ -585,7 +591,13 @@ static void layer_record_base_material(
                 .capture_width = (float)capture_width,
                 .capture_height = (float)capture_height,
             };
-            flux_compute_dispatch(command, pipeline, &push, sizeof(push), gx, gy, 1u);
+            flux_compute_dispatch(&(flux_compute_dispatch_opts){.cmd = command,
+                                                                .pipeline = pipeline,
+                                                                .push_constants = &push,
+                                                                .push_bytes = sizeof(push),
+                                                                .group_x = gx,
+                                                                .group_y = gy,
+                                                                .group_z = 1u});
             /* Each plate is read back by the next one. */
             if (f + 1u < desc->base_material_count || r + 1u < plate_region_count)
                 layer_barrier_compute_write_to_read_write(command, dst_image);
@@ -798,8 +810,14 @@ static void layer_plan_record(void *raw, VkCommandBuffer command) {
             };
             uint32_t gx = (region->width + PRISM_GLASS_WG - 1u) / PRISM_GLASS_WG;
             uint32_t gy = (region->height + PRISM_GLASS_WG - 1u) / PRISM_GLASS_WG;
-            flux_compute_dispatch(command, filter->clear_pipelines[p->is16f ? 1 : 0], &push,
-                                  sizeof(push), gx, gy, 1u);
+            flux_compute_dispatch(
+                &(flux_compute_dispatch_opts){.cmd = command,
+                                              .pipeline = filter->clear_pipelines[p->is16f ? 1 : 0],
+                                              .push_constants = &push,
+                                              .push_bytes = sizeof(push),
+                                              .group_x = gx,
+                                              .group_y = gy,
+                                              .group_z = 1u});
         }
         if (p->scratch) {
             VkImage scratch_image = flux_image_vk_image(p->scratch);
@@ -818,8 +836,14 @@ static void layer_plan_record(void *raw, VkCommandBuffer command) {
                 };
                 uint32_t gx = (region->width + PRISM_GLASS_WG - 1u) / PRISM_GLASS_WG;
                 uint32_t gy = (region->height + PRISM_GLASS_WG - 1u) / PRISM_GLASS_WG;
-                flux_compute_dispatch(command, filter->clear_pipelines[p->is16f ? 1 : 0], &push,
-                                      sizeof(push), gx, gy, 1u);
+                flux_compute_dispatch(&(flux_compute_dispatch_opts){
+                    .cmd = command,
+                    .pipeline = filter->clear_pipelines[p->is16f ? 1 : 0],
+                    .push_constants = &push,
+                    .push_bytes = sizeof(push),
+                    .group_x = gx,
+                    .group_y = gy,
+                    .group_z = 1u});
             }
             if (p->glass_batch_count > 0u)
                 layer_barrier_compute_write_to_read_write(command, scratch_image);
@@ -845,8 +869,13 @@ static void layer_plan_record(void *raw, VkCommandBuffer command) {
                 .stats_address_lo = (uint32_t)(p->stats_address & 0xFFFFFFFFu),
                 .stats_address_hi = (uint32_t)(p->stats_address >> 32u),
             };
-            flux_compute_dispatch(command, filter->stats_pipeline, &spush, sizeof(spush), 1u, 1u,
-                                  1u);
+            flux_compute_dispatch(&(flux_compute_dispatch_opts){.cmd = command,
+                                                                .pipeline = filter->stats_pipeline,
+                                                                .push_constants = &spush,
+                                                                .push_bytes = sizeof(spush),
+                                                                .group_x = 1u,
+                                                                .group_y = 1u,
+                                                                .group_z = 1u});
         }
         if (p->stats_buffer != VK_NULL_HANDLE)
             layer_barrier_stats_write_to_compute(command, p->stats_buffer);
@@ -887,12 +916,13 @@ static void layer_plan_record(void *raw, VkCommandBuffer command) {
 }
 
 flux_result prism_backdrop_layer_filter_apply(prism_backdrop_layer_filter *filter,
-                                              flux_frame *frame,
-                                              const prism_backdrop_layer_desc *desc,
-                                              prism_material_output *out) {
-    if (!filter || !frame || !desc || !out)
+                                              const prism_backdrop_layer_filter_apply_opts *opts) {
+    if (!filter || !opts || !opts->frame || !opts->desc || !opts->out)
         return FLUX_ERROR_INVALID_ARGUMENT;
-    *out = (prism_material_output){0};
+    flux_frame *frame = opts->frame;
+    const prism_backdrop_layer_desc *desc = opts->desc;
+    prism_material_output *out = opts->out;
+    *out = (prism_material_output){};
     if (!valid_backdrop_layer_desc(desc))
         return FLUX_ERROR_INVALID_ARGUMENT;
     if (flux_frame_get_state(frame) != FLUX_FRAME_STATE_RECORDING ||
@@ -1225,10 +1255,14 @@ flux_result prism_backdrop_layer_filter_apply(prism_backdrop_layer_filter *filte
 }
 
 flux_result prism_backdrop_layer_filter_stats(prism_backdrop_layer_filter *filter,
-                                              flux_frame *frame, prism_backdrop_stat *out,
-                                              uint32_t max_groups, uint32_t *out_count) {
-    if (!filter || !frame || !out_count || (max_groups > 0u && !out))
+                                              const prism_backdrop_layer_filter_stats_opts *opts) {
+    if (!filter || !opts || !opts->frame || !opts->out_count ||
+        (opts->max_groups > 0u && !opts->out))
         return FLUX_ERROR_INVALID_ARGUMENT;
+    flux_frame *frame = opts->frame;
+    prism_backdrop_stat *out = opts->out;
+    uint32_t max_groups = opts->max_groups;
+    uint32_t *out_count = opts->out_count;
     *out_count = 0u;
     if (flux_frame_device(frame) != filter->device)
         return FLUX_ERROR_INVALID_ARGUMENT;

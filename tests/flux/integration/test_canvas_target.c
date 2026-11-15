@@ -75,7 +75,7 @@ int main(void) {
         OT_EXPECT(flux_canvas_end(canvas) == FLUX_OK);
 
         flux_color black = flux_color_rgba(0, 0, 0, 255);
-        pd.attachment = (flux_canvas_attachment){0};
+        pd.attachment = (flux_canvas_attachment){};
         pd.clear_color = &black;
         pd.frame = frame;
         OT_EXPECT(flux_canvas_begin(canvas, &pd) == FLUX_OK);
@@ -112,7 +112,9 @@ int main(void) {
         flux_effect_blur_desc bd = FLUX_EFFECT_BLUR_DESC_INIT;
         bd.input = target;
         bd.sigma = 6.0f;
-        OT_EXPECT(flux_blur_filter_apply(blur_filter, frame, &bd, &blurred) == FLUX_OK);
+        OT_EXPECT(flux_blur_filter_apply(
+                      blur_filter, &(flux_blur_filter_apply_opts){
+                                       .frame = frame, .desc = &bd, .out = &blurred}) == FLUX_OK);
         OT_EXPECT(blurred != nullptr);
         /* ADR-0147: the blur is deferred; materialize before the pass that
          * samples it, since compute cannot be inserted inside a pass. */
@@ -162,7 +164,10 @@ int main(void) {
         invalid_blur.input = target;
         invalid_blur.sigma = 6.0f;
         flux_image *blurred = nullptr;
-        OT_EXPECT(flux_blur_filter_apply(blur_filter, frame, &invalid_blur, &blurred) ==
+        OT_EXPECT(flux_blur_filter_apply(blur_filter,
+                                         &(flux_blur_filter_apply_opts){.frame = frame,
+                                                                        .desc = &invalid_blur,
+                                                                        .out = &blurred}) ==
                   FLUX_ERROR_INVALID_ARGUMENT);
         OT_EXPECT(blurred == nullptr);
 
@@ -177,7 +182,9 @@ int main(void) {
         bd.next = &regions;
         bd.input = target;
         bd.sigma = 6.0f;
-        OT_EXPECT(flux_blur_filter_apply(blur_filter, frame, &bd, &blurred) == FLUX_OK);
+        OT_EXPECT(flux_blur_filter_apply(
+                      blur_filter, &(flux_blur_filter_apply_opts){
+                                       .frame = frame, .desc = &bd, .out = &blurred}) == FLUX_OK);
         OT_EXPECT(blurred != nullptr);
         OT_EXPECT(flux_frame_materialize_image(frame, blurred) == FLUX_OK);
 
@@ -259,7 +266,9 @@ int main(void) {
         bd.input = target;
         bd.sigma = 2.0f;
         flux_image *blurred = nullptr;
-        OT_EXPECT(flux_blur_filter_apply(blur_filter, frame, &bd, &blurred) == FLUX_OK);
+        OT_EXPECT(flux_blur_filter_apply(
+                      blur_filter, &(flux_blur_filter_apply_opts){
+                                       .frame = frame, .desc = &bd, .out = &blurred}) == FLUX_OK);
         OT_EXPECT(blurred != nullptr);
         OT_EXPECT(flux_frame_materialize_image(frame, blurred) == FLUX_OK);
 
@@ -310,7 +319,10 @@ int main(void) {
             sd.tint_blue = 0.0f;
             sd.alpha = 1.0f;
             flux_image *shadow = nullptr;
-            OT_EXPECT(flux_shadow_filter_apply(shadow_filter, frame, &sd, &shadow) == FLUX_OK);
+            OT_EXPECT(flux_shadow_filter_apply(shadow_filter,
+                                               &(flux_shadow_filter_apply_opts){
+                                                   .frame = frame, .desc = &sd, .out = &shadow}) ==
+                      FLUX_OK);
             OT_EXPECT(shadow != nullptr);
             /* ADR-0147: the shadow is deferred; materialize before the pass
              * that samples it (compute cannot run inside a render pass). */
@@ -417,7 +429,9 @@ int main(void) {
         bd.input = backdrop;
         bd.sigma = FLUX_EFFECT_BLUR_SIGMA_MAX;
         flux_image *blurred = nullptr;
-        OT_EXPECT(flux_blur_filter_apply(blur_filter, frame, &bd, &blurred) == FLUX_OK);
+        OT_EXPECT(flux_blur_filter_apply(
+                      blur_filter, &(flux_blur_filter_apply_opts){
+                                       .frame = frame, .desc = &bd, .out = &blurred}) == FLUX_OK);
         OT_EXPECT(flux_frame_materialize_image(frame, blurred) == FLUX_OK);
 
         flux_color black = flux_color_rgba(0, 0, 0, 255);
@@ -461,7 +475,9 @@ int main(void) {
         bd.input = cross_target;
         bd.sigma = 4.0f;
         flux_image *blurred = nullptr;
-        OT_EXPECT(flux_blur_filter_apply(blur_filter, frame, &bd, &blurred) == FLUX_OK);
+        OT_EXPECT(flux_blur_filter_apply(
+                      blur_filter, &(flux_blur_filter_apply_opts){
+                                       .frame = frame, .desc = &bd, .out = &blurred}) == FLUX_OK);
         OT_EXPECT(flux_image_format(blurred) == FLUX_FORMAT_RGBA8_UNORM);
         OT_EXPECT(flux_frame_materialize_image(frame, blurred) == FLUX_OK);
 

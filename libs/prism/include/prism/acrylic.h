@@ -94,10 +94,14 @@ prism_acrylic_filter_retain(prism_acrylic_filter *filter);
 
 PRISM_API void prism_acrylic_filter_release(prism_acrylic_filter *filter);
 
-PRISM_NODISCARD PRISM_API flux_result prism_acrylic_filter_apply(prism_acrylic_filter *filter,
-                                                                 flux_frame *frame,
-                                                                 const prism_acrylic_desc *desc,
-                                                                 prism_material_output *out);
+typedef struct prism_acrylic_filter_apply_opts {
+    flux_frame *frame;
+    const prism_acrylic_desc *desc;
+    prism_material_output *out;
+} prism_acrylic_filter_apply_opts;
+
+PRISM_NODISCARD PRISM_API flux_result prism_acrylic_filter_apply(
+    prism_acrylic_filter *filter, const prism_acrylic_filter_apply_opts *opts);
 
 #ifdef __cplusplus
 }

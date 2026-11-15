@@ -12,12 +12,12 @@ static const lens_input IN0 = {.display_size = {800, 600}, .dt_seconds = 0.016f}
 /*  Many nodes force store growth beyond the default 256 slots        */
 /* ------------------------------------------------------------------ */
 static void test_many_nodes(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     /* frame 1: create 500 labels */
     lens_begin(ui, &IN0);
-    lens_column_begin(ui, NULL);
+    lens_column_begin(ui, nullptr);
     for (int i = 0; i < 500; i++) {
         char lbl[32];
         snprintf(lbl, sizeof lbl, "item_%d", i);
@@ -27,10 +27,10 @@ static void test_many_nodes(void) {
     lens_test_end(ui);
 
     lens_node *root = lens_root(ui);
-    OT_EXPECT(root != NULL);
+    OT_EXPECT(root != nullptr);
     /* first child of root is the column; its first child is the first label */
     lens_node *col = lens_node_first_child(root);
-    OT_EXPECT(col != NULL);
+    OT_EXPECT(col != nullptr);
     int count = 0;
     for (lens_node *c = lens_node_first_child(col); c; c = lens_node_next_sibling(c))
         count++;
@@ -38,7 +38,7 @@ static void test_many_nodes(void) {
 
     /* frame 2: all 500 still present (stable identity) */
     lens_begin(ui, &IN0);
-    lens_column_begin(ui, NULL);
+    lens_column_begin(ui, nullptr);
     for (int i = 0; i < 500; i++) {
         char lbl[32];
         snprintf(lbl, sizeof lbl, "item_%d", i);
@@ -57,13 +57,13 @@ static void test_many_nodes(void) {
 /*  are silently ignored. We verify the tree stops growing.           */
 /* ------------------------------------------------------------------ */
 static void test_deep_nesting(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     /* 50-deep: should succeed */
     lens_begin(ui, &IN0);
     for (int i = 0; i < 50; i++)
-        lens_column_begin(ui, NULL);
+        lens_column_begin(ui, nullptr);
     lens_label(ui, &(lens_label_opts){.text = "deep"});
     for (int i = 0; i < 50; i++)
         lens_close(ui);
@@ -81,7 +81,7 @@ static void test_deep_nesting(void) {
     /* 70-deep: pushes beyond 64 stack entries fail and set overflow. */
     lens_begin(ui, &IN0);
     for (int i = 0; i < 70; i++)
-        lens_column_begin(ui, NULL);
+        lens_column_begin(ui, nullptr);
     lens_label(ui, &(lens_label_opts){.text = "too deep"});
     for (int i = 0; i < 70; i++)
         lens_close(ui);
@@ -106,12 +106,12 @@ static void test_deep_nesting(void) {
 /*  Arena pressure: many draw commands per frame                      */
 /* ------------------------------------------------------------------ */
 static void test_arena_pressure(void) {
-    lens *ui = NULL;
+    lens *ui = nullptr;
     /* tiny arena to force pressure */
     OT_EXPECT(lens_create(&(lens_desc){.arena_bytes = 4096}, &ui) == FLUX_OK);
 
     lens_begin(ui, &IN0);
-    lens_column_begin(ui, NULL);
+    lens_column_begin(ui, nullptr);
     for (int i = 0; i < 200; i++) {
         /* each button pushes multiple draw commands and arena-copies text */
         if (lens_button(ui, &(lens_button_opts){.label = "X"}).clicked) { /* ignore */
@@ -128,7 +128,7 @@ static void test_arena_pressure(void) {
     OT_EXPECT(lens_overflowed(ui) == true);
 
     lens_begin(ui, &IN0);
-    lens_column_begin(ui, NULL);
+    lens_column_begin(ui, nullptr);
     (void)lens_button(ui, &(lens_button_opts){.label = "one"});
     lens_close(ui);
     lens_test_end(ui);
@@ -141,12 +141,12 @@ static void test_arena_pressure(void) {
 /*  Rapid node churn: enter / leave / re-enter many ids               */
 /* ------------------------------------------------------------------ */
 static void test_rapid_churn(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     /* Frame 1: 100 buttons */
     lens_begin(ui, &IN0);
-    lens_column_begin(ui, NULL);
+    lens_column_begin(ui, nullptr);
     for (int i = 0; i < 100; i++) {
         char lbl[16];
         snprintf(lbl, sizeof lbl, "b%d", i);
@@ -158,7 +158,7 @@ static void test_rapid_churn(void) {
 
     /* Frame 2: only even ids remain */
     lens_begin(ui, &IN0);
-    lens_column_begin(ui, NULL);
+    lens_column_begin(ui, nullptr);
     for (int i = 0; i < 100; i += 2) {
         char lbl[16];
         snprintf(lbl, sizeof lbl, "b%d", i);
@@ -170,7 +170,7 @@ static void test_rapid_churn(void) {
 
     /* Frame 3: restore all 100 */
     lens_begin(ui, &IN0);
-    lens_column_begin(ui, NULL);
+    lens_column_begin(ui, nullptr);
     for (int i = 0; i < 100; i++) {
         char lbl[16];
         snprintf(lbl, sizeof lbl, "b%d", i);
@@ -189,8 +189,8 @@ static void test_rapid_churn(void) {
 /*  Id collision: same label in same scope reuses the same node       */
 /* ------------------------------------------------------------------ */
 static void test_id_collision_reuses_node(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     lens_begin(ui, &IN0);
     lens_button(ui, &(lens_button_opts){.label = "Dup"});
@@ -206,8 +206,8 @@ static void test_id_collision_reuses_node(void) {
      * sibling — the tree holds one child. NOTE: this pins the
      * reconciler's merge behaviour as contract; a caller wanting two
      * buttons must disambiguate the id (lens_push_id). */
-    OT_EXPECT(second == NULL);
-    OT_EXPECT(first != NULL);
+    OT_EXPECT(second == nullptr);
+    OT_EXPECT(first != nullptr);
 
     lens_release(ui);
 }

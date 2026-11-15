@@ -12,7 +12,7 @@
  * so a caller's stack/loop-local label survives the post-end walk. */
 static const char *arena_strn(lens *ui, const char *s, size_t n) {
     if (!s)
-        return NULL;
+        return nullptr;
     char *c = flux_arena_alloc(&ui->arena, n + 1);
     if (!c) {
         lensi_set_overflow(ui);
@@ -28,8 +28,8 @@ void lensi_node_semantics(lens *ui, lens_node *n, lens_role role, const char *na
     if (!n)
         return;
     n->semantics.role = role;
-    n->semantics.name = name ? arena_strn(ui, name, lensi_label_visible_len(name)) : NULL;
-    n->semantics.value = value ? arena_strn(ui, value, strlen(value)) : NULL;
+    n->semantics.name = name ? arena_strn(ui, name, lensi_label_visible_len(name)) : nullptr;
+    n->semantics.value = value ? arena_strn(ui, value, strlen(value)) : nullptr;
     n->semantics.flags = flags;
 }
 

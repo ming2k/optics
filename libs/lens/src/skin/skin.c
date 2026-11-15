@@ -31,7 +31,7 @@ lens_skin_fn lens_default_skin(lens_widget_kind kind) {
     case LENS_WIDGET_TEXTEDIT:
         return lensi_skin_textedit;
     default:
-        return NULL;
+        return nullptr;
     }
 }
 
@@ -46,8 +46,8 @@ void lens_set_skin(lens *ui, lens_widget_kind kind, lens_skin_fn fn) {
             return;
         ui->user_skins[i] = fn;
         if (fn) {
-            ui->user_skins_userdata[i] = NULL;
-            ui->user_skins_user[i] = NULL;
+            ui->user_skins_userdata[i] = nullptr;
+            ui->user_skins_user[i] = nullptr;
         }
         return;
     }
@@ -57,8 +57,8 @@ void lens_set_skin(lens *ui, lens_widget_kind kind, lens_skin_fn fn) {
     if (fn) {
         /* The plain form supersedes a userdata registration for this kind;
          * clearing it keeps "last registration wins" predictable. */
-        ui->skins_userdata[kind] = NULL;
-        ui->skins_user[kind] = NULL;
+        ui->skins_userdata[kind] = nullptr;
+        ui->skins_user[kind] = nullptr;
     }
 }
 
@@ -72,7 +72,7 @@ void lens_set_skin_userdata(lens *ui, lens_widget_kind kind, lens_skin_userdata_
         ui->user_skins_userdata[i] = fn;
         ui->user_skins_user[i] = user;
         if (fn)
-            ui->user_skins[i] = NULL;
+            ui->user_skins[i] = nullptr;
         return;
     }
     if (kind >= LENS_WIDGET_KIND_COUNT)
@@ -80,7 +80,7 @@ void lens_set_skin_userdata(lens *ui, lens_widget_kind kind, lens_skin_userdata_
     ui->skins_userdata[kind] = fn;
     ui->skins_user[kind] = user;
     if (fn)
-        ui->skins[kind] = NULL; /* userdata form wins; see internal.h */
+        ui->skins[kind] = nullptr; /* userdata form wins; see internal.h */
 }
 
 void lensi_skin_emit(lens *ui, lens_node *n, const lens_widget_record *rec) {
@@ -107,7 +107,7 @@ void lensi_skin_emit(lens *ui, lens_node *n, const lens_widget_record *rec) {
             return;
         }
     }
-    lens_skin_fn fn = NULL;
+    lens_skin_fn fn = nullptr;
     if (rec->kind < LENS_WIDGET_KIND_COUNT)
         fn = ui->skins[rec->kind];
     if (!fn)
@@ -116,13 +116,14 @@ void lensi_skin_emit(lens *ui, lens_node *n, const lens_widget_record *rec) {
         fn(ui, n, rec);
 }
 
-void lens_skin_emit_user(lens *ui, lens_node *node, lens_widget_kind kind, lens_widget_record rec) {
-    if (!ui || !node)
+void lens_skin_emit_user(lens *ui, const lens_skin_emit_user_opts *opts) {
+    if (!ui || !opts || !opts->node)
         return;
-    if ((uint32_t)kind < (uint32_t)LENS_WIDGET_KIND_USER_BASE)
+    if ((uint32_t)opts->kind < (uint32_t)LENS_WIDGET_KIND_USER_BASE)
         return; /* built-ins own their emission; see lens.h */
-    rec.kind = kind;
-    lensi_skin_emit(ui, node, &rec);
+    lens_widget_record rec = opts->rec;
+    rec.kind = opts->kind;
+    lensi_skin_emit(ui, opts->node, &rec);
 }
 
 /* ---- per-node scratch (ADR-0061 item 9) ---------------------------- */
@@ -132,7 +133,7 @@ void lens_skin_emit_user(lens *ui, lens_node *node, lens_widget_kind kind, lens_
 
 float *lens_skin_scratch(lens *ui, lens_node *node) {
     (void)ui; /* the node already knows its owning context */
-    return node ? node->skin_scratch : NULL;
+    return node ? node->skin_scratch : nullptr;
 }
 
 /* ---- public emission seam (the skin's pen) --------------------------
@@ -141,43 +142,55 @@ float *lens_skin_scratch(lens *ui, lens_node *node) {
  * declarations in <lens/lens.h>. Built-in skins call lensi_drawlist_push
  * directly — they predate the seam and need its full field set. */
 
-void lens_skin_rect(lens *ui, lens_node *node, flux_rect rel, flux_color color, float radius) {
-    lensi_drawlist_push(
-        ui, node,
-        (lens_draw_cmd){.kind = LENS_DRAW_RECT, .rel = rel, .color = color, .radius = radius});
+void lens_skin_rect(lens *ui, const lens_skin_rect_opts *opts) {
+    if (!opts)
+        return;
+    lensi_drawlist_push(ui, opts->node,
+                        (lens_draw_cmd){.kind = LENS_DRAW_RECT,
+                                        .rel = opts->rel,
+                                        .color = opts->color,
+                                        .radius = opts->radius});
 }
 
-void lens_skin_border(lens *ui, lens_node *node, flux_rect rel, flux_color color, float radius,
-                      float width) {
-    lensi_drawlist_push(ui, node,
+void lens_skin_border(lens *ui, const lens_skin_border_opts *opts) {
+    if (!opts)
+        return;
+    lensi_drawlist_push(ui, opts->node,
                         (lens_draw_cmd){.kind = LENS_DRAW_BORDER,
-                                        .rel = rel,
-                                        .color = color,
-                                        .radius = radius,
-                                        .width = width});
+                                        .rel = opts->rel,
+                                        .color = opts->color,
+                                        .radius = opts->radius,
+                                        .width = opts->width});
 }
 
-void lens_skin_text(lens *ui, lens_node *node, flux_rect rel, flux_color color, const char *utf8,
-                    float size_px, float weight) {
-    lensi_drawlist_push(ui, node,
+void lens_skin_text(lens *ui, const lens_skin_text_opts *opts) {
+    if (!opts)
+        return;
+    lensi_drawlist_push(ui, opts->node,
                         (lens_draw_cmd){.kind = LENS_DRAW_TEXT,
-                                        .rel = rel,
-                                        .color = color,
-                                        .text = utf8,
-                                        .text_size = size_px,
-                                        .text_weight = weight});
+                                        .rel = opts->rel,
+                                        .color = opts->color,
+                                        .text = opts->utf8,
+                                        .text_size = opts->size_px,
+                                        .text_weight = opts->weight});
 }
 
-void lens_skin_icon(lens *ui, lens_node *node, flux_rect rel, flux_color color, float stroke,
-                    lens_icon_id icon) {
-    lensi_drawlist_push(
-        ui, node,
-        (lens_draw_cmd){
-            .kind = LENS_DRAW_ICON, .rel = rel, .color = color, .width = stroke, .icon_id = icon});
+void lens_skin_icon(lens *ui, const lens_skin_icon_opts *opts) {
+    if (!opts)
+        return;
+    lensi_drawlist_push(ui, opts->node,
+                        (lens_draw_cmd){.kind = LENS_DRAW_ICON,
+                                        .rel = opts->rel,
+                                        .color = opts->color,
+                                        .width = opts->stroke,
+                                        .icon_id = opts->icon});
 }
 
-void lens_skin_clip_push(lens *ui, lens_node *node, flux_rect rel) {
-    lensi_drawlist_push(ui, node, (lens_draw_cmd){.kind = LENS_DRAW_CLIP_PUSH, .rel = rel});
+void lens_skin_clip_push(lens *ui, const lens_skin_clip_push_opts *opts) {
+    if (!opts)
+        return;
+    lensi_drawlist_push(ui, opts->node,
+                        (lens_draw_cmd){.kind = LENS_DRAW_CLIP_PUSH, .rel = opts->rel});
 }
 
 void lens_skin_clip_pop(lens *ui, lens_node *node) {

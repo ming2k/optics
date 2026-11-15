@@ -265,16 +265,27 @@ PRISM_API void prism_backdrop_layer_filter_release(prism_backdrop_layer_filter *
  * The image is borrowed from the filter and remains valid until the same slot is
  * applied again, the filter is released, or the required slab extent changes. Do
  * not release it. */
+typedef struct prism_backdrop_layer_filter_apply_opts {
+    flux_frame *frame;
+    const prism_backdrop_layer_desc *desc;
+    prism_material_output *out;
+} prism_backdrop_layer_filter_apply_opts;
+
 PRISM_NODISCARD PRISM_API flux_result prism_backdrop_layer_filter_apply(
-    prism_backdrop_layer_filter *filter, flux_frame *frame, const prism_backdrop_layer_desc *desc,
-    prism_material_output *out);
+    prism_backdrop_layer_filter *filter, const prism_backdrop_layer_filter_apply_opts *opts);
 
 /* Reads the glass statistics this frame slot last submitted (see
  * prism_liquid_glass_filter_stats; group i of the stats aligns with group
  * i of that submission's glass array). */
+typedef struct prism_backdrop_layer_filter_stats_opts {
+    flux_frame *frame;
+    prism_backdrop_stat *out;
+    uint32_t max_groups;
+    uint32_t *out_count;
+} prism_backdrop_layer_filter_stats_opts;
+
 PRISM_NODISCARD PRISM_API flux_result prism_backdrop_layer_filter_stats(
-    prism_backdrop_layer_filter *filter, flux_frame *frame, prism_backdrop_stat *out,
-    uint32_t max_groups, uint32_t *out_count);
+    prism_backdrop_layer_filter *filter, const prism_backdrop_layer_filter_stats_opts *opts);
 
 #ifdef __cplusplus
 }

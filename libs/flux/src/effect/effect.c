@@ -750,14 +750,28 @@ static flux_result record_blur_dispatch(effect_state *st, flux_device *d, VkComm
     };
     uint32_t gx = (in->width + EFFECT_BLUR_WG - 1) / EFFECT_BLUR_WG;
     uint32_t gy = (in->height + EFFECT_BLUR_WG - 1) / EFFECT_BLUR_WG;
-    flux_compute_dispatch(cmd, st->blur_pipelines[is16f ? 1 : 0], &pc, sizeof(pc), gx, gy, 1);
+    flux_compute_dispatch(
+        &(flux_compute_dispatch_opts){.cmd = cmd,
+                                      .pipeline = st->blur_pipelines[is16f ? 1 : 0],
+                                      .push_constants = &pc,
+                                      .push_bytes = sizeof(pc),
+                                      .group_x = gx,
+                                      .group_y = gy,
+                                      .group_z = 1});
 
     barrier_compute_write_to_read(cmd, intermediate->image);
 
     pc.in_handle = intermediate->bindless;
     pc.out_handle = output->bindless_storage;
     pc.axis = 1u;
-    flux_compute_dispatch(cmd, st->blur_pipelines[is16f ? 1 : 0], &pc, sizeof(pc), gx, gy, 1);
+    flux_compute_dispatch(
+        &(flux_compute_dispatch_opts){.cmd = cmd,
+                                      .pipeline = st->blur_pipelines[is16f ? 1 : 0],
+                                      .push_constants = &pc,
+                                      .push_bytes = sizeof(pc),
+                                      .group_x = gx,
+                                      .group_y = gy,
+                                      .group_z = 1});
 
     barrier_compute_write_to_read(cmd, output->image);
     return FLUX_OK;
@@ -767,10 +781,12 @@ static flux_result record_blur_dispatch(effect_state *st, flux_device *d, VkComm
 /*  Public: flux_effect_blur                                          */
 /* ------------------------------------------------------------------ */
 
-flux_result flux_effect_blur(VkCommandBuffer cmd, const flux_effect_blur_desc *desc,
-                             flux_image **out) {
-    if (!cmd || !desc || !out)
+flux_result flux_effect_blur(const flux_effect_blur_opts *opts) {
+    if (!opts || !opts->cmd || !opts->desc || !opts->out)
         return FLUX_ERROR_INVALID_ARGUMENT;
+    VkCommandBuffer cmd = opts->cmd;
+    const flux_effect_blur_desc *desc = opts->desc;
+    flux_image **out = opts->out;
     if (desc->type != FLUX_TYPE_EFFECT_BLUR_DESC) {
         FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "desc->type != FLUX_TYPE_EFFECT_BLUR_DESC");
         return FLUX_ERROR_INVALID_ARGUMENT;
@@ -909,29 +925,49 @@ static flux_result record_shadow_dispatch(effect_state *st, flux_device *d, VkCo
     flux_compute_pipeline *pipeline = st->shadow_pipelines[is16f ? 1 : 0];
 
     /* Pass 0: horizontal Gaussian over the mask alpha → ping. */
-    flux_compute_dispatch(cmd, pipeline, &pc, sizeof(pc), gx, gy, 1);
+    flux_compute_dispatch(&(flux_compute_dispatch_opts){.cmd = cmd,
+                                                        .pipeline = pipeline,
+                                                        .push_constants = &pc,
+                                                        .push_bytes = sizeof(pc),
+                                                        .group_x = gx,
+                                                        .group_y = gy,
+                                                        .group_z = 1});
     barrier_compute_write_to_read(cmd, ping->image);
 
     /* Pass 1: vertical Gaussian over ping → pong. */
     pc.in_handle = ping->bindless;
     pc.out_handle = pong->bindless_storage;
     pc.mode = 1u;
-    flux_compute_dispatch(cmd, pipeline, &pc, sizeof(pc), gx, gy, 1);
+    flux_compute_dispatch(&(flux_compute_dispatch_opts){.cmd = cmd,
+                                                        .pipeline = pipeline,
+                                                        .push_constants = &pc,
+                                                        .push_bytes = sizeof(pc),
+                                                        .group_x = gx,
+                                                        .group_y = gy,
+                                                        .group_z = 1});
     barrier_compute_write_to_read(cmd, pong->image);
 
     /* Pass 2: combine — sample pong at (p - offset), tint, premultiply. */
     pc.in_handle = pong->bindless;
     pc.out_handle = output->bindless_storage;
     pc.mode = 2u;
-    flux_compute_dispatch(cmd, pipeline, &pc, sizeof(pc), gx, gy, 1);
+    flux_compute_dispatch(&(flux_compute_dispatch_opts){.cmd = cmd,
+                                                        .pipeline = pipeline,
+                                                        .push_constants = &pc,
+                                                        .push_bytes = sizeof(pc),
+                                                        .group_x = gx,
+                                                        .group_y = gy,
+                                                        .group_z = 1});
     barrier_compute_write_to_read(cmd, output->image);
     return FLUX_OK;
 }
 
-flux_result flux_effect_shadow(VkCommandBuffer cmd, const flux_effect_shadow_desc *desc,
-                               flux_image **out) {
-    if (!cmd || !desc || !out)
+flux_result flux_effect_shadow(const flux_effect_shadow_opts *opts) {
+    if (!opts || !opts->cmd || !opts->desc || !opts->out)
         return FLUX_ERROR_INVALID_ARGUMENT;
+    VkCommandBuffer cmd = opts->cmd;
+    const flux_effect_shadow_desc *desc = opts->desc;
+    flux_image **out = opts->out;
     if (desc->type != FLUX_TYPE_EFFECT_SHADOW_DESC) {
         FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "desc->type != FLUX_TYPE_EFFECT_SHADOW_DESC");
         return FLUX_ERROR_INVALID_ARGUMENT;
@@ -1109,7 +1145,7 @@ static flux_result blur_filter_ensure_slot(flux_blur_filter *filter, uint32_t in
 
     if (slot->output)
         flux_image_release(slot->output);
-    *slot = (blur_filter_slot){0};
+    *slot = (blur_filter_slot){};
 
     flux_result r = flux_image_create_compute_writable(filter->device, input->width, input->height,
                                                        storage_format, &slot->output);
@@ -1178,7 +1214,13 @@ static void record_backdrop_pass(effect_state *st, flux_device *device, VkComman
         pc.region_height = output->height;
         uint32_t gx = (output->width + EFFECT_BLUR_WG - 1u) / EFFECT_BLUR_WG;
         uint32_t gy = (output->height + EFFECT_BLUR_WG - 1u) / EFFECT_BLUR_WG;
-        flux_compute_dispatch(cmd, pipeline, &pc, sizeof(pc), gx, gy, 1u);
+        flux_compute_dispatch(&(flux_compute_dispatch_opts){.cmd = cmd,
+                                                            .pipeline = pipeline,
+                                                            .push_constants = &pc,
+                                                            .push_bytes = sizeof(pc),
+                                                            .group_x = gx,
+                                                            .group_y = gy,
+                                                            .group_z = 1u});
     } else {
         bool dispatched = false;
         for (uint32_t i = 0; i < region_count; ++i) {
@@ -1190,7 +1232,13 @@ static void record_backdrop_pass(effect_state *st, flux_device *device, VkComman
                 barrier_compute_write_to_write(cmd, output->image);
             uint32_t gx = (pc.region_width + EFFECT_BLUR_WG - 1u) / EFFECT_BLUR_WG;
             uint32_t gy = (pc.region_height + EFFECT_BLUR_WG - 1u) / EFFECT_BLUR_WG;
-            flux_compute_dispatch(cmd, pipeline, &pc, sizeof(pc), gx, gy, 1u);
+            flux_compute_dispatch(&(flux_compute_dispatch_opts){.cmd = cmd,
+                                                                .pipeline = pipeline,
+                                                                .push_constants = &pc,
+                                                                .push_bytes = sizeof(pc),
+                                                                .group_x = gx,
+                                                                .group_y = gy,
+                                                                .group_z = 1u});
             dispatched = true;
         }
     }
@@ -1227,10 +1275,13 @@ static void record_backdrop_filter(effect_state *st, flux_device *device, VkComm
                          regions, region_count, is16f);
 }
 
-flux_result flux_blur_filter_apply(flux_blur_filter *filter, flux_frame *frame,
-                                   const flux_effect_blur_desc *desc, flux_image **out) {
-    if (!filter || !frame || !desc || !out)
+flux_result flux_blur_filter_apply(flux_blur_filter *filter,
+                                   const flux_blur_filter_apply_opts *opts) {
+    if (!filter || !opts || !opts->frame || !opts->desc || !opts->out)
         return FLUX_ERROR_INVALID_ARGUMENT;
+    flux_frame *frame = opts->frame;
+    const flux_effect_blur_desc *desc = opts->desc;
+    flux_image **out = opts->out;
     *out = nullptr;
     if (desc->type != FLUX_TYPE_EFFECT_BLUR_DESC || !desc->input) {
         FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "invalid reusable blur descriptor");
@@ -1354,10 +1405,12 @@ flux_result flux_blur_filter_apply(flux_blur_filter *filter, flux_frame *frame,
     return FLUX_OK;
 }
 
-flux_result flux_blur_filter_current(flux_blur_filter *filter, flux_frame *frame,
-                                     flux_image **out) {
-    if (!filter || !frame || !out)
+flux_result flux_blur_filter_current(flux_blur_filter *filter,
+                                     const flux_blur_filter_current_opts *opts) {
+    if (!filter || !opts || !opts->frame || !opts->out)
         return FLUX_ERROR_INVALID_ARGUMENT;
+    flux_frame *frame = opts->frame;
+    flux_image **out = opts->out;
     *out = nullptr;
     if (!frame->surface || frame->state != FLUX_FRAME_STATE_RECORDING || frame->pass_active) {
         FLUX_FAIL(FLUX_ERROR_INVALID_STATE,
@@ -1463,7 +1516,7 @@ static flux_result shadow_filter_ensure_slot(flux_shadow_filter *filter, uint32_
 
     if (slot->output)
         flux_image_release(slot->output);
-    *slot = (shadow_filter_slot){0};
+    *slot = (shadow_filter_slot){};
 
     flux_result r = flux_image_create_compute_writable(filter->device, input->width, input->height,
                                                        storage_format, &slot->output);
@@ -1475,10 +1528,13 @@ static flux_result shadow_filter_ensure_slot(flux_shadow_filter *filter, uint32_
     return FLUX_OK;
 }
 
-flux_result flux_shadow_filter_apply(flux_shadow_filter *filter, flux_frame *frame,
-                                     const flux_effect_shadow_desc *desc, flux_image **out) {
-    if (!filter || !frame || !desc || !out)
+flux_result flux_shadow_filter_apply(flux_shadow_filter *filter,
+                                     const flux_shadow_filter_apply_opts *opts) {
+    if (!filter || !opts || !opts->frame || !opts->desc || !opts->out)
         return FLUX_ERROR_INVALID_ARGUMENT;
+    flux_frame *frame = opts->frame;
+    const flux_effect_shadow_desc *desc = opts->desc;
+    flux_image **out = opts->out;
     *out = nullptr;
     if (desc->type != FLUX_TYPE_EFFECT_SHADOW_DESC || !desc->input) {
         FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "invalid reusable shadow descriptor");

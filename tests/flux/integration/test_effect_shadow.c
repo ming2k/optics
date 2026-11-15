@@ -121,7 +121,8 @@ typedef struct shadow_record_ctx {
 
 static void record_shadow_and_readback(VkCommandBuffer cmd, void *user) {
     shadow_record_ctx *ctx = user;
-    OT_EXPECT(flux_effect_shadow(cmd, ctx->desc, ctx->out) == FLUX_OK);
+    OT_EXPECT(flux_effect_shadow(&(flux_effect_shadow_opts){
+                  .cmd = cmd, .desc = ctx->desc, .out = ctx->out}) == FLUX_OK);
     OT_EXPECT(*ctx->out != nullptr);
 
     VkImage img = flux_image_vk_image(*ctx->out);
@@ -175,12 +176,16 @@ int main(void) {
     {
         flux_image *out = nullptr;
         flux_effect_shadow_desc d = FLUX_EFFECT_SHADOW_DESC_INIT;
-        OT_EXPECT(flux_effect_shadow(nullptr, &d, &out) == FLUX_ERROR_INVALID_ARGUMENT);
+        OT_EXPECT(flux_effect_shadow(&(flux_effect_shadow_opts){
+                      .cmd = nullptr, .desc = &d, .out = &out}) == FLUX_ERROR_INVALID_ARGUMENT);
         OT_EXPECT(out == nullptr);
-        OT_EXPECT(flux_effect_shadow((VkCommandBuffer)1, &d, &out) == FLUX_ERROR_INVALID_ARGUMENT);
+        OT_EXPECT(flux_effect_shadow(&(flux_effect_shadow_opts){
+                      .cmd = (VkCommandBuffer)1, .desc = &d, .out = &out}) ==
+                  FLUX_ERROR_INVALID_ARGUMENT);
         OT_EXPECT(out == nullptr);
         d.input = (flux_image *)1;
-        OT_EXPECT(flux_effect_shadow((VkCommandBuffer)1, &d, nullptr) ==
+        OT_EXPECT(flux_effect_shadow(&(flux_effect_shadow_opts){
+                      .cmd = (VkCommandBuffer)1, .desc = &d, .out = nullptr}) ==
                   FLUX_ERROR_INVALID_ARGUMENT);
     }
     {
@@ -189,7 +194,9 @@ int main(void) {
         flux_effect_shadow_desc d = FLUX_EFFECT_SHADOW_DESC_INIT;
         d.input = (flux_image *)1;
         d.type = FLUX_TYPE_EFFECT_BLUR_DESC;
-        OT_EXPECT(flux_effect_shadow((VkCommandBuffer)1, &d, &out) == FLUX_ERROR_INVALID_ARGUMENT);
+        OT_EXPECT(flux_effect_shadow(&(flux_effect_shadow_opts){
+                      .cmd = (VkCommandBuffer)1, .desc = &d, .out = &out}) ==
+                  FLUX_ERROR_INVALID_ARGUMENT);
         OT_EXPECT(out == nullptr);
     }
     {
@@ -198,10 +205,14 @@ int main(void) {
         flux_effect_shadow_desc d = FLUX_EFFECT_SHADOW_DESC_INIT;
         d.input = (flux_image *)1;
         d.alpha = (0.0f / 0.0f);
-        OT_EXPECT(flux_effect_shadow((VkCommandBuffer)1, &d, &out) == FLUX_ERROR_INVALID_ARGUMENT);
+        OT_EXPECT(flux_effect_shadow(&(flux_effect_shadow_opts){
+                      .cmd = (VkCommandBuffer)1, .desc = &d, .out = &out}) ==
+                  FLUX_ERROR_INVALID_ARGUMENT);
         d.alpha = 1.0f;
         d.offset_x = (1.0f / 0.0f);
-        OT_EXPECT(flux_effect_shadow((VkCommandBuffer)1, &d, &out) == FLUX_ERROR_INVALID_ARGUMENT);
+        OT_EXPECT(flux_effect_shadow(&(flux_effect_shadow_opts){
+                      .cmd = (VkCommandBuffer)1, .desc = &d, .out = &out}) ==
+                  FLUX_ERROR_INVALID_ARGUMENT);
     }
 
     flux_device *d = flux_test_make_headless_device();
@@ -406,21 +417,29 @@ int main(void) {
         sd.tint_green = 1.0f;
         sd.tint_blue = 1.0f;
         sd.alpha = 1.0f;
-        OT_EXPECT(flux_shadow_filter_apply(filter, nullptr, &sd, &out) ==
+        OT_EXPECT(flux_shadow_filter_apply(filter,
+                                           &(flux_shadow_filter_apply_opts){
+                                               .frame = nullptr, .desc = &sd, .out = &out}) ==
                   FLUX_ERROR_INVALID_ARGUMENT);
         OT_EXPECT(out == nullptr);
 
         /* Wrong descriptor type is rejected. */
         flux_effect_shadow_desc wrong = sd;
         wrong.type = FLUX_TYPE_EFFECT_BLUR_DESC;
-        OT_EXPECT(flux_shadow_filter_apply(filter, (flux_frame *)1, &wrong, &out) ==
-                  FLUX_ERROR_INVALID_ARGUMENT);
+        OT_EXPECT(
+            flux_shadow_filter_apply(filter,
+                                     &(flux_shadow_filter_apply_opts){
+                                         .frame = (flux_frame *)1, .desc = &wrong, .out = &out}) ==
+            FLUX_ERROR_INVALID_ARGUMENT);
         OT_EXPECT(out == nullptr);
 
         /* Non-finite parameters are rejected before any dispatch. */
         flux_effect_shadow_desc nan_desc = sd;
         nan_desc.offset_y = (0.0f / 0.0f);
-        OT_EXPECT(flux_shadow_filter_apply(filter, (flux_frame *)1, &nan_desc, &out) ==
+        OT_EXPECT(flux_shadow_filter_apply(
+                      filter, &(flux_shadow_filter_apply_opts){.frame = (flux_frame *)1,
+                                                               .desc = &nan_desc,
+                                                               .out = &out}) ==
                   FLUX_ERROR_INVALID_ARGUMENT);
         OT_EXPECT(out == nullptr);
 

@@ -357,7 +357,13 @@ static inline void prism_glass_record_batch(VkCommandBuffer command,
     };
     uint32_t gx = (batch->width + PRISM_GLASS_WG - 1u) / PRISM_GLASS_WG;
     uint32_t gy = (batch->height + PRISM_GLASS_WG - 1u) / PRISM_GLASS_WG;
-    flux_compute_dispatch(command, pipeline, &push, sizeof(push), gx, gy, 1u);
+    flux_compute_dispatch(&(flux_compute_dispatch_opts){.cmd = command,
+                                                        .pipeline = pipeline,
+                                                        .push_constants = &push,
+                                                        .push_bytes = sizeof(push),
+                                                        .group_x = gx,
+                                                        .group_y = gy,
+                                                        .group_z = 1u});
 }
 
 #endif /* PRISM_GLASS_DISPATCH_H */

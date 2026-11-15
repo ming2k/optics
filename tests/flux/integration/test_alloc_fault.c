@@ -70,9 +70,9 @@ int main(void) {
         bd.size = 256;
         bd.usage = FLUX_BUFFER_USAGE_UNIFORM;
         bd.location = FLUX_BUFFER_HOST_VISIBLE;
-        flux_buffer *b = NULL;
+        flux_buffer *b = nullptr;
         OT_EXPECT(flux_buffer_create(d, &bd, &b) == FLUX_ERROR_OUT_OF_MEMORY);
-        OT_EXPECT(b == NULL);
+        OT_EXPECT(b == nullptr);
 
         flux_error_info err;
         flux_get_last_error(&err);
@@ -99,7 +99,7 @@ int main(void) {
         bd.size = 256;
         bd.usage = FLUX_BUFFER_USAGE_UNIFORM;
         bd.location = FLUX_BUFFER_HOST_VISIBLE;
-        flux_buffer *empty = NULL;
+        flux_buffer *empty = nullptr;
         OT_EXPECT(flux_buffer_create(d, &bd, &empty) == FLUX_OK);
         flux_buffer_release(empty);
 
@@ -111,17 +111,17 @@ int main(void) {
             .height = 8,
             .format = FLUX_FORMAT_RGBA8_UNORM,
         };
-        flux_image *sweeper = NULL;
+        flux_image *sweeper = nullptr;
         OT_EXPECT(flux_image_create(d, &sweep_desc, &sweeper) == FLUX_OK);
 
         flux_memory_stats before;
         flux_device_memory_stats(d, &before);
 
         fail_next(1);
-        flux_image *img = NULL;
+        flux_image *img = nullptr;
         flux_result r = flux_image_create(d, &sweep_desc, &img);
         OT_EXPECT(r == FLUX_OK); /* retry after reclaim recovered */
-        OT_EXPECT(img != NULL);
+        OT_EXPECT(img != nullptr);
         OT_EXPECT(atomic_load(&g_injected_calls) > 0);
 
         /* No unbounded growth: the retried block replaced the reclaimed
@@ -146,9 +146,9 @@ int main(void) {
         bd.size = 16u * 1024 * 1024;
         bd.usage = FLUX_BUFFER_USAGE_STORAGE;
         bd.location = FLUX_BUFFER_GPU_LOCAL;
-        flux_buffer *big = NULL;
+        flux_buffer *big = nullptr;
         OT_EXPECT(flux_buffer_create(d, &bd, &big) == FLUX_ERROR_OUT_OF_MEMORY);
-        OT_EXPECT(big == NULL);
+        OT_EXPECT(big == nullptr);
 
         flux_memory_stats after;
         flux_device_memory_stats(d, &after);

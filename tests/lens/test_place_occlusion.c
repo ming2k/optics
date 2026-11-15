@@ -31,8 +31,8 @@ static lens_place_opts card_opts(flux_rect rect) {
 }
 
 static void test_popup_card_occludes_base_widget(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     bool base_clicked = false;
     bool card_clicked = false;
@@ -78,8 +78,8 @@ static lens_place_opts popup_at(const char *id, flux_rect rect) {
 }
 
 static void test_later_popup_occludes_earlier_same_band(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     const flux_rect R1 = {0, 0, 200, 200};
     const flux_rect R2 = {100, 0, 200, 200};
@@ -100,7 +100,7 @@ static void test_later_popup_occludes_earlier_same_band(void) {
         }                                                                                          \
     } while (0)
 
-    lens_response first_r = {0}, second_r = {0};
+    lens_response first_r = {}, second_r = {};
     lens_begin(ui, &IN0);
     BUILD_TWO();
     lens_test_end(ui);

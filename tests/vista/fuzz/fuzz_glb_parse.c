@@ -27,15 +27,24 @@
 
 #include <stdint.h>
 
+static flux_result parse_glb(const void *bytes, size_t size, vista_scene_data **out) {
+    return vista_parse_glb(&(vista_parse_glb_opts){.bytes = bytes, .byte_count = size, .out = out});
+}
+
+static bool data_bounds(const vista_scene_data *data, flux_vec3 *out_min, flux_vec3 *out_max) {
+    return vista_scene_data_bounds(
+        data, &(vista_scene_data_bounds_opts){.out_min = out_min, .out_max = out_max});
+}
+
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
-    vista_scene_data *parsed = NULL;
-    flux_result r = vista_parse_glb(data, size, &parsed);
+    vista_scene_data *parsed = nullptr;
+    flux_result r = parse_glb(data, size, &parsed);
     if (parsed) {
         /* Walk the accessors too: primitive_count must be consistent
          * with what bounds() reports (a torn parse must not report
          * primitives with no finite geometry). */
         flux_vec3 bmin, bmax;
-        bool any_bounds = vista_scene_data_bounds(parsed, &bmin, &bmax);
+        bool any_bounds = data_bounds(parsed, &bmin, &bmax);
         bool inverted = any_bounds && !(bmin.x <= bmax.x && bmin.y <= bmax.y && bmin.z <= bmax.z);
         vista_scene_data_free(parsed);
         if (inverted)

@@ -10,8 +10,8 @@ static const lens_input IN0 = {.display_size = {400, 300}, .dt_seconds = 0.016f}
 /* ---- R4: central keyboard activation -------------------------------- */
 
 static void test_return_activates_focused_button(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     lens_begin(ui, &IN0);
     lens_button(ui, &(lens_button_opts){.label = "OK"});
@@ -30,8 +30,8 @@ static void test_return_activates_focused_button(void) {
 }
 
 static void test_space_toggles_focused_checkbox(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     bool on = false;
 
     lens_begin(ui, &IN0);
@@ -73,8 +73,8 @@ static void collect_roles(const lens_semantics *sem, flux_rect bounds, lens_id i
 }
 
 static void test_roles_are_wired(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     role_seen seen;
 
     float val = 0.5f;
@@ -83,7 +83,7 @@ static void test_roles_are_wired(void) {
                 &(lens_slider_opts){.label = "Volume", .value = &val, .min = 0.0f, .max = 1.0f});
     lens_button(ui, &(lens_button_opts){.label = "More", .variant = LENS_BUTTON_LINK});
     lens_test_end(ui);
-    seen = (role_seen){0};
+    seen = (role_seen){};
     lens_accessibility_walk(ui, collect_roles, &seen);
     OT_EXPECT(seen.progress);
     OT_EXPECT(seen.link);
@@ -94,8 +94,8 @@ static void test_roles_are_wired(void) {
 /* ---- R3: prev-band truncation flags overflow ------------------------- */
 
 static void test_band_overflow_is_flagged(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     /* Owned metadata must preserve more than 16 overlays without truncation. */
     lens_begin(ui, &IN0);
@@ -122,8 +122,8 @@ static void test_band_overflow_is_flagged(void) {
 /* ---- R6: key_count is clamped to the keys[] capacity ----------------- */
 
 static void test_key_count_clamped(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     lens_begin(ui, &IN0);
     lens_button(ui, &(lens_button_opts){.label = "OK"});
@@ -159,8 +159,8 @@ static void build_field(lens *ui, char *buf, size_t cap) {
 }
 
 static void test_paste_bound_to_requester(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     char buf[64] = "";
 
     /* focus the field (press at its top-left area) */
@@ -176,7 +176,7 @@ static void test_paste_bound_to_requester(void) {
     build_field(ui, buf, sizeof buf);
     lens_request_paste(ui);
     lens_test_end(ui);
-    lens_paste(ui, "zz", 2);
+    lens_paste(ui, &(lens_paste_opts){.utf8 = "zz", .len = 2});
     lens_begin(ui, &IN0);
     build_field(ui, buf, sizeof buf);
     lens_test_end(ui);
@@ -192,7 +192,7 @@ static void test_paste_bound_to_requester(void) {
     click_at(ui, 350, 280);
     build_field(ui, buf, sizeof buf);
     lens_test_end(ui);
-    lens_paste(ui, "QQ", 2);
+    lens_paste(ui, &(lens_paste_opts){.utf8 = "QQ", .len = 2});
     lens_begin(ui, &IN0);
     build_field(ui, buf, sizeof buf);
     lens_test_end(ui);
@@ -204,8 +204,8 @@ static void test_paste_bound_to_requester(void) {
 /* ---- O5: reaped nodes release interaction-owned ids ------------------- */
 
 static void test_reap_reconciles_focus_and_capture(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     /* capture: press the button (active_id set) */
     lens_begin(ui, &IN0);
@@ -238,8 +238,8 @@ static void test_reap_reconciles_focus_and_capture(void) {
 /* ---- O7: a node re-entering from the grace window is not clickable ---- */
 
 static void test_grace_reentry_not_interactive(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     /* two frames to settle prev geometry */
     for (int f = 0; f < 2; f++) {
@@ -290,15 +290,15 @@ static void test_grace_reentry_not_interactive(void) {
 /* ---- C6: empty-label ids unify --------------------------------------- */
 
 static void test_empty_label_current_id_matches(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     lens_begin(ui, &IN0);
     lens_button(ui, &(lens_button_opts){.label = ""});
     lens_test_end(ui);
     /* lens_current_id with an empty label must resolve the node the build
      * produced (the sentinel hash), not the raw scope id. */
-    OT_EXPECT(lens_find(ui, lens_current_id(ui, "")) != NULL);
+    OT_EXPECT(lens_find(ui, lens_current_id(ui, "")) != nullptr);
 
     lens_release(ui);
 }

@@ -30,7 +30,7 @@ typedef struct ex_track {
 } ex_track;
 
 static inline void ex_handle(ex_track *tab, const char *name, lens_response r) {
-    ex_track *t = NULL, *slot = NULL;
+    ex_track *t = nullptr, *slot = nullptr;
     for (int i = 0; i < EX_TRACK_MAX; i++) {
         if (tab[i].used) {
             if (strcmp(tab[i].name, name) == 0) {

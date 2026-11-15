@@ -276,8 +276,15 @@ void flux_observe_destroy(flux_device *d) {
 /*  Accounting                                                        */
 /* ------------------------------------------------------------------ */
 
-bool flux_observe_acquire(flux_device *d, flux_scope scope, flux_observe_lifetime lifetime,
-                          const char *kind, const char *owner, uint64_t bytes, const char *site) {
+bool flux_observe_acquire(flux_device *d, const flux_observe_acquire_opts *opts) {
+    if (!opts)
+        return false;
+    flux_scope scope = opts->scope;
+    flux_observe_lifetime lifetime = opts->lifetime;
+    const char *kind = opts->kind;
+    const char *owner = opts->owner;
+    uint64_t bytes = opts->bytes;
+    const char *site = opts->site;
     bool created = false;
     flux_observe_state *state = ledger_for(d, scope);
     flux_observe_row *r = row_resolve(state, scope, lifetime, kind, owner, site, &created);
@@ -308,10 +315,13 @@ bool flux_observe_acquire(flux_device *d, flux_scope scope, flux_observe_lifetim
     return true;
 }
 
-void flux_observe_release(flux_device *d, flux_scope scope, const char *kind, const char *owner,
-                          uint64_t bytes) {
-    if (!kind || !owner)
+void flux_observe_release(flux_device *d, const flux_observe_release_opts *opts) {
+    if (!opts || !opts->kind || !opts->owner)
         return;
+    flux_scope scope = opts->scope;
+    const char *kind = opts->kind;
+    const char *owner = opts->owner;
+    uint64_t bytes = opts->bytes;
     if ((uint32_t)scope >= (uint32_t)FLUX_SCOPE_COUNT)
         return;
     flux_observe_state *s = ledger_for(d, scope);
@@ -431,10 +441,14 @@ flux_observe_response flux_observe_report(const flux_device *d,
     return resp;
 }
 
-flux_result flux_observe_read_counters(const flux_device *d, flux_scope scope, const char *kind,
-                                       const char *owner, flux_observe_counters *out) {
-    if (!kind || !owner || !out)
+flux_result flux_observe_read_counters(const flux_device *d,
+                                       const flux_observe_read_counters_opts *opts) {
+    if (!opts || !opts->kind || !opts->owner || !opts->out)
         return FLUX_ERROR_INVALID_ARGUMENT;
+    flux_scope scope = opts->scope;
+    const char *kind = opts->kind;
+    const char *owner = opts->owner;
+    flux_observe_counters *out = opts->out;
     const flux_observe_state *s;
     if (scope == FLUX_SCOPE_PROCESS) {
         if (!atomic_load_explicit(&g_process_observe_ready, memory_order_acquire))

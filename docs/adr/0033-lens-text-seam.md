@@ -9,6 +9,7 @@ date: 2026-07-21
 
 - Status: Accepted
 - Date: 2026-07-21
+- Amended: 2026-11-15 — `flux_text` was renamed `glyph`; `lens_text_measure_ex` was merged into the single-descriptor `lens_text_measure_opts` API.
 - Scope: lens (L2 toolkit). Defines the text rendering and shaping
   boundary.
 

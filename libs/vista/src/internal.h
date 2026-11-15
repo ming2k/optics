@@ -17,7 +17,7 @@
 /*  JSON value tree                                                   */
 /* ------------------------------------------------------------------ */
 
-typedef enum { J_NULL, J_BOOL, J_NUM, J_STR, J_ARR, J_OBJ } jkind;
+typedef enum : uint32_t { J_NULL, J_BOOL, J_NUM, J_STR, J_ARR, J_OBJ } jkind;
 
 typedef struct jv {
     jkind kind;
@@ -96,13 +96,13 @@ typedef struct vista_node {
     char *name;
 } vista_node;
 
-typedef enum vista_animation_path {
+typedef enum vista_animation_path : uint32_t {
     SG_ANIM_TRANSLATION,
     SG_ANIM_ROTATION,
     SG_ANIM_SCALE,
 } vista_animation_path;
 
-typedef enum vista_interpolation {
+typedef enum vista_interpolation : uint32_t {
     SG_INTERP_LINEAR,
     SG_INTERP_STEP,
     SG_INTERP_CUBIC,

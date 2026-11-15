@@ -108,7 +108,7 @@ flux_result flux_render_plan_validate(const flux_render_plan *plan) {
      *   - a cycle is a dependency path back to itself. */
     for (uint32_t i = 0; i < plan->node_count; ++i) {
         for (uint32_t d = 0; d < plan->nodes[i].dependency_count; ++d) {
-            uint8_t state[FLUX_RENDER_PLAN_MAX_NODES] = {0};
+            uint8_t state[FLUX_RENDER_PLAN_MAX_NODES] = {};
             if (depends_on(plan, plan->nodes[i].dependencies[d], i, state))
                 return FLUX_ERROR_INVALID_STATE;
         }
@@ -124,7 +124,7 @@ flux_result flux_render_plan_validate(const flux_render_plan *plan) {
                     if (!is_writer(write->mode) ||
                         !same_resource(&read->resource, &write->resource))
                         continue;
-                    uint8_t state[FLUX_RENDER_PLAN_MAX_NODES] = {0};
+                    uint8_t state[FLUX_RENDER_PLAN_MAX_NODES] = {};
                     if (!depends_on(plan, i, j, state))
                         return FLUX_ERROR_INVALID_STATE;
                 }
@@ -141,7 +141,7 @@ flux_result flux_render_plan_validate(const flux_render_plan *plan) {
                     const flux_render_access *wb = &plan->nodes[j].accesses[b];
                     if (!is_writer(wb->mode) || !same_resource(&wa->resource, &wb->resource))
                         continue;
-                    uint8_t state[FLUX_RENDER_PLAN_MAX_NODES] = {0};
+                    uint8_t state[FLUX_RENDER_PLAN_MAX_NODES] = {};
                     if (!depends_on(plan, j, i, state))
                         return FLUX_ERROR_INVALID_STATE;
                 }

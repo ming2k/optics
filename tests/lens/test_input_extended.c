@@ -16,8 +16,8 @@ static const lens_input IN0 = {.display_size = {400, 300}, .dt_seconds = 0.016f}
 /*  Right / middle button generate their own click events             */
 /* ------------------------------------------------------------------ */
 static void test_right_and_middle_click(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     /* frame 1: button enters */
     lens_begin(ui, &IN0);
@@ -81,8 +81,8 @@ static void test_right_and_middle_click(void) {
 /*  Left+Right pressed together: left wins active capture             */
 /* ------------------------------------------------------------------ */
 static void test_multi_button_left_wins(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     /* frame 1: enter */
     lens_begin(ui, &IN0);
@@ -129,8 +129,8 @@ static void test_multi_button_left_wins(void) {
 /*  Drag outside, return inside, release → click                      */
 /* ------------------------------------------------------------------ */
 static void test_drag_back_inside_yields_click(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     /* frame 1: enter */
     lens_begin(ui, &IN0);
@@ -172,8 +172,8 @@ static void test_drag_back_inside_yields_click(void) {
 /*  (Nested scroll hot-routing is exercised in test_widgets.)         */
 /* ------------------------------------------------------------------ */
 static void test_wheel_scrolls_content(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     lens_begin(ui, &IN0);
     lens_size(ui, 0, 80);
@@ -215,8 +215,8 @@ static void test_wheel_scrolls_content(void) {
 /*  Shift+Tab moves focus backward                                    */
 /* ------------------------------------------------------------------ */
 static void test_shift_tab_reverse_focus(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     lens_input in = IN0;
 
@@ -276,8 +276,8 @@ static void test_shift_tab_reverse_focus(void) {
 /*  Function keys F1 through F12 (ADR-0099)                           */
 /* ------------------------------------------------------------------ */
 static void test_function_keys_f1_to_f12(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     for (int k = LENS_KEY_F1; k <= LENS_KEY_F12; k++) {
         lens_input in = IN0;

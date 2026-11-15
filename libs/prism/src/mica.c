@@ -268,7 +268,7 @@ static flux_result mica_ensure_slot(prism_mica_filter *filter, uint32_t index,
         return FLUX_OK;
     if (slot->output)
         flux_image_release(slot->output);
-    *slot = (mica_filter_slot){0};
+    *slot = (mica_filter_slot){};
     flux_result r =
         flux_image_create_compute_writable(filter->device, width, height, format, &slot->output);
     if (r != FLUX_OK)
@@ -413,7 +413,14 @@ static void mica_plan_record(void *raw, VkCommandBuffer cmd) {
         };
         uint32_t gx = (pc.region_width + PRISM_WG - 1u) / PRISM_WG;
         uint32_t gy = (pc.region_height + PRISM_WG - 1u) / PRISM_WG;
-        flux_compute_dispatch(cmd, filter->clear_pipelines[cls], &pc, sizeof(pc), gx, gy, 1);
+        flux_compute_dispatch(
+            &(flux_compute_dispatch_opts){.cmd = cmd,
+                                          .pipeline = filter->clear_pipelines[cls],
+                                          .push_constants = &pc,
+                                          .push_bytes = sizeof(pc),
+                                          .group_x = gx,
+                                          .group_y = gy,
+                                          .group_z = 1});
         barrier_compute_write_to_read_write(cmd, out_vk);
     } else {
         for (uint32_t i = 0; i < p->previous_count; ++i) {
@@ -429,7 +436,14 @@ static void mica_plan_record(void *raw, VkCommandBuffer cmd) {
             };
             uint32_t gx = (prev->width + PRISM_WG - 1u) / PRISM_WG;
             uint32_t gy = (prev->height + PRISM_WG - 1u) / PRISM_WG;
-            flux_compute_dispatch(cmd, filter->clear_pipelines[cls], &pc, sizeof(pc), gx, gy, 1);
+            flux_compute_dispatch(
+                &(flux_compute_dispatch_opts){.cmd = cmd,
+                                              .pipeline = filter->clear_pipelines[cls],
+                                              .push_constants = &pc,
+                                              .push_bytes = sizeof(pc),
+                                              .group_x = gx,
+                                              .group_y = gy,
+                                              .group_z = 1});
             barrier_compute_write_to_read_write(cmd, out_vk);
         }
         for (uint32_t i = 0; i < p->current_count; ++i) {
@@ -445,7 +459,14 @@ static void mica_plan_record(void *raw, VkCommandBuffer cmd) {
             };
             uint32_t gx = (cur->width + PRISM_WG - 1u) / PRISM_WG;
             uint32_t gy = (cur->height + PRISM_WG - 1u) / PRISM_WG;
-            flux_compute_dispatch(cmd, filter->clear_pipelines[cls], &pc, sizeof(pc), gx, gy, 1);
+            flux_compute_dispatch(
+                &(flux_compute_dispatch_opts){.cmd = cmd,
+                                              .pipeline = filter->clear_pipelines[cls],
+                                              .push_constants = &pc,
+                                              .push_bytes = sizeof(pc),
+                                              .group_x = gx,
+                                              .group_y = gy,
+                                              .group_z = 1});
             barrier_compute_write_to_read_write(cmd, out_vk);
         }
     }
@@ -454,8 +475,13 @@ static void mica_plan_record(void *raw, VkCommandBuffer cmd) {
         const mica_region *bounds = &p->current[i];
         uint32_t gx = (bounds->width + PRISM_WG - 1u) / PRISM_WG;
         uint32_t gy = (bounds->height + PRISM_WG - 1u) / PRISM_WG;
-        flux_compute_dispatch(cmd, filter->mica_pipelines[cls], &p->pushes[i], sizeof(mica_push),
-                              gx, gy, 1);
+        flux_compute_dispatch(&(flux_compute_dispatch_opts){.cmd = cmd,
+                                                            .pipeline = filter->mica_pipelines[cls],
+                                                            .push_constants = &p->pushes[i],
+                                                            .push_bytes = sizeof(mica_push),
+                                                            .group_x = gx,
+                                                            .group_y = gy,
+                                                            .group_z = 1});
         if (i + 1 < p->push_count)
             barrier_compute_write_to_read_write(cmd, out_vk);
     }
@@ -463,10 +489,13 @@ static void mica_plan_record(void *raw, VkCommandBuffer cmd) {
     barrier_compute_write_to_read(cmd, out_vk);
 }
 
-flux_result prism_mica_filter_apply(prism_mica_filter *filter, flux_frame *frame,
-                                    const prism_mica_desc *desc, prism_material_output *out) {
-    if (!filter || !frame || !desc || !out)
+flux_result prism_mica_filter_apply(prism_mica_filter *filter,
+                                    const prism_mica_filter_apply_opts *opts) {
+    if (!filter || !opts || !opts->frame || !opts->desc || !opts->out)
         return FLUX_ERROR_INVALID_ARGUMENT;
+    flux_frame *frame = opts->frame;
+    const prism_mica_desc *desc = opts->desc;
+    prism_material_output *out = opts->out;
     if (desc->type != PRISM_TYPE_MICA_DESC)
         return FLUX_ERROR_INVALID_ARGUMENT;
     if (!desc->wallpaper && !desc->blurred_wallpaper)
@@ -476,7 +505,7 @@ flux_result prism_mica_filter_apply(prism_mica_filter *filter, flux_frame *frame
     if (desc->group_count > 0 && !desc->groups)
         return FLUX_ERROR_INVALID_ARGUMENT;
 
-    *out = (prism_material_output){0};
+    *out = (prism_material_output){};
     if (flux_frame_get_state(frame) != FLUX_FRAME_STATE_RECORDING ||
         flux_frame_has_active_pass(frame))
         return FLUX_ERROR_INVALID_STATE;

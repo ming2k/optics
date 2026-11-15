@@ -109,7 +109,7 @@ lens_tree_action lens_tree_view(lens *ui, const char *id_str, lens_tree_item *it
 
         bool is_focused = (state && state->focused_index == (int32_t)i);
         flux_color row_bg =
-            (item->selected || is_focused) ? ui->theme.color_active : (flux_color){0};
+            (item->selected || is_focused) ? ui->theme.color_active : (flux_color){};
 
         lens_response row_resp =
             lens_pressable_begin(ui, &(lens_pressable_opts){

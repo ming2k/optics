@@ -32,17 +32,22 @@ static void relocated_capture(void) {
     OT_EXPECT(flux_encoder_create(nullptr, &enc) == FLUX_OK);
     flux_geometry g = {.kind = FLUX_GEOM_PATH, .path = {.path = path}};
     flux_brush white = flux_brush_solid(0xffffffff);
-    flux_encoder_draw_geometry(enc, &g, &white);
+    flux_encoder_draw_geometry(enc,
+                               &(flux_encoder_draw_geometry_opts){.geom = &g, .brush = &white});
     flux_path_reset(path);
-    flux_encoder_draw_geometry(enc, &g, &white); /* Empty path owns no caller pointer. */
+    flux_encoder_draw_geometry(
+        enc, &(flux_encoder_draw_geometry_opts){
+                 .geom = &g, .brush = &white}); /* Empty path owns no caller pointer. */
     flux_arena_deinit(&arena);
 
     g = flux_geom_rect((flux_rect){0, 0, 0, 0});
     for (unsigned i = 0; i < 10000; i++)
-        flux_encoder_draw_geometry(enc, &g, &white);
+        flux_encoder_draw_geometry(enc,
+                                   &(flux_encoder_draw_geometry_opts){.geom = &g, .brush = &white});
     flux_encoder_rotate(enc, 0); /* A command requiring alignment padding. */
     g = flux_geom_rect((flux_rect){20, 2, 8, 8});
-    flux_encoder_draw_geometry(enc, &g, &white);
+    flux_encoder_draw_geometry(enc,
+                               &(flux_encoder_draw_geometry_opts){.geom = &g, .brush = &white});
     flux_display_list *list = nullptr;
     OT_EXPECT(flux_encoder_finish(enc, &list) == FLUX_OK);
     flux_encoder_destroy(enc);
@@ -55,7 +60,8 @@ static void relocated_capture(void) {
     flux_color clear = 0;
     OT_EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
                                                             .clear_color = &clear}) == FLUX_OK);
-    OT_EXPECT(flux_canvas_submit_display_list(c, shared) == FLUX_OK);
+    OT_EXPECT(flux_canvas_submit_display_list(
+                  c, &(flux_canvas_submit_display_list_opts){.list = shared}) == FLUX_OK);
     OT_EXPECT(flux_canvas_end(c) == FLUX_OK);
     OT_EXPECT(alpha(c, 4, 4) == 255);
     OT_EXPECT(alpha(c, 24, 4) == 255);
@@ -90,7 +96,8 @@ static void captured_glyphs(void) {
     flux_color clear = 0;
     OT_EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
                                                             .clear_color = &clear}) == FLUX_OK);
-    OT_EXPECT(flux_canvas_submit_display_list(c, list) == FLUX_OK);
+    OT_EXPECT(flux_canvas_submit_display_list(
+                  c, &(flux_canvas_submit_display_list_opts){.list = list}) == FLUX_OK);
     OT_EXPECT(flux_canvas_end(c) == FLUX_OK);
     OT_EXPECT(alpha(c, 5, 5) == 255);
     flux_canvas_release(c);
@@ -102,20 +109,24 @@ static void isolated_state(void) {
     OT_EXPECT(flux_encoder_create(nullptr, &enc) == FLUX_OK);
     flux_geometry g = flux_geom_rect((flux_rect){2, 2, 8, 8});
     flux_brush white = flux_brush_solid(0xffffffff);
-    flux_encoder_draw_geometry(enc, &g, &white);
-    flux_encoder_translate(enc, 10, 0); /* Does not leak into the caller. */
+    flux_encoder_draw_geometry(enc,
+                               &(flux_encoder_draw_geometry_opts){.geom = &g, .brush = &white});
+    flux_encoder_translate(
+        enc, &(flux_encoder_translate_opts){.x = 10, .y = 0}); /* Does not leak into the caller. */
     flux_display_list *list = nullptr;
     OT_EXPECT(flux_encoder_finish(enc, &list) == FLUX_OK);
     flux_encoder_destroy(enc);
     flux_canvas *c = canvas();
-    OT_EXPECT(flux_canvas_submit_display_list(c, list) == FLUX_ERROR_INVALID_STATE);
+    OT_EXPECT(flux_canvas_submit_display_list(c, &(flux_canvas_submit_display_list_opts){
+                                                     .list = list}) == FLUX_ERROR_INVALID_STATE);
     flux_color clear = 0;
     OT_EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
                                                             .clear_color = &clear}) == FLUX_OK);
-    flux_canvas_translate(c, 20, 0);
+    flux_canvas_translate(c, &(flux_canvas_translate_opts){.x = 20, .y = 0});
     flux_canvas_clip_rect(c, (flux_rect){0, 0, 12, 12});
-    OT_EXPECT(flux_canvas_submit_display_list(c, list) == FLUX_OK);
-    flux_canvas_draw_geometry(c, &g, &white);
+    OT_EXPECT(flux_canvas_submit_display_list(
+                  c, &(flux_canvas_submit_display_list_opts){.list = list}) == FLUX_OK);
+    flux_canvas_draw_geometry(c, &(flux_canvas_draw_geometry_opts){.geom = &g, .brush = &white});
     OT_EXPECT(flux_canvas_end(c) == FLUX_OK);
     OT_EXPECT(alpha(c, 4, 4) == 255);
     OT_EXPECT(alpha(c, 24, 4) == 255);
@@ -164,10 +175,10 @@ static void layer_bounds_are_hints(void) {
     OT_EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
                                                             .clear_color = &clear}) == FLUX_OK);
     flux_rect hint = {0, 0, 1, 1};
-    flux_canvas_save_layer(c, &hint, 0.5f);
+    flux_canvas_save_layer(c, &(flux_canvas_save_layer_opts){.bounds = &hint, .opacity = 0.5f});
     flux_geometry g = flux_geom_rect((flux_rect){2, 2, 8, 8});
     flux_brush white = flux_brush_solid(0xffffffff);
-    flux_canvas_draw_geometry(c, &g, &white);
+    flux_canvas_draw_geometry(c, &(flux_canvas_draw_geometry_opts){.geom = &g, .brush = &white});
     flux_canvas_restore(c);
     OT_EXPECT(flux_canvas_end(c) == FLUX_OK);
     OT_EXPECT(abs((int)alpha(c, 4, 4) - 128) <= 1);
@@ -179,7 +190,8 @@ static void append_and_splice(void) {
     OT_EXPECT(flux_encoder_create(nullptr, &enc1) == FLUX_OK);
     flux_geometry g1 = flux_geom_rect((flux_rect){2, 2, 8, 8});
     flux_brush white = flux_brush_solid(0xffffffff);
-    flux_encoder_draw_geometry(enc1, &g1, &white);
+    flux_encoder_draw_geometry(enc1,
+                               &(flux_encoder_draw_geometry_opts){.geom = &g1, .brush = &white});
     flux_display_list *dl1 = nullptr;
     OT_EXPECT(flux_encoder_finish(enc1, &dl1) == FLUX_OK);
     flux_encoder_destroy(enc1);
@@ -187,7 +199,8 @@ static void append_and_splice(void) {
     flux_encoder *enc2 = nullptr;
     OT_EXPECT(flux_encoder_create(nullptr, &enc2) == FLUX_OK);
     flux_geometry g2 = flux_geom_rect((flux_rect){20, 20, 8, 8});
-    flux_encoder_draw_geometry(enc2, &g2, &white);
+    flux_encoder_draw_geometry(enc2,
+                               &(flux_encoder_draw_geometry_opts){.geom = &g2, .brush = &white});
     OT_EXPECT(flux_encoder_draw_display_list(enc2, dl1) == FLUX_OK);
     flux_display_list *dl2 = nullptr;
     OT_EXPECT(flux_encoder_finish(enc2, &dl2) == FLUX_OK);
@@ -201,7 +214,8 @@ static void append_and_splice(void) {
     flux_color clear = 0;
     OT_EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
                                                             .clear_color = &clear}) == FLUX_OK);
-    OT_EXPECT(flux_canvas_submit_display_list(c, dl2) == FLUX_OK);
+    OT_EXPECT(flux_canvas_submit_display_list(
+                  c, &(flux_canvas_submit_display_list_opts){.list = dl2}) == FLUX_OK);
     OT_EXPECT(flux_canvas_end(c) == FLUX_OK);
     OT_EXPECT(alpha(c, 4, 4) == 255);
     OT_EXPECT(alpha(c, 22, 22) == 255);
@@ -216,10 +230,11 @@ static void append_and_splice(void) {
 static void child_ownership_and_state(void) {
     flux_encoder *enc = nullptr;
     OT_EXPECT(flux_encoder_create(nullptr, &enc) == FLUX_OK);
-    flux_encoder_translate(enc, 2, 0);
+    flux_encoder_translate(enc, &(flux_encoder_translate_opts){.x = 2, .y = 0});
     flux_geometry g = flux_geom_rect((flux_rect){0, 0, 4, 4});
     flux_brush white = flux_brush_solid(0xffffffffu);
-    flux_encoder_draw_geometry(enc, &g, &white);
+    flux_encoder_draw_geometry(enc,
+                               &(flux_encoder_draw_geometry_opts){.geom = &g, .brush = &white});
     flux_display_list *child = nullptr;
     OT_EXPECT(flux_encoder_finish(enc, &child) == FLUX_OK);
     flux_encoder_destroy(enc);
@@ -227,7 +242,7 @@ static void child_ownership_and_state(void) {
     /* This budget is smaller than the child's payload; composition must
      * retain a reference rather than copy the captured commands. */
     OT_EXPECT(flux_encoder_create(&(flux_encoder_desc){.max_bytes = 64}, &enc) == FLUX_OK);
-    flux_encoder_translate(enc, 8, 8);
+    flux_encoder_translate(enc, &(flux_encoder_translate_opts){.x = 8, .y = 8});
     OT_EXPECT(flux_encoder_draw_display_list(enc, child) == FLUX_OK);
     OT_EXPECT(flux_encoder_draw_display_list(enc, child) == FLUX_OK);
     flux_display_list *placed = nullptr;
@@ -237,7 +252,8 @@ static void child_ownership_and_state(void) {
 
     OT_EXPECT(flux_encoder_create(nullptr, &enc) == FLUX_OK);
     OT_EXPECT(flux_encoder_draw_display_list(enc, placed) == FLUX_OK);
-    flux_encoder_draw_geometry(enc, &g, &white);
+    flux_encoder_draw_geometry(enc,
+                               &(flux_encoder_draw_geometry_opts){.geom = &g, .brush = &white});
     flux_display_list *parent = nullptr;
     OT_EXPECT(flux_encoder_finish(enc, &parent) == FLUX_OK);
     flux_encoder_destroy(enc);
@@ -247,7 +263,8 @@ static void child_ownership_and_state(void) {
     flux_color clear = 0;
     OT_EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
                                                             .clear_color = &clear}) == FLUX_OK);
-    OT_EXPECT(flux_canvas_submit_display_list(c, parent) == FLUX_OK);
+    OT_EXPECT(flux_canvas_submit_display_list(
+                  c, &(flux_canvas_submit_display_list_opts){.list = parent}) == FLUX_OK);
     OT_EXPECT(flux_canvas_end(c) == FLUX_OK);
     OT_EXPECT(alpha(c, 1, 1) == 255);
     OT_EXPECT(alpha(c, 11, 9) == 255);
@@ -261,7 +278,7 @@ static void child_nesting_and_sticky_failure(void) {
     OT_EXPECT(flux_encoder_create(nullptr, &enc) == FLUX_OK);
     flux_geometry g = flux_geom_rect((flux_rect){0, 0, 4, 4});
     flux_brush b = flux_brush_solid(0xffffffffu);
-    flux_encoder_draw_geometry(enc, &g, &b);
+    flux_encoder_draw_geometry(enc, &(flux_encoder_draw_geometry_opts){.geom = &g, .brush = &b});
     flux_display_list *child = nullptr;
     OT_EXPECT(flux_encoder_finish(enc, &child) == FLUX_OK);
     flux_encoder_destroy(enc);
@@ -272,7 +289,8 @@ static void child_nesting_and_sticky_failure(void) {
         flux_display_list *parent = nullptr;
         if (result != FLUX_OK) {
             OT_EXPECT(result == FLUX_ERROR_OUT_OF_RANGE);
-            flux_encoder_draw_geometry(enc, &g, &b);
+            flux_encoder_draw_geometry(enc,
+                                       &(flux_encoder_draw_geometry_opts){.geom = &g, .brush = &b});
             OT_EXPECT(flux_encoder_finish(enc, &parent) == result);
             OT_EXPECT(parent == nullptr);
             flux_encoder_destroy(enc);
@@ -318,7 +336,8 @@ static void cropped_glyph_capture_and_execution_budget(void) {
     flux_color clear = 0;
     OT_EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
                                                             .clear_color = &clear}) == FLUX_OK);
-    OT_EXPECT(flux_canvas_submit_display_list(c, child) == FLUX_OK);
+    OT_EXPECT(flux_canvas_submit_display_list(
+                  c, &(flux_canvas_submit_display_list_opts){.list = child}) == FLUX_OK);
     OT_EXPECT(flux_canvas_end(c) == FLUX_OK);
     OT_EXPECT(alpha(c, 4, 4) == 255);
     flux_canvas_release(c);
@@ -344,9 +363,15 @@ static void dynamic_image_inputs(void) {
         .opacity = 1.0f,
         .image = {.tint = 0xffffffffu},
     };
-    flux_encoder_draw_geometry_slot(enc, &g, &slot_brush, 3);
+    flux_encoder_draw_geometry(enc,
+                               &(flux_encoder_draw_geometry_opts){
+                                   .geom = &g, .brush = &slot_brush, .slot = 3, .use_slot = true});
     OT_EXPECT(flux_encoder_status(enc) == FLUX_OK);
-    flux_encoder_draw_geometry_slot(enc, &g, &slot_brush, FLUX_DISPLAY_LIST_MAX_INPUTS);
+    flux_encoder_draw_geometry(
+        enc, &(flux_encoder_draw_geometry_opts){.geom = &g,
+                                                .brush = &slot_brush,
+                                                .slot = FLUX_DISPLAY_LIST_MAX_INPUTS,
+                                                .use_slot = true});
     OT_EXPECT(flux_encoder_status(enc) == FLUX_ERROR_INVALID_ARGUMENT);
     /* The sticky failure keeps the invalid slot out of the published list. */
     flux_display_list *list = nullptr;
@@ -355,7 +380,9 @@ static void dynamic_image_inputs(void) {
     flux_encoder_destroy(enc);
 
     OT_EXPECT(flux_encoder_create(nullptr, &enc) == FLUX_OK);
-    flux_encoder_draw_geometry_slot(enc, &g, &slot_brush, 3);
+    flux_encoder_draw_geometry(enc,
+                               &(flux_encoder_draw_geometry_opts){
+                                   .geom = &g, .brush = &slot_brush, .slot = 3, .use_slot = true});
     OT_EXPECT(flux_encoder_finish(enc, &list) == FLUX_OK);
     flux_encoder_destroy(enc);
     OT_EXPECT(flux_display_list_input_mask(list) == (UINT64_C(1) << 3));
@@ -364,14 +391,24 @@ static void dynamic_image_inputs(void) {
     flux_color clear = 0;
     OT_EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
                                                             .clear_color = &clear}) == FLUX_OK);
-    OT_EXPECT(flux_canvas_submit_display_list(c, list) == FLUX_ERROR_INVALID_STATE);
-    OT_EXPECT(flux_canvas_submit_display_list_bound(c, list, nullptr, 0) ==
+    OT_EXPECT(flux_canvas_submit_display_list(c, &(flux_canvas_submit_display_list_opts){
+                                                     .list = list}) == FLUX_ERROR_INVALID_STATE);
+    OT_EXPECT(flux_canvas_submit_display_list(
+                  c, &(flux_canvas_submit_display_list_opts){.list = list,
+                                                             .bindings = nullptr,
+                                                             .binding_count = 0}) ==
               FLUX_ERROR_INVALID_STATE);
     flux_display_list_binding missing = {.slot = 3, .image = nullptr};
-    OT_EXPECT(flux_canvas_submit_display_list_bound(c, list, &missing, 1) ==
+    OT_EXPECT(flux_canvas_submit_display_list(
+                  c, &(flux_canvas_submit_display_list_opts){.list = list,
+                                                             .bindings = &missing,
+                                                             .binding_count = 1}) ==
               FLUX_ERROR_INVALID_ARGUMENT);
     flux_display_list_binding unknown = {.slot = 4, .image = (flux_image *)1};
-    OT_EXPECT(flux_canvas_submit_display_list_bound(c, list, &unknown, 1) ==
+    OT_EXPECT(flux_canvas_submit_display_list(
+                  c, &(flux_canvas_submit_display_list_opts){.list = list,
+                                                             .bindings = &unknown,
+                                                             .binding_count = 1}) ==
               FLUX_ERROR_INVALID_ARGUMENT);
     OT_EXPECT(flux_canvas_end(c) == FLUX_OK);
     flux_canvas_release(c);
@@ -383,26 +420,36 @@ static void serialized_round_trip(void) {
     OT_EXPECT(flux_encoder_create(nullptr, &enc) == FLUX_OK);
     flux_geometry g = flux_geom_rect((flux_rect){2, 2, 8, 8});
     flux_brush white = flux_brush_solid(0xffffffff);
-    flux_encoder_draw_geometry(enc, &g, &white);
-    flux_encoder_translate(enc, 20, 0);
-    flux_encoder_draw_geometry(enc, &g, &white);
+    flux_encoder_draw_geometry(enc,
+                               &(flux_encoder_draw_geometry_opts){.geom = &g, .brush = &white});
+    flux_encoder_translate(enc, &(flux_encoder_translate_opts){.x = 20, .y = 0});
+    flux_encoder_draw_geometry(enc,
+                               &(flux_encoder_draw_geometry_opts){.geom = &g, .brush = &white});
     flux_display_list *list = nullptr;
     OT_EXPECT(flux_encoder_finish(enc, &list) == FLUX_OK);
     flux_encoder_destroy(enc);
 
     uint8_t *data = nullptr;
     size_t size = 0;
-    OT_EXPECT(flux_display_list_serialize(list, nullptr, &data, &size) == FLUX_OK);
+    flux_display_list_serialize_opts sopts = FLUX_DISPLAY_LIST_SERIALIZE_OPTS_INIT;
+    sopts.out_data = &data;
+    sopts.out_size = &size;
+    OT_EXPECT(flux_display_list_serialize(list, &sopts) == FLUX_OK);
     OT_EXPECT(data != nullptr && size > 24);
 
     flux_display_list *loaded = nullptr;
-    OT_EXPECT(flux_display_list_deserialize(data, size, nullptr, &loaded) == FLUX_OK);
+    flux_display_list_deserialize_opts dopts = FLUX_DISPLAY_LIST_DESERIALIZE_OPTS_INIT;
+    dopts.data = data;
+    dopts.size = size;
+    dopts.out_list = &loaded;
+    OT_EXPECT(flux_display_list_deserialize(&dopts) == FLUX_OK);
     OT_EXPECT(loaded != nullptr);
     flux_canvas *c = canvas();
     flux_color clear = 0;
     OT_EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
                                                             .clear_color = &clear}) == FLUX_OK);
-    OT_EXPECT(flux_canvas_submit_display_list(c, loaded) == FLUX_OK);
+    OT_EXPECT(flux_canvas_submit_display_list(
+                  c, &(flux_canvas_submit_display_list_opts){.list = loaded}) == FLUX_OK);
     OT_EXPECT(flux_canvas_end(c) == FLUX_OK);
     OT_EXPECT(alpha(c, 4, 4) == 255);
     OT_EXPECT(alpha(c, 24, 4) == 255);
@@ -413,12 +460,12 @@ static void serialized_round_trip(void) {
     flux_display_list *bad = nullptr;
     uint8_t saved = data[0];
     data[0] ^= 0xFFu;
-    OT_EXPECT(flux_display_list_deserialize(data, size, nullptr, &bad) ==
-              FLUX_ERROR_INVALID_ARGUMENT);
+    dopts.out_list = &bad;
+    OT_EXPECT(flux_display_list_deserialize(&dopts) == FLUX_ERROR_INVALID_ARGUMENT);
     OT_EXPECT(bad == nullptr);
     data[0] = saved;
-    OT_EXPECT(flux_display_list_deserialize(data, size - 1, nullptr, &bad) ==
-              FLUX_ERROR_INVALID_ARGUMENT);
+    dopts.size = size - 1;
+    OT_EXPECT(flux_display_list_deserialize(&dopts) == FLUX_ERROR_INVALID_ARGUMENT);
     OT_EXPECT(bad == nullptr);
 
     flux_display_list_serialized_free(data);

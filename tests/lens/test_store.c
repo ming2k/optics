@@ -11,8 +11,8 @@
 #include "../../libs/lens/src/internal.h"
 
 int main(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     lens_input in = {.display_size = {200, 100}, .dt_seconds = 0.016f};
 
@@ -24,12 +24,12 @@ int main(void) {
     OT_EXPECT(aid != 0);
 
     lens_node *n = lens_find(ui, aid);
-    OT_EXPECT(n != NULL);
+    OT_EXPECT(n != nullptr);
     OT_EXPECT(lens_node_phase_of(n) == LENS_NODE_ENTERING); /* no prior frame */
 
     /* stash persistent per-node state */
     int *s = (int *)lens_node_state(n, sizeof(int));
-    OT_EXPECT(s != NULL);
+    OT_EXPECT(s != nullptr);
     *s = 42;
 
     /* frame 2: same id -> same node pointer, state carried forward */
@@ -42,9 +42,9 @@ int main(void) {
     OT_EXPECT(lens_node_phase_of(n2) == LENS_NODE_STABLE);
     int *s2 = (int *)lens_node_state(n2, sizeof(int));
     OT_EXPECT(s2 == s);
-    OT_EXPECT(*s2 == 42);                                    /* persisted */
-    OT_EXPECT(lens_node_state(n2, sizeof(int) + 1) == NULL); /* fixed type/size */
-    OT_EXPECT(lens_node_state(n2, sizeof(int)) == s);        /* address remains stable */
+    OT_EXPECT(*s2 == 42);                                       /* persisted */
+    OT_EXPECT(lens_node_state(n2, sizeof(int) + 1) == nullptr); /* fixed type/size */
+    OT_EXPECT(lens_node_state(n2, sizeof(int)) == s);           /* address remains stable */
 
     /* stop building it: it should leave, then reap after the grace window */
     bool present_during_grace = false;
@@ -61,7 +61,7 @@ int main(void) {
         lens_begin(ui, &in);
         lens_test_end(ui);
     }
-    OT_EXPECT(lens_find(ui, aid) == NULL); /* reaped */
+    OT_EXPECT(lens_find(ui, aid) == nullptr); /* reaped */
 
     /* ---- sustained population collapse shrinks the slot table --------
      *
@@ -90,7 +90,7 @@ int main(void) {
         (void)lens_button(ui, &(lens_button_opts){.label = "post-shrink"});
         lens_id pid = lens_get_response(ui).id;
         lens_test_end(ui);
-        OT_EXPECT(pid != 0 && lens_find(ui, pid) != NULL);
+        OT_EXPECT(pid != 0 && lens_find(ui, pid) != nullptr);
     }
 
     lens_release(ui);

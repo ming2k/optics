@@ -67,7 +67,7 @@ static bool adjust_from_scroll(lens *ui, bool hovered, float *value, float min, 
 }
 
 lens_response lens_slider(lens *ui, const lens_slider_opts *opts) {
-    lens_slider_opts default_opts = {0};
+    lens_slider_opts default_opts = {};
     if (!opts)
         opts = &default_opts;
 
@@ -87,7 +87,7 @@ lens_response lens_slider(lens *ui, const lens_slider_opts *opts) {
         opts->box.id ? lensi_gen_widget_id(ui, opts->box.id) : lensi_gen_widget_id(ui, label);
     lens_node *n = lensi_store_touch(ui, id);
     if (!n)
-        return (lens_response){0};
+        return (lens_response){};
 
     lensi_link_child(ui, n);
     lensi_node_box(ui, n, &opts->box);

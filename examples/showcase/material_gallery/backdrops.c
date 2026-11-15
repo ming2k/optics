@@ -112,7 +112,8 @@ static void draw_bouncing_tv(flux_canvas *c, flux_arena *arena, float W, float H
         flux_brush shadow_b = flux_brush_solid(glow_c);
         flux_geometry g_shadow = flux_geom_rrect(
             (flux_rect){bx - 12.0f, by - 8.0f, box_w + 24.0f, box_h + 20.0f}, 28.0f * app->scale);
-        flux_canvas_draw_geometry(c, &g_shadow, &shadow_b);
+        flux_canvas_draw_geometry(
+            c, &(flux_canvas_draw_geometry_opts){.geom = &g_shadow, .brush = &shadow_b});
     }
 
     /* Bouncing TV body: vibrant linear gradient */
@@ -144,14 +145,16 @@ static void draw_bouncing_tv(flux_canvas *c, flux_arena *arena, float W, float H
         flux_brush tv_b = flux_brush_linear_gradient(
             (flux_point){bx, by}, (flux_point){bx + box_w, by + box_h}, box_stops, 3);
         flux_geometry g_tv = flux_geom_rrect((flux_rect){bx, by, box_w, box_h}, 18.0f * app->scale);
-        flux_canvas_draw_geometry(c, &g_tv, &tv_b);
+        flux_canvas_draw_geometry(c,
+                                  &(flux_canvas_draw_geometry_opts){.geom = &g_tv, .brush = &tv_b});
 
         /* Crisp specular outline */
         flux_brush border_b = flux_brush_solid(flux_color_rgba_premul(255, 255, 255, 220));
         flux_geometry g_tv_border =
             flux_geom_rrect((flux_rect){bx, by, box_w, box_h}, 18.0f * app->scale);
         g_tv_border.stroke.width = 2.0f;
-        flux_canvas_draw_geometry(c, &g_tv_border, &border_b);
+        flux_canvas_draw_geometry(
+            c, &(flux_canvas_draw_geometry_opts){.geom = &g_tv_border, .brush = &border_b});
     }
 
     /* High-contrast test geometry inside the TV box for optical refraction & dispersion analysis */

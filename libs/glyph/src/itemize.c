@@ -157,10 +157,10 @@ void txt_itemize_release_scratch(glyph_ctx *t) {
     txt_free(t, t->bo_buf, "bidi_buf");
     txt_free(t, t->bt_buf, "bidi_buf");
     txt_free(t, t->lv_buf, "bidi_buf");
-    t->cp_buf = NULL;
-    t->bo_buf = NULL;
-    t->bt_buf = NULL;
-    t->lv_buf = NULL;
+    t->cp_buf = nullptr;
+    t->bo_buf = nullptr;
+    t->bt_buf = nullptr;
+    t->lv_buf = nullptr;
     t->cp_cap = 0;
 }
 

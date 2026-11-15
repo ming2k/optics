@@ -16,6 +16,7 @@
 
 #include <flux/core.h>
 #include <flux/math.h>
+#include <stdint.h>
 #include <vulkan/vulkan.h>
 
 #ifdef __cplusplus
@@ -178,7 +179,7 @@ FLUX_API flux_bindless_handle flux_image_bindless_storage_handle(const flux_imag
 
 typedef struct flux_graphics_pipeline flux_graphics_pipeline;
 
-typedef enum flux_primitive_topology {
+typedef enum flux_primitive_topology : uint32_t {
     FLUX_TOPOLOGY_TRIANGLE_LIST = 0,
     FLUX_TOPOLOGY_TRIANGLE_STRIP = 1,
     FLUX_TOPOLOGY_LINE_LIST = 2,
@@ -186,7 +187,7 @@ typedef enum flux_primitive_topology {
     FLUX_TOPOLOGY_POINT_LIST = 4,
 } flux_primitive_topology;
 
-typedef enum flux_cull_mode {
+typedef enum flux_cull_mode : uint32_t {
     FLUX_CULL_NONE = 0,
     FLUX_CULL_BACK = 1,
     FLUX_CULL_FRONT = 2,
@@ -196,13 +197,13 @@ typedef enum flux_cull_mode {
  * NONE       — opaque overwrite (color blend disabled).
  * PREMUL     — Porter-Duff source-over assuming premultiplied src.
  * ADDITIVE   — src + dst (HDR particle-style accumulation). */
-typedef enum flux_blend_preset {
+typedef enum flux_blend_preset : uint32_t {
     FLUX_BLEND_PRESET_NONE = 0,
     FLUX_BLEND_PRESET_PREMUL = 1,
     FLUX_BLEND_PRESET_ADDITIVE = 2,
 } flux_blend_preset;
 
-typedef enum flux_depth_test {
+typedef enum flux_depth_test : uint32_t {
     FLUX_DEPTH_NONE = 0,
     FLUX_DEPTH_TEST_AND_WRITE = 1,
     FLUX_DEPTH_TEST_READONLY = 2,
@@ -271,8 +272,14 @@ FLUX_API VkPipelineLayout flux_graphics_pipeline_vk_layout(const flux_graphics_p
 /* Bind the pipeline and push `push_bytes` of `push_constants` (may be
  * NULL/0). Records into the frame's command buffer. The device
  * bindless set is bound at slot 0 to match the pipeline layout. */
-FLUX_API void flux_graphics_pipeline_bind(flux_frame *f, flux_graphics_pipeline *pipeline,
-                                          const void *push_constants, uint32_t push_bytes);
+typedef struct flux_graphics_pipeline_bind_opts {
+    flux_graphics_pipeline *pipeline;
+    const void *push_constants;
+    uint32_t push_bytes;
+} flux_graphics_pipeline_bind_opts;
+
+FLUX_API void flux_graphics_pipeline_bind(flux_frame *f,
+                                          const flux_graphics_pipeline_bind_opts *opts);
 
 /* ================================================================== */
 /*  Sampler                                                           */
@@ -283,12 +290,12 @@ FLUX_API void flux_graphics_pipeline_bind(flux_frame *f, flux_graphics_pipeline 
  * to reference the sampler from any shader. */
 typedef struct flux_sampler flux_sampler;
 
-typedef enum flux_filter {
+typedef enum flux_filter : uint32_t {
     FLUX_FILTER_NEAREST = 0,
     FLUX_FILTER_LINEAR = 1,
 } flux_filter;
 
-typedef enum flux_address_mode {
+typedef enum flux_address_mode : uint32_t {
     FLUX_ADDRESS_REPEAT = 0,
     FLUX_ADDRESS_CLAMP_TO_EDGE = 1,
     FLUX_ADDRESS_MIRRORED_REPEAT = 2,
@@ -327,12 +334,15 @@ FLUX_API flux_bindless_handle flux_sampler_bindless_handle(const flux_sampler *s
 /*  Dynamic-rendering pass                                            */
 /* ================================================================== */
 
-typedef enum flux_load_op {
+typedef enum flux_load_op : uint32_t {
     FLUX_LOAD_DONT_CARE = 0,
     FLUX_LOAD_CLEAR = 1,
     FLUX_LOAD_LOAD = 2
 } flux_load_op;
-typedef enum flux_store_op { FLUX_STORE_DONT_CARE = 0, FLUX_STORE_STORE = 1 } flux_store_op;
+typedef enum flux_store_op : uint32_t {
+    FLUX_STORE_DONT_CARE = 0,
+    FLUX_STORE_STORE = 1
+} flux_store_op;
 
 typedef struct flux_pass_attachment {
     VkImageView view; /* may be VK_NULL_HANDLE → use frame's swapchain image */
@@ -399,16 +409,31 @@ FLUX_API void flux_frame_end_pass(flux_frame *f);
 /* Backend-neutral wrappers for the dynamic viewport and scissor state used by
  * graphics pipelines. The frame must be recording; calls outside that state
  * are ignored. */
-FLUX_API void flux_frame_set_viewport(flux_frame *f, float x, float y, float width, float height,
-                                      float min_depth, float max_depth);
-FLUX_API void flux_frame_set_scissor(flux_frame *f, int32_t x, int32_t y, uint32_t width,
-                                     uint32_t height);
+typedef struct flux_frame_set_viewport_opts {
+    float x;
+    float y;
+    float width;
+    float height;
+    float min_depth;
+    float max_depth;
+} flux_frame_set_viewport_opts;
+
+FLUX_API void flux_frame_set_viewport(flux_frame *f, const flux_frame_set_viewport_opts *opts);
+
+typedef struct flux_frame_set_scissor_opts {
+    int32_t x;
+    int32_t y;
+    uint32_t width;
+    uint32_t height;
+} flux_frame_set_scissor_opts;
+
+FLUX_API void flux_frame_set_scissor(flux_frame *f, const flux_frame_set_scissor_opts *opts);
 
 /* ================================================================== */
 /*  Explicit Pipeline Barriers & Queue Transitions (RFC-0094 / ADR-0087) */
 /* ================================================================== */
 
-typedef enum flux_pipeline_stage {
+typedef enum flux_pipeline_stage : uint32_t {
     FLUX_STAGE_TOP_OF_PIPE = 1u << 0,
     FLUX_STAGE_DRAW_INDIRECT = 1u << 1,
     FLUX_STAGE_VERTEX_INPUT = 1u << 2,
@@ -422,7 +447,7 @@ typedef enum flux_pipeline_stage {
     FLUX_STAGE_BOTTOM_OF_PIPE = 1u << 10,
 } flux_pipeline_stage;
 
-typedef enum flux_access_flags {
+typedef enum flux_access_flags : uint32_t {
     FLUX_ACCESS_NONE = 0,
     FLUX_ACCESS_INDIRECT_COMMAND_READ = 1u << 0,
     FLUX_ACCESS_INDEX_READ = 1u << 1,
@@ -450,8 +475,13 @@ typedef struct flux_image_barrier {
     uint32_t dst_queue_family;
 } flux_image_barrier;
 
-FLUX_API void flux_frame_pipeline_barrier(flux_frame *f, const flux_image_barrier *image_barriers,
-                                          uint32_t count);
+typedef struct flux_frame_pipeline_barrier_opts {
+    const flux_image_barrier *image_barriers;
+    uint32_t count;
+} flux_frame_pipeline_barrier_opts;
+
+FLUX_API void flux_frame_pipeline_barrier(flux_frame *f,
+                                          const flux_frame_pipeline_barrier_opts *opts);
 
 /* ================================================================== */
 /*  Deferred pass registration (ADR-0147)                             */
@@ -555,8 +585,13 @@ FLUX_NODISCARD FLUX_API flux_result flux_frame_require_pass(flux_frame *f,
  *   FLUX_ERROR_INVALID_ARGUMENT — null frame, or null `images` with count > 0.
  *   FLUX_ERROR_INVALID_STATE    — an image is a pending deferred output, or the
  *     frame is not recording. */
+typedef struct flux_frame_reject_pending_inputs_opts {
+    const flux_image *const *images;
+    uint32_t count;
+} flux_frame_reject_pending_inputs_opts;
+
 FLUX_NODISCARD FLUX_API flux_result
-flux_frame_reject_pending_inputs(flux_frame *f, const flux_image *const *images, uint32_t count);
+flux_frame_reject_pending_inputs(flux_frame *f, const flux_frame_reject_pending_inputs_opts *opts);
 
 #ifdef __cplusplus
 }

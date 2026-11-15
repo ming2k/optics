@@ -40,7 +40,7 @@ int main(void) {
     OT_EXPECT_STR_EQ(iris_a11y__action_name(LENS_ROLE_CHECKBOX), "click");
     OT_EXPECT_STR_EQ(iris_a11y__action_name(LENS_ROLE_RADIO), "click");
     OT_EXPECT_STR_EQ(iris_a11y__action_name(LENS_ROLE_DISCLOSURE), "click");
-    OT_EXPECT(iris_a11y__action_name(LENS_ROLE_LABEL) == NULL);
+    OT_EXPECT(iris_a11y__action_name(LENS_ROLE_LABEL) == nullptr);
 
     /* --- Value parser --- */
     OT_EXPECT(iris_a11y__parse_value("1.5") == 1.5);
@@ -48,11 +48,11 @@ int main(void) {
     OT_EXPECT(iris_a11y__parse_value("-0.25") == -0.25);
     OT_EXPECT(iris_a11y__parse_value("  7  ") == 7.0); /* strtod skips ws */
     OT_EXPECT(iris_a11y__parse_value("") == 0.0);
-    OT_EXPECT(iris_a11y__parse_value(NULL) == 0.0);
+    OT_EXPECT(iris_a11y__parse_value(nullptr) == 0.0);
     OT_EXPECT(iris_a11y__parse_value("not a number") == 0.0);
 
     /* --- UTF-8 code-point count (AT-SPI Text offsets) --- */
-    OT_EXPECT(iris_a11y__char_count_utf8(NULL) == 0);
+    OT_EXPECT(iris_a11y__char_count_utf8(nullptr) == 0);
     OT_EXPECT(iris_a11y__char_count_utf8("") == 0);
     OT_EXPECT(iris_a11y__char_count_utf8("abc") == 3);
     /* "héllo" — é is 2 bytes in UTF-8, still 1 code point → 5 chars total. */
@@ -114,7 +114,7 @@ int main(void) {
     /* --- node_fill: deep copies + sibling index --- */
     iris_a11y__node cur[8];
     memset(cur, 0, sizeof cur);
-    lens_semantics sem = {.role = LENS_ROLE_BUTTON, .name = "OK", .value = NULL, .flags = 0};
+    lens_semantics sem = {.role = LENS_ROLE_BUTTON, .name = "OK", .value = nullptr, .flags = 0};
     iris_a11y__node_fill(&cur[0], &sem, 100, 0, cur, 0);
     OT_EXPECT_STR_EQ(cur[0].name, "OK");
     OT_EXPECT(cur[0].value[0] == '\0');
@@ -136,18 +136,18 @@ int main(void) {
     iris_a11y__node f1[4], f2[4];
     memset(f1, 0, sizeof f1);
     memset(f2, 0, sizeof f2);
-    lens_semantics s1 = {.role = LENS_ROLE_BUTTON, .name = "One", .value = NULL, .flags = 0};
+    lens_semantics s1 = {.role = LENS_ROLE_BUTTON, .name = "One", .value = nullptr, .flags = 0};
     lens_semantics s2 = {
-        .role = LENS_ROLE_CHECKBOX, .name = "Two", .value = NULL, .flags = LENS_A11Y_CHECKED};
+        .role = LENS_ROLE_CHECKBOX, .name = "Two", .value = nullptr, .flags = LENS_A11Y_CHECKED};
     iris_a11y__node_fill(&f1[0], &s1, 1, 0, f1, 0);
     iris_a11y__node_fill(&f1[1], &s2, 2, 0, f1, 1);
-    size_t n = iris_a11y__diff(NULL, 0, f1, 2, evs, 32);
+    size_t n = iris_a11y__diff(nullptr, 0, f1, 2, evs, 32);
     OT_EXPECT(n == 2); /* both added */
     OT_EXPECT(evs[0].kind == IRIS_A11Y__EV_ADD && evs[0].id == 1 && evs[0].index == 0);
     OT_EXPECT(evs[1].kind == IRIS_A11Y__EV_ADD && evs[1].id == 2 && evs[1].index == 1);
 
     /* frame 2: id 1 renamed, id 2 removed, id 3 added (unchecked, new name) */
-    lens_semantics s1b = {.role = LENS_ROLE_BUTTON, .name = "One!", .value = NULL, .flags = 0};
+    lens_semantics s1b = {.role = LENS_ROLE_BUTTON, .name = "One!", .value = nullptr, .flags = 0};
     lens_semantics s3 = {.role = LENS_ROLE_SLIDER, .name = "Vol", .value = "0.5", .flags = 0};
     iris_a11y__node_fill(&f2[0], &s1b, 1, 0, f2, 0);
     iris_a11y__node_fill(&f2[1], &s3, 3, 0, f2, 1);
@@ -161,7 +161,7 @@ int main(void) {
 
     /* frame 3: slider value moves, checkbox state flips, role changes */
     lens_semantics s3b = {.role = LENS_ROLE_SLIDER, .name = "Vol", .value = "0.7", .flags = 0};
-    lens_semantics s1c = {.role = LENS_ROLE_LINK, .name = "One!", .value = NULL, .flags = 0};
+    lens_semantics s1c = {.role = LENS_ROLE_LINK, .name = "One!", .value = nullptr, .flags = 0};
     iris_a11y__node_fill(&f1[0], &s1c, 1, 0, f1, 0);
     iris_a11y__node_fill(&f1[1], &s3b, 3, 0, f1, 1);
     n = iris_a11y__diff(f2, 2, f1, 2, evs, 32);
@@ -174,8 +174,8 @@ int main(void) {
 
     /* state flip: checked -> unchecked on a stable id */
     lens_semantics c_on = {
-        .role = LENS_ROLE_CHECKBOX, .name = "C", .value = NULL, .flags = LENS_A11Y_CHECKED};
-    lens_semantics c_off = {.role = LENS_ROLE_CHECKBOX, .name = "C", .value = NULL, .flags = 0};
+        .role = LENS_ROLE_CHECKBOX, .name = "C", .value = nullptr, .flags = LENS_A11Y_CHECKED};
+    lens_semantics c_off = {.role = LENS_ROLE_CHECKBOX, .name = "C", .value = nullptr, .flags = 0};
     memset(f1, 0, sizeof f1);
     memset(f2, 0, sizeof f2);
     iris_a11y__node_fill(&f1[0], &c_on, 5, 0, f1, 0);
@@ -234,7 +234,7 @@ int main(void) {
     OT_EXPECT(d.removed_text[0] == 'x' && d.inserted_text[0] == 'y');
 
     /* NULL behaves as empty */
-    OT_EXPECT(iris_a11y__text_delta_of(NULL, "a", &d));
+    OT_EXPECT(iris_a11y__text_delta_of(nullptr, "a", &d));
     OT_EXPECT(d.offset == 0 && d.inserted == 1);
 
     /* --- diff routes text-role value changes to EV_TEXT --- */

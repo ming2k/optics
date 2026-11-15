@@ -6,8 +6,8 @@
  * frame. Persistent fields (id, phase, has_prev, prev_rect, state,
  * animation) are preserved (ADR-0027). */
 void lensi_node_reset_frame(lens_node *n) {
-    n->parent = NULL;
-    n->first_child = n->last_child = n->next_sibling = NULL;
+    n->parent = nullptr;
+    n->first_child = n->last_child = n->next_sibling = nullptr;
     n->child_count = 0;
     n->child_seq = 0;
     n->last_child_hash = n->child_hash;
@@ -60,10 +60,10 @@ void lensi_node_reset_frame(lens_node *n) {
      * so far). A node that emitted 32 commands last frame allocates
      * exactly once this frame; the retained cap is bounded by the node's
      * own high-water mark and dies with the node. */
-    n->cmds = NULL;
+    n->cmds = nullptr;
     n->cmd_count = 0;
 
-    n->semantics = (lens_semantics){0};
+    n->semantics = (lens_semantics){};
 }
 
 /* ---- escape hatch (frame-scoped borrows) ---- */
@@ -81,30 +81,30 @@ lens_node_phase lens_node_phase_of(const lens_node *n) {
 }
 
 lens_node *lens_node_parent(const lens_node *n) {
-    return n ? n->parent : NULL;
+    return n ? n->parent : nullptr;
 }
 lens_node *lens_node_first_child(const lens_node *n) {
-    return n ? n->first_child : NULL;
+    return n ? n->first_child : nullptr;
 }
 lens_node *lens_node_next_sibling(const lens_node *n) {
-    return n ? n->next_sibling : NULL;
+    return n ? n->next_sibling : nullptr;
 }
 
 void *lens_node_state(lens_node *n, size_t bytes) {
     if (!n || bytes == 0)
-        return NULL;
+        return nullptr;
     if (n->state) {
         /* The API promises a stable address for the lifetime of the node.
          * Growing would invalidate previously-borrowed pointers, so callers
          * must use one fixed state type/size for a given node id. */
-        return n->state_bytes == bytes ? n->state : NULL;
+        return n->state_bytes == bytes ? n->state : nullptr;
     }
     /* Allocate through the owning context's persistent allocator and zero-init
      * on first touch (ADR-0027). Freed at reap or lens_release. */
     void *mem = lensi_alloc(n->ui, bytes);
     if (!mem) {
         lensi_set_overflow(n->ui);
-        return NULL;
+        return nullptr;
     }
     memset(mem, 0, bytes);
     n->state = mem;

@@ -18,6 +18,7 @@
 #define PRISM_MICA_H
 
 #include <prism/types.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -30,7 +31,7 @@ typedef struct prism_mica_shape {
 } prism_mica_shape;
 
 /* Mica variant: Base (standard foundation) or Alt (commanding layer / tab strip). */
-typedef enum prism_mica_kind {
+typedef enum prism_mica_kind : uint32_t {
     PRISM_MICA_BASE = 0,
     PRISM_MICA_ALT = 1,
 } prism_mica_kind;
@@ -119,10 +120,14 @@ PRISM_NODISCARD PRISM_API prism_mica_filter *prism_mica_filter_retain(prism_mica
 
 PRISM_API void prism_mica_filter_release(prism_mica_filter *filter);
 
-PRISM_NODISCARD PRISM_API flux_result prism_mica_filter_apply(prism_mica_filter *filter,
-                                                              flux_frame *frame,
-                                                              const prism_mica_desc *desc,
-                                                              prism_material_output *out);
+typedef struct prism_mica_filter_apply_opts {
+    flux_frame *frame;
+    const prism_mica_desc *desc;
+    prism_material_output *out;
+} prism_mica_filter_apply_opts;
+
+PRISM_NODISCARD PRISM_API flux_result
+prism_mica_filter_apply(prism_mica_filter *filter, const prism_mica_filter_apply_opts *opts);
 
 #ifdef __cplusplus
 }

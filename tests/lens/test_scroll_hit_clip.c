@@ -19,8 +19,8 @@ static const char *ROW_LABELS[20] = {"row-0",  "row-1",  "row-2",  "row-3",  "ro
  * landing on its arranged rect must not reach it. After scrolling down
  * it becomes visible at that spot and works. */
 static void test_scroll_clips_hit_testing(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     bool clicked = false;
     bool hovered = false;

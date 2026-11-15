@@ -446,7 +446,7 @@ static void test_cover_coverage_agrees_with_field(void) {
     };
     flux_curve_cover rc = {ring, 4, flux_curve_cover_bounds(ring, 4)};
     int partial = 0;
-    int levels[17] = {0};
+    int levels[17] = {};
     for (int i = -12; i <= 12; ++i) {
         for (int j = -12; j <= 12; ++j) {
             float c = flux_curve_cover_coverage(rc, FLUX_CURVE_FILL_NONZERO, (float)i * 0.125f,

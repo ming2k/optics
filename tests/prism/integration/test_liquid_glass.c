@@ -52,7 +52,10 @@ static uint32_t render_liquid_glass_frame(flux_surface *surface, flux_canvas *ca
     blur_desc.input = target;
     blur_desc.sigma = 2.0f;
     flux_image *blurred = nullptr;
-    OT_EXPECT(flux_blur_filter_apply(blur_filter, frame, &blur_desc, &blurred) == FLUX_OK);
+    OT_EXPECT(flux_blur_filter_apply(blur_filter,
+                                     &(flux_blur_filter_apply_opts){.frame = frame,
+                                                                    .desc = &blur_desc,
+                                                                    .out = &blurred}) == FLUX_OK);
 
     prism_liquid_glass_desc glass_desc = PRISM_LIQUID_GLASS_DESC_INIT;
     glass_desc.input = target;
@@ -60,8 +63,11 @@ static uint32_t render_liquid_glass_frame(flux_surface *surface, flux_canvas *ca
     glass_desc.groups = groups;
     glass_desc.group_count = group_count;
     glass_desc.refraction = 0.0f;
-    prism_material_output glass = {0};
-    OT_EXPECT(prism_liquid_glass_filter_apply(glass_filter, frame, &glass_desc, &glass) == FLUX_OK);
+    prism_material_output glass = {};
+    OT_EXPECT(prism_liquid_glass_filter_apply(
+                  glass_filter, &(prism_liquid_glass_filter_apply_opts){.frame = frame,
+                                                                        .desc = &glass_desc,
+                                                                        .out = &glass}) == FLUX_OK);
 
     flux_color black = flux_color_rgba(0, 0, 0, 255);
     OT_EXPECT(flux_canvas_begin(canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
@@ -134,7 +140,9 @@ int main(void) {
         bd.input = target;
         bd.sigma = 8.0f;
         flux_image *blurred = nullptr;
-        OT_EXPECT(flux_blur_filter_apply(blur_filter, frame, &bd, &blurred) == FLUX_OK);
+        OT_EXPECT(flux_blur_filter_apply(
+                      blur_filter, &(flux_blur_filter_apply_opts){
+                                       .frame = frame, .desc = &bd, .out = &blurred}) == FLUX_OK);
 
         prism_liquid_glass_shape body_shapes[1] = {
             {.bounds = {16, 16, 32, 32}, .corner_radius = 16},
@@ -148,8 +156,10 @@ int main(void) {
         gd.groups = &body;
         gd.group_count = 1;
         gd.refraction = 6.0f;
-        prism_material_output glass = {0};
-        OT_EXPECT(prism_liquid_glass_filter_apply(glass_filter, frame, &gd, &glass) == FLUX_OK);
+        prism_material_output glass = {};
+        OT_EXPECT(prism_liquid_glass_filter_apply(
+                      glass_filter, &(prism_liquid_glass_filter_apply_opts){
+                                        .frame = frame, .desc = &gd, .out = &glass}) == FLUX_OK);
         OT_EXPECT(glass.image != nullptr);
 
         OT_EXPECT(

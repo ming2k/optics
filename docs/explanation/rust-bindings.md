@@ -96,8 +96,8 @@ model, but it means a published crate would require every consumer to have a C
 toolchain, the matching Optics libraries, and `libclang` installed. Publication
 to crates.io therefore requires pre-generated bindings (or an equivalent
 no-`libclang` path) plus a release matrix that validates installed-prefix
-linking. Until that work lands, Git dependencies are the supported distribution
-form.
+linking. Until that work lands, every crate sets `publish = false` and Git
+dependencies are the supported distribution form.
 
 ## Change Workflow
 

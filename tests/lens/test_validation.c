@@ -37,8 +37,8 @@ static void build_textfield_pair(lens *ui, char *buf_a, char *buf_b) {
 }
 
 static void test_textfield_error_reaches_skin(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     lens_set_skin(ui, LENS_WIDGET_TEXTEDIT, capture);
 
     char a[64] = "test", b[64] = "other";
@@ -50,13 +50,13 @@ static void test_textfield_error_reaches_skin(void) {
     OT_EXPECT(g_saw_clean); /* tf2's record carried error = false */
     OT_EXPECT(!lens_overflowed(ui));
 
-    lens_set_skin(ui, LENS_WIDGET_TEXTEDIT, NULL); /* restore */
+    lens_set_skin(ui, LENS_WIDGET_TEXTEDIT, nullptr); /* restore */
     lens_release(ui);
 }
 
 static void test_slider_error_reaches_skin(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     lens_set_skin(ui, LENS_WIDGET_SLIDER, capture);
 
     float val = 0.5f;
@@ -70,13 +70,13 @@ static void test_slider_error_reaches_skin(void) {
     OT_EXPECT(g_saw_error);
     OT_EXPECT(!lens_overflowed(ui));
 
-    lens_set_skin(ui, LENS_WIDGET_SLIDER, NULL);
+    lens_set_skin(ui, LENS_WIDGET_SLIDER, nullptr);
     lens_release(ui);
 }
 
 static void test_error_scoped_to_its_own_widget(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     lens_set_skin(ui, LENS_WIDGET_TEXTEDIT, capture);
 
     /* Error is carried by the descriptor, so it can only apply to the one
@@ -88,7 +88,7 @@ static void test_error_scoped_to_its_own_widget(void) {
     build_textfield_pair(ui, a, b);
     OT_EXPECT(g_saw_any && g_saw_error && g_saw_clean);
 
-    lens_set_skin(ui, LENS_WIDGET_TEXTEDIT, NULL);
+    lens_set_skin(ui, LENS_WIDGET_TEXTEDIT, nullptr);
     lens_release(ui);
 }
 

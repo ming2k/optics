@@ -31,7 +31,7 @@ static void custom_toggle(lens *ui, const char *label) {
 }
 
 int main(void) {
-    lens *ui = NULL;
+    lens *ui = nullptr;
     if (lens_create(&(lens_desc){.theme = lens_theme_default()}, &ui) != FLUX_OK) {
         return 1;
     }
@@ -54,7 +54,7 @@ int main(void) {
 
         lens_begin(ui, &in);
         printf("--- Frame %d ---\n", frame);
-        lens_column_begin(ui, NULL);
+        lens_column_begin(ui, nullptr);
         custom_toggle(ui, "Auto-Save");
         custom_toggle(ui, "Dark Mode");
         lens_close(ui);

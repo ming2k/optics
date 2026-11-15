@@ -156,7 +156,14 @@ int main(void) {
     vkBeginCommandBuffer(cmd, &cbbi);
 
     push_constants pc = {.out_buffer_address = baddr, .count = COUNT};
-    flux_compute_dispatch(cmd, pipe, &pc, sizeof(pc), (COUNT + WORKGROUP - 1) / WORKGROUP, 1, 1);
+    flux_compute_dispatch(
+        &(flux_compute_dispatch_opts){.cmd = cmd,
+                                      .pipeline = pipe,
+                                      .push_constants = &pc,
+                                      .push_bytes = sizeof(pc),
+                                      .group_x = (COUNT + WORKGROUP - 1) / WORKGROUP,
+                                      .group_y = 1,
+                                      .group_z = 1});
 
     VkMemoryBarrier2 mb = {
         .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
@@ -213,8 +220,10 @@ int main(void) {
         if (dd) {
             uint64_t modifiers[512];
             uint32_t modifier_count = 512;
-            if (flux_dmabuf_format_modifiers(dd, FLUX_FORMAT_BGRA8_UNORM, modifiers,
-                                             &modifier_count) == FLUX_OK) {
+            if (flux_dmabuf_format_modifiers(dd, &(flux_dmabuf_format_modifiers_opts){
+                                                     .format = FLUX_FORMAT_BGRA8_UNORM,
+                                                     .out_modifiers = modifiers,
+                                                     .inout_count = &modifier_count}) == FLUX_OK) {
                 flux_surface_desc sd = FLUX_SURFACE_DESC_INIT;
                 sd.width = 16;
                 sd.height = 16;

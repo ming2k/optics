@@ -26,8 +26,8 @@ static lens_response build_pressable(lens *ui) {
 }
 
 static void test_complete_row_is_one_hit_target(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     lens_begin(ui, &IN0);
     OT_EXPECT(!build_pressable(ui).hovered);

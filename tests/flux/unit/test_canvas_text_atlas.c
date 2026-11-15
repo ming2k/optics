@@ -30,6 +30,21 @@
 #define W 112
 #define H 112
 
+static glyph_metrics measure(glyph_ctx *t, const char *s, size_t len, const glyph_style *style) {
+    return glyph_measure(t, &(glyph_measure_opts){.utf8 = s, .len = len, .style = style});
+}
+
+static void draw(glyph_ctx *t, flux_canvas *canvas, flux_arena *arena, float x, float y,
+                 const char *s, size_t len, const glyph_style *style) {
+    glyph_draw(t, &(glyph_draw_opts){.canvas = canvas,
+                                     .arena = arena,
+                                     .x = x,
+                                     .y = y,
+                                     .utf8 = s,
+                                     .len = len,
+                                     .style = style});
+}
+
 static uint8_t *snapshot(flux_canvas *c) {
     uint32_t w = 0, h = 0, stride = 0;
     const uint8_t *fb = flux_canvas_cpu_pixels(c, &w, &h, &stride);
@@ -53,7 +68,7 @@ int main(void) {
     OT_EXPECT(t != nullptr);
 
     /* No shaping backend → measure-only context → nothing to check. */
-    glyph_metrics m = glyph_measure(t, "A", 1, nullptr);
+    glyph_metrics m = measure(t, "A", 1, nullptr);
     if (m.width <= 0.0f) {
         glyph_release(t);
         OT_SKIP("no shaping backend");
@@ -62,7 +77,7 @@ int main(void) {
     flux_canvas *c = nullptr;
     OT_EXPECT(flux_canvas_create_cpu(W, H, SCALE, &c) == FLUX_OK);
 
-    glyph_style style = {0};
+    glyph_style style = {};
     style.size_px = 64.0f;
     style.color = flux_color_rgba_premul(255, 255, 255, 255);
 
@@ -72,7 +87,7 @@ int main(void) {
     /* Frame 1: record two glyphs. */
     begin_clear(c);
     OT_EXPECT(flux_canvas_cache_begin(c));
-    glyph_draw(t, c, nullptr, 4.0f, 4.0f, "Hg", 2, &style);
+    draw(t, c, nullptr, 4.0f, 4.0f, "Hg", 2, &style);
     flux_canvas_cache_entry rec = flux_canvas_cache_end(c);
     OT_EXPECT(rec.slot != nullptr);
     OT_EXPECT(flux_canvas_end(c) == FLUX_OK);
@@ -98,7 +113,7 @@ int main(void) {
         glyph_get_stats(t, &st_after);
         if (st_after.atlas_clears > st_before.atlas_clears)
             break;
-        glyph_draw(t, c, nullptr, 0.13f * (float)k, 4.0f, filler, 94, &style);
+        draw(t, c, nullptr, 0.13f * (float)k, 4.0f, filler, 94, &style);
     }
     OT_EXPECT(flux_canvas_end(c) == FLUX_OK);
     glyph_get_stats(t, &st_after);
@@ -110,7 +125,7 @@ int main(void) {
      * draws; draw once more so the refusal below keys on the post-clear
      * generation even when the final filler draw triggered the clear. */
     begin_clear(c);
-    glyph_draw(t, c, nullptr, 4.0f, 4.0f, "x", 1, &style);
+    draw(t, c, nullptr, 4.0f, 4.0f, "x", 1, &style);
     OT_EXPECT(flux_canvas_end(c) == FLUX_OK);
 
     /* Frame 3: the pre-clear segment must be REFUSED — its baked UVs name
@@ -133,7 +148,7 @@ int main(void) {
     /* Frame 4: live re-draw re-rasterises into the new atlas generation
      * and reproduces the recorded pixels exactly. */
     begin_clear(c);
-    glyph_draw(t, c, nullptr, 4.0f, 4.0f, "Hg", 2, &style);
+    draw(t, c, nullptr, 4.0f, 4.0f, "Hg", 2, &style);
     OT_EXPECT(flux_canvas_end(c) == FLUX_OK);
     uint8_t *redrawn = snapshot(c);
     OT_EXPECT(memcmp(live, redrawn, (size_t)W * H * 4) == 0);
@@ -143,7 +158,7 @@ int main(void) {
     /* A segment recorded after the clear replays normally. */
     begin_clear(c);
     OT_EXPECT(flux_canvas_cache_begin(c));
-    glyph_draw(t, c, nullptr, 4.0f, 4.0f, "Hg", 2, &style);
+    draw(t, c, nullptr, 4.0f, 4.0f, "Hg", 2, &style);
     flux_canvas_cache_entry rec2 = flux_canvas_cache_end(c);
     OT_EXPECT(rec2.slot != nullptr);
     OT_EXPECT(flux_canvas_end(c) == FLUX_OK);

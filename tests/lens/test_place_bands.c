@@ -28,8 +28,8 @@ static lens_place_opts exact_at(flux_rect rect, lens_band band, flux_color bg) {
 
 /* The body always runs — non-transient nodes have no open state. */
 static void test_exact_always_entered(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     int body_runs = 0;
     for (int frame = 0; frame < 2; frame++) {
@@ -49,8 +49,8 @@ static void test_exact_always_entered(void) {
 
 /* Placement is exactly at the rect's top-left — no below-anchor drop. */
 static void test_exact_place_at_rect(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     lens_place_opts o = exact_at((flux_rect){40, 50, 120, 24}, LENS_BAND_CHROME, 0);
     o.layout.pad = 4.0f;
@@ -84,8 +84,8 @@ static void test_exact_place_at_rect(void) {
  * boxes) and must update immediately when callers move/resize the same
  * stable id. */
 static void test_rect_extent_tracks_updates(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     lens_begin(ui, &ZERO_IN);
     lens_id id = lens_current_id(ui, "selection");
@@ -95,7 +95,7 @@ static void test_rect_extent_tracks_updates(void) {
     lens_test_end(ui);
 
     lens_node *node = lens_find(ui, id);
-    OT_EXPECT(node != NULL);
+    OT_EXPECT(node != nullptr);
     flux_rect bounds = lens_node_bounds(node);
     OT_EXPECT_NEAR(bounds.x, 20.0f, 0.001f);
     OT_EXPECT_NEAR(bounds.y, 30.0f, 0.001f);
@@ -109,7 +109,7 @@ static void test_rect_extent_tracks_updates(void) {
     lens_test_end(ui);
 
     node = lens_find(ui, id);
-    OT_EXPECT(node != NULL);
+    OT_EXPECT(node != nullptr);
     bounds = lens_node_bounds(node);
     OT_EXPECT_NEAR(bounds.x, 80.0f, 0.001f);
     OT_EXPECT_NEAR(bounds.y, 60.0f, 0.001f);
@@ -122,8 +122,8 @@ static void test_rect_extent_tracks_updates(void) {
 /* Escape and click-outside must not remove a non-transient node — it has
  * no open state to lose. */
 static void test_persistent_not_dismissed(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     lens_begin(ui, &ZERO_IN);
     if (place_begin(ui, "wsbar", exact_at((flux_rect){0, 0, 400, 28}, LENS_BAND_CHROME, 0))) {
@@ -167,8 +167,8 @@ static void test_persistent_not_dismissed(void) {
 /* A base widget under a CHROME node is occluded: a click on the dock does
  * not fall through to the window behind it. */
 static void test_chrome_occludes_base(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     lens_place_opts cover = exact_at((flux_rect){0, 0, 200, 200}, LENS_BAND_CHROME, 0xff000000u);
     cover.layout.pad = 8.0f;
@@ -204,8 +204,8 @@ static void test_chrome_occludes_base(void) {
 /* Strict band order: a widget inside a CHROME node is occluded by a POPUP
  * node on top of it. */
 static void test_popup_occludes_chrome_contents(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     lens_place_opts chrome = exact_at((flux_rect){0, 0, 200, 200}, LENS_BAND_CHROME, 0);
     chrome.layout.pad = 8.0f;
@@ -248,8 +248,8 @@ static void test_popup_occludes_chrome_contents(void) {
  * base button under it stays clickable, while a button INSIDE a default
  * (non-interactive) backdrop gets no hits at all. */
 static void test_backdrop_hit_transparent(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     lens_place_opts bd = exact_at((flux_rect){0, 0, 400, 300}, LENS_BAND_BACKDROP, 0);
 
@@ -297,8 +297,8 @@ static void test_backdrop_hit_transparent(void) {
 
 /* The opt-in flag makes a BACKDROP subtree hit-testable. */
 static void test_backdrop_interactive_opt_in(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     lens_place_opts bd = exact_at((flux_rect){0, 0, 400, 300}, LENS_BAND_BACKDROP, 0);
     bd.interactive = true;
@@ -361,9 +361,9 @@ static void render(lens *ui, flux_canvas *canvas) {
 /* Emission order: BACKDROP under the base tree under CHROME under POPUP
  * under TOPMOST; within a band, later registration wins. */
 static void test_band_render_order(void) {
-    lens *ui = NULL;
-    flux_canvas *canvas = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    flux_canvas *canvas = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     OT_EXPECT(flux_canvas_create_cpu(400, 300, 1.0f, &canvas) == FLUX_OK);
 
     const flux_color RED = 0xFFFF0000u;
@@ -458,9 +458,9 @@ static void test_band_render_order(void) {
 /* Within one band there is no weight: later registration paints (and
  * hit-tests) above earlier. */
 static void test_intra_band_registration_order(void) {
-    lens *ui = NULL;
-    flux_canvas *canvas = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    flux_canvas *canvas = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     OT_EXPECT(flux_canvas_create_cpu(400, 300, 1.0f, &canvas) == FLUX_OK);
 
     const flux_color CYAN = 0xFF00FFFFu;
@@ -489,9 +489,9 @@ static void test_intra_band_registration_order(void) {
  * above also hit-tests above" invariant can never be violated — it must
  * render above the base tree AND occlude it. */
 static void test_base_band_request_clamped_to_chrome(void) {
-    lens *ui = NULL;
-    flux_canvas *canvas = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    flux_canvas *canvas = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     OT_EXPECT(flux_canvas_create_cpu(400, 300, 1.0f, &canvas) == FLUX_OK);
 
     const flux_color BLUE = 0xFF0000FFu;

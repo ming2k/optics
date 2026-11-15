@@ -59,7 +59,7 @@ GLYPH_API const char *glyph_version_string(void);
 typedef struct glyph_ctx glyph_ctx;
 
 /* Typeface family. */
-typedef enum {
+typedef enum : uint32_t {
     GLYPH_FAMILY_DEFAULT = 0, /* use the context default (sans-serif) */
     GLYPH_FAMILY_SANS = 1,    /* sans-serif                           */
     GLYPH_FAMILY_SERIF = 2,   /* serif                                */
@@ -104,7 +104,13 @@ GLYPH_API void glyph_release(glyph_ctx *t);
 
 /* Atlas synchronization contract. */
 FLUX_NODISCARD GLYPH_API bool glyph_has_pending_uploads(const glyph_ctx *t);
-FLUX_NODISCARD GLYPH_API flux_result glyph_flush_atlas(glyph_ctx *t, flux_frame *f);
+
+typedef struct glyph_flush_atlas_opts {
+    flux_frame *frame; /* nullable: host-atlas paths */
+} glyph_flush_atlas_opts;
+
+FLUX_NODISCARD GLYPH_API flux_result glyph_flush_atlas(glyph_ctx *t,
+                                                       const glyph_flush_atlas_opts *opts);
 FLUX_NODISCARD GLYPH_API uint64_t glyph_get_atlas_epoch(const glyph_ctx *t, const flux_frame *f);
 
 /* Scale contract. */
@@ -139,48 +145,85 @@ GLYPH_API void glyph_get_stats(const glyph_ctx *t, glyph_stats *out);
 /*  Measure                                                           */
 /* ================================================================== */
 
-GLYPH_API glyph_metrics glyph_measure(glyph_ctx *t, const char *utf8, size_t len,
-                                      const glyph_style *style);
+typedef struct glyph_measure_opts {
+    const char *utf8;
+    size_t len;
+    const glyph_style *style; /* nullable: engine defaults */
+} glyph_measure_opts;
+
+GLYPH_API glyph_metrics glyph_measure(glyph_ctx *t, const glyph_measure_opts *opts);
 
 /* ================================================================== */
 /*  Draw                                                              */
 /* ================================================================== */
 
-GLYPH_API void glyph_draw(glyph_ctx *t, flux_canvas *canvas, flux_arena *arena, float x, float y,
-                          const char *utf8, size_t len, const glyph_style *style);
+typedef struct glyph_draw_opts {
+    flux_canvas *canvas;
+    flux_arena *arena; /* nullable: canvas-owned allocations */
+    float x, y;
+    const char *utf8;
+    size_t len;
+    const glyph_style *style; /* nullable: engine defaults */
+    flux_color outline_color;
+    float outline_width; /* 0 = fill only */
+} glyph_draw_opts;
 
-typedef struct glyph_record_desc {
+GLYPH_API void glyph_draw(glyph_ctx *t, const glyph_draw_opts *opts);
+
+typedef struct glyph_record_opts {
+    flux_encoder *encoder;
     float x, y;
     const char *utf8;
     size_t len;
     glyph_style style;
     flux_color outline_color;
-    float outline_width;
-} glyph_record_desc;
+    float outline_width; /* 0 = fill only */
+} glyph_record_opts;
 
-FLUX_NODISCARD GLYPH_API flux_result glyph_record(glyph_ctx *t, flux_encoder *encoder,
-                                                  const glyph_record_desc *desc);
-
-GLYPH_API void glyph_draw_outlined(glyph_ctx *t, flux_canvas *canvas, flux_arena *arena, float x,
-                                   float y, const char *utf8, size_t len, const glyph_style *style,
-                                   flux_color outline_color, float outline_width);
+FLUX_NODISCARD GLYPH_API flux_result glyph_record(glyph_ctx *t, const glyph_record_opts *opts);
 
 /* ================================================================== */
 /*  Caret and selection mapping (BiDi-correct)                        */
 /* ================================================================== */
 
-GLYPH_API float glyph_x_for_byte(glyph_ctx *t, const char *utf8, size_t len, size_t byte,
-                                 const glyph_style *style);
+typedef struct glyph_x_for_byte_opts {
+    const char *utf8;
+    size_t len;
+    size_t byte;
+    const glyph_style *style; /* nullable: engine defaults */
+} glyph_x_for_byte_opts;
 
-GLYPH_API size_t glyph_byte_for_x(glyph_ctx *t, const char *utf8, size_t len, float local_x,
-                                  const glyph_style *style);
+GLYPH_API float glyph_x_for_byte(glyph_ctx *t, const glyph_x_for_byte_opts *opts);
 
-GLYPH_API int glyph_selection_rects(glyph_ctx *t, const char *utf8, size_t len, size_t lo,
-                                    size_t hi, const glyph_style *style, glyph_xrange *out,
-                                    int max);
+typedef struct glyph_byte_for_x_opts {
+    const char *utf8;
+    size_t len;
+    float local_x;
+    const glyph_style *style; /* nullable: engine defaults */
+} glyph_byte_for_x_opts;
 
-GLYPH_API size_t glyph_visual_move(glyph_ctx *t, const char *utf8, size_t len, size_t byte,
-                                   bool forward, const glyph_style *style);
+GLYPH_API size_t glyph_byte_for_x(glyph_ctx *t, const glyph_byte_for_x_opts *opts);
+
+typedef struct glyph_selection_rects_opts {
+    const char *utf8;
+    size_t len;
+    size_t lo, hi;
+    const glyph_style *style; /* nullable: engine defaults */
+    glyph_xrange *out;
+    int max;
+} glyph_selection_rects_opts;
+
+GLYPH_API int glyph_selection_rects(glyph_ctx *t, const glyph_selection_rects_opts *opts);
+
+typedef struct glyph_visual_move_opts {
+    const char *utf8;
+    size_t len;
+    size_t byte;
+    bool forward;
+    const glyph_style *style; /* nullable: engine defaults */
+} glyph_visual_move_opts;
+
+GLYPH_API size_t glyph_visual_move(glyph_ctx *t, const glyph_visual_move_opts *opts);
 
 #ifdef __cplusplus
 }

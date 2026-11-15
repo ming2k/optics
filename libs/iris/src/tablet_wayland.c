@@ -128,7 +128,7 @@ static void tablet_tool_proximity_out(void *data, struct zwp_tablet_tool_v2 *too
         return;
     tool_apply_down(false);
     (void)tablet_emit_proximity(false);
-    g_tablet.active_tool = NULL;
+    g_tablet.active_tool = nullptr;
     g_tablet.eraser = false;
     g_tablet.pressure = 0.0;
 }
@@ -226,8 +226,8 @@ static void tablet_tool_done(void *data, struct zwp_tablet_tool_v2 *tool) {
 
 static const struct zwp_tablet_tool_v2_listener tablet_tool_listener = {
     .type = tablet_tool_type,
-    .hardware_serial = NULL,
-    .hardware_id_wacom = NULL,
+    .hardware_serial = nullptr,
+    .hardware_id_wacom = nullptr,
     .capability = tablet_tool_capability,
     .done = tablet_tool_done,
     .removed = tablet_tool_removed,
@@ -239,9 +239,9 @@ static const struct zwp_tablet_tool_v2_listener tablet_tool_listener = {
     .pressure = tablet_tool_pressure,
     .distance = tablet_tool_distance,
     .tilt = tablet_tool_tilt,
-    .rotation = NULL,
-    .slider = NULL,
-    .wheel = NULL,
+    .rotation = nullptr,
+    .slider = nullptr,
+    .wheel = nullptr,
     .button = tablet_tool_button,
     .frame = tablet_tool_frame,
 };
@@ -257,9 +257,9 @@ static void tablet_seat_tool_added(void *data, struct zwp_tablet_seat_v2 *seat,
 }
 
 static const struct zwp_tablet_seat_v2_listener tablet_seat_listener = {
-    .tablet_added = NULL,
+    .tablet_added = nullptr,
     .tool_added = tablet_seat_tool_added,
-    .pad_added = NULL,
+    .pad_added = nullptr,
 };
 
 /* ------------------------------------------------------------------ */
@@ -280,7 +280,7 @@ void iris_wayland__tablet_bind_manager(struct wl_registry *reg, uint32_t name,
         g_host = *host;
     if (g_pending_seat) {
         g_tablet.seat = zwp_tablet_manager_v2_get_tablet_seat(g_tablet.mgr, g_pending_seat);
-        zwp_tablet_seat_v2_add_listener(g_tablet.seat, &tablet_seat_listener, NULL);
+        zwp_tablet_seat_v2_add_listener(g_tablet.seat, &tablet_seat_listener, nullptr);
     }
 }
 
@@ -289,7 +289,7 @@ void iris_wayland__tablet_attach_seat(struct wl_seat *seat) {
     if (!g_tablet.mgr || g_tablet.seat || !seat)
         return;
     g_tablet.seat = zwp_tablet_manager_v2_get_tablet_seat(g_tablet.mgr, seat);
-    zwp_tablet_seat_v2_add_listener(g_tablet.seat, &tablet_seat_listener, NULL);
+    zwp_tablet_seat_v2_add_listener(g_tablet.seat, &tablet_seat_listener, nullptr);
 }
 
 void iris_wayland__tablet_global_removed(uint32_t name) {
@@ -308,7 +308,7 @@ void iris_wayland__tablet_fill_input(lens_input *in) {
 }
 
 void iris_wayland__tablet_reset(void) {
-    g_tablet = (wp_tablet){0};
+    g_tablet = (wp_tablet){};
 }
 
 bool iris_wayland__tablet_in_proximity(void) {

@@ -81,7 +81,7 @@ int main(void) {
     OT_EXPECT(s == IRIS_COLOR_SCHEME_PREFER_DARK);
 
     /* 4. GTK_THEME unset also falls through to the safe default. */
-    with_env(NULL, &s);
+    with_env(nullptr, &s);
     OT_EXPECT(s == IRIS_COLOR_SCHEME_PREFER_DARK);
 
     /* 5. iris_system_prefers_dark is consistent: PREFER_DARK and
@@ -102,12 +102,12 @@ int main(void) {
      *        registration and unwatch stops it;
      *      - no callback fires spuriously while we sit idle. */
     iris_color_scheme_unwatch(); /* safe no-op before any watch */
-    OT_EXPECT(iris_color_scheme_watch(NULL, NULL) != 0);
+    OT_EXPECT(iris_color_scheme_watch(nullptr, nullptr) != 0);
 
     watch_calls = 0;
-    if (iris_color_scheme_watch(on_scheme_changed, NULL) == 0) {
+    if (iris_color_scheme_watch(on_scheme_changed, nullptr) == 0) {
         /* Re-registration replaces cb/user and keeps watching. */
-        OT_EXPECT(iris_color_scheme_watch(on_scheme_changed, NULL) == 0);
+        OT_EXPECT(iris_color_scheme_watch(on_scheme_changed, nullptr) == 0);
         iris_color_scheme_unwatch();
         /* After unwatch returns the registration is dead: the callback
          * must not fire, and a second unwatch is a safe no-op. */

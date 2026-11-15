@@ -96,6 +96,8 @@ without compatibility shims.
    `tests/e2e/` contains only scenarios that link `optics_dep` (the umbrella
    façade and its public libraries) and the shared harness. The current
    scenarios are:
+   - `e2e_flux_version`: umbrella version and flux runtime version in every
+     feature configuration, including a flux-only distribution.
    - `e2e_public_api`: umbrella version lockstep and a complete public frame.
    - `e2e_interaction_session`: synthetic host loop across pointer, focus,
      keyboard text, accessibility export, snapshot publication, and CPU replay.
@@ -163,7 +165,7 @@ without compatibility shims.
 ## Consequences
 
 - Every registered test now has a layer or lane. The current inventory is
-  `unit=112`, `integration=66`, `e2e=3`, `bench=8`, plus lint/tooling.
+  `unit=112`, `integration=66`, `e2e=4`, `bench=8`, plus lint/tooling.
   `glyph` has a dedicated suite: pure cache/lifecycle tests are `unit`, while
   shaping-dependent caret/selection and text-soak lanes are `integration`.
 - `meson test --suite unit`, `--suite integration`, and `--suite e2e` are

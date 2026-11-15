@@ -197,3 +197,5 @@ silent fallback. Its primitives have landed.
 | 0161 | [Reticle Vector Compiler and Vista Subsystem Boundary](0161-reticle-vector-compiler-and-vista-boundary.md) | Accepted |
 | 0162 | [Layered Test Architecture: One Harness, Three Layers, Public-API E2E](0162-layered-test-architecture-one-harness-three-layers-public-api-e2e.md) | Accepted |
 | 0163 | [Repository-Root Cargo Workspace and a Honest Git-Dependency Boundary](0163-repository-root-cargo-workspace.md) | Accepted |
+| 0164 | [Umbrella Feature Detection Uses Distribution Flags, Not Host Header Probing](0164-umbrella-feature-detection-flags.md) | Accepted |
+| 0165 | [Single Opts Descriptor Migration by Library](0165-single-opts-descriptor-migration-by-library.md) | Accepted |

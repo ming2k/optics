@@ -54,9 +54,17 @@ FLUX_API VkPipelineLayout flux_compute_pipeline_vk_layout(flux_compute_pipeline 
  * (caller must have declared a matching push_constant block in the
  * shader), binds the device bindless descriptor set at set=0, and
  * issues vkCmdDispatch. */
-FLUX_API void flux_compute_dispatch(VkCommandBuffer cmd, flux_compute_pipeline *pipeline,
-                                    const void *push_constants, uint32_t push_bytes,
-                                    uint32_t group_x, uint32_t group_y, uint32_t group_z);
+typedef struct flux_compute_dispatch_opts {
+    VkCommandBuffer cmd;
+    flux_compute_pipeline *pipeline;
+    const void *push_constants;
+    uint32_t push_bytes;
+    uint32_t group_x;
+    uint32_t group_y;
+    uint32_t group_z;
+} flux_compute_dispatch_opts;
+
+FLUX_API void flux_compute_dispatch(const flux_compute_dispatch_opts *opts);
 
 #ifdef __cplusplus
 }

@@ -171,8 +171,8 @@ flux_result flux_graphics_pipeline_create(flux_device *d, const flux_graphics_pi
     };
 
     /* Vertex input — caller-supplied or empty (BDA-style pulling). */
-    VkVertexInputBindingDescription vk_binding = {0};
-    VkVertexInputAttributeDescription vk_attrs[16] = {0};
+    VkVertexInputBindingDescription vk_binding = {};
+    VkVertexInputAttributeDescription vk_attrs[16] = {};
     VkPipelineVertexInputStateCreateInfo vi = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
     };
@@ -317,10 +317,12 @@ VkPipelineLayout flux_graphics_pipeline_vk_layout(const flux_graphics_pipeline *
     return p ? p->layout : VK_NULL_HANDLE;
 }
 
-void flux_graphics_pipeline_bind(flux_frame *f, flux_graphics_pipeline *p,
-                                 const void *push_constants, uint32_t push_bytes) {
-    if (!f || !p || !p->pipeline)
+void flux_graphics_pipeline_bind(flux_frame *f, const flux_graphics_pipeline_bind_opts *opts) {
+    if (!f || !opts || !opts->pipeline || !opts->pipeline->pipeline)
         return;
+    flux_graphics_pipeline *p = opts->pipeline;
+    const void *push_constants = opts->push_constants;
+    uint32_t push_bytes = opts->push_bytes;
     VkCommandBuffer cmd = flux_frame_vk_command_buffer(f);
     if (!cmd)
         return;

@@ -32,9 +32,14 @@ static size_t utf8_prev_boundary(const char *text, size_t pos) {
 }
 
 static glyph_metrics measure_slice(lens *ui, const char *text, size_t len, float size) {
-    return glyph_measure(
-        ui->text, text, len,
-        &(glyph_style){.size_px = size, .weight = 0.0f, .family = (glyph_family)ui->text_family});
+    return glyph_measure(ui->text,
+                         &(glyph_measure_opts){
+                             .utf8 = text,
+                             .len = len,
+                             .style = &(glyph_style){.size_px = size,
+                                                     .weight = 0.0f,
+                                                     .family = (glyph_family)ui->text_family},
+                         });
 }
 
 static size_t wrapped_line_end(lens *ui, const char *text, size_t len, size_t start, float size,
@@ -57,10 +62,16 @@ static size_t wrapped_line_end(lens *ui, const char *text, size_t len, size_t st
     size_t segment_len = segment_end - start;
     const glyph_style style = {
         .size_px = size, .weight = 0.0f, .family = (glyph_family)ui->text_family};
-    size_t cut = glyph_byte_for_x(ui->text, segment, segment_len, max_width, &style);
+    size_t cut = glyph_byte_for_x(
+        ui->text, &(glyph_byte_for_x_opts){
+                      .utf8 = segment, .len = segment_len, .local_x = max_width, .style = &style});
     if (cut > segment_len)
         cut = segment_len;
-    while (cut > 0 && glyph_x_for_byte(ui->text, segment, segment_len, cut, &style) > max_width)
+    while (cut > 0 &&
+           glyph_x_for_byte(ui->text, &(glyph_x_for_byte_opts){.utf8 = segment,
+                                                               .len = segment_len,
+                                                               .byte = cut,
+                                                               .style = &style}) > max_width)
         cut = utf8_prev_boundary(segment, cut);
     if (cut == 0)
         cut = utf8_next_boundary(segment, segment_len, 0);
@@ -126,7 +137,7 @@ static void push_line_slice(lens *ui, lens_text_line **lines, int *count, int *c
 }
 
 lens_response lens_label(lens *ui, const lens_label_opts *opts) {
-    lens_label_opts default_opts = {0};
+    lens_label_opts default_opts = {};
     if (!opts)
         opts = &default_opts;
 
@@ -149,7 +160,7 @@ lens_response lens_label(lens *ui, const lens_label_opts *opts) {
         opts->box.id ? lensi_gen_widget_id(ui, opts->box.id) : lensi_gen_widget_id(ui, text);
     lens_node *n = lensi_store_touch(ui, id);
     if (!n)
-        return (lens_response){0};
+        return (lens_response){};
 
     lensi_link_child(ui, n);
     lensi_node_box(ui, n, &opts->box);
@@ -161,7 +172,7 @@ lens_response lens_label(lens *ui, const lens_label_opts *opts) {
 
     float w = 0.0f;
     float h = 0.0f;
-    lens_text_line *lines = NULL;
+    lens_text_line *lines = nullptr;
     int line_count = 0;
 
     if (wrap && max_w > 0.0f) {
@@ -210,7 +221,7 @@ lens_response lens_label(lens *ui, const lens_label_opts *opts) {
     }
     n->measured = (flux_point){w, h};
 
-    lensi_node_semantics(ui, n, LENS_ROLE_LABEL, text, NULL, 0);
+    lensi_node_semantics(ui, n, LENS_ROLE_LABEL, text, nullptr, 0);
 
     lensi_skin_emit(ui, n,
                     &(lens_widget_record){

@@ -88,12 +88,12 @@ static const char *node_string(const iris_a11y__node *n) {
 /* find_node: returns ptr into g_state.nodes or NULL */
 static iris_a11y__node *find_node(lens_id id) {
     if (id == 0)
-        return NULL; /* root */
+        return nullptr; /* root */
     for (size_t i = 0; i < g_state.n; i++) {
         if (g_state.nodes[i].id == id)
             return &g_state.nodes[i];
     }
-    return NULL;
+    return nullptr;
 }
 
 /* find_prev: same lookup against the previous frame's snapshot. */
@@ -102,15 +102,15 @@ static const iris_a11y__node *find_prev(lens_id id) {
         if (g_state.prev[i].id == id)
             return &g_state.prev[i];
     }
-    return NULL;
+    return nullptr;
 }
 
 /* ------------------------------------------------------------------ */
 /*  D-Bus connection + registration                                    */
 /* ------------------------------------------------------------------ */
 
-static sd_bus *g_a11y_bus = NULL;
-static char g_unique[128] = {0}; /* our unique bus name on a11y bus  */
+static sd_bus *g_a11y_bus = nullptr;
+static char g_unique[128] = {}; /* our unique bus name on a11y bus  */
 
 /* Path helpers. Root is /org/a11y/atspi/accessible/root; widgets use
  * /org/a11y/atspi/accessible/<lens_id>. */
@@ -131,7 +131,7 @@ static int parse_path(const char *path, lens_id *out) {
         *out = 0;
         return 0;
     }
-    char *end = NULL;
+    char *end = nullptr;
     unsigned long long v = strtoull(rest, &end, 10);
     if (end == rest || *end != '\0')
         return -1;
@@ -147,7 +147,7 @@ static int parse_path(const char *path, lens_id *out) {
  * run on the main thread inside the bus pump, so calling straight into
  * lens is safe; the activation lands next frame like any input. Cleared on
  * shutdown. */
-static lens *g_lens_ui = NULL;
+static lens *g_lens_ui = nullptr;
 
 /* ------------------------------------------------------------------ */
 /*  org.a11y.atspi.Accessible method handlers                          */
@@ -290,7 +290,7 @@ static int m_get_state(sd_bus_message *m, void *u, sd_bus_error *e) {
         iris_a11y__state_bits(0, &lo, &hi);
     }
 
-    sd_bus_message *reply = NULL;
+    sd_bus_message *reply = nullptr;
     int rc = sd_bus_message_new_method_return(m, &reply);
     if (rc < 0)
         return rc;
@@ -303,7 +303,7 @@ static int m_get_state(sd_bus_message *m, void *u, sd_bus_error *e) {
         sd_bus_message_unref(reply);
         return rc;
     }
-    return sd_bus_send(NULL, reply, NULL);
+    return sd_bus_send(nullptr, reply, nullptr);
 }
 
 static int m_get_application(sd_bus_message *m, void *u, sd_bus_error *e) {
@@ -337,7 +337,7 @@ static int m_get_attributes(sd_bus_message *m, void *u, sd_bus_error *e) {
     (void)u;
     (void)e;
     /* Return an empty a{ss} dict. */
-    sd_bus_message *reply = NULL;
+    sd_bus_message *reply = nullptr;
     int rc = sd_bus_message_new_method_return(m, &reply);
     if (rc < 0)
         return rc;
@@ -351,7 +351,7 @@ static int m_get_attributes(sd_bus_message *m, void *u, sd_bus_error *e) {
         sd_bus_message_unref(reply);
         return rc;
     }
-    return sd_bus_send(NULL, reply, NULL);
+    return sd_bus_send(nullptr, reply, nullptr);
 }
 
 static int m_get_interfaces(sd_bus_message *m, void *u, sd_bus_error *e) {
@@ -369,7 +369,7 @@ static int m_get_interfaces(sd_bus_message *m, void *u, sd_bus_error *e) {
             role = n->role;
     }
 
-    sd_bus_message *reply = NULL;
+    sd_bus_message *reply = nullptr;
     int rc = sd_bus_message_new_method_return(m, &reply);
     if (rc < 0)
         return rc;
@@ -411,7 +411,7 @@ static int m_get_interfaces(sd_bus_message *m, void *u, sd_bus_error *e) {
         sd_bus_message_unref(reply);
         return rc;
     }
-    return sd_bus_send(NULL, reply, NULL);
+    return sd_bus_send(nullptr, reply, nullptr);
 }
 
 /* org.a11y.atspi.Application: GetLocale, GetToolkitName, GetVersion */
@@ -460,24 +460,25 @@ static int p_get_app_id(sd_bus *bus, const char *path, const char *interface, co
 
 static const sd_bus_vtable g_accessible_vtable[] = {
     SD_BUS_VTABLE_START(0),
-    SD_BUS_METHOD("GetName", NULL, "s", HANDLER(m_get_name), SD_BUS_VTABLE_UNPRIVILEGED),
-    SD_BUS_METHOD("GetDescription", NULL, "s", HANDLER(m_get_description),
+    SD_BUS_METHOD("GetName", nullptr, "s", HANDLER(m_get_name), SD_BUS_VTABLE_UNPRIVILEGED),
+    SD_BUS_METHOD("GetDescription", nullptr, "s", HANDLER(m_get_description),
                   SD_BUS_VTABLE_UNPRIVILEGED),
-    SD_BUS_METHOD("GetRole", NULL, "u", HANDLER(m_get_role), SD_BUS_VTABLE_UNPRIVILEGED),
-    SD_BUS_METHOD("GetRoleName", NULL, "s", HANDLER(m_get_role_name), SD_BUS_VTABLE_UNPRIVILEGED),
-    SD_BUS_METHOD("GetParent", NULL, "so", HANDLER(m_get_parent), SD_BUS_VTABLE_UNPRIVILEGED),
-    SD_BUS_METHOD("GetChildCount", NULL, "i", HANDLER(m_get_child_count),
+    SD_BUS_METHOD("GetRole", nullptr, "u", HANDLER(m_get_role), SD_BUS_VTABLE_UNPRIVILEGED),
+    SD_BUS_METHOD("GetRoleName", nullptr, "s", HANDLER(m_get_role_name),
+                  SD_BUS_VTABLE_UNPRIVILEGED),
+    SD_BUS_METHOD("GetParent", nullptr, "so", HANDLER(m_get_parent), SD_BUS_VTABLE_UNPRIVILEGED),
+    SD_BUS_METHOD("GetChildCount", nullptr, "i", HANDLER(m_get_child_count),
                   SD_BUS_VTABLE_UNPRIVILEGED),
     SD_BUS_METHOD("GetChildAtIndex", "i", "so", HANDLER(m_get_child_at_index),
                   SD_BUS_VTABLE_UNPRIVILEGED),
-    SD_BUS_METHOD("GetState", NULL, "au", HANDLER(m_get_state), SD_BUS_VTABLE_UNPRIVILEGED),
-    SD_BUS_METHOD("GetApplication", NULL, "so", HANDLER(m_get_application),
+    SD_BUS_METHOD("GetState", nullptr, "au", HANDLER(m_get_state), SD_BUS_VTABLE_UNPRIVILEGED),
+    SD_BUS_METHOD("GetApplication", nullptr, "so", HANDLER(m_get_application),
                   SD_BUS_VTABLE_UNPRIVILEGED),
-    SD_BUS_METHOD("GetIndexInParent", NULL, "i", HANDLER(m_get_index_in_parent),
+    SD_BUS_METHOD("GetIndexInParent", nullptr, "i", HANDLER(m_get_index_in_parent),
                   SD_BUS_VTABLE_UNPRIVILEGED),
-    SD_BUS_METHOD("GetAttributes", NULL, "a{ss}", HANDLER(m_get_attributes),
+    SD_BUS_METHOD("GetAttributes", nullptr, "a{ss}", HANDLER(m_get_attributes),
                   SD_BUS_VTABLE_UNPRIVILEGED),
-    SD_BUS_METHOD("GetInterfaces", NULL, "as", HANDLER(m_get_interfaces),
+    SD_BUS_METHOD("GetInterfaces", nullptr, "as", HANDLER(m_get_interfaces),
                   SD_BUS_VTABLE_UNPRIVILEGED),
     SD_BUS_VTABLE_END,
 };
@@ -506,7 +507,7 @@ static int action_get_n(sd_bus_message *m, void *u, sd_bus_error *e) {
     (void)e;
     lens_id id = 0;
     iris_a11y__node *n =
-        (parse_path(sd_bus_message_get_path(m), &id) == 0 && id != 0) ? find_node(id) : NULL;
+        (parse_path(sd_bus_message_get_path(m), &id) == 0 && id != 0) ? find_node(id) : nullptr;
     int32_t count = (n && iris_a11y__supports_action(n->role)) ? 1 : 0;
     return sd_bus_reply_method_return(m, "i", count);
 }
@@ -518,8 +519,8 @@ static int action_named(sd_bus_message *m, void *u, sd_bus_error *e) {
     (void)sd_bus_message_read(m, "i", &idx);
     lens_id id = 0;
     iris_a11y__node *n =
-        (parse_path(sd_bus_message_get_path(m), &id) == 0 && id != 0) ? find_node(id) : NULL;
-    const char *nm = (n && idx == 0) ? iris_a11y__action_name(n->role) : NULL;
+        (parse_path(sd_bus_message_get_path(m), &id) == 0 && id != 0) ? find_node(id) : nullptr;
+    const char *nm = (n && idx == 0) ? iris_a11y__action_name(n->role) : nullptr;
     return sd_bus_reply_method_return(m, "s", nm ? nm : "");
 }
 
@@ -530,7 +531,7 @@ static int action_description(sd_bus_message *m, void *u, sd_bus_error *e) {
     (void)sd_bus_message_read(m, "i", &idx);
     lens_id id = 0;
     iris_a11y__node *n =
-        (parse_path(sd_bus_message_get_path(m), &id) == 0 && id != 0) ? find_node(id) : NULL;
+        (parse_path(sd_bus_message_get_path(m), &id) == 0 && id != 0) ? find_node(id) : nullptr;
     const char *desc =
         (n && idx == 0 && iris_a11y__supports_action(n->role)) ? "activate the control" : "";
     return sd_bus_reply_method_return(m, "s", desc);
@@ -550,8 +551,8 @@ static int action_get_actions(sd_bus_message *m, void *u, sd_bus_error *e) {
     (void)e;
     lens_id id = 0;
     iris_a11y__node *n =
-        (parse_path(sd_bus_message_get_path(m), &id) == 0 && id != 0) ? find_node(id) : NULL;
-    sd_bus_message *reply = NULL;
+        (parse_path(sd_bus_message_get_path(m), &id) == 0 && id != 0) ? find_node(id) : nullptr;
+    sd_bus_message *reply = nullptr;
     int rc = sd_bus_message_new_method_return(m, &reply);
     if (rc < 0)
         return rc;
@@ -577,7 +578,7 @@ static int action_get_actions(sd_bus_message *m, void *u, sd_bus_error *e) {
         sd_bus_message_unref(reply);
         return rc;
     }
-    return sd_bus_send(NULL, reply, NULL);
+    return sd_bus_send(nullptr, reply, nullptr);
 }
 
 static int action_do(sd_bus_message *m, void *u, sd_bus_error *e) {
@@ -589,7 +590,7 @@ static int action_do(sd_bus_message *m, void *u, sd_bus_error *e) {
         return rc;
     lens_id id = 0;
     iris_a11y__node *n =
-        (parse_path(sd_bus_message_get_path(m), &id) == 0 && id != 0) ? find_node(id) : NULL;
+        (parse_path(sd_bus_message_get_path(m), &id) == 0 && id != 0) ? find_node(id) : nullptr;
     int ok = 0;
     if (n && idx == 0 && iris_a11y__supports_action(n->role) && g_lens_ui) {
         /* ADR-0062: hand the activation to lens's interaction path; it
@@ -603,13 +604,13 @@ static int action_do(sd_bus_message *m, void *u, sd_bus_error *e) {
 
 static const sd_bus_vtable g_action_vtable[] = {
     SD_BUS_VTABLE_START(0),
-    SD_BUS_METHOD("GetNActions", NULL, "i", HANDLER(action_get_n), SD_BUS_VTABLE_UNPRIVILEGED),
+    SD_BUS_METHOD("GetNActions", nullptr, "i", HANDLER(action_get_n), SD_BUS_VTABLE_UNPRIVILEGED),
     SD_BUS_METHOD("GetName", "i", "s", HANDLER(action_named), SD_BUS_VTABLE_UNPRIVILEGED),
     SD_BUS_METHOD("GetDescription", "i", "s", HANDLER(action_description),
                   SD_BUS_VTABLE_UNPRIVILEGED),
     SD_BUS_METHOD("GetKeyBinding", "i", "s", HANDLER(action_keybinding),
                   SD_BUS_VTABLE_UNPRIVILEGED),
-    SD_BUS_METHOD("GetActions", NULL, "a(is)", HANDLER(action_get_actions),
+    SD_BUS_METHOD("GetActions", nullptr, "a(is)", HANDLER(action_get_actions),
                   SD_BUS_VTABLE_UNPRIVILEGED),
     SD_BUS_METHOD("DoAction", "i", "b", HANDLER(action_do), SD_BUS_VTABLE_UNPRIVILEGED),
     SD_BUS_VTABLE_END,
@@ -651,7 +652,7 @@ static const char *text_slice(const char *value, int32_t start, int32_t end) {
 static iris_a11y__node *node_on_path(sd_bus_message *m) {
     lens_id id = 0;
     if (parse_path(sd_bus_message_get_path(m), &id) != 0 || id == 0)
-        return NULL;
+        return nullptr;
     return find_node(id);
 }
 
@@ -726,13 +727,13 @@ static int text_no_op_b(sd_bus_message *m, void *u, sd_bus_error *e) {
 
 static const sd_bus_vtable g_text_vtable[] = {
     SD_BUS_VTABLE_START(0),
-    SD_BUS_METHOD("GetCharacterCount", NULL, "i", HANDLER(text_char_count),
+    SD_BUS_METHOD("GetCharacterCount", nullptr, "i", HANDLER(text_char_count),
                   SD_BUS_VTABLE_UNPRIVILEGED),
     SD_BUS_METHOD("GetText", "ii", "s", HANDLER(text_get), SD_BUS_VTABLE_UNPRIVILEGED),
-    SD_BUS_METHOD("GetTextAll", NULL, "s", HANDLER(text_get_all), SD_BUS_VTABLE_UNPRIVILEGED),
-    SD_BUS_METHOD("GetCaretOffset", NULL, "i", HANDLER(text_caret), SD_BUS_VTABLE_UNPRIVILEGED),
+    SD_BUS_METHOD("GetTextAll", nullptr, "s", HANDLER(text_get_all), SD_BUS_VTABLE_UNPRIVILEGED),
+    SD_BUS_METHOD("GetCaretOffset", nullptr, "i", HANDLER(text_caret), SD_BUS_VTABLE_UNPRIVILEGED),
     SD_BUS_METHOD("SetCaretOffset", "i", "b", HANDLER(text_set_caret), SD_BUS_VTABLE_UNPRIVILEGED),
-    SD_BUS_METHOD("GetNSelections", NULL, "i", HANDLER(text_n_selections),
+    SD_BUS_METHOD("GetNSelections", nullptr, "i", HANDLER(text_n_selections),
                   SD_BUS_VTABLE_UNPRIVILEGED),
     SD_BUS_METHOD("GetSelection", "i", "ii", HANDLER(text_get_selection),
                   SD_BUS_VTABLE_UNPRIVILEGED),
@@ -810,24 +811,24 @@ static const sd_bus_vtable g_value_vtable[] = {
     SD_BUS_PROPERTY("MaximumValue", "d", value_prop_zero, 0, 0),
     SD_BUS_PROPERTY("MinimumIncrement", "d", value_prop_zero, 0, 0),
     /* Deprecated method forms older AT clients (pyatspi < 2.40) still call. */
-    SD_BUS_METHOD("GetCurrentValue", NULL, "d", HANDLER(value_get_current),
+    SD_BUS_METHOD("GetCurrentValue", nullptr, "d", HANDLER(value_get_current),
                   SD_BUS_VTABLE_UNPRIVILEGED),
     SD_BUS_METHOD("SetCurrentValue", "d", "", HANDLER(value_set_current),
                   SD_BUS_VTABLE_UNPRIVILEGED),
-    SD_BUS_METHOD("GetMinimumValue", NULL, "d", HANDLER(value_get_zero),
+    SD_BUS_METHOD("GetMinimumValue", nullptr, "d", HANDLER(value_get_zero),
                   SD_BUS_VTABLE_UNPRIVILEGED),
-    SD_BUS_METHOD("GetMaximumValue", NULL, "d", HANDLER(value_get_zero),
+    SD_BUS_METHOD("GetMaximumValue", nullptr, "d", HANDLER(value_get_zero),
                   SD_BUS_VTABLE_UNPRIVILEGED),
-    SD_BUS_METHOD("GetMinimumIncrement", NULL, "d", HANDLER(value_get_zero),
+    SD_BUS_METHOD("GetMinimumIncrement", nullptr, "d", HANDLER(value_get_zero),
                   SD_BUS_VTABLE_UNPRIVILEGED),
     SD_BUS_VTABLE_END,
 };
 
 static const sd_bus_vtable g_application_vtable[] = {
     SD_BUS_VTABLE_START(0),
-    SD_BUS_METHOD("GetToolkitName", NULL, "s", HANDLER(m_get_toolkit_name),
+    SD_BUS_METHOD("GetToolkitName", nullptr, "s", HANDLER(m_get_toolkit_name),
                   SD_BUS_VTABLE_UNPRIVILEGED),
-    SD_BUS_METHOD("GetVersion", NULL, "s", HANDLER(m_get_version), SD_BUS_VTABLE_UNPRIVILEGED),
+    SD_BUS_METHOD("GetVersion", nullptr, "s", HANDLER(m_get_version), SD_BUS_VTABLE_UNPRIVILEGED),
     SD_BUS_METHOD("GetLocale", "i", "s", HANDLER(m_get_locale), SD_BUS_VTABLE_UNPRIVILEGED),
     SD_BUS_PROPERTY("Id", "s", p_get_app_id, 0, SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
     SD_BUS_VTABLE_END,
@@ -842,7 +843,7 @@ static void visit_fn(const lens_semantics *s, flux_rect bounds, lens_id id, lens
                      void *user);
 
 IRIS_API bool iris_a11y_is_active(void) {
-    return g_a11y_bus != NULL && g_a11y_active;
+    return g_a11y_bus != nullptr && g_a11y_active;
 }
 
 static int on_bus_message_filter(sd_bus_message *m, void *userdata, sd_bus_error *ret_error) {
@@ -853,7 +854,7 @@ static int on_bus_message_filter(sd_bus_message *m, void *userdata, sd_bus_error
         if (!g_a11y_active) {
             g_a11y_active = true;
             if (g_state.n == 0 && g_lens_ui)
-                lens_accessibility_walk(g_lens_ui, visit_fn, NULL);
+                lens_accessibility_walk(g_lens_ui, visit_fn, nullptr);
         }
     }
     return 0; /* Pass through to vtables */
@@ -868,7 +869,7 @@ IRIS_API int iris_a11y_init(void) {
     if (no_at_bridge && strcmp(no_at_bridge, "1") == 0)
         return -1;
 
-    char addr_buf[1024] = {0};
+    char addr_buf[1024] = {};
 
     /* Explicit opt-in overrides (standard GTK_A11Y, AT_SPI_BUS_ADDRESS, IRIS_A11Y_FORCE). */
     bool explicitly_requested = false;
@@ -892,7 +893,7 @@ IRIS_API int iris_a11y_init(void) {
          * Enforce a tight fail-fast timeout (50ms): if the session bus or
          * a11y broker is absent/unresponsive, fail soft immediately without
          * degrading application startup or blocking the main thread. */
-        sd_bus *session = NULL;
+        sd_bus *session = nullptr;
         int rc = sd_bus_open_user(&session);
         if (rc < 0)
             return -1;
@@ -925,7 +926,7 @@ IRIS_API int iris_a11y_init(void) {
             return 0;
         }
 
-        char *addr_owned = NULL;
+        char *addr_owned = nullptr;
         rc = sd_bus_get_property_string(session, "org.a11y.Bus", "/org/a11y/bus", "org.a11y.Bus",
                                         "BusAddress", &err, &addr_owned);
         if (rc >= 0 && addr_owned && addr_owned[0] != '\0' &&
@@ -934,9 +935,9 @@ IRIS_API int iris_a11y_init(void) {
         } else {
             /* Fallback: GetAddress method call (used by legacy broker setups). */
             free(addr_owned);
-            addr_owned = NULL;
+            addr_owned = nullptr;
             sd_bus_error_free(&err);
-            sd_bus_message *reply = NULL;
+            sd_bus_message *reply = nullptr;
             rc = sd_bus_call_method(session, "org.a11y.Bus", "/org/a11y/bus", "org.a11y.Bus",
                                     "GetAddress", &err, &reply, "");
             if (rc < 0) {
@@ -944,7 +945,7 @@ IRIS_API int iris_a11y_init(void) {
                 sd_bus_unref(session);
                 return -1;
             }
-            const char *reply_addr = NULL;
+            const char *reply_addr = nullptr;
             rc = sd_bus_message_read(reply, "s", &reply_addr);
             bool valid = rc >= 0 && reply_addr && reply_addr[0] != '\0' &&
                          strlen(reply_addr) < sizeof addr_buf;
@@ -991,45 +992,46 @@ IRIS_API int iris_a11y_init(void) {
     }
 
     /* 3. Capture our unique name; AT-SPI references use it. */
-    const char *unique = NULL;
+    const char *unique = nullptr;
     if (sd_bus_get_unique_name(g_a11y_bus, &unique) >= 0 && unique) {
         strncpy(g_unique, unique, sizeof g_unique - 1);
         g_unique[sizeof g_unique - 1] = '\0';
     }
 
     /* 4. Register the root accessible + Application interface. */
-    rc = sd_bus_add_object_vtable(g_a11y_bus, NULL, "/org/a11y/atspi/accessible/root",
-                                  "org.a11y.atspi.Application", g_application_vtable, NULL);
+    rc = sd_bus_add_object_vtable(g_a11y_bus, nullptr, "/org/a11y/atspi/accessible/root",
+                                  "org.a11y.atspi.Application", g_application_vtable, nullptr);
     (void)rc;
-    rc = sd_bus_add_object_vtable(g_a11y_bus, NULL, "/org/a11y/atspi/accessible/root",
-                                  "org.a11y.atspi.Accessible", g_accessible_vtable, NULL);
+    rc = sd_bus_add_object_vtable(g_a11y_bus, nullptr, "/org/a11y/atspi/accessible/root",
+                                  "org.a11y.atspi.Accessible", g_accessible_vtable, nullptr);
     (void)rc;
 
     /* 5. Fallback vtable for /org/a11y/atspi/accessible/<lens_id> paths.
      *    This catches every widget without us registering each one. */
-    rc = sd_bus_add_fallback_vtable(g_a11y_bus, NULL, "/org/a11y/atspi/accessible",
-                                    "org.a11y.atspi.Accessible", g_accessible_vtable, NULL, NULL);
+    rc = sd_bus_add_fallback_vtable(g_a11y_bus, nullptr, "/org/a11y/atspi/accessible",
+                                    "org.a11y.atspi.Accessible", g_accessible_vtable, nullptr,
+                                    nullptr);
     (void)rc;
 
     /* 6. Action / Text / Value interfaces — same fallback path prefix, one
      *    vtable each. Each method handler no-ops for roles that do not
      *    support the interface, so orca querying e.g. Text on a button gets
      *    a benign empty answer rather than an unknown-method error. */
-    (void)sd_bus_add_fallback_vtable(g_a11y_bus, NULL, "/org/a11y/atspi/accessible",
-                                     "org.a11y.atspi.Action", g_action_vtable, NULL, NULL);
-    (void)sd_bus_add_fallback_vtable(g_a11y_bus, NULL, "/org/a11y/atspi/accessible",
-                                     "org.a11y.atspi.Text", g_text_vtable, NULL, NULL);
-    (void)sd_bus_add_fallback_vtable(g_a11y_bus, NULL, "/org/a11y/atspi/accessible",
-                                     "org.a11y.atspi.Value", g_value_vtable, NULL, NULL);
+    (void)sd_bus_add_fallback_vtable(g_a11y_bus, nullptr, "/org/a11y/atspi/accessible",
+                                     "org.a11y.atspi.Action", g_action_vtable, nullptr, nullptr);
+    (void)sd_bus_add_fallback_vtable(g_a11y_bus, nullptr, "/org/a11y/atspi/accessible",
+                                     "org.a11y.atspi.Text", g_text_vtable, nullptr, nullptr);
+    (void)sd_bus_add_fallback_vtable(g_a11y_bus, nullptr, "/org/a11y/atspi/accessible",
+                                     "org.a11y.atspi.Value", g_value_vtable, nullptr, nullptr);
 
     /* 7. Event.Object on the root and the fallback prefix: declares the
      *    signals iris_a11y_update emits (ChildrenChanged / PropertyChange /
      *    StateChanged, "siiva{sv}") so introspection advertises them. */
-    (void)sd_bus_add_object_vtable(g_a11y_bus, NULL, "/org/a11y/atspi/accessible/root",
-                                   "org.a11y.atspi.Event.Object", g_event_object_vtable, NULL);
-    (void)sd_bus_add_fallback_vtable(g_a11y_bus, NULL, "/org/a11y/atspi/accessible",
-                                     "org.a11y.atspi.Event.Object", g_event_object_vtable, NULL,
-                                     NULL);
+    (void)sd_bus_add_object_vtable(g_a11y_bus, nullptr, "/org/a11y/atspi/accessible/root",
+                                   "org.a11y.atspi.Event.Object", g_event_object_vtable, nullptr);
+    (void)sd_bus_add_fallback_vtable(g_a11y_bus, nullptr, "/org/a11y/atspi/accessible",
+                                     "org.a11y.atspi.Event.Object", g_event_object_vtable, nullptr,
+                                     nullptr);
 
     /* 8. Register with the AT-SPI registry (links our root into the
      *    desktop-wide accessibility tree). Ignore failures — at-spi2-core
@@ -1038,18 +1040,19 @@ IRIS_API int iris_a11y_init(void) {
      *    registry service is absent or unresponsive (a synchronous call
      *    with default timeout blocks the main thread for 25s waiting for
      *    bus activation). */
-    (void)sd_bus_call_method_async(g_a11y_bus, NULL, "org.a11y.atspi.Registry",
-                                   "/org/a11y/atspi/accessible/root", "org.a11y.atspi.Socket",
-                                   "Embed", NULL, NULL, "o", "/org/a11y/atspi/accessible/root");
+    (void)sd_bus_call_method_async(
+        g_a11y_bus, nullptr, "org.a11y.atspi.Registry", "/org/a11y/atspi/accessible/root",
+        "org.a11y.atspi.Socket", "Embed", nullptr, nullptr, "o", "/org/a11y/atspi/accessible/root");
 
     /* 9. Install message filter to detect incoming AT-SPI client activity
      *    and lazy-activate detailed signal emissions (ADR-0103). */
-    (void)sd_bus_add_filter(g_a11y_bus, NULL, on_bus_message_filter, NULL);
+    (void)sd_bus_add_filter(g_a11y_bus, nullptr, on_bus_message_filter, nullptr);
 
     /* 10. Some sd_bus builds filter incoming method_calls unless we add an
      *     explicit match. Match every message to us; the vtable dispatch
      *     is the actual filter. */
-    (void)sd_bus_match_signal_async(g_a11y_bus, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+    (void)sd_bus_match_signal_async(g_a11y_bus, nullptr, nullptr, nullptr, nullptr, nullptr,
+                                    nullptr, nullptr, nullptr);
 
     return 0;
 }
@@ -1075,7 +1078,7 @@ void iris_a11y__pump(void) {
     if (!g_a11y_bus)
         return;
     for (;;) {
-        int rc = sd_bus_process(g_a11y_bus, NULL);
+        int rc = sd_bus_process(g_a11y_bus, nullptr);
         if (rc <= 0)
             break;
     }
@@ -1085,14 +1088,14 @@ IRIS_API void iris_a11y_shutdown(void) {
     if (!g_a11y_bus)
         return;
     sd_bus_unref(g_a11y_bus);
-    g_a11y_bus = NULL;
+    g_a11y_bus = nullptr;
     g_a11y_active = false;
     g_unique[0] = '\0';
     g_state.n = 0;
     g_state.n_prev = 0;
     g_state.focused = 0;
     g_state.truncated = false;
-    g_lens_ui = NULL;
+    g_lens_ui = nullptr;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1127,7 +1130,7 @@ static void emit_object_event(lens_id path_id, const char *member, const char *d
     char path[64];
     format_path(path, sizeof path, path_id);
 
-    sd_bus_message *sig = NULL;
+    sd_bus_message *sig = nullptr;
     int rc =
         sd_bus_message_new_signal(g_a11y_bus, &sig, path, "org.a11y.atspi.Event.Object", member);
     if (rc < 0)
@@ -1152,14 +1155,14 @@ static void emit_object_event(lens_id path_id, const char *member, const char *d
     if (rc >= 0)
         rc = sd_bus_message_close_container(sig); /* a{sv} */
     if (rc >= 0)
-        (void)sd_bus_send(NULL, sig, NULL); /* sig carries the bus ref */
+        (void)sd_bus_send(nullptr, sig, nullptr); /* sig carries the bus ref */
     sd_bus_message_unref(sig);
 }
 
 /* StateChanged:focused — detail1 is 1/0, payload an int 0 (the shape
  * at-spi2-atk emits; clients re-read the object). */
 static void emit_state_changed(lens_id id, const char *state_name, int enabled) {
-    emit_object_event(id, "StateChanged", state_name, enabled, 0, "i", NULL, NULL, 0);
+    emit_object_event(id, "StateChanged", state_name, enabled, 0, "i", nullptr, nullptr, 0);
 }
 
 /* Translate one diff event (a11y_util.c) into its Event.Object signal. */
@@ -1180,15 +1183,16 @@ static void emit_diff_event(const iris_a11y__event *ev) {
     }
     case IRIS_A11Y__EV_NAME:
         emit_object_event(ev->id, "PropertyChange", "accessible-name", 0, 0, "s", ev->node->name,
-                          NULL, 0);
+                          nullptr, 0);
         break;
     case IRIS_A11Y__EV_VALUE:
         /* at-spi2-atk sends an int-0 payload here too; clients re-query
          * the Value interface for the new CurrentValue. */
-        emit_object_event(ev->id, "PropertyChange", "accessible-value", 0, 0, "i", NULL, NULL, 0);
+        emit_object_event(ev->id, "PropertyChange", "accessible-value", 0, 0, "i", nullptr, nullptr,
+                          0);
         break;
     case IRIS_A11Y__EV_ROLE:
-        emit_object_event(ev->id, "PropertyChange", "accessible-role", 0, 0, "u", NULL, NULL,
+        emit_object_event(ev->id, "PropertyChange", "accessible-role", 0, 0, "u", nullptr, nullptr,
                           (int32_t)iris_a11y__map_role(ev->role));
         break;
     case IRIS_A11Y__EV_STATE_ON:
@@ -1211,14 +1215,14 @@ static void emit_diff_event(const iris_a11y__event *ev) {
             memcpy(buf, d->removed_text, nb);
             buf[nb] = '\0';
             emit_object_event(ev->id, "TextChanged", "delete", d->offset, d->removed, "s", buf,
-                              NULL, 0);
+                              nullptr, 0);
         }
         if (d->inserted > 0) {
             size_t nb = d->inserted_bytes < sizeof buf - 1 ? d->inserted_bytes : sizeof buf - 1;
             memcpy(buf, d->inserted_text, nb);
             buf[nb] = '\0';
             emit_object_event(ev->id, "TextChanged", "insert", d->offset, d->inserted, "s", buf,
-                              NULL, 0);
+                              nullptr, 0);
         }
         break;
     }
@@ -1243,7 +1247,7 @@ IRIS_API int iris_a11y_update(lens *ui) {
     memcpy(g_state.prev, g_state.nodes, g_state.n * sizeof g_state.prev[0]);
     g_state.n = 0;
     g_state.truncated = false;
-    lens_accessibility_walk(ui, visit_fn, NULL);
+    lens_accessibility_walk(ui, visit_fn, nullptr);
     if (g_state.truncated) {
         /* Once per process: a tree this big is a real defect, but a warning
          * per frame would drown the log. */
@@ -1307,7 +1311,7 @@ IRIS_API int iris_a11y_update(lens *ui) {
              * bridges use for the right/bottom edges. */
             emit_object_event(cur->id, "BoundsChanged", "",
                               (int32_t)(cur->bounds.x + cur->bounds.w),
-                              (int32_t)(cur->bounds.y + cur->bounds.h), "i", NULL, NULL, 0);
+                              (int32_t)(cur->bounds.y + cur->bounds.h), "i", nullptr, nullptr, 0);
         }
     }
 

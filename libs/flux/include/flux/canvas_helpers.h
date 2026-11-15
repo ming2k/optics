@@ -82,7 +82,7 @@ static inline flux_geometry flux_geom_path(const flux_path *path) {
  * Drawing convenience functions (Header-only static inline)
  *
  * All helpers construct clean-break Geometry x Brush representations and
- * route exclusively through flux_canvas_draw_geometry (ADR-0089 / ADR-0091).
+ * route exclusively through flux_canvas_draw_geometry(ADR-0089 / ADR-0091).
  * ============================================================================= */
 
 /* Constructors preserve invalid counts for draw-time validation; no truncation
@@ -112,20 +112,20 @@ static inline flux_brush flux_brush_radial_gradient(flux_point center, float rad
 static inline void flux_canvas_fill_rect(flux_canvas *c, flux_rect r, const flux_brush *brush) {
     flux_geometry g = flux_geom_rect(r);
     flux_brush b = brush ? *brush : flux_brush_solid(0xFF000000u);
-    flux_canvas_draw_geometry(c, &g, &b);
+    flux_canvas_draw_geometry(c, &(flux_canvas_draw_geometry_opts){.geom = &g, .brush = &b});
 }
 
 static inline void flux_canvas_fill_rect_color(flux_canvas *c, flux_rect r, flux_color color) {
     flux_geometry g = flux_geom_rect(r);
     flux_brush b = flux_brush_solid(color);
-    flux_canvas_draw_geometry(c, &g, &b);
+    flux_canvas_draw_geometry(c, &(flux_canvas_draw_geometry_opts){.geom = &g, .brush = &b});
 }
 
 static inline void flux_canvas_fill_rrect(flux_canvas *c, flux_rect r, float radius,
                                           flux_color color) {
     flux_geometry g = flux_geom_rrect(r, radius);
     flux_brush b = flux_brush_solid(color);
-    flux_canvas_draw_geometry(c, &g, &b);
+    flux_canvas_draw_geometry(c, &(flux_canvas_draw_geometry_opts){.geom = &g, .brush = &b});
 }
 
 static inline void flux_canvas_stroke_rrect(flux_canvas *c, flux_rect r, float radius,
@@ -133,14 +133,14 @@ static inline void flux_canvas_stroke_rrect(flux_canvas *c, flux_rect r, float r
     flux_geometry g = flux_geom_rrect(r, radius);
     g.stroke.width = width;
     flux_brush b = flux_brush_solid(color);
-    flux_canvas_draw_geometry(c, &g, &b);
+    flux_canvas_draw_geometry(c, &(flux_canvas_draw_geometry_opts){.geom = &g, .brush = &b});
 }
 
 static inline void flux_canvas_fill_circle(flux_canvas *c, float cx, float cy, float radius,
                                            flux_color color) {
     flux_geometry g = flux_geom_circle(cx, cy, radius);
     flux_brush b = flux_brush_solid(color);
-    flux_canvas_draw_geometry(c, &g, &b);
+    flux_canvas_draw_geometry(c, &(flux_canvas_draw_geometry_opts){.geom = &g, .brush = &b});
 }
 
 static inline void flux_canvas_stroke_circle(flux_canvas *c, float cx, float cy, float radius,
@@ -148,21 +148,21 @@ static inline void flux_canvas_stroke_circle(flux_canvas *c, float cx, float cy,
     flux_geometry g = flux_geom_circle(cx, cy, radius);
     g.stroke.width = width;
     flux_brush b = flux_brush_solid(color);
-    flux_canvas_draw_geometry(c, &g, &b);
+    flux_canvas_draw_geometry(c, &(flux_canvas_draw_geometry_opts){.geom = &g, .brush = &b});
 }
 
 static inline void flux_canvas_fill_path(flux_canvas *c, const flux_path *path, flux_fill_rule rule,
                                          const flux_brush *brush) {
     flux_geometry geom = flux_geom_path(path);
     geom.path.fill_rule = rule;
-    flux_canvas_draw_geometry(c, &geom, brush);
+    flux_canvas_draw_geometry(c, &(flux_canvas_draw_geometry_opts){.geom = &geom, .brush = brush});
 }
 static inline void flux_canvas_stroke_path(flux_canvas *c, const flux_path *path,
                                            const flux_stroke_style *stroke,
                                            const flux_brush *brush) {
     flux_geometry geom = flux_geom_path(path);
     geom.stroke = stroke ? *stroke : (flux_stroke_style){.width = 1.0f};
-    flux_canvas_draw_geometry(c, &geom, brush);
+    flux_canvas_draw_geometry(c, &(flux_canvas_draw_geometry_opts){.geom = &geom, .brush = brush});
 }
 
 /* Image modulation is explicit; a null style selects white, full opacity,
@@ -183,7 +183,7 @@ static inline void flux_canvas_draw_image(flux_canvas *c, flux_image *image, flu
         .opacity = style ? style->opacity : 1.0f,
         .image = {.image = image, .tint = style ? style->tint : 0xFFFFFFFFu},
     };
-    flux_canvas_draw_geometry(c, &g, &b);
+    flux_canvas_draw_geometry(c, &(flux_canvas_draw_geometry_opts){.geom = &g, .brush = &b});
 }
 
 static inline void flux_canvas_draw_image_opaque(flux_canvas *c, flux_image *image, flux_rect dst) {
@@ -194,7 +194,7 @@ static inline void flux_canvas_draw_image_opaque(flux_canvas *c, flux_image *ima
         .opacity = 1.0f,
         .image = {.image = image, .opaque_only = true, .tint = 0xFFFFFFFFu},
     };
-    flux_canvas_draw_geometry(c, &g, &b);
+    flux_canvas_draw_geometry(c, &(flux_canvas_draw_geometry_opts){.geom = &g, .brush = &b});
 }
 
 static inline void flux_canvas_draw_image_rrect(flux_canvas *c, flux_image *image, flux_rect dst,
@@ -206,7 +206,7 @@ static inline void flux_canvas_draw_image_rrect(flux_canvas *c, flux_image *imag
         .opacity = style ? style->opacity : 1.0f,
         .image = {.image = image, .tint = style ? style->tint : 0xFFFFFFFFu},
     };
-    flux_canvas_draw_geometry(c, &g, &b);
+    flux_canvas_draw_geometry(c, &(flux_canvas_draw_geometry_opts){.geom = &g, .brush = &b});
 }
 
 static inline void flux_canvas_draw_image_clipped_rrect(flux_canvas *c, flux_image *image,
@@ -225,7 +225,7 @@ static inline void flux_canvas_draw_image_clipped_rrect(flux_canvas *c, flux_ima
                 .tint = style ? style->tint : 0xFFFFFFFFu,
             },
     };
-    flux_canvas_draw_geometry(c, &g, &b);
+    flux_canvas_draw_geometry(c, &(flux_canvas_draw_geometry_opts){.geom = &g, .brush = &b});
 }
 
 static inline void flux_canvas_draw_image_sub(flux_canvas *c, flux_image *image, flux_rect dst,
@@ -237,7 +237,7 @@ static inline void flux_canvas_draw_image_sub(flux_canvas *c, flux_image *image,
         .opacity = 1.0f,
         .image = {.image = image, .src_rect = src, .tint = 0xFFFFFFFFu},
     };
-    flux_canvas_draw_geometry(c, &g, &b);
+    flux_canvas_draw_geometry(c, &(flux_canvas_draw_geometry_opts){.geom = &g, .brush = &b});
 }
 
 static inline void flux_canvas_draw_image_opaque_sub(flux_canvas *c, flux_image *image,
@@ -249,7 +249,7 @@ static inline void flux_canvas_draw_image_opaque_sub(flux_canvas *c, flux_image 
         .opacity = 1.0f,
         .image = {.image = image, .src_rect = src, .opaque_only = true, .tint = 0xFFFFFFFFu},
     };
-    flux_canvas_draw_geometry(c, &g, &b);
+    flux_canvas_draw_geometry(c, &(flux_canvas_draw_geometry_opts){.geom = &g, .brush = &b});
 }
 
 static inline void flux_canvas_draw_image_sampled(flux_canvas *c, flux_image *image,
@@ -267,7 +267,7 @@ static inline void flux_canvas_draw_image_sampled(flux_canvas *c, flux_image *im
                 .tint = style ? style->tint : 0xFFFFFFFFu,
             },
     };
-    flux_canvas_draw_geometry(c, &g, &b);
+    flux_canvas_draw_geometry(c, &(flux_canvas_draw_geometry_opts){.geom = &g, .brush = &b});
 }
 
 #ifdef __cplusplus

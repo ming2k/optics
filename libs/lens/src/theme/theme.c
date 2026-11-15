@@ -3,7 +3,7 @@
 #include "../internal.h"
 
 lens_material_recipe lens_material_recipe_default(lens_material_kind kind, bool dark) {
-    lens_material_recipe r = {0};
+    lens_material_recipe r = {};
     if (dark) {
         switch (kind) {
         case LENS_MATERIAL_MICA:
@@ -125,7 +125,7 @@ lens_material_recipe lens_material_recipe_default(lens_material_kind kind, bool 
 }
 
 lens_theme lens_theme_dark(void) {
-    lens_theme t = {0};
+    lens_theme t = {};
     t.size = sizeof(lens_theme);
     /* Premium sleek dark mode (Solid colors) */
     t.color_bg = flux_color_rgba(0x0e, 0x0e, 0x11, 0xff);     /* deep almost-black */
@@ -148,7 +148,7 @@ lens_theme lens_theme_dark(void) {
     t.corner_radius = 6.0f;
     t.border_width = 0.0f;
 
-    t.font = NULL;
+    t.font = nullptr;
     t.font_size = 14.0f;
     t.icon_size = 0.0f;
     t.font_size_title = 28.0f;
@@ -182,7 +182,7 @@ lens_theme lens_theme_dark(void) {
 }
 
 lens_theme lens_theme_default(void) {
-    lens_theme t = {0};
+    lens_theme t = {};
     t.size = sizeof(lens_theme);
     /* Clean, high-end light mode (Solid colors) */
     t.color_bg = flux_color_rgba(0xfa, 0xfa, 0xfb, 0xff);
@@ -205,7 +205,7 @@ lens_theme lens_theme_default(void) {
     t.corner_radius = 6.0f;
     t.border_width = 0.0f;
 
-    t.font = NULL;
+    t.font = nullptr;
     t.font_size = 14.0f;
     t.icon_size = 0.0f;
     t.font_size_title = 28.0f;

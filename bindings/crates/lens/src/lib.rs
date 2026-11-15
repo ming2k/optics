@@ -202,7 +202,12 @@ impl Ui {
     pub fn deliver_drop(&mut self, payload: &str, pos: (f32, f32)) {
         let c = cstr(payload);
         let pt = sys::flux_point { x: pos.0, y: pos.1 };
-        unsafe { sys::lens_deliver_drop(self.raw, c.as_ptr(), payload.len(), pt) };
+        let opts = sys::lens_deliver_drop_opts {
+            payload: c.as_ptr(),
+            len: payload.len(),
+            pos: pt,
+        };
+        unsafe { sys::lens_deliver_drop(self.raw, &opts) };
     }
 
     /// Run one immediate-mode frame. The closure receives a [`Frame`] that
@@ -529,8 +534,12 @@ impl Ui {
     /// Place text on the system clipboard (via the host clipboard interface, if
     /// one was supplied to the context). No-op otherwise.
     pub fn copy(&mut self, text: &str) {
+        let opts = sys::lens_copy_opts {
+            utf8: text.as_ptr() as *const c_char,
+            len: text.len(),
+        };
         // SAFETY: raw is live; text/len describe a valid byte range.
-        unsafe { sys::lens_copy(self.raw, text.as_ptr() as *const c_char, text.len()) };
+        unsafe { sys::lens_copy(self.raw, &opts) };
     }
 
     /// Ask the host for clipboard text; it is later delivered via [`Ui::paste`].
@@ -542,8 +551,12 @@ impl Ui {
     /// Deliver clipboard text into lens; the focused text widget consumes it
     /// on the next frame's build.
     pub fn paste(&mut self, text: &str) {
+        let opts = sys::lens_paste_opts {
+            utf8: text.as_ptr() as *const c_char,
+            len: text.len(),
+        };
         // SAFETY: raw is live; text/len describe a valid byte range.
-        unsafe { sys::lens_paste(self.raw, text.as_ptr() as *const c_char, text.len()) };
+        unsafe { sys::lens_paste(self.raw, &opts) };
     }
 }
 
@@ -667,12 +680,14 @@ impl<'frame> Frame<'frame> {
     /// intrinsic-size pass.
     pub fn measure_text(&self, text: &str, size: f32) -> TextMetrics {
         let text = cstr(text);
-        let theme = self.theme();
-        // SAFETY: ui and the theme font are live for this frame; text is a
-        // NUL-terminated string that outlives the call.
-        TextMetrics::from_raw(unsafe {
-            sys::lens_text_measure(self.ui, theme.0.font, text.as_ptr(), size.max(1.0))
-        })
+        let opts = sys::lens_text_measure_opts {
+            utf8: text.as_ptr(),
+            size_px: size.max(1.0),
+            weight: 0.0,
+        };
+        // SAFETY: ui is live for this frame; opts.utf8 is a NUL-terminated
+        // string that outlives the call.
+        TextMetrics::from_raw(unsafe { sys::lens_text_measure(self.ui, &opts) })
     }
 
     // ---- clipboard & IME (app-owned editing surfaces) -----------------
@@ -680,8 +695,12 @@ impl<'frame> Frame<'frame> {
     /// Place text on the system clipboard (via the host clipboard
     /// interface, if one was supplied). No-op otherwise.
     pub fn copy(&mut self, text: &str) {
+        let opts = sys::lens_copy_opts {
+            utf8: text.as_ptr() as *const c_char,
+            len: text.len(),
+        };
         // SAFETY: ui is live inside a frame; text/len describe a valid range.
-        unsafe { sys::lens_copy(self.ui, text.as_ptr() as *const c_char, text.len()) };
+        unsafe { sys::lens_copy(self.ui, &opts) };
     }
 
     /// Ask the host for clipboard text. The payload is delivered into
@@ -699,10 +718,12 @@ impl<'frame> Frame<'frame> {
     pub fn take_paste(&mut self) -> Option<String> {
         // The C staging buffer caps payloads at 1 MiB (LENSI_PASTE_MAX).
         let mut buf = vec![0u8; 1024 * 1024];
-        // SAFETY: ui is live; buf is writable for buf.len() bytes.
-        let n = unsafe {
-            sys::lens_take_paste(self.ui, buf.as_mut_ptr() as *mut c_char, buf.len() as u32)
+        let opts = sys::lens_take_paste_opts {
+            dst: buf.as_mut_ptr() as *mut c_char,
+            cap: buf.len() as u32,
         };
+        // SAFETY: ui is live; buf is writable for buf.len() bytes.
+        let n = unsafe { sys::lens_take_paste(self.ui, &opts) };
         if n == 0 {
             return None;
         }
@@ -1527,18 +1548,20 @@ impl<'frame> Frame<'frame> {
             drop_pos: sys::flux_point { x: 0.0, y: 0.0 },
             action: 0,
         };
-        let hit =
-            unsafe { sys::lens_dnd_drop_target(self.ui, raw_id, accepted_actions, &mut info) };
+        let dnd_opts = sys::lens_dnd_drop_target_opts {
+            id: raw_id,
+            accepted_actions,
+            out_info: &mut info,
+        };
+        let hit = unsafe { sys::lens_dnd_drop_target(self.ui, &dnd_opts) };
         if hit || info.is_hovered || info.is_dropped {
             let payload = if info.is_dropped {
                 let mut buf = [0u8; 1024];
-                let len = unsafe {
-                    sys::lens_take_drop(
-                        self.ui,
-                        buf.as_mut_ptr() as *mut std::os::raw::c_char,
-                        buf.len() as u32,
-                    )
+                let take_opts = sys::lens_take_drop_opts {
+                    dst: buf.as_mut_ptr() as *mut std::os::raw::c_char,
+                    cap: buf.len() as u32,
                 };
+                let len = unsafe { sys::lens_take_drop(self.ui, &take_opts) };
                 if len > 0 {
                     Some(String::from_utf8_lossy(&buf[..len as usize]).into_owned())
                 } else {
@@ -1607,12 +1630,21 @@ impl<'frame> Frame<'frame> {
 
     pub fn textedit_set_caret(&mut self, label: &str, caret: u32) {
         let c = cstr(label);
-        unsafe { sys::lens_textedit_set_caret(self.ui, c.as_ptr(), caret) };
+        let opts = sys::lens_textedit_set_caret_opts {
+            label: c.as_ptr(),
+            caret,
+        };
+        unsafe { sys::lens_textedit_set_caret(self.ui, &opts) };
     }
 
     pub fn textedit_set_selection(&mut self, label: &str, anchor: u32, caret: u32) {
         let c = cstr(label);
-        unsafe { sys::lens_textedit_set_selection(self.ui, c.as_ptr(), anchor, caret) };
+        let opts = sys::lens_textedit_set_selection_opts {
+            label: c.as_ptr(),
+            sel_start: anchor,
+            sel_end: caret,
+        };
+        unsafe { sys::lens_textedit_set_selection(self.ui, &opts) };
     }
 }
 
@@ -1858,8 +1890,14 @@ pub unsafe fn skin_rect(
     color: Color,
     radius: f32,
 ) {
+    let opts = sys::lens_skin_rect_opts {
+        node,
+        rel: rel.to_raw(),
+        color: color.raw(),
+        radius,
+    };
     // SAFETY: forwarded contract from the caller.
-    unsafe { sys::lens_skin_rect(ui, node, rel.to_raw(), color.raw(), radius) };
+    unsafe { sys::lens_skin_rect(ui, &opts) };
 }
 
 /// Push a border stroke from inside a skin. Same contract as [`skin_rect`].
@@ -1875,8 +1913,15 @@ pub unsafe fn skin_border(
     radius: f32,
     width: f32,
 ) {
+    let opts = sys::lens_skin_border_opts {
+        node,
+        rel: rel.to_raw(),
+        color: color.raw(),
+        radius,
+        width,
+    };
     // SAFETY: forwarded contract from the caller.
-    unsafe { sys::lens_skin_border(ui, node, rel.to_raw(), color.raw(), radius, width) };
+    unsafe { sys::lens_skin_border(ui, &opts) };
 }
 
 /// Push text from inside a skin. A negative `rel.w`/`rel.h` centres the
@@ -1896,18 +1941,16 @@ pub unsafe fn skin_text(
     weight: f32,
 ) {
     let c = cstr(text);
-    // SAFETY: forwarded contract from the caller; c outlives the call.
-    unsafe {
-        sys::lens_skin_text(
-            ui,
-            node,
-            rel.to_raw(),
-            color.raw(),
-            c.as_ptr(),
-            size_px,
-            weight,
-        )
+    let opts = sys::lens_skin_text_opts {
+        node,
+        rel: rel.to_raw(),
+        color: color.raw(),
+        utf8: c.as_ptr(),
+        size_px,
+        weight,
     };
+    // SAFETY: forwarded contract from the caller; c outlives the call.
+    unsafe { sys::lens_skin_text(ui, &opts) };
 }
 
 /// Push a vector icon glyph from inside a skin. `icon` is a raw
@@ -1926,8 +1969,15 @@ pub unsafe fn skin_icon(
     stroke: f32,
     icon: sys::lens_icon_id,
 ) {
+    let opts = sys::lens_skin_icon_opts {
+        node,
+        rel: rel.to_raw(),
+        color: color.raw(),
+        stroke,
+        icon,
+    };
     // SAFETY: forwarded contract from the caller.
-    unsafe { sys::lens_skin_icon(ui, node, rel.to_raw(), color.raw(), stroke, icon) };
+    unsafe { sys::lens_skin_icon(ui, &opts) };
 }
 
 /// Push a nested logical clip from inside a skin (e.g. per-cell clips in a
@@ -1938,8 +1988,12 @@ pub unsafe fn skin_icon(
 /// `ui` and `node` must be the values the skin was called with, during
 /// that call.
 pub unsafe fn skin_clip_push(ui: *mut sys::lens, node: *mut sys::lens_node, rel: Rect) {
+    let opts = sys::lens_skin_clip_push_opts {
+        node,
+        rel: rel.to_raw(),
+    };
     // SAFETY: forwarded contract from the caller.
-    unsafe { sys::lens_skin_clip_push(ui, node, rel.to_raw()) };
+    unsafe { sys::lens_skin_clip_push(ui, &opts) };
 }
 
 /// Pop a clip pushed with [`skin_clip_push`]. Same contract as

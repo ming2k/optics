@@ -45,10 +45,10 @@ static float read_f32(const uint8_t *p, size_t avail, size_t *cursor) {
 
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     flux_arena arena;
-    if (flux_arena_init(&arena, 1u << 20, NULL) != FLUX_OK)
+    if (flux_arena_init(&arena, 1u << 20, nullptr) != FLUX_OK)
         return 0;
 
-    flux_path *p = NULL;
+    flux_path *p = nullptr;
     if (flux_path_create(&p, &arena) != FLUX_OK) {
         flux_arena_deinit(&arena);
         return 0;

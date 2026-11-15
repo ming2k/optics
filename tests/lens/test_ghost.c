@@ -20,9 +20,9 @@ typedef struct fixture {
 } fixture;
 
 static void fixture_open(fixture *f) {
-    f->ui = NULL;
-    f->canvas = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &f->ui) == FLUX_OK);
+    f->ui = nullptr;
+    f->canvas = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &f->ui) == FLUX_OK);
     OT_EXPECT(flux_canvas_create_cpu(W, H, 1.0f, &f->canvas) == FLUX_OK);
 }
 
@@ -34,7 +34,7 @@ static void fixture_close(fixture *f) {
 static void snapshot(const fixture *f, uint8_t *out) {
     uint32_t w = 0, h = 0, stride = 0;
     const uint8_t *fb = flux_canvas_cpu_pixels(f->canvas, &w, &h, &stride);
-    OT_EXPECT(fb != NULL && w == W && h == H && stride == W * 4);
+    OT_EXPECT(fb != nullptr && w == W && h == H && stride == W * 4);
     memcpy(out, fb, (size_t)h * stride);
 }
 
@@ -53,7 +53,8 @@ static void build_with_footer(lens *ui, float progress) {
     lens_begin(ui, &IN0);
     lens_label(ui, &(lens_label_opts){.text = "header##hdr"});
     lens_label(ui, &(lens_label_opts){.text = val_str, .box = {.id = "load"}});
-    lens_set_ghost(ui, lens_current_id(ui, "load"), 1.0f);
+    lens_set_ghost(
+        ui, &(lens_set_ghost_opts){.subtree_root = lens_current_id(ui, "load"), .alpha = 1.0f});
     lens_test_end(ui);
 }
 
@@ -82,7 +83,8 @@ static void test_armed_subtree_ghosts_after_removal(void) {
     /* Remove the subtree: the armed pin freezes it at full alpha */
     lens_begin(f.ui, &IN0);
     lens_label(f.ui, &(lens_label_opts){.text = "header##hdr"});
-    lens_set_ghost(f.ui, lens_current_id(f.ui, "load"), 1.0f); /* refresh pin */
+    lens_set_ghost(f.ui, &(lens_set_ghost_opts){.subtree_root = lens_current_id(f.ui, "load"),
+                                                .alpha = 1.0f}); /* refresh pin */
     lens_test_end(f.ui);
     render_frame(&f);
     snapshot(&f, ghosted);
@@ -131,7 +133,8 @@ static void test_ghost_alpha_matches_live_opacity_path(void) {
         }
         lens_begin(g.ui, &IN0);
         lens_label(g.ui, &(lens_label_opts){.text = "header##hdr"});
-        lens_set_ghost(g.ui, lens_current_id(g.ui, "load"), alpha);
+        lens_set_ghost(g.ui, &(lens_set_ghost_opts){.subtree_root = lens_current_id(g.ui, "load"),
+                                                    .alpha = alpha});
         lens_test_end(g.ui);
         render_frame(&g);
         snapshot(&g, ghost_shot);
@@ -169,7 +172,8 @@ static void test_refresh_extends_lifetime(void) {
     fixture_open(&f);
     for (int i = 0; i < 3; i++) {
         build_with_footer(f.ui, 0.5f);
-        lens_set_ghost(f.ui, lens_current_id(f.ui, "load"), 1.0f);
+        lens_set_ghost(f.ui, &(lens_set_ghost_opts){.subtree_root = lens_current_id(f.ui, "load"),
+                                                    .alpha = 1.0f});
         render_frame(&f);
     }
     uint8_t first[W * H * 4], later[W * H * 4];
@@ -177,7 +181,8 @@ static void test_refresh_extends_lifetime(void) {
     /* frame 1 ghost */
     lens_begin(f.ui, &IN0);
     lens_label(f.ui, &(lens_label_opts){.text = "header##hdr"});
-    lens_set_ghost(f.ui, lens_current_id(f.ui, "load"), 1.0f);
+    lens_set_ghost(
+        f.ui, &(lens_set_ghost_opts){.subtree_root = lens_current_id(f.ui, "load"), .alpha = 1.0f});
     lens_test_end(f.ui);
     render_frame(&f);
     snapshot(&f, first);
@@ -186,7 +191,8 @@ static void test_refresh_extends_lifetime(void) {
     for (int i = 0; i < 20; i++) {
         lens_begin(f.ui, &IN0);
         lens_label(f.ui, &(lens_label_opts){.text = "header##hdr"});
-        lens_set_ghost(f.ui, lens_current_id(f.ui, "load"), 1.0f);
+        lens_set_ghost(f.ui, &(lens_set_ghost_opts){.subtree_root = lens_current_id(f.ui, "load"),
+                                                    .alpha = 1.0f});
         lens_test_end(f.ui);
         render_frame(&f);
     }
@@ -205,14 +211,17 @@ static void test_ghost_never_hit_tests(void) {
     for (int i = 0; i < 3; i++) {
         lens_begin(f.ui, &IN0);
         lens_button(f.ui, &(lens_button_opts){.label = "target##btn"});
-        lens_set_ghost(f.ui, lens_current_id(f.ui, "target##btn"), 1.0f);
+        lens_set_ghost(f.ui,
+                       &(lens_set_ghost_opts){.subtree_root = lens_current_id(f.ui, "target##btn"),
+                                              .alpha = 1.0f});
         lens_test_end(f.ui);
         render_frame(&f);
     }
     lens_input click = IN0;
     click.mouse_pressed[0] = true;
     lens_begin(f.ui, &click);
-    lens_set_ghost(f.ui, lens_current_id(f.ui, "target##btn"), 1.0f);
+    lens_set_ghost(f.ui, &(lens_set_ghost_opts){
+                             .subtree_root = lens_current_id(f.ui, "target##btn"), .alpha = 1.0f});
     lens_test_end(f.ui);
 
     bool clicked = false;

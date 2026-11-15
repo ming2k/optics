@@ -156,7 +156,7 @@ int main(void) {
         flux_result r = flux_compute_pipeline_create(d, &desc, &pipeline);
         OT_EXPECT(r == FLUX_OK);
         if (r != FLUX_OK) {
-            flux_error_info info = {0};
+            flux_error_info info = {};
             flux_get_last_error(&info);
             fprintf(stderr, "test_sdf_parity: pipeline failed: %s (%s:%d)\n",
                     info.message ? info.message : "(no detail)", info.file ? info.file : "?",
@@ -221,7 +221,13 @@ int main(void) {
                 .sample_count = SAMPLE_COUNT,
                 .mode = mode,
             };
-            flux_compute_dispatch(cmd, pipeline, &pc, sizeof(pc), SAMPLE_COUNT / WORKGROUP, 1, 1);
+            flux_compute_dispatch(&(flux_compute_dispatch_opts){.cmd = cmd,
+                                                                .pipeline = pipeline,
+                                                                .push_constants = &pc,
+                                                                .push_bytes = sizeof(pc),
+                                                                .group_x = SAMPLE_COUNT / WORKGROUP,
+                                                                .group_y = 1,
+                                                                .group_z = 1});
 
             /* Make the dispatch's stores visible to the host before it reads the
              * mapping. Host coherence makes the *view* consistent; it does not

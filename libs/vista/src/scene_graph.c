@@ -56,11 +56,13 @@ VISTA_API const char *vista_version_string(void) {
         VISTA_VERSION_PATCH);
 }
 
-VISTA_API flux_result vista_load_glb(flux_device *device, const void *glb_bytes, size_t byte_count,
-                                     vista_scene **out) {
-    if (!device || !glb_bytes || !out)
+VISTA_API flux_result vista_load_glb(flux_device *device, const vista_load_glb_opts *opts) {
+    if (!device || !opts || !opts->bytes || !opts->out)
         return FLUX_ERROR_INVALID_ARGUMENT;
-    *out = NULL;
+    *opts->out = nullptr;
+    const void *glb_bytes = opts->bytes;
+    size_t byte_count = opts->byte_count;
+    vista_scene **out = opts->out;
 
     /* Two-stage pipeline: parse (device-independent, testable, fuzzer-
      * reachable) then build (the only stage touching the device). */
@@ -95,21 +97,20 @@ VISTA_API flux_result vista_load_glb(flux_device *device, const void *glb_bytes,
  * declares (classic C opaque pattern), so the public handle and the
  * internal storage are one type — no downcasts, no layout drift. */
 
-VISTA_API flux_result vista_parse_glb(const void *glb_bytes, size_t byte_count,
-                                      vista_scene_data **out) {
-    if (!glb_bytes || !out)
+VISTA_API flux_result vista_parse_glb(const vista_parse_glb_opts *opts) {
+    if (!opts || !opts->bytes || !opts->out)
         return FLUX_ERROR_INVALID_ARGUMENT;
-    *out = NULL;
+    *opts->out = nullptr;
     sg_scene_data *data = calloc(1, sizeof(*data));
     if (!data)
         return FLUX_ERROR_OUT_OF_MEMORY;
-    flux_result r = sg_parse_glb(glb_bytes, byte_count, data);
+    flux_result r = sg_parse_glb(opts->bytes, opts->byte_count, data);
     if (r != FLUX_OK) {
         /* sg_parse_glb releases everything it allocated on failure. */
         free(data);
         return r;
     }
-    *out = (vista_scene_data *)(void *)data;
+    *opts->out = (vista_scene_data *)(void *)data;
     return FLUX_OK;
 }
 
@@ -146,10 +147,12 @@ VISTA_API uint32_t vista_scene_data_primitive_count(const vista_scene_data *data
     return data ? data->prim_count : 0;
 }
 
-VISTA_API bool vista_scene_data_bounds(const vista_scene_data *data, flux_vec3 *out_min,
-                                       flux_vec3 *out_max) {
-    if (!out_min || !out_max || !data)
+VISTA_API bool vista_scene_data_bounds(const vista_scene_data *data,
+                                       const vista_scene_data_bounds_opts *opts) {
+    if (!opts || !opts->out_min || !opts->out_max || !data)
         return false;
+    flux_vec3 *out_min = opts->out_min;
+    flux_vec3 *out_max = opts->out_max;
     flux_vec3 wmin = {FLT_MAX, FLT_MAX, FLT_MAX};
     flux_vec3 wmax = {-FLT_MAX, -FLT_MAX, -FLT_MAX};
     bool any = false;
@@ -175,15 +178,15 @@ void sg_data_transfer(sg_scene_data *data, vista_scene *sc) {
     /* sc->prims is the build stage's business (it owns the upload);
      * this moves only the parse-owned node/skin/root state. */
     sc->nodes = data->nodes;
-    data->nodes = NULL;
+    data->nodes = nullptr;
     sc->node_count = data->node_count;
     data->node_count = 0;
     sc->skins = data->skins;
-    data->skins = NULL;
+    data->skins = nullptr;
     sc->skin_count = data->skin_count;
     data->skin_count = 0;
     sc->roots = data->roots;
-    data->roots = NULL;
+    data->roots = nullptr;
     sc->root_count = data->root_count;
     data->root_count = 0;
     for (int i = 0; i < SG_HUMAN_BONE_COUNT; ++i)
@@ -198,7 +201,7 @@ flux_result sg_data_build(flux_device *dev, sg_scene_data *data, vista_scene *sc
      * meshes are released here; the node/skin transfers below have not
      * happened yet (they are only committed on full success), so the
      * caller's zeroed `data` and `sc` stay consistent for either path. */
-    vista_primitive *prims = data->prim_count ? calloc(data->prim_count, sizeof(*prims)) : NULL;
+    vista_primitive *prims = data->prim_count ? calloc(data->prim_count, sizeof(*prims)) : nullptr;
     if (data->prim_count && !prims) {
         sg_data_free(data);
         return FLUX_ERROR_OUT_OF_MEMORY;
@@ -211,7 +214,7 @@ flux_result sg_data_build(flux_device *dev, sg_scene_data *data, vista_scene *sc
         };
         flux_mesh_desc md = {
             .type = FLUX_TYPE_MESH_DESC,
-            .next = pd->skin_vertices ? &sd : NULL,
+            .next = pd->skin_vertices ? &sd : nullptr,
             .vertices = pd->vertices,
             .vertex_count = pd->vertex_count,
             .indices = pd->indices,
@@ -235,7 +238,7 @@ flux_result sg_data_build(flux_device *dev, sg_scene_data *data, vista_scene *sc
         free(pd->vertices);
         free(pd->indices);
         free(pd->skin_vertices);
-        data->prims[i] = (sg_primitive_data){0};
+        data->prims[i] = (sg_primitive_data){};
     }
 
     /* All meshes live: transfer everything into the scene and finish the
@@ -245,7 +248,7 @@ flux_result sg_data_build(flux_device *dev, sg_scene_data *data, vista_scene *sc
     sc->prims = prims;
     sc->prim_count = data->prim_count;
     free(data->prims);
-    data->prims = NULL;
+    data->prims = nullptr;
     data->prim_count = 0;
     sg_data_transfer(data, sc);
     sg_data_free(data); /* nodes/skins/roots transferred; nothing left */
@@ -255,11 +258,13 @@ flux_result sg_data_build(flux_device *dev, sg_scene_data *data, vista_scene *sc
     return FLUX_OK;
 }
 
-VISTA_API flux_result vista_scene_data_build(flux_device *device, vista_scene_data *data,
-                                             vista_scene **out) {
-    if (!device || !data || !out)
+VISTA_API flux_result vista_scene_data_build(flux_device *device,
+                                             const vista_scene_data_build_opts *opts) {
+    if (!device || !opts || !opts->data || !opts->out)
         return FLUX_ERROR_INVALID_ARGUMENT;
-    *out = NULL;
+    *opts->out = nullptr;
+    vista_scene_data *data = opts->data;
+    vista_scene **out = opts->out;
     vista_scene *sc = calloc(1, sizeof(*sc));
     if (!sc) {
         sg_data_free(data);
@@ -318,11 +323,14 @@ VISTA_API void vista_scene_release(vista_scene *scene) {
     free(scene);
 }
 
-VISTA_API flux_result vista_scene_set_materials(vista_scene *scene, flux_material *const *materials,
-                                                uint32_t material_count, flux_material *fallback) {
-    if (!scene || (material_count > 0 && !materials))
+VISTA_API flux_result vista_scene_set_materials(vista_scene *scene,
+                                                const vista_scene_set_materials_opts *opts) {
+    if (!scene || !opts || (opts->material_count > 0 && !opts->materials))
         return FLUX_ERROR_INVALID_ARGUMENT;
-    flux_material **replacement = NULL;
+    flux_material *const *materials = opts->materials;
+    uint32_t material_count = opts->material_count;
+    flux_material *fallback = opts->fallback;
+    flux_material **replacement = nullptr;
     if (material_count > 0) {
         /* Pointer array: the element is a flux_material *, not a struct. */
         replacement =
@@ -352,10 +360,13 @@ VISTA_API uint32_t vista_scene_primitive_count(const vista_scene *scene) {
     return scene ? scene->prim_count : 0;
 }
 
-VISTA_API bool vista_scene_humanoid_bone_position(const vista_scene *scene, const char *bone_name,
-                                                  flux_vec3 *out_position) {
-    if (!scene || !bone_name || !out_position)
+VISTA_API bool
+vista_scene_humanoid_bone_position(const vista_scene *scene,
+                                   const vista_scene_humanoid_bone_position_opts *opts) {
+    if (!scene || !opts || !opts->bone_name || !opts->out_position)
         return false;
+    const char *bone_name = opts->bone_name;
+    flux_vec3 *out_position = opts->out_position;
     int bone = sg_human_bone_index(bone_name, false);
     if (bone < 0)
         return false;
@@ -396,7 +407,7 @@ static flux_mat4 node_local(const vista_node *node) {
 static uint32_t *sg_build_world_order(const vista_scene *scene) {
     uint32_t n = scene->node_count;
     if (n == 0)
-        return NULL;
+        return nullptr;
     uint32_t *order = malloc((size_t)n * sizeof(*order));
     bool *placed = calloc(n, sizeof(*placed));
     /* head[i] is the first child of i; next[i] the following sibling; both
@@ -410,7 +421,7 @@ static uint32_t *sg_build_world_order(const vista_scene *scene) {
         free(head);
         free(next);
         free(stack);
-        return NULL;
+        return nullptr;
     }
     for (uint32_t i = 0; i < n; ++i) {
         head[i] = UINT32_MAX;
@@ -548,10 +559,11 @@ static void expand_world_aabb(flux_mat4 m, flux_vec3 bmin, flux_vec3 bmax, flux_
             }
 }
 
-VISTA_API bool vista_scene_bounds(const vista_scene *scene, flux_vec3 *out_min,
-                                  flux_vec3 *out_max) {
-    if (!scene || !out_min || !out_max)
+VISTA_API bool vista_scene_bounds(const vista_scene *scene, const vista_scene_bounds_opts *opts) {
+    if (!scene || !opts || !opts->out_min || !opts->out_max)
         return false;
+    flux_vec3 *out_min = opts->out_min;
+    flux_vec3 *out_max = opts->out_max;
     flux_vec3 wmin = {1e30f, 1e30f, 1e30f};
     flux_vec3 wmax = {-1e30f, -1e30f, -1e30f};
     bool any = false;
@@ -604,24 +616,31 @@ static void draw_primitive(flux_frame *frame, const flux_camera *cam, flux_mat4 
     if (skin && skin->joint_count > 0) {
         /* Skin palettes already produce model/world-space positions, so the
          * draw world is identity (world * inverse(world) form). */
-        flux_mat4 identity = flux_mat4_identity();
-        if (light)
-            flux_scene_draw_mesh_skinned_lit(frame, cam, identity, primitive->mesh, material, light,
-                                             skin->palette, skin->joint_count);
-        else
-            flux_scene_draw_mesh_skinned(frame, cam, identity, primitive->mesh, material,
-                                         skin->palette, skin->joint_count);
-    } else if (light) {
-        flux_scene_draw_mesh_lit(frame, cam, world, primitive->mesh, material, light);
+        flux_scene_draw_mesh(frame, &(flux_scene_draw_mesh_opts){
+                                        .camera = cam,
+                                        .world = flux_mat4_identity(),
+                                        .mesh = primitive->mesh,
+                                        .material = material,
+                                        .light = light,
+                                        .joint_matrices = skin->palette,
+                                        .joint_count = skin->joint_count,
+                                    });
     } else {
-        flux_scene_draw_mesh(frame, cam, world, primitive->mesh, material);
+        flux_scene_draw_mesh(frame, &(flux_scene_draw_mesh_opts){
+                                        .camera = cam,
+                                        .world = world,
+                                        .mesh = primitive->mesh,
+                                        .material = material,
+                                        .light = light,
+                                    });
     }
 }
 
-VISTA_API void vista_draw(flux_frame *frame, const flux_camera *cam, const vista_scene *scene,
-                          const vista_draw_opts *opts) {
-    if (!frame || !cam || !scene || !opts)
+VISTA_API void vista_draw(flux_frame *frame, const vista_draw_opts *opts) {
+    if (!frame || !opts || !opts->camera || !opts->scene)
         return;
+    const flux_camera *cam = opts->camera;
+    const vista_scene *scene = opts->scene;
 
     /* glTF alpha semantics require all depth-writing OPAQUE/MASK draws before
      * depth-reading, non-writing BLEND draws. Source order remains stable
@@ -642,7 +661,7 @@ VISTA_API void vista_draw(flux_frame *frame, const flux_camera *cam, const vista
                     continue;
                 const vista_skin *skin = n->skin >= 0 && (uint32_t)n->skin < scene->skin_count
                                              ? &scene->skins[n->skin]
-                                             : NULL;
+                                             : nullptr;
                 draw_primitive(frame, cam, n->world, p, material, opts->light, skin);
             }
         }
@@ -656,7 +675,7 @@ VISTA_API void vista_draw(flux_frame *frame, const flux_camera *cam, const vista
                 bool blend =
                     material && flux_material_get_alpha_mode(material) == FLUX_MATERIAL_ALPHA_BLEND;
                 if (material && blend == (blend_phase != 0))
-                    draw_primitive(frame, cam, identity, p, material, opts->light, NULL);
+                    draw_primitive(frame, cam, identity, p, material, opts->light, nullptr);
             }
         }
     }

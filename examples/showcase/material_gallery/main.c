@@ -87,7 +87,9 @@ void gallery_render_frosted(gallery_app *app, flux_frame *frame, flux_image *blu
     desc.tint_strength = r.tint_opacity;
 
     prism_material_output out = {};
-    if (prism_frosted_filter_apply(app->frosted_filter, frame, &desc, &out) == FLUX_OK)
+    if (prism_frosted_filter_apply(app->frosted_filter,
+                                   &(prism_frosted_filter_apply_opts){
+                                       .frame = frame, .desc = &desc, .out = &out}) == FLUX_OK)
         gallery_emit_output(app, &out);
 }
 
@@ -116,7 +118,9 @@ void gallery_render_acrylic(gallery_app *app, flux_frame *frame, flux_image *blu
     desc.border_alpha = r.border_highlight;
 
     prism_material_output out = {};
-    if (prism_acrylic_filter_apply(app->acrylic_filter, frame, &desc, &out) == FLUX_OK)
+    if (prism_acrylic_filter_apply(app->acrylic_filter,
+                                   &(prism_acrylic_filter_apply_opts){
+                                       .frame = frame, .desc = &desc, .out = &out}) == FLUX_OK)
         gallery_emit_output(app, &out);
 }
 
@@ -146,7 +150,9 @@ void gallery_render_mica(gallery_app *app, flux_frame *frame, flux_image *blurre
     desc.fallback_weight = inactive ? 1.0f : 0.0f;
 
     prism_material_output out = {};
-    if (prism_mica_filter_apply(app->mica_filter, frame, &desc, &out) == FLUX_OK)
+    if (prism_mica_filter_apply(
+            app->mica_filter,
+            &(prism_mica_filter_apply_opts){.frame = frame, .desc = &desc, .out = &out}) == FLUX_OK)
         gallery_emit_output(app, &out);
 }
 
@@ -210,7 +216,9 @@ static void on_prepare(flux_frame *frame, flux_canvas *canvas, flux_device *devi
         flux_effect_blur_desc bd = FLUX_EFFECT_BLUR_DESC_INIT;
         bd.input = app->capture;
         bd.sigma = 10.0f * scale;
-        (void)flux_blur_filter_apply(app->blur_filter, frame, &bd, &blurred);
+        (void)flux_blur_filter_apply(
+            app->blur_filter,
+            &(flux_blur_filter_apply_opts){.frame = frame, .desc = &bd, .out = &blurred});
     }
 
     /* ===== STEP 3: APPLY MATERIALS ACCORDING TO VIEW MODE ===== */
@@ -254,7 +262,8 @@ static void record_image(flux_encoder *enc, flux_image *image, flux_rect dst) {
         .opacity = 1.0f,
         .image = {.image = image, .tint = flux_color_rgba_premul(255, 255, 255, 255)},
     };
-    flux_encoder_draw_geometry(enc, &geom, &brush);
+    flux_encoder_draw_geometry(enc,
+                               &(flux_encoder_draw_geometry_opts){.geom = &geom, .brush = &brush});
 }
 
 static void on_record(flux_encoder *enc, float scale, void *user) {

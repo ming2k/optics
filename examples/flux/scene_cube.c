@@ -243,9 +243,15 @@ static void on_prepare(flux_frame *frame, flux_canvas *canvas, flux_device *devi
         flux_scene_light light = FLUX_SCENE_LIGHT_DEFAULT;
         light.direction = (flux_vec3){-0.6f, -1.0f, -0.4f};
         light.ambient = 0.12f;
-        flux_scene_draw_mesh_lit(frame, &cam, world, app->cube, app->mat, &light);
+        flux_scene_draw_mesh(frame, &(flux_scene_draw_mesh_opts){.camera = &cam,
+                                                                 .world = world,
+                                                                 .mesh = app->cube,
+                                                                 .material = app->mat,
+                                                                 .light = &light});
     } else {
-        flux_scene_draw_mesh(frame, &cam, world, app->cube, app->mat);
+        flux_scene_draw_mesh(
+            frame, &(flux_scene_draw_mesh_opts){
+                       .camera = &cam, .world = world, .mesh = app->cube, .material = app->mat});
     }
 
     flux_frame_end_pass(frame);

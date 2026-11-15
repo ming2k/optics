@@ -20,16 +20,19 @@ static const void *deny_resource(void *user, flux_display_list_resource_kind kin
     (void)user;
     (void)kind;
     (void)id;
-    return NULL;
+    return nullptr;
 }
 
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
+    flux_display_list *list = nullptr;
     flux_display_list_deserialize_opts opts = FLUX_DISPLAY_LIST_DESERIALIZE_OPTS_INIT;
+    opts.data = data;
+    opts.size = size;
     opts.resolve = deny_resource;
+    opts.out_list = &list;
 
-    flux_display_list *list = NULL;
-    flux_result r = flux_display_list_deserialize(data, size, &opts, &list);
-    if (r != FLUX_OK && list != NULL)
+    flux_result r = flux_display_list_deserialize(&opts);
+    if (r != FLUX_OK && list != nullptr)
         abort();
     if (list)
         flux_display_list_release(list);

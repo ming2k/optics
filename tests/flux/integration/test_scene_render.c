@@ -63,10 +63,10 @@ static flux_mesh *make_skinned_quad(flux_device *d, float half) {
         {{-half, half, 0}, {0, 0, 1}, {0, 1}},
     };
     flux_skin_vertex skin_verts[4] = {
-        {.joints = {0}, .weights = {1, 0, 0, 0}},
-        {.joints = {0}, .weights = {1, 0, 0, 0}},
-        {.joints = {0}, .weights = {1, 0, 0, 0}},
-        {.joints = {0}, .weights = {1, 0, 0, 0}},
+        {.joints = {}, .weights = {1, 0, 0, 0}},
+        {.joints = {}, .weights = {1, 0, 0, 0}},
+        {.joints = {}, .weights = {1, 0, 0, 0}},
+        {.joints = {}, .weights = {1, 0, 0, 0}},
     };
     uint32_t idx[6] = {0, 1, 2, 0, 2, 3};
     flux_mesh_skin_desc sd = {
@@ -119,8 +119,14 @@ static flux_result render_frame(flux_surface *s, flux_target *depth, const flux_
     };
     flux_frame_begin_pass(frame, &pass);
 
-    flux_frame_set_viewport(frame, 0.0f, 0.0f, (float)W, (float)H, 0.0f, 1.0f);
-    flux_frame_set_scissor(frame, 0, 0, W, H);
+    flux_frame_set_viewport(frame, &(flux_frame_set_viewport_opts){.x = 0.0f,
+                                                                   .y = 0.0f,
+                                                                   .width = (float)W,
+                                                                   .height = (float)H,
+                                                                   .min_depth = 0.0f,
+                                                                   .max_depth = 1.0f});
+    flux_frame_set_scissor(frame,
+                           &(flux_frame_set_scissor_opts){.x = 0, .y = 0, .width = W, .height = H});
 
     draw(frame, cam, user);
 
@@ -142,8 +148,12 @@ static void draw_depth_case(flux_frame *f, const flux_camera *cam, void *user) {
     depth_case *c = user;
     flux_mat4 id = flux_mat4_identity();
     /* Near first. If depth testing is broken the far quad wins. */
-    flux_scene_draw_mesh(f, cam, id, c->near_quad, c->red);
-    flux_scene_draw_mesh(f, cam, id, c->far_quad, c->green);
+    flux_scene_draw_mesh(f,
+                         &(flux_scene_draw_mesh_opts){
+                             .camera = cam, .world = id, .mesh = c->near_quad, .material = c->red});
+    flux_scene_draw_mesh(
+        f, &(flux_scene_draw_mesh_opts){
+               .camera = cam, .world = id, .mesh = c->far_quad, .material = c->green});
 }
 
 typedef struct phong_case {
@@ -154,7 +164,11 @@ typedef struct phong_case {
 
 static void draw_phong_case(flux_frame *f, const flux_camera *cam, void *user) {
     phong_case *c = user;
-    flux_scene_draw_mesh_lit(f, cam, flux_mat4_identity(), c->quad, c->mat, &c->light);
+    flux_scene_draw_mesh(f, &(flux_scene_draw_mesh_opts){.camera = cam,
+                                                         .world = flux_mat4_identity(),
+                                                         .mesh = c->quad,
+                                                         .material = c->mat,
+                                                         .light = &c->light});
 }
 
 typedef struct skin_case {
@@ -170,12 +184,20 @@ typedef struct texture_case {
 
 static void draw_skin_case(flux_frame *f, const flux_camera *cam, void *user) {
     skin_case *c = user;
-    flux_scene_draw_mesh_skinned(f, cam, flux_mat4_identity(), c->quad, c->material, c->palette, 1);
+    flux_scene_draw_mesh(f, &(flux_scene_draw_mesh_opts){.camera = cam,
+                                                         .world = flux_mat4_identity(),
+                                                         .mesh = c->quad,
+                                                         .material = c->material,
+                                                         .joint_matrices = c->palette,
+                                                         .joint_count = 1});
 }
 
 static void draw_texture_case(flux_frame *f, const flux_camera *cam, void *user) {
     texture_case *c = user;
-    flux_scene_draw_mesh(f, cam, flux_mat4_identity(), c->quad, c->material);
+    flux_scene_draw_mesh(f, &(flux_scene_draw_mesh_opts){.camera = cam,
+                                                         .world = flux_mat4_identity(),
+                                                         .mesh = c->quad,
+                                                         .material = c->material});
 }
 
 int main(void) {
@@ -212,7 +234,7 @@ int main(void) {
 
     /* --- depth test: near (red) drawn first survives far (green) --- */
     {
-        depth_case c = {0};
+        depth_case c = {};
         c.near_quad = make_quad(d, 0.8f, 1.0f); /* 3 units from the eye */
         c.far_quad = make_quad(d, 2.5f, -1.0f); /* 5 units, projects larger */
         OT_EXPECT(c.near_quad != nullptr && c.far_quad != nullptr);
@@ -255,7 +277,7 @@ int main(void) {
 
     /* --- Phong: head-on light brightens, departing light leaves ambient --- */
     {
-        phong_case c = {0};
+        phong_case c = {};
         c.quad = make_quad(d, 1.5f, 0.0f);
         OT_EXPECT(c.quad != nullptr);
 
@@ -301,7 +323,7 @@ int main(void) {
 
     /* --- GPU skinning: a one-joint palette translates the bind-pose quad. --- */
     {
-        skin_case c = {0};
+        skin_case c = {};
         c.quad = make_skinned_quad(d, 0.4f);
         c.palette[0] = flux_mat4_translate(1.0f, 0.0f, 0.0f);
         OT_EXPECT(c.quad != nullptr);
@@ -477,9 +499,19 @@ int main(void) {
                 .height = H,
             };
             flux_frame_begin_pass(frame, &pass);
-            flux_frame_set_viewport(frame, 0.0f, 0.0f, (float)W, (float)H, 0.0f, 1.0f);
-            flux_frame_set_scissor(frame, 0, 0, W, H);
-            flux_scene_draw_mesh_lit(frame, &cam, flux_mat4_identity(), quad, mat, &light);
+            flux_frame_set_viewport(frame, &(flux_frame_set_viewport_opts){.x = 0.0f,
+                                                                           .y = 0.0f,
+                                                                           .width = (float)W,
+                                                                           .height = (float)H,
+                                                                           .min_depth = 0.0f,
+                                                                           .max_depth = 1.0f});
+            flux_frame_set_scissor(
+                frame, &(flux_frame_set_scissor_opts){.x = 0, .y = 0, .width = W, .height = H});
+            flux_scene_draw_mesh(frame, &(flux_scene_draw_mesh_opts){.camera = &cam,
+                                                                     .world = flux_mat4_identity(),
+                                                                     .mesh = quad,
+                                                                     .material = mat,
+                                                                     .light = &light});
             flux_frame_end_pass(frame);
             OT_EXPECT(flux_frame_finish_image_target(frame, rt) == FLUX_OK);
 

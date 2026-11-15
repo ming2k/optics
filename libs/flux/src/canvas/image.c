@@ -183,7 +183,7 @@ flux_result flux_image_init_color(flux_device *d, flux_image *im, const void *ne
         }
     }
 
-    flux_image_color_params params = {0};
+    flux_image_color_params params = {};
     flux_mat3 to_working;
     flux_color_space working = FLUX_COLOR_SPACE_SCRGB;
     flux_color_space_transform_matrix(content, working, &to_working);
@@ -559,7 +559,7 @@ static flux_result image_cow(flux_image *im) {
     if (!im->shared || atomic_load_explicit(&im->shared->refs, memory_order_acquire) <= 1)
         return FLUX_OK;
     VkImage image = VK_NULL_HANDLE;
-    flux_vk_alloc alloc = {0};
+    flux_vk_alloc alloc = {};
     VkImageView view = VK_NULL_HANDLE;
     flux_bindless_handle bindless = FLUX_BINDLESS_INVALID;
     flux_bindless_handle storage = FLUX_BINDLESS_INVALID;
@@ -648,77 +648,17 @@ static flux_result update_region_validate(const flux_image *im, uint32_t x, uint
     return FLUX_OK;
 }
 
-flux_result flux_image_update_region(flux_image *im, uint32_t x, uint32_t y, uint32_t w, uint32_t h,
-                                     const void *data, size_t bytes) {
-    if (!im)
+flux_result flux_image_update_region(flux_image *im, const flux_image_update_region_opts *opts) {
+    if (!im || !opts)
         return FLUX_ERROR_INVALID_ARGUMENT;
-    flux_device *d = im->device;
-    flux_platform_mutex_lock(&d->image_version_lock);
-    size_t needed;
-    flux_result v = update_region_validate(im, x, y, w, h, data, 0, bytes, &needed);
-    if (v != FLUX_OK)
-        goto out;
-    v = image_cow(im);
-    if (v != FLUX_OK)
-        goto out;
-    v = flux_vk_upload_to_image(d, im, im->image, (int32_t)x, (int32_t)y, w, h,
-                                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, data, needed);
-out:
-    flux_platform_mutex_unlock(&d->image_version_lock);
-    return v;
-}
-
-flux_result flux_image_update_region_strided(flux_image *im, uint32_t x, uint32_t y, uint32_t w,
-                                             uint32_t h, const void *data, size_t row_bytes,
-                                             size_t bytes) {
-    if (!im)
-        return FLUX_ERROR_INVALID_ARGUMENT;
-    flux_device *d = im->device;
-    flux_platform_mutex_lock(&d->image_version_lock);
-    size_t packed;
-    flux_result v = update_region_validate(im, x, y, w, h, data, row_bytes, bytes, &packed);
-    if (v != FLUX_OK)
-        goto out;
-    v = image_cow(im);
-    if (v != FLUX_OK)
-        goto out;
-
-    size_t row_min = (size_t)w * bytes_per_pixel(im->format);
-    if (row_bytes == 0 || row_bytes == row_min) {
-        v = flux_vk_upload_to_image(d, im, im->image, (int32_t)x, (int32_t)y, w, h,
-                                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, data, packed);
-        goto out;
-    }
-
-    /* Strided source: repack rows into a scratch buffer, then upload packed.
-     * The scratch is sized to the tightly packed extent (not the strided
-     * span) so the staging copy stays minimal. */
-    void *scratch = flux_internal_alloc(d, packed);
-    if (!scratch) {
-        v = FLUX_ERROR_OUT_OF_MEMORY;
-        goto out;
-    }
-    const uint8_t *src = data;
-    uint8_t *dst = scratch;
-    for (uint32_t row = 0; row < h; ++row) {
-        memcpy(dst, src, row_min);
-        src += row_bytes;
-        dst += row_min;
-    }
-    v = flux_vk_upload_to_image(d, im, im->image, (int32_t)x, (int32_t)y, w, h,
-                                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, scratch, packed);
-    flux_internal_free(d, scratch);
-out:
-    flux_platform_mutex_unlock(&d->image_version_lock);
-    return v;
-}
-
-flux_result flux_image_update_region_premultiply(flux_image *im, uint32_t x, uint32_t y, uint32_t w,
-                                                 uint32_t h, const void *data, size_t row_bytes,
-                                                 size_t bytes) {
-    if (!im)
-        return FLUX_ERROR_INVALID_ARGUMENT;
-    if (im->format != FLUX_FORMAT_RGBA8_UNORM) {
+    const uint32_t x = opts->x;
+    const uint32_t y = opts->y;
+    const uint32_t w = opts->width;
+    const uint32_t h = opts->height;
+    const void *data = opts->data;
+    const size_t row_bytes = opts->row_bytes;
+    const size_t bytes = opts->bytes;
+    if (opts->premultiply && im->format != FLUX_FORMAT_RGBA8_UNORM) {
         FLUX_FAIL(FLUX_ERROR_UNSUPPORTED, "premultiply upload requires FLUX_FORMAT_RGBA8_UNORM");
         return FLUX_ERROR_UNSUPPORTED;
     }
@@ -732,29 +672,44 @@ flux_result flux_image_update_region_premultiply(flux_image *im, uint32_t x, uin
     if (v != FLUX_OK)
         goto out;
 
-    size_t stride = row_bytes ? row_bytes : (size_t)w * 4u;
+    size_t row_min = (size_t)w * bytes_per_pixel(im->format);
+    if (!opts->premultiply && (row_bytes == 0 || row_bytes == row_min)) {
+        v = flux_vk_upload_to_image(d, im, im->image, (int32_t)x, (int32_t)y, w, h,
+                                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, data, packed);
+        goto out;
+    }
+
     uint8_t *scratch = flux_internal_alloc(d, packed);
     if (!scratch) {
         v = FLUX_ERROR_OUT_OF_MEMORY;
         goto out;
     }
+    size_t stride = row_bytes ? row_bytes : row_min;
     const uint8_t *src = data;
     uint8_t *dst = scratch;
-    for (uint32_t row = 0; row < h; ++row) {
-        for (uint32_t px = 0; px < w; ++px) {
-            const uint8_t *s = src + (size_t)px * 4u;
-            uint8_t a = s[3];
-            if (a == 255u || a == 0u) {
-                memcpy(dst, s, 4); /* fast paths, identical to flux_color_rgba_premul */
-            } else {
-                dst[0] = (uint8_t)((s[0] * a + 127u) / 255u);
-                dst[1] = (uint8_t)((s[1] * a + 127u) / 255u);
-                dst[2] = (uint8_t)((s[2] * a + 127u) / 255u);
-                dst[3] = a;
+    if (opts->premultiply) {
+        for (uint32_t row = 0; row < h; ++row) {
+            for (uint32_t px = 0; px < w; ++px) {
+                const uint8_t *s = src + (size_t)px * 4u;
+                uint8_t a = s[3];
+                if (a == 255u || a == 0u) {
+                    memcpy(dst, s, 4); /* fast paths, identical to flux_color_rgba_premul */
+                } else {
+                    dst[0] = (uint8_t)((s[0] * a + 127u) / 255u);
+                    dst[1] = (uint8_t)((s[1] * a + 127u) / 255u);
+                    dst[2] = (uint8_t)((s[2] * a + 127u) / 255u);
+                    dst[3] = a;
+                }
+                dst += 4u;
             }
-            dst += 4u;
+            src += stride;
         }
-        src += stride;
+    } else {
+        for (uint32_t row = 0; row < h; ++row) {
+            memcpy(dst, src, row_min);
+            src += stride;
+            dst += row_min;
+        }
     }
     v = flux_vk_upload_to_image(d, im, im->image, (int32_t)x, (int32_t)y, w, h,
                                 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, scratch, packed);

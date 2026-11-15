@@ -162,11 +162,16 @@ VkPipelineLayout flux_compute_pipeline_vk_layout(flux_compute_pipeline *p) {
     return p ? p->layout : VK_NULL_HANDLE;
 }
 
-void flux_compute_dispatch(VkCommandBuffer cmd, flux_compute_pipeline *pipeline,
-                           const void *push_constants, uint32_t push_bytes, uint32_t group_x,
-                           uint32_t group_y, uint32_t group_z) {
-    if (!cmd || !pipeline || !pipeline->pipeline)
+void flux_compute_dispatch(const flux_compute_dispatch_opts *opts) {
+    if (!opts || !opts->cmd || !opts->pipeline || !opts->pipeline->pipeline)
         return;
+    VkCommandBuffer cmd = opts->cmd;
+    flux_compute_pipeline *pipeline = opts->pipeline;
+    const void *push_constants = opts->push_constants;
+    uint32_t push_bytes = opts->push_bytes;
+    uint32_t group_x = opts->group_x;
+    uint32_t group_y = opts->group_y;
+    uint32_t group_z = opts->group_z;
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline->pipeline);
 

@@ -39,14 +39,14 @@ void txtp_charset_free(txtp_charset *cs) {
 
 static txtp_charset *txtp_charset_from_fc(const FcCharSet *src) {
     if (!src)
-        return NULL;
+        return nullptr;
     txtp_charset *cs = calloc(1, sizeof *cs);
     if (!cs)
-        return NULL;
+        return nullptr;
     cs->fc = FcCharSetCopy((FcCharSet *)src);
     if (!cs->fc) {
         free(cs);
-        return NULL;
+        return nullptr;
     }
     return cs;
 }
@@ -59,9 +59,9 @@ void txtp_font_match_clear(txtp_font_match *m) {
     if (!m)
         return;
     free(m->path);
-    m->path = NULL;
+    m->path = nullptr;
     txtp_charset_free(m->charset);
-    m->charset = NULL;
+    m->charset = nullptr;
     m->index = 0;
 }
 
@@ -112,45 +112,45 @@ static const char *const hardcoded[] = {
     "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
     "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
     "/usr/share/fonts/TTF/DejaVuSans.ttf",
-    NULL,
+    nullptr,
 };
 
 txtp_font_list *txt_platform_font_query_family(const char *family_name, float weight, bool italic,
                                                int max_results) {
     if (!family_name || max_results <= 0)
-        return NULL;
+        return nullptr;
     if (!FcInit())
-        return NULL;
+        return nullptr;
 
     int fc_slant = italic ? FC_SLANT_ITALIC : FC_SLANT_ROMAN;
-    FcPattern *pat = FcPatternBuild(NULL, FC_FAMILY, FcTypeString, (const FcChar8 *)family_name,
+    FcPattern *pat = FcPatternBuild(nullptr, FC_FAMILY, FcTypeString, (const FcChar8 *)family_name,
                                     FC_WEIGHT, FcTypeInteger, weight_to_fc(weight), FC_SLANT,
-                                    FcTypeInteger, fc_slant, (char *)NULL);
+                                    FcTypeInteger, fc_slant, (char *)nullptr);
     if (!pat)
-        return NULL;
-    FcConfigSubstitute(NULL, pat, FcMatchPattern);
+        return nullptr;
+    FcConfigSubstitute(nullptr, pat, FcMatchPattern);
     FcDefaultSubstitute(pat);
     FcResult res = FcResultNoMatch;
-    FcFontSet *fs = FcFontSort(NULL, pat, FcTrue, NULL, &res);
+    FcFontSet *fs = FcFontSort(nullptr, pat, FcTrue, nullptr, &res);
     FcPatternDestroy(pat);
     if (!fs)
-        return NULL;
+        return nullptr;
 
     txtp_font_list *list = calloc(1, sizeof *list);
     if (!list) {
         FcFontSetDestroy(fs);
-        return NULL;
+        return nullptr;
     }
     list->matches = calloc((size_t)max_results, sizeof *list->matches);
     if (!list->matches) {
         free(list);
         FcFontSetDestroy(fs);
-        return NULL;
+        return nullptr;
     }
 
     for (int i = 0; i < fs->nfont && list->count < max_results; i++) {
         FcPattern *p = fs->fonts[i];
-        FcChar8 *file = NULL;
+        FcChar8 *file = nullptr;
         if (FcPatternGetString(p, FC_FILE, 0, &file) != FcResultMatch)
             continue;
 
@@ -166,7 +166,7 @@ txtp_font_list *txt_platform_font_query_family(const char *family_name, float we
         if (FcPatternGetInteger(p, FC_INDEX, 0, &idx) == FcResultMatch)
             m->index = idx;
 
-        FcCharSet *cs = NULL;
+        FcCharSet *cs = nullptr;
         if (FcPatternGetCharSet(p, FC_CHARSET, 0, &cs) == FcResultMatch && cs)
             m->charset = txtp_charset_from_fc(cs);
 
@@ -209,17 +209,17 @@ bool txt_platform_font_query_codepoint(const char *family_name, float weight, bo
         return false;
     }
 
-    FcPattern *pat = FcPatternBuild(NULL, FC_FAMILY, FcTypeString, (const FcChar8 *)family_name,
+    FcPattern *pat = FcPatternBuild(nullptr, FC_FAMILY, FcTypeString, (const FcChar8 *)family_name,
                                     FC_WEIGHT, FcTypeInteger, weight_to_fc(weight), FC_SLANT,
                                     FcTypeInteger, italic ? FC_SLANT_ITALIC : FC_SLANT_ROMAN,
-                                    FC_CHARSET, FcTypeCharSet, req_cs, (char *)NULL);
+                                    FC_CHARSET, FcTypeCharSet, req_cs, (char *)nullptr);
     FcCharSetDestroy(req_cs);
     if (!pat)
         return false;
-    FcConfigSubstitute(NULL, pat, FcMatchPattern);
+    FcConfigSubstitute(nullptr, pat, FcMatchPattern);
     FcDefaultSubstitute(pat);
     FcResult res = FcResultNoMatch;
-    FcFontSet *fs = FcFontSort(NULL, pat, FcTrue, NULL, &res);
+    FcFontSet *fs = FcFontSort(nullptr, pat, FcTrue, nullptr, &res);
     FcPatternDestroy(pat);
     if (!fs)
         return false;
@@ -229,7 +229,7 @@ bool txt_platform_font_query_codepoint(const char *family_name, float weight, bo
      * first that does. */
     int chosen = -1;
     for (int i = 0; i < fs->nfont; i++) {
-        FcCharSet *cs = NULL;
+        FcCharSet *cs = nullptr;
         if (FcPatternGetCharSet(fs->fonts[i], FC_CHARSET, 0, &cs) == FcResultMatch && cs &&
             FcCharSetHasChar(cs, (FcChar32)cp)) {
             chosen = i;
@@ -242,19 +242,19 @@ bool txt_platform_font_query_codepoint(const char *family_name, float weight, bo
     }
 
     FcPattern *p = fs->fonts[chosen];
-    FcChar8 *file = NULL;
+    FcChar8 *file = nullptr;
     if (FcPatternGetString(p, FC_FILE, 0, &file) != FcResultMatch) {
         FcFontSetDestroy(fs);
         return false;
     }
     int idx = 0;
     FcPatternGetInteger(p, FC_INDEX, 0, &idx);
-    FcCharSet *cs = NULL;
+    FcCharSet *cs = nullptr;
     FcPatternGetCharSet(p, FC_CHARSET, 0, &cs);
 
     out->path = txtp_strdup((const char *)file);
     out->index = idx;
-    out->charset = cs ? txtp_charset_from_fc(cs) : NULL;
+    out->charset = cs ? txtp_charset_from_fc(cs) : nullptr;
     FcFontSetDestroy(fs);
-    return out->path != NULL;
+    return out->path != nullptr;
 }

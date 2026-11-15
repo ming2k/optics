@@ -16,8 +16,8 @@ static void pixel(const uint8_t *fb, uint32_t stride, uint32_t x, uint32_t y, ui
 }
 
 static void test_selectable_click(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     /* Frame 1: establish prev_rect */
     lens_begin(ui, &IN0);
@@ -52,8 +52,8 @@ static void test_selectable_click(void) {
 /* The selected flag is surfaced to assistive tech as a checked state, and a
  * disabled selectable never reports a click. */
 static void test_selectable_selected_and_disabled(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     lens_begin(ui, &IN0);
     lens_selectable(ui, &(lens_selectable_opts){.label = "Note", .selected = true});
@@ -74,8 +74,8 @@ static void test_selectable_selected_and_disabled(void) {
 }
 
 static void test_selected_surface_uses_theme(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     lens_theme theme = lens_theme_dark();
     theme.color_active = flux_color_rgba_premul(0, 255, 0, 255);
     theme.color_accent = flux_color_rgba_premul(255, 0, 0, 255);
@@ -88,7 +88,7 @@ static void test_selected_surface_uses_theme(void) {
     lens_selectable(ui, &(lens_selectable_opts){.label = "Selected", .selected = true});
     lens_test_end(ui);
 
-    flux_canvas *canvas = NULL;
+    flux_canvas *canvas = nullptr;
     OT_EXPECT(flux_canvas_create_cpu(100, 40, 1.0f, &canvas) == FLUX_OK);
     flux_color black = flux_color_rgba_premul(0, 0, 0, 255);
     OT_EXPECT(flux_canvas_begin(canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
@@ -99,7 +99,7 @@ static void test_selected_surface_uses_theme(void) {
 
     uint32_t width = 0, height = 0, stride = 0;
     const uint8_t *fb = flux_canvas_cpu_pixels(canvas, &width, &height, &stride);
-    OT_EXPECT(fb != NULL && width == 100 && height == 40);
+    OT_EXPECT(fb != nullptr && width == 100 && height == 40);
     uint8_t p[4];
     pixel(fb, stride, 1, 20, p);
     OT_EXPECT(p[0] < 5 && p[1] > 250 && p[2] < 5); /* themed surface, no red rail */

@@ -67,7 +67,7 @@
 #include <stdint.h>
 
 /* What the caller should do with this iteration. */
-typedef enum iris_pace_action {
+typedef enum iris_pace_action : uint32_t {
     /* Render and present a frame. */
     IRIS_PACE_PAINT = 0,
     /* Do not render; keep the schedule (or the pulse subscription) alive.

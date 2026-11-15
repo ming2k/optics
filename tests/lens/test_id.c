@@ -5,9 +5,9 @@
 #include <lens/lens.h>
 
 int main(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
-    OT_EXPECT(ui != NULL);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
+    OT_EXPECT(ui != nullptr);
 
     lens_input in = {.display_size = {200, 100}, .dt_seconds = 0.016f};
 

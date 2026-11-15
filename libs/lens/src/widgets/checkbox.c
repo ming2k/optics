@@ -4,7 +4,7 @@
 #include <math.h>
 
 lens_response lens_checkbox(lens *ui, const lens_checkbox_opts *opts) {
-    lens_checkbox_opts default_opts = {0};
+    lens_checkbox_opts default_opts = {};
     if (!opts)
         opts = &default_opts;
 
@@ -22,7 +22,7 @@ lens_response lens_checkbox(lens *ui, const lens_checkbox_opts *opts) {
         opts->box.id ? lensi_gen_widget_id(ui, opts->box.id) : lensi_gen_widget_id(ui, label);
     lens_node *n = lensi_store_touch(ui, id);
     if (!n)
-        return (lens_response){0};
+        return (lens_response){};
 
     lensi_link_child(ui, n);
     lensi_node_box(ui, n, &opts->box);
@@ -30,7 +30,7 @@ lens_response lens_checkbox(lens *ui, const lens_checkbox_opts *opts) {
 
     float font_size = lensi_style_font_size(ui, &eff, t);
     float padding = lensi_style_padding(&eff, t);
-    lens_text_metrics tm = {0};
+    lens_text_metrics tm = {};
     if (label[0])
         tm = lensi_text_measure_label(ui, label, font_size, 0.0f);
 
@@ -70,7 +70,7 @@ lens_response lens_checkbox(lens *ui, const lens_checkbox_opts *opts) {
                          (disabled ? LENS_A11Y_DISABLED : 0);
     lens_role role =
         (opts->appearance == LENS_CHECKBOX_RADIO) ? LENS_ROLE_RADIO : LENS_ROLE_CHECKBOX;
-    lensi_node_semantics(ui, n, role, label, NULL, sem_flags);
+    lensi_node_semantics(ui, n, role, label, nullptr, sem_flags);
 
     float dt = ui->input.dt_seconds;
     if (!disabled) {

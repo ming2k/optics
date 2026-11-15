@@ -5,12 +5,22 @@
 
 #include <math.h>
 
-lens_virtual_grid_plan lens_virtual_grid_calc(float available_width, float viewport_height,
-                                              float scroll_y, uint32_t total_items,
-                                              float min_col_width, float max_col_width,
-                                              float item_height, float target_gap,
-                                              uint32_t overscan_rows) {
-    lens_virtual_grid_plan plan = {0};
+lens_virtual_grid_plan lens_virtual_grid_calc(const lens_virtual_grid_calc_opts *opts) {
+    lens_virtual_grid_plan plan = {};
+    if (!opts) {
+        plan.columns = 1;
+        return plan;
+    }
+
+    float available_width = opts->available_width;
+    float viewport_height = opts->viewport_height;
+    float scroll_y = opts->scroll_y;
+    uint32_t total_items = opts->total_items;
+    float min_col_width = opts->min_col_width;
+    float max_col_width = opts->max_col_width;
+    float item_height = opts->item_height;
+    float target_gap = opts->target_gap;
+    uint32_t overscan_rows = opts->overscan_rows;
 
     if (available_width <= 0.0f || total_items == 0) {
         plan.columns = 1;

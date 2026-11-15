@@ -24,8 +24,8 @@ static lens_id build_button_frame(lens *ui, bool *clicked) {
 
 /* Activation fires on the next frame, moves focus, and is single-shot. */
 static void test_activate_fires_and_focuses(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     bool clicked = false;
     lens_id id = build_button_frame(ui, &clicked);
@@ -54,8 +54,8 @@ static void test_activate_fires_and_focuses(void) {
 
 /* A request for a nonexistent id is dropped at frame end and never fires. */
 static void test_activate_unknown_id_dropped(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     bool clicked = false;
     lens_id id = build_button_frame(ui, &clicked);
@@ -75,8 +75,8 @@ static void test_activate_unknown_id_dropped(void) {
 
 /* A newer request replaces an unconsumed older one (single pending slot). */
 static void test_activate_replaces_pending(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     bool clicked = false;
     lens_id id = build_button_frame(ui, &clicked);
@@ -93,8 +93,8 @@ static void test_activate_replaces_pending(void) {
 /* Disabled widgets do not activate, and the request is consumed/dropped so
  * it cannot fire later if the widget becomes enabled again mid-frame. */
 static void test_activate_disabled_blocked(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     bool disabled = true;
     lens_id id = 0;
@@ -141,8 +141,8 @@ static void test_activate_disabled_blocked(void) {
 /* Occlusion does not block AT activation: a transient popup over the
  * button swallows its pointer interaction but not the a11y request. */
 static void test_activate_bypasses_occlusion(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     /* frame 1: button under an open full-window popup (POPUP band
      * occludes; a BACKDROP would be hit-transparent) */

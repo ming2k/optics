@@ -196,7 +196,13 @@ int main(void) {
         .oy = 0.0f,
     };
 
-    flux_compute_dispatch(cmd, pipe, &pc, sizeof(pc), tx, ty, 1);
+    flux_compute_dispatch(&(flux_compute_dispatch_opts){.cmd = cmd,
+                                                        .pipeline = pipe,
+                                                        .push_constants = &pc,
+                                                        .push_bytes = sizeof(pc),
+                                                        .group_x = tx,
+                                                        .group_y = ty,
+                                                        .group_z = 1});
 
     /* Barrier: compute write -> host read */
     VkMemoryBarrier2 mb = {

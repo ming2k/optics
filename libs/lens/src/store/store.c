@@ -138,7 +138,7 @@ void lensi_store_destroy(lens *ui) {
         }
         lensi_free(ui, s->slots);
     }
-    s->slots = NULL;
+    s->slots = nullptr;
     s->cap = s->count = 0;
     s->idle_frames = 0;
     s->live_head = s->live_tail = LENSI_STORE_LINK_NONE;
@@ -147,14 +147,14 @@ void lensi_store_destroy(lens *ui) {
 lens_node *lensi_store_find(const lens *ui, lens_id id) {
     const lens_store *s = &ui->store;
     if (!s->cap || !id)
-        return NULL;
+        return nullptr;
     uint32_t i = slot_index(id, s->cap);
     while (s->slots[i].id) {
         if (s->slots[i].id == id)
             return s->slots[i].node;
         i = (i + 1) & (s->cap - 1);
     }
-    return NULL;
+    return nullptr;
 }
 
 static bool store_insert(lens *ui, lens_node *n) {
@@ -180,7 +180,7 @@ lens_node *lensi_store_touch(lens *ui, lens_id id) {
         n = lensi_alloc(ui, sizeof *n);
         if (!n) {
             lensi_set_overflow(ui);
-            return NULL;
+            return nullptr;
         }
         memset(n, 0, sizeof *n);
         n->id = id;
@@ -190,7 +190,7 @@ lens_node *lensi_store_touch(lens *ui, lens_id id) {
         if (!store_insert(ui, n)) {
             lensi_free(ui, n);
             lensi_set_overflow(ui);
-            return NULL;
+            return nullptr;
         }
     }
     if (n->last_seen != ui->frame) {

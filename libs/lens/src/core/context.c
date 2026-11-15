@@ -159,7 +159,7 @@ static lens_desc lensi_desc_copy_in(const lens_desc *desc) {
 flux_result lens_create(const lens_desc *desc, lens **out) {
     if (!out)
         return FLUX_ERROR_INVALID_ARGUMENT;
-    *out = NULL;
+    *out = nullptr;
 
     lens *ui = calloc(1, sizeof *ui); // RAW_ALLOC_OK(no-device)
     if (!ui)
@@ -206,7 +206,7 @@ flux_result lens_create(const lens_desc *desc, lens **out) {
     ui->caret_presented_visible = true;
 
     size_t arena_bytes = d.arena_bytes ? d.arena_bytes : LENSI_DEFAULT_ARENA_BYTES;
-    flux_result r = flux_arena_init(&ui->arena, arena_bytes, NULL);
+    flux_result r = flux_arena_init(&ui->arena, arena_bytes, nullptr);
     if (r != FLUX_OK)
         goto fail_arena;
 
@@ -220,7 +220,7 @@ flux_result lens_create(const lens_desc *desc, lens **out) {
      * available, so widgets never branch on backend presence. Only fails
      * on allocation, which is non-fatal here (text simply stays blank). */
     if (glyph_create(&(glyph_desc){.device = ui->device, .scale = ui->scale}, &ui->text) != FLUX_OK)
-        ui->text = NULL;
+        ui->text = nullptr;
 
     /* Icon coverage-mask cache (ADR-0112). Allocation failure is non-fatal:
      * the pool stays at cap 0 and icons draw through the live vector path. */
@@ -348,12 +348,15 @@ void lens_set_opacity(lens *ui, float opacity) {
 }
 
 /* Ghost replay (ADR-0078): the public pin. */
-void lens_set_ghost(lens *ui, lens_id subtree_root, float alpha) {
+void lens_set_ghost(lens *ui, const lens_set_ghost_opts *opts) {
+    if (!opts)
+        return;
+    float alpha = opts->alpha;
     if (!isfinite(alpha) || alpha < 0.0f)
         alpha = 0.0f;
     else if (alpha > 1.0f)
         alpha = 1.0f;
-    lensi_ghost_pin(ui, subtree_root, alpha);
+    lensi_ghost_pin(ui, opts->subtree_root, alpha);
 }
 
 float lens_opacity(const lens *ui) {
@@ -968,7 +971,7 @@ void lens_begin(lens *ui, const lens_input *input) {
     /* Size-aware copy (ADR-0036): zero = legacy/trust full struct; >0
      * clamps to min(caller, lib) so apps compiled against older or newer
      * headers degrade cleanly without ABI break. */
-    ui->input = (lens_input){0};
+    ui->input = (lens_input){};
     if (input) {
         size_t want = input->size ? input->size : sizeof(lens_input);
         if (want > sizeof(lens_input))
@@ -982,8 +985,8 @@ void lens_begin(lens *ui, const lens_input *input) {
     }
     memset(ui->key_consumed, 0, sizeof ui->key_consumed);
     ui->menu_nav = 0;
-    ui->caret_rect = (flux_rect){0, 0, 0, 0};  /* refreshed by text widget */
-    ui->text_context = (lens_text_context){0}; /* refreshed alongside it */
+    ui->caret_rect = (flux_rect){0, 0, 0, 0}; /* refreshed by text widget */
+    ui->text_context = (lens_text_context){}; /* refreshed alongside it */
     /* Ownership is per-frame, like the rect it describes: whichever producer
      * claims the caret *this* frame decides whether lens owns its blink
      * (ADR-0151). A stale `true` would let a widget-owned caret keep claiming
@@ -1013,7 +1016,7 @@ void lens_begin(lens *ui, const lens_input *input) {
     ui->next_grid_col = ui->next_grid_row = 0;
     ui->next_disabled = false;
     ui->next_error = false;
-    ui->next_placeholder = NULL;
+    ui->next_placeholder = nullptr;
     ui->next_style = lens_style_init();
     ui->style_top = 0;  /* style scopes are frame-scoped (ADR-0061): a
                          * forgotten lens_pop_style cannot leak across frames */
@@ -1022,17 +1025,17 @@ void lens_begin(lens *ui, const lens_input *input) {
     ui->click_hit_focusable = false;
     ui->scroll_hot_id = 0;
     ui->cursor_hint = LENS_CURSOR_DEFAULT;
-    ui->tab_order = NULL;
+    ui->tab_order = nullptr;
     ui->tab_count = 0; /* tab_cap retained: see the node cmd_cap note */
-    ui->last_response = (lens_response){0};
-    ui->last_node = NULL;
+    ui->last_response = (lens_response){};
+    ui->last_node = nullptr;
     /* Band buckets are arena-backed; they reset with the arena and are
      * rebuilt by lensi_place_bucket at lens_end. The per-band caps are
      * retained across the reset for the same reason as cmd_cap: the
      * rebuild allocates at last frame's high-water size in one step
      * instead of re-walking the doubling chain. */
     for (uint32_t b = 0; b < (uint32_t)LENS_BAND_COUNT; b++) {
-        ui->bands[b] = NULL;
+        ui->bands[b] = nullptr;
         ui->band_counts[b] = 0;
     }
     ui->prev_tooltip_active = ui->tooltip.active;
@@ -1141,7 +1144,7 @@ bool lens_focused(const lens *ui, lens_id id) {
     return ui && ui->focused_id == id;
 }
 lens_response lens_get_response(const lens *ui) {
-    return ui ? ui->last_response : (lens_response){0};
+    return ui ? ui->last_response : (lens_response){};
 }
 lens_cursor_hint lens_get_cursor_hint(const lens *ui) {
     return ui ? ui->cursor_hint : LENS_CURSOR_DEFAULT;
@@ -1152,10 +1155,10 @@ void lens_set_cursor_hint(lens *ui, lens_cursor_hint hint) {
 }
 
 lens_node *lens_root(lens *ui) {
-    return ui ? ui->root : NULL;
+    return ui ? ui->root : nullptr;
 }
 lens_node *lens_find(lens *ui, lens_id id) {
-    return ui ? lensi_store_find(ui, id) : NULL;
+    return ui ? lensi_store_find(ui, id) : nullptr;
 }
 
 uint64_t lens_generation(const lens *ui) {

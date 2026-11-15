@@ -9,6 +9,7 @@ date: 2026-07-21
 
 - Status: Accepted
 - Date: 2026-07-21
+- Amended: 2026-11-15 — `flux_text` was renamed `glyph`; the `_ex` weight variant was merged into `const lens_text_measure_opts *`.
 - Scope: lens (L2 toolkit). Defines the measurement contract widgets
   rely on for intrinsic sizing.
 

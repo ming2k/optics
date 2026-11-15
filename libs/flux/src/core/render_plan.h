@@ -25,7 +25,7 @@ struct flux_image;
 #define FLUX_RENDER_PLAN_MAX_DEPENDENCIES 8u
 #define FLUX_RENDER_PLAN_MAX_REGION_RECTS 8u
 
-typedef enum flux_render_node_kind {
+typedef enum flux_render_node_kind : uint32_t {
     FLUX_RENDER_NODE_UPLOAD = 1,
     FLUX_RENDER_NODE_CANVAS = 2,
     FLUX_RENDER_NODE_SCENE = 3,
@@ -34,12 +34,12 @@ typedef enum flux_render_node_kind {
     FLUX_RENDER_NODE_OUTPUT = 6,
 } flux_render_node_kind;
 
-typedef enum flux_render_resource_kind {
+typedef enum flux_render_resource_kind : uint32_t {
     FLUX_RENDER_RESOURCE_IMAGE = 1,
     FLUX_RENDER_RESOURCE_BUFFER = 2,
 } flux_render_resource_kind;
 
-typedef enum flux_render_access_mode {
+typedef enum flux_render_access_mode : uint32_t {
     FLUX_RENDER_ACCESS_READ = 1,
     FLUX_RENDER_ACCESS_WRITE = 2,
     FLUX_RENDER_ACCESS_READ_WRITE = 3,

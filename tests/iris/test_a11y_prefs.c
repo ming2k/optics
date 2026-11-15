@@ -43,7 +43,7 @@ static void test_query_baseline_is_sane(void) {
 }
 
 static void test_watch_null_cb_rejected(void) {
-    OT_EXPECT(iris_a11y_prefs_watch(NULL, NULL) != 0);
+    OT_EXPECT(iris_a11y_prefs_watch(nullptr, nullptr) != 0);
     /* NULL backend callback is equally rejected (internal slot, same
      * contract; called through the public surface's sibling for
      * coverage). */
@@ -51,7 +51,7 @@ static void test_watch_null_cb_rejected(void) {
 }
 
 static void test_watch_unwatch_roundtrip(void) {
-    OT_EXPECT(iris_a11y_prefs_watch(on_prefs, NULL) == 0 || true);
+    OT_EXPECT(iris_a11y_prefs_watch(on_prefs, nullptr) == 0 || true);
     /* Unwatch must clear cleanly even if watch reported unavailable
      * (stub build): the no-op contract. */
     iris_a11y_prefs_unwatch();

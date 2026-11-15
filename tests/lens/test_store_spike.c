@@ -59,7 +59,7 @@ static void spike_and_dwell(lens *ui, int count, int idle_frames) {
 
 int main(void) {
     /* Small arena on purpose: the overflow path is part of the stress. */
-    lens *ui = NULL;
+    lens *ui = nullptr;
     OT_EXPECT(lens_create(&(lens_desc){.arena_bytes = 64u * 1024u}, &ui) == FLUX_OK);
 
     /* 1. Spike sizes around the growth thresholds (initial cap 256 at
@@ -86,11 +86,11 @@ int main(void) {
      *    lens_button returns "clicked", which is false without input —
      *    node presence is the surviving-state assertion here. */
     lens_begin(ui, &(lens_input){.size = sizeof(lens_input)});
-    lens_row_begin(ui, NULL);
+    lens_row_begin(ui, nullptr);
     (void)lens_button(ui, &(lens_button_opts){.label = "stable##keep"});
     lens_test_end(ui);
     g_seen_button = false;
-    lens_accessibility_walk(ui, saw_button, NULL);
+    lens_accessibility_walk(ui, saw_button, nullptr);
     OT_EXPECT(g_seen_button);
 
     lens_release(ui);

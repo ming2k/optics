@@ -27,7 +27,7 @@ int main(void) {
     }
 
     /* Round 1: create N, retain/release each, then release the round. */
-    flux_image *images[N_IMAGES] = {0};
+    flux_image *images[N_IMAGES] = {};
     for (uint32_t i = 0; i < N_IMAGES; ++i) {
         images[i] = make_image(d);
         OT_EXPECT(images[i] != nullptr);

@@ -69,7 +69,7 @@ static void image_storage_free(flux_device *d, flux_surface_image_storage *stora
     flux_internal_free(d, storage->render_finished);
     flux_internal_free(d, storage->allocs);
     flux_internal_free(d, storage->bindless);
-    *storage = (flux_surface_image_storage){0};
+    *storage = (flux_surface_image_storage){};
 }
 
 static void *image_storage_alloc_array(flux_device *d, uint32_t count, size_t element_size) {
@@ -81,7 +81,7 @@ static void *image_storage_alloc_array(flux_device *d, uint32_t count, size_t el
 
 static bool image_storage_alloc(flux_device *d, uint32_t count,
                                 flux_surface_image_storage *storage) {
-    *storage = (flux_surface_image_storage){0};
+    *storage = (flux_surface_image_storage){};
     if (count == 0)
         return false;
 
@@ -127,7 +127,7 @@ static void surface_take_image_storage(flux_surface *s, flux_surface_image_stora
     s->render_finished = storage->render_finished;
     s->image_allocs = storage->allocs;
     s->image_bindless = storage->bindless;
-    *storage = (flux_surface_image_storage){0};
+    *storage = (flux_surface_image_storage){};
 }
 
 static void surface_free_image_storage(flux_surface *s) {
@@ -230,13 +230,13 @@ static flux_color_space color_space_from_vk(VkColorSpaceKHR vk) {
     case VK_COLOR_SPACE_ADOBERGB_NONLINEAR_EXT:
         return (flux_color_space)FLUX_COLOR_SPACE_ADOBE_RGB;
     case VK_COLOR_SPACE_ADOBERGB_LINEAR_EXT:
-        return (flux_color_space){FLUX_PRIMARIES_ADOBE_RGB, FLUX_TRANSFER_LINEAR, 0.0f, {0}};
+        return (flux_color_space){FLUX_PRIMARIES_ADOBE_RGB, FLUX_TRANSFER_LINEAR, 0.0f, {}};
     case VK_COLOR_SPACE_HDR10_ST2084_EXT:
         return (flux_color_space)FLUX_COLOR_SPACE_BT2020_PQ;
     case VK_COLOR_SPACE_HDR10_HLG_EXT:
         return (flux_color_space)FLUX_COLOR_SPACE_BT2020_HLG;
     case VK_COLOR_SPACE_BT2020_LINEAR_EXT:
-        return (flux_color_space){FLUX_PRIMARIES_BT2020, FLUX_TRANSFER_LINEAR, 0.0f, {0}};
+        return (flux_color_space){FLUX_PRIMARIES_BT2020, FLUX_TRANSFER_LINEAR, 0.0f, {}};
     default: /* SRGB_NONLINEAR, BT709_NONLINEAR, PASS_THROUGH, ... */
         return (flux_color_space)FLUX_COLOR_SPACE_SRGB;
     }
@@ -487,7 +487,7 @@ flux_result flux_surface_create_swapchain(flux_surface *s, uint32_t want_w, uint
         FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "vkGetSwapchainImagesKHR failed", vr);
         return FLUX_ERROR_BACKEND_FAILURE;
     }
-    flux_surface_image_storage storage = {0};
+    flux_surface_image_storage storage = {};
     uint32_t new_count = 0;
     for (uint32_t attempt = 0; attempt < 3; ++attempt) {
         if (!image_storage_alloc(s->device, got, &storage)) {
@@ -735,10 +735,10 @@ VkImageLayout *flux_surface_render_layout_slot(flux_surface *s) {
 static void offscreen_destroy_images(flux_surface *s) {
     if (s->readback_staging) {
         flux_vk_staging_release(s->device, s->readback_staging);
-        s->readback_staging = NULL;
+        s->readback_staging = nullptr;
     }
     s->last_readback_slot = UINT32_MAX;
-    s->last_readback_region = (flux_readback_region){0};
+    s->last_readback_region = (flux_readback_region){};
     for (uint32_t i = 0; i < s->image_count; ++i) {
         if (s->image_bindless[i] != FLUX_BINDLESS_INVALID)
             flux_bindless_release(s->device, s->image_bindless[i]);
@@ -756,7 +756,7 @@ static void offscreen_destroy_images(flux_surface *s) {
         s->image_foreign_owned[i] = false;
         s->image_sync_exported[i] = false;
         s->render_finished[i] = VK_NULL_HANDLE;
-        s->image_allocs[i] = (flux_vk_alloc){0};
+        s->image_allocs[i] = (flux_vk_alloc){};
         s->image_bindless[i] = FLUX_BINDLESS_INVALID;
     }
     surface_free_image_storage(s);
@@ -950,7 +950,7 @@ static flux_result offscreen_create_images(flux_surface *s, uint32_t w, uint32_t
 
     offscreen_destroy_images(s);
 
-    flux_surface_image_storage storage = {0};
+    flux_surface_image_storage storage = {};
     if (!image_storage_alloc(s->device, s->frames_in_flight, &storage)) {
         FLUX_FAIL(FLUX_ERROR_OUT_OF_MEMORY, "offscreen image metadata allocation failed");
         return FLUX_ERROR_OUT_OF_MEMORY;
@@ -1145,8 +1145,8 @@ static flux_result offscreen_create_images(flux_surface *s, uint32_t w, uint32_t
             s->image_allocs[i].memory = mem;
             s->image_allocs[i].offset = 0;
             s->image_allocs[i].size = mreq.memoryRequirements.size;
-            s->image_allocs[i].mapped = NULL;
-            s->image_allocs[i].block = NULL;
+            s->image_allocs[i].mapped = nullptr;
+            s->image_allocs[i].block = nullptr;
             /* The export bypasses the slab; count it like an import. */
             flux_vk_allocator_note_external(d, mreq.memoryRequirements.size);
 
@@ -1249,10 +1249,10 @@ void flux_surface_destroy_swapchain(flux_surface *s) {
         return;
     if (s->readback_staging) {
         flux_vk_staging_release(s->device, s->readback_staging);
-        s->readback_staging = NULL;
+        s->readback_staging = nullptr;
     }
     s->last_readback_slot = UINT32_MAX;
-    s->last_readback_region = (flux_readback_region){0};
+    s->last_readback_region = (flux_readback_region){};
     for (uint32_t i = 0; i < s->image_count; ++i) {
         if (s->image_bindless[i] != FLUX_BINDLESS_INVALID)
             flux_bindless_release(s->device, s->image_bindless[i]);
@@ -1288,7 +1288,7 @@ static void destroy_per_frame(flux_surface *s, uint32_t slot);
 
 static flux_result init_per_frame(flux_surface *s, uint32_t slot) {
     flux_per_frame *f = &s->frames[slot];
-    *f = (flux_per_frame){0};
+    *f = (flux_per_frame){};
 
     VkCommandPoolCreateInfo pci = {
         .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
@@ -1307,7 +1307,7 @@ static flux_result init_per_frame(flux_surface *s, uint32_t slot) {
         .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
         .commandBufferCount = 2,
     };
-    VkCommandBuffer command_buffers[2] = {0};
+    VkCommandBuffer command_buffers[2] = {};
     vr = vkAllocateCommandBuffers(s->device->device, &cbai, command_buffers);
     if (vr != VK_SUCCESS) {
         FLUX_FAIL_VK(FLUX_ERROR_BACKEND_FAILURE, "vkAllocateCommandBuffers failed", vr);
@@ -1362,7 +1362,7 @@ static void destroy_per_frame(flux_surface *s, uint32_t slot) {
         vkDestroySemaphore(d, f->image_acquired, nullptr);
     if (f->pool)
         vkDestroyCommandPool(d, f->pool, nullptr); /* frees cmd too */
-    *f = (flux_per_frame){0};
+    *f = (flux_per_frame){};
 }
 
 /* ------------------------------------------------------------------ */
@@ -1400,7 +1400,7 @@ flux_result flux_surface_create(flux_device *device, const flux_surface_desc *de
     s->last_submitted_slot = UINT32_MAX;
     s->last_readback_slot = UINT32_MAX;
     s->presented_epoch = FLUX_DAMAGE_EPOCH_NONE;
-    s->last_readback_region = (flux_readback_region){0};
+    s->last_readback_region = (flux_readback_region){};
     s->frames_in_flight = device->frames_in_flight;
     if (s->frames_in_flight > FLUX_MAX_FRAMES_IN_FLIGHT)
         s->frames_in_flight = FLUX_MAX_FRAMES_IN_FLIGHT;
@@ -1702,7 +1702,7 @@ flux_result flux_surface_resize(flux_surface *s, uint32_t w, uint32_t h) {
         s->current_frame = 0;
         s->last_submitted_slot = UINT32_MAX; /* old contents are gone */
         s->last_readback_slot = UINT32_MAX;
-        s->last_readback_region = (flux_readback_region){0};
+        s->last_readback_region = (flux_readback_region){};
         return offscreen_create_images(s, w, h, s->offscreen_allowed_modifiers,
                                        s->offscreen_allowed_modifier_count);
     }
@@ -1719,7 +1719,7 @@ void flux_surface_get_info(const flux_surface *s, flux_surface_info *out) {
     if (!out)
         return;
     if (!s) {
-        *out = (flux_surface_info){0};
+        *out = (flux_surface_info){};
         return;
     }
     out->width = s->extent.width;
@@ -1843,7 +1843,7 @@ static flux_result ensure_readback_staging(flux_surface *s, uint32_t width, uint
     /* Allocate first so allocation failure preserves the previous immutable
      * snapshot. A larger successful request replaces it only after its frame
      * fence proves the old staging is no longer referenced by the GPU. */
-    flux_staging_buf *replacement = NULL;
+    flux_staging_buf *replacement = nullptr;
     r = flux_vk_staging_acquire(s->device, needed, VK_BUFFER_USAGE_TRANSFER_DST_BIT, &replacement);
     if (r != FLUX_OK)
         return r;
@@ -1868,7 +1868,7 @@ static flux_result ensure_readback_staging(flux_surface *s, uint32_t width, uint
     if (previous) {
         flux_vk_staging_release(s->device, previous);
         s->last_readback_slot = UINT32_MAX;
-        s->last_readback_region = (flux_readback_region){0};
+        s->last_readback_region = (flux_readback_region){};
     }
     return FLUX_OK;
 }
@@ -1917,7 +1917,7 @@ flux_result flux_surface_read_pixels_ready(flux_surface *s, bool *out_ready) {
 flux_result flux_surface_take_readback(flux_surface *s, flux_readback **out) {
     if (!s || !out)
         return FLUX_ERROR_INVALID_ARGUMENT;
-    *out = NULL;
+    *out = nullptr;
     if (s->offscreen_require_readback) {
         FLUX_FAIL(FLUX_ERROR_UNSUPPORTED, "require_readback staging remains owned by its surface");
         return FLUX_ERROR_UNSUPPORTED;
@@ -1952,9 +1952,9 @@ flux_result flux_surface_take_readback(flux_surface *s, flux_readback **out) {
         .format = s->format,
         .region = s->last_readback_region,
     };
-    s->readback_staging = NULL;
+    s->readback_staging = nullptr;
     s->last_readback_slot = UINT32_MAX;
-    s->last_readback_region = (flux_readback_region){0};
+    s->last_readback_region = (flux_readback_region){};
     *out = readback;
     return FLUX_OK;
 }
@@ -1984,7 +1984,7 @@ flux_result flux_readback_read_pixels(const flux_readback *readback, void *dst, 
 void flux_readback_get_region(const flux_readback *readback, flux_readback_region *out_region) {
     if (!out_region)
         return;
-    *out_region = readback ? readback->region : (flux_readback_region){0};
+    *out_region = readback ? readback->region : (flux_readback_region){};
 }
 
 void flux_readback_release(flux_readback *readback) {
@@ -1999,7 +1999,7 @@ void flux_readback_release(flux_readback *readback) {
 flux_result flux_surface_read_pixels(flux_surface *s, void *dst, size_t bytes) {
     if (!s || !dst)
         return FLUX_ERROR_INVALID_ARGUMENT;
-    bool persistent_staging = s->readback_staging != NULL;
+    bool persistent_staging = s->readback_staging != nullptr;
     uint32_t slot = persistent_staging ? s->last_readback_slot : s->last_submitted_slot;
     if (slot == UINT32_MAX) {
         FLUX_FAIL(FLUX_ERROR_INVALID_STATE, "no frame is available for readback");
@@ -2355,8 +2355,14 @@ void flux_surface_invalidate_damage(flux_surface *s) {
     s->frame_slot.repaint_full = false;
 }
 
-flux_result flux_surface_scanout_damage(const flux_surface *s, flux_rect *out_rects,
-                                        uint32_t capacity, uint32_t *out_count, bool *out_full) {
+flux_result flux_surface_scanout_damage(const flux_surface *s,
+                                        const flux_surface_scanout_damage_opts *opts) {
+    if (!s || !opts)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    flux_rect *out_rects = opts->out_rects;
+    uint32_t capacity = opts->capacity;
+    uint32_t *out_count = opts->out_count;
+    bool *out_full = opts->out_full;
     if (!s || !out_count || !out_full || (capacity > 0 && !out_rects))
         return FLUX_ERROR_INVALID_ARGUMENT;
     *out_count = 0;

@@ -15,9 +15,9 @@ static inline flux_device *bench_headless_device(void) {
         .type = FLUX_TYPE_DEVICE_DESC,
         .frames_in_flight = 1,
     };
-    flux_device *device = NULL;
+    flux_device *device = nullptr;
     if (flux_device_create(&desc, &device) != FLUX_OK)
-        return NULL;
+        return nullptr;
     return device;
 }
 

@@ -22,11 +22,18 @@ int main(void) {
     };
 
     lens_input in = {.display_size = {800, 600}, .dt_seconds = 0.016f};
-    flux_rect anchor = {0};
+    flux_rect anchor = {};
+
+    lens_menubar_opts mb_opts = {
+        .id = "mb",
+        .items = mb_items,
+        .item_count = 2,
+        .out_anchor = &anchor,
+    };
 
     /* Frame 1: Neutral pass to layout menubar */
     lens_begin(ui, &in);
-    int32_t open_menu = lens_menubar(ui, "mb", mb_items, 2, &anchor);
+    int32_t open_menu = lens_menubar(ui, &mb_opts);
     OT_EXPECT(open_menu == -1);
     lens_test_end(ui);
 
@@ -35,14 +42,14 @@ int main(void) {
     in.mouse_down[LENS_MOUSE_LEFT] = true;
     in.mouse_pressed[LENS_MOUSE_LEFT] = true;
     lens_begin(ui, &in);
-    lens_menubar(ui, "mb", mb_items, 2, &anchor);
+    lens_menubar(ui, &mb_opts);
     lens_test_end(ui);
 
     in.mouse_down[LENS_MOUSE_LEFT] = false;
     in.mouse_pressed[LENS_MOUSE_LEFT] = false;
     in.mouse_released[LENS_MOUSE_LEFT] = true;
     lens_begin(ui, &in);
-    open_menu = lens_menubar(ui, "mb", mb_items, 2, &anchor);
+    open_menu = lens_menubar(ui, &mb_opts);
     OT_EXPECT(open_menu == 0);
     OT_EXPECT(anchor.w > 0.0f);
 
@@ -57,7 +64,7 @@ int main(void) {
     in.mouse_pressed[LENS_MOUSE_LEFT] = true;
     in.mouse_released[LENS_MOUSE_LEFT] = false;
     lens_begin(ui, &in);
-    lens_menubar(ui, "mb", mb_items, 2, &anchor);
+    lens_menubar(ui, &mb_opts);
     lens_popup_menu(ui, "file_menu", anchor, file_items, 4, nullptr);
     lens_test_end(ui);
 
@@ -65,7 +72,7 @@ int main(void) {
     in.mouse_pressed[LENS_MOUSE_LEFT] = false;
     in.mouse_released[LENS_MOUSE_LEFT] = true;
     lens_begin(ui, &in);
-    lens_menubar(ui, "mb", mb_items, 2, &anchor);
+    lens_menubar(ui, &mb_opts);
     act = lens_popup_menu(ui, "file_menu", anchor, file_items, 4, nullptr);
     OT_EXPECT(act == 1); /* "Open..." clicked! */
     lens_test_end(ui);
@@ -73,7 +80,7 @@ int main(void) {
     /* Frame 4: Menu should now be closed */
     in.mouse_released[LENS_MOUSE_LEFT] = false;
     lens_begin(ui, &in);
-    open_menu = lens_menubar(ui, "mb", mb_items, 2, &anchor);
+    open_menu = lens_menubar(ui, &mb_opts);
     OT_EXPECT(open_menu == -1);
     lens_test_end(ui);
 

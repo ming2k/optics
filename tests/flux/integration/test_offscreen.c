@@ -179,11 +179,19 @@ int main(void) {
     {
         flux_frame *frame = nullptr;
         OT_EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
-        flux_transient tr = {0};
-        OT_EXPECT(flux_frame_alloc_transient(frame, 16, 3, &tr) == FLUX_ERROR_INVALID_ARGUMENT);
+        flux_transient tr = {};
+        OT_EXPECT(flux_frame_alloc_transient(frame,
+                                             &(flux_frame_alloc_transient_opts){
+                                                 .bytes = 16, .alignment = 3, .out = &tr}) ==
+                  FLUX_ERROR_INVALID_ARGUMENT);
         OT_EXPECT(tr.cpu == nullptr);
-        OT_EXPECT(flux_frame_alloc_transient(frame, 16, 512, &tr) == FLUX_ERROR_INVALID_ARGUMENT);
-        OT_EXPECT(flux_frame_alloc_transient(frame, 16, 16, &tr) == FLUX_OK);
+        OT_EXPECT(flux_frame_alloc_transient(frame,
+                                             &(flux_frame_alloc_transient_opts){
+                                                 .bytes = 16, .alignment = 512, .out = &tr}) ==
+                  FLUX_ERROR_INVALID_ARGUMENT);
+        OT_EXPECT(flux_frame_alloc_transient(
+                      frame, &(flux_frame_alloc_transient_opts){
+                                 .bytes = 16, .alignment = 16, .out = &tr}) == FLUX_OK);
         OT_EXPECT(tr.cpu != nullptr && tr.alignment == 16);
         OT_EXPECT(flux_frame_present(frame) == FLUX_ERROR_INVALID_STATE);
         OT_EXPECT(flux_frame_submit(frame) == FLUX_OK);
@@ -370,7 +378,7 @@ int main(void) {
         flux_readback *snapshot = nullptr;
         OT_EXPECT(flux_surface_take_readback(snapshot_surface, &snapshot) == FLUX_OK);
         OT_EXPECT(snapshot != nullptr);
-        flux_readback_region full_region = {0};
+        flux_readback_region full_region = {};
         flux_readback_get_region(snapshot, &full_region);
         OT_EXPECT(full_region.x == 0 && full_region.y == 0);
         OT_EXPECT(full_region.width == W && full_region.height == H);

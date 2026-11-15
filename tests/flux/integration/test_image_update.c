@@ -24,7 +24,11 @@ static flux_image *make_image(flux_device *d, uint32_t *initial) {
 
 int main(void) {
     /* --- NULL safety --- */
-    OT_EXPECT(flux_image_update_region(nullptr, 0, 0, 1, 1, "x", 4) == FLUX_ERROR_INVALID_ARGUMENT);
+    OT_EXPECT(flux_image_update_region(
+                  nullptr,
+                  &(flux_image_update_region_opts){
+                      .x = 0, .y = 0, .width = 1, .height = 1, .data = "x", .bytes = 4}) ==
+              FLUX_ERROR_INVALID_ARGUMENT);
 
     flux_device *d = flux_test_make_headless_device();
     if (!d) {
@@ -44,51 +48,93 @@ int main(void) {
         uint32_t patch[8 * 8];
         for (uint32_t i = 0; i < 8 * 8; ++i)
             patch[i] = 0xFF00FF00u;
-        OT_EXPECT(flux_image_update_region(img, 4, 4, 8, 8, patch, sizeof(patch)) == FLUX_OK);
+        OT_EXPECT(flux_image_update_region(
+                      img, &(flux_image_update_region_opts){.x = 4,
+                                                            .y = 4,
+                                                            .width = 8,
+                                                            .height = 8,
+                                                            .data = patch,
+                                                            .bytes = sizeof(patch)}) == FLUX_OK);
     }
 
     /* --- happy path: 1x1 corner --- */
     {
         uint32_t p = 0xFFFFFFFFu;
-        OT_EXPECT(flux_image_update_region(img, IMG_W - 1, IMG_H - 1, 1, 1, &p, sizeof(p)) ==
-                  FLUX_OK);
+        OT_EXPECT(flux_image_update_region(
+                      img, &(flux_image_update_region_opts){.x = IMG_W - 1,
+                                                            .y = IMG_H - 1,
+                                                            .width = 1,
+                                                            .height = 1,
+                                                            .data = &p,
+                                                            .bytes = sizeof(p)}) == FLUX_OK);
     }
 
     /* --- happy path: full image (x=0, y=0, w=W, h=H) --- */
     {
-        OT_EXPECT(flux_image_update_region(img, 0, 0, IMG_W, IMG_H, pixels, sizeof(pixels)) ==
-                  FLUX_OK);
+        OT_EXPECT(flux_image_update_region(
+                      img, &(flux_image_update_region_opts){.x = 0,
+                                                            .y = 0,
+                                                            .width = IMG_W,
+                                                            .height = IMG_H,
+                                                            .data = pixels,
+                                                            .bytes = sizeof(pixels)}) == FLUX_OK);
     }
 
     /* --- out of bounds: x+w exceeds width --- */
     {
         uint32_t p = 0;
-        OT_EXPECT(flux_image_update_region(img, IMG_W - 1, 0, 2, 1, &p, 8) ==
-                  FLUX_ERROR_OUT_OF_RANGE);
+        OT_EXPECT(
+            flux_image_update_region(
+                img,
+                &(flux_image_update_region_opts){
+                    .x = IMG_W - 1, .y = 0, .width = 2, .height = 1, .data = &p, .bytes = 8}) ==
+            FLUX_ERROR_OUT_OF_RANGE);
     }
 
     /* --- out of bounds: y+h exceeds height --- */
     {
         uint32_t p = 0;
-        OT_EXPECT(flux_image_update_region(img, 0, IMG_H, 1, 1, &p, 4) == FLUX_ERROR_OUT_OF_RANGE);
+        OT_EXPECT(flux_image_update_region(
+                      img,
+                      &(flux_image_update_region_opts){
+                          .x = 0, .y = IMG_H, .width = 1, .height = 1, .data = &p, .bytes = 4}) ==
+                  FLUX_ERROR_OUT_OF_RANGE);
     }
 
     /* --- zero extent rejected --- */
     {
         uint32_t p = 0;
-        OT_EXPECT(flux_image_update_region(img, 0, 0, 0, 1, &p, 4) == FLUX_ERROR_INVALID_ARGUMENT);
-        OT_EXPECT(flux_image_update_region(img, 0, 0, 1, 0, &p, 4) == FLUX_ERROR_INVALID_ARGUMENT);
+        OT_EXPECT(flux_image_update_region(
+                      img,
+                      &(flux_image_update_region_opts){
+                          .x = 0, .y = 0, .width = 0, .height = 1, .data = &p, .bytes = 4}) ==
+                  FLUX_ERROR_INVALID_ARGUMENT);
+        OT_EXPECT(flux_image_update_region(
+                      img,
+                      &(flux_image_update_region_opts){
+                          .x = 0, .y = 0, .width = 1, .height = 0, .data = &p, .bytes = 4}) ==
+                  FLUX_ERROR_INVALID_ARGUMENT);
     }
 
     /* --- bytes too small for w*h*bpp --- */
     {
         uint8_t too_small[4];
-        OT_EXPECT(flux_image_update_region(img, 0, 0, 2, 2, too_small, sizeof(too_small)) ==
+        OT_EXPECT(flux_image_update_region(
+                      img, &(flux_image_update_region_opts){.x = 0,
+                                                            .y = 0,
+                                                            .width = 2,
+                                                            .height = 2,
+                                                            .data = too_small,
+                                                            .bytes = sizeof(too_small)}) ==
                   FLUX_ERROR_INVALID_ARGUMENT);
     }
 
     /* --- NULL data rejected --- */
-    OT_EXPECT(flux_image_update_region(img, 0, 0, 1, 1, nullptr, 4) == FLUX_ERROR_INVALID_ARGUMENT);
+    OT_EXPECT(flux_image_update_region(
+                  img,
+                  &(flux_image_update_region_opts){
+                      .x = 0, .y = 0, .width = 1, .height = 1, .data = nullptr, .bytes = 4}) ==
+              FLUX_ERROR_INVALID_ARGUMENT);
 
     flux_image_release(img);
     flux_device_release(d);

@@ -75,6 +75,7 @@
 #include <iris/a11y.h>
 #include <iris/a11y_prefs.h>
 #include <iris/cursor.h>
+#include <iris/window.h>
 #include <iris/dnd.h>
 #include <iris/theme.h>
 
@@ -387,26 +388,27 @@ IRIS_API void iris_window_start_move(void) {
         [pl->window performWindowDragWithEvent:current_event];
 }
 
-IRIS_API void iris_window_set_min_size(int32_t width, int32_t height) {
+IRIS_API void iris_window_set_min_size(const iris_window_set_min_size_opts *opts) {
     IrisPlatform *pl = g_active_pl;
-    if (!pl || !pl->window)
+    if (!pl || !pl->window || !opts)
         return;
-    pl->min_w = width;
-    pl->min_h = height;
+    pl->min_w = opts->width;
+    pl->min_h = opts->height;
     /* {0,0} is AppKit's "no minimum" sentinel, matching the 0-clears
      * convention of iris/window.h. */
-    [pl->window setContentMinSize:NSMakeSize(width > 0 ? width : 0, height > 0 ? height : 0)];
+    [pl->window setContentMinSize:NSMakeSize(opts->width > 0 ? opts->width : 0,
+                                             opts->height > 0 ? opts->height : 0)];
 }
 
-IRIS_API void iris_window_set_max_size(int32_t width, int32_t height) {
+IRIS_API void iris_window_set_max_size(const iris_window_set_max_size_opts *opts) {
     IrisPlatform *pl = g_active_pl;
-    if (!pl || !pl->window)
+    if (!pl || !pl->window || !opts)
         return;
-    pl->max_w = width;
-    pl->max_h = height;
+    pl->max_w = opts->width;
+    pl->max_h = opts->height;
     /* AppKit has no "no maximum" sentinel; FLT_MAX is the de-facto one. */
-    [pl->window
-        setContentMaxSize:NSMakeSize(width > 0 ? width : FLT_MAX, height > 0 ? height : FLT_MAX)];
+    [pl->window setContentMaxSize:NSMakeSize(opts->width > 0 ? opts->width : FLT_MAX,
+                                             opts->height > 0 ? opts->height : FLT_MAX)];
 }
 
 IRIS_API bool iris_window_get_geometry(int32_t *out_width, int32_t *out_height) {
@@ -420,11 +422,9 @@ IRIS_API bool iris_window_get_geometry(int32_t *out_width, int32_t *out_height) 
     return true;
 }
 
-IRIS_API int iris_window_create_activation_token(const char *app_id, char *out_buf,
-                                                 size_t out_cap) {
-    (void)app_id;
-    (void)out_buf;
-    (void)out_cap;
+IRIS_API int
+iris_window_create_activation_token(const iris_window_create_activation_token_opts *opts) {
+    (void)opts;
     return -1;
 }
 
@@ -771,8 +771,10 @@ static int key_sentinel(unsigned short keyCode) {
         if (str) {
             const char *utf8 = [str UTF8String];
             if (utf8 && _platform && _platform->ui) {
-                lens_paste(_platform->ui, utf8, strlen(utf8));
-                lens_deliver_drop(_platform->ui, utf8, strlen(utf8), drop_pos);
+                lens_paste(_platform->ui, &(lens_paste_opts){.utf8 = utf8, .len = strlen(utf8)});
+                lens_deliver_drop(
+                    _platform->ui,
+                    &(lens_deliver_drop_opts){.payload = utf8, .len = strlen(utf8), .pos = drop_pos});
                 return YES;
             }
         }
@@ -785,8 +787,11 @@ static int key_sentinel(unsigned short keyCode) {
             if (path) {
                 const char *utf8 = [path UTF8String];
                 if (utf8 && _platform && _platform->ui) {
-                    lens_paste(_platform->ui, utf8, strlen(utf8));
-                    lens_deliver_drop(_platform->ui, utf8, strlen(utf8), drop_pos);
+                    lens_paste(_platform->ui,
+                               &(lens_paste_opts){.utf8 = utf8, .len = strlen(utf8)});
+                    lens_deliver_drop(_platform->ui,
+                                      &(lens_deliver_drop_opts){
+                                          .payload = utf8, .len = strlen(utf8), .pos = drop_pos});
                     return YES;
                 }
             }
@@ -1338,7 +1343,7 @@ static void deliver_paste(IrisPlatform *pl) {
         return;
     const char *utf8 = [s UTF8String];
     if (utf8)
-        lens_paste(pl->ui, utf8, strlen(utf8));
+        lens_paste(pl->ui, &(lens_paste_opts){.utf8 = utf8, .len = strlen(utf8)});
 }
 
 /* ------------------------------------------------------------------ */
@@ -1613,7 +1618,7 @@ static void *cocoa_presenter_thread_main(void *arg) {
                 bool drew = false;
                 if (flux_canvas_begin(ctx->canvas, &pass_desc) == FLUX_OK) {
                     if (pkt->host_list) {
-                        (void)flux_canvas_submit_display_list(ctx->canvas, pkt->host_list);
+                        (void)flux_canvas_submit_display_list(ctx->canvas, &(flux_canvas_submit_display_list_opts){.list = pkt->host_list});
                         drew = true;
                     }
                     if (pkt->snapshot) {
@@ -2159,7 +2164,7 @@ int iris_app_run_cocoa(const iris_app_config *cfg) {
 
                     if (flux_canvas_begin(canvas, &pass_desc) == FLUX_OK) {
                         if (host_list) {
-                            drew = flux_canvas_submit_display_list(canvas, host_list) == FLUX_OK;
+                            drew = flux_canvas_submit_display_list(canvas, &(flux_canvas_submit_display_list_opts){.list = host_list}) == FLUX_OK;
                         }
                         if (lens_snapshot_create(ui, &snapshot) == FLUX_OK) {
                             drew = lens_snapshot_submit(snapshot, canvas) == FLUX_OK || drew;

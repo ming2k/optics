@@ -26,12 +26,12 @@ static void focus_area(lens *ui, const char *label, char *buf, size_t cap) {
 }
 
 static void test_insert_ascii(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
-    char buf[32] = {0};
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
+    char buf[32] = {};
 
     focus_field(ui, "tf", buf, sizeof buf);
-    lens_textedit_set_caret(ui, "tf", 6);
+    lens_textedit_set_caret(ui, &(lens_textedit_set_caret_opts){.label = "tf", .caret = 6});
 
     lens_input in = IN0;
     strncpy(in.text_utf8, "hello", sizeof in.text_utf8 - 1);
@@ -48,13 +48,13 @@ static void test_insert_ascii(void) {
 }
 
 static void test_backspace_and_delete(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     char buf[32] = "abc";
 
     focus_field(ui, "tf", buf, sizeof buf);
-    lens_textedit_set_caret(ui, "tf", 6);
-    lens_textedit_set_caret(ui, "tf", 3);
+    lens_textedit_set_caret(ui, &(lens_textedit_set_caret_opts){.label = "tf", .caret = 6});
+    lens_textedit_set_caret(ui, &(lens_textedit_set_caret_opts){.label = "tf", .caret = 3});
 
     /* Backspace removes 'c' */
     lens_input in = IN0;
@@ -70,7 +70,7 @@ static void test_backspace_and_delete(void) {
     OT_EXPECT(strcmp(buf, "ab") == 0);
 
     /* Move caret to 0 and Delete removes 'a' */
-    lens_textedit_set_caret(ui, "tf", 0);
+    lens_textedit_set_caret(ui, &(lens_textedit_set_caret_opts){.label = "tf", .caret = 0});
     in.keys[0] = (lens_key_event){.key = LENS_KEY_DELETE, .pressed = true};
     lens_begin(ui, &in);
     changed =
@@ -85,13 +85,13 @@ static void test_backspace_and_delete(void) {
 }
 
 static void test_cursor_navigation(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     char buf[32] = "world";
 
     focus_field(ui, "tf", buf, sizeof buf);
-    lens_textedit_set_caret(ui, "tf", 6);
-    lens_textedit_set_caret(ui, "tf", 5);
+    lens_textedit_set_caret(ui, &(lens_textedit_set_caret_opts){.label = "tf", .caret = 6});
+    lens_textedit_set_caret(ui, &(lens_textedit_set_caret_opts){.label = "tf", .caret = 5});
 
     /* Home moves to 0 */
     lens_input in = IN0;
@@ -102,7 +102,7 @@ static void test_cursor_navigation(void) {
     lens_test_end(ui);
 
     /* Insert 'a' at 0 */
-    in.keys[0] = (lens_key_event){0};
+    in.keys[0] = (lens_key_event){};
     in.key_count = 0;
     strncpy(in.text_utf8, "a", sizeof in.text_utf8 - 1);
     lens_begin(ui, &in);
@@ -118,12 +118,12 @@ static void test_cursor_navigation(void) {
 }
 
 static void test_multiline_enter_inserts_newline(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     char buf[64] = "line1";
 
     focus_area(ui, "ta", buf, sizeof buf);
-    lens_textedit_set_caret(ui, "ta", 5);
+    lens_textedit_set_caret(ui, &(lens_textedit_set_caret_opts){.label = "ta", .caret = 5});
 
     /* Press Enter in multiline */
     lens_input in = IN0;
@@ -141,7 +141,7 @@ static void test_multiline_enter_inserts_newline(void) {
     OT_EXPECT(strcmp(buf, "line1\n") == 0);
 
     /* Add "line2" */
-    in.keys[0] = (lens_key_event){0};
+    in.keys[0] = (lens_key_event){};
     in.key_count = 0;
     strncpy(in.text_utf8, "line2", sizeof in.text_utf8 - 1);
     lens_begin(ui, &in);
@@ -159,12 +159,14 @@ static void test_multiline_enter_inserts_newline(void) {
 }
 
 static void test_multiline_selection_and_copy(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     char buf[64] = "hello\nworld";
 
     focus_area(ui, "ta", buf, sizeof buf);
-    lens_textedit_set_selection(ui, "ta", 0, 5); /* select "hello" */
+    lens_textedit_set_selection(
+        ui, &(lens_textedit_set_selection_opts){
+                .label = "ta", .sel_start = 0, .sel_end = 5}); /* select "hello" */
 
     /* Backspace deletes selection */
     lens_input in = IN0;
@@ -185,8 +187,8 @@ static void test_multiline_selection_and_copy(void) {
 }
 
 static void test_textedit_cursor_hint(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     char buf[32] = "search";
 
     /* Frame 1: render textedit at known position */
@@ -213,8 +215,8 @@ static void test_textedit_cursor_hint(void) {
 }
 
 static void test_textedit_vertical_centering(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     char buf[32] = "centered";
 
     /* Render textedit with 40px height */
@@ -225,17 +227,17 @@ static void test_textedit_vertical_centering(void) {
     lens_test_end(ui);
 
     lens_node *n = lens_find(ui, lens_current_id(ui, "tf"));
-    OT_EXPECT(n != NULL);
+    OT_EXPECT(n != nullptr);
 
     /* Find text draw command and verify vertical centering */
-    const lens_draw_cmd *text_cmd = NULL;
+    const lens_draw_cmd *text_cmd = nullptr;
     for (uint32_t i = 0; i < n->cmd_count; i++) {
         if (n->cmds[i].kind == LENS_DRAW_TEXT) {
             text_cmd = &n->cmds[i];
             break;
         }
     }
-    OT_EXPECT(text_cmd != NULL);
+    OT_EXPECT(text_cmd != nullptr);
     /* In a 40px box, text should be centered: (40 - fm.height) * 0.5f */
     OT_EXPECT(text_cmd->rel.y > 0.0f);
     OT_EXPECT(text_cmd->rel.y < 20.0f);
@@ -244,12 +246,12 @@ static void test_textedit_vertical_centering(void) {
 }
 
 static void test_textedit_caret_coverage(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     char buf[32] = "/home/ming";
 
     focus_field(ui, "tf", buf, sizeof buf);
-    lens_textedit_set_caret(ui, "tf", 6);
+    lens_textedit_set_caret(ui, &(lens_textedit_set_caret_opts){.label = "tf", .caret = 6});
 
     /* Frame 2: render focused field to emit caret */
     lens_begin(ui, &IN0);
@@ -257,10 +259,10 @@ static void test_textedit_caret_coverage(void) {
     lens_test_end(ui);
 
     lens_node *n = lens_find(ui, lens_current_id(ui, "tf"));
-    OT_EXPECT(n != NULL);
+    OT_EXPECT(n != nullptr);
 
     /* Find caret draw command */
-    const lens_draw_cmd *caret_cmd = NULL;
+    const lens_draw_cmd *caret_cmd = nullptr;
     for (uint32_t i = 0; i < n->cmd_count; i++) {
         /* Caret is drawn as LENS_DRAW_RECT with width 1.5f */
         if (n->cmds[i].kind == LENS_DRAW_RECT && n->cmds[i].rel.w == 1.5f) {
@@ -268,7 +270,7 @@ static void test_textedit_caret_coverage(void) {
             break;
         }
     }
-    OT_EXPECT(caret_cmd != NULL);
+    OT_EXPECT(caret_cmd != nullptr);
     if (caret_cmd) {
         /* Caret height must span full ascent + descent (>= 14.0f for standard 13px font) */
         OT_EXPECT(caret_cmd->rel.h >= 14.0f);
@@ -278,12 +280,12 @@ static void test_textedit_caret_coverage(void) {
 }
 
 static void test_textedit_ime_preedit_and_commit(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     char buf[64] = "hello ";
 
     focus_field(ui, "tf", buf, sizeof buf);
-    lens_textedit_set_caret(ui, "tf", 6);
+    lens_textedit_set_caret(ui, &(lens_textedit_set_caret_opts){.label = "tf", .caret = 6});
 
     /* Frame 1: IME sends preedit "nihao" */
     lens_input in = IN0;
@@ -296,7 +298,7 @@ static void test_textedit_ime_preedit_and_commit(void) {
     lens_test_end(ui);
 
     lens_node *n = lens_find(ui, lens_current_id(ui, "tf"));
-    OT_EXPECT(n != NULL);
+    OT_EXPECT(n != nullptr);
     /* Node must have preedit underline draw command */
     bool found_preedit_underline = false;
     for (uint32_t i = 0; i < n->cmd_count; i++) {
@@ -324,8 +326,8 @@ static void test_textedit_ime_preedit_and_commit(void) {
 }
 
 static void test_double_click_selects_word(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     char buf[64] = "hello world /path/test";
 
     /* Frame 1: layout text field at known position */
@@ -365,7 +367,9 @@ static void test_double_click_selects_word(void) {
     lens_test_end(ui);
 
     uint32_t sel_lo = 0, sel_hi = 0;
-    OT_EXPECT(lens_textedit_get_selection(ui, "tf", &sel_lo, &sel_hi));
+    OT_EXPECT(lens_textedit_get_selection(
+        ui, &(lens_textedit_get_selection_opts){
+                .label = "tf", .out_sel_start = &sel_lo, .out_sel_end = &sel_hi}));
     /* "world" is at index 6..11 */
     OT_EXPECT(sel_lo == 6);
     OT_EXPECT(sel_hi == 11);
@@ -379,7 +383,9 @@ static void test_double_click_selects_word(void) {
                                             .cap = sizeof buf});
     lens_test_end(ui);
 
-    OT_EXPECT(lens_textedit_get_selection(ui, "tf", &sel_lo, &sel_hi));
+    OT_EXPECT(lens_textedit_get_selection(
+        ui, &(lens_textedit_get_selection_opts){
+                .label = "tf", .out_sel_start = &sel_lo, .out_sel_end = &sel_hi}));
     OT_EXPECT(sel_lo == 0);
     OT_EXPECT(sel_hi == (uint32_t)strlen(buf));
 
@@ -387,16 +393,17 @@ static void test_double_click_selects_word(void) {
 }
 
 static void test_ctrl_arrow_word_navigation(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     char buf[64] = "/home/ming/test";
 
     focus_field(ui, "tf", buf, sizeof buf);
 
     /* Start at end: cursor = 15 */
-    lens_textedit_set_caret(ui, "tf", 15);
+    lens_textedit_set_caret(ui, &(lens_textedit_set_caret_opts){.label = "tf", .caret = 15});
     uint32_t cur = 0;
-    OT_EXPECT(lens_textedit_get_caret(ui, "tf", &cur));
+    OT_EXPECT(lens_textedit_get_caret(
+        ui, &(lens_textedit_get_caret_opts){.label = "tf", .out_caret = &cur}));
     OT_EXPECT(cur == 15);
 
     /* Ctrl+Left moves to start of "test" (11) */
@@ -407,28 +414,32 @@ static void test_ctrl_arrow_word_navigation(void) {
     lens_begin(ui, &in);
     lens_textedit(ui, &(lens_textedit_opts){.box = {.id = "tf"}, .buf = buf, .cap = sizeof buf});
     lens_test_end(ui);
-    OT_EXPECT(lens_textedit_get_caret(ui, "tf", &cur));
+    OT_EXPECT(lens_textedit_get_caret(
+        ui, &(lens_textedit_get_caret_opts){.label = "tf", .out_caret = &cur}));
     OT_EXPECT(cur == 11);
 
     /* Ctrl+Left moves across '/' to start of "ming" (6) */
     lens_begin(ui, &in);
     lens_textedit(ui, &(lens_textedit_opts){.box = {.id = "tf"}, .buf = buf, .cap = sizeof buf});
     lens_test_end(ui);
-    OT_EXPECT(lens_textedit_get_caret(ui, "tf", &cur));
+    OT_EXPECT(lens_textedit_get_caret(
+        ui, &(lens_textedit_get_caret_opts){.label = "tf", .out_caret = &cur}));
     OT_EXPECT(cur == 6);
 
     /* Ctrl+Left moves across '/' to start of "home" (1) */
     lens_begin(ui, &in);
     lens_textedit(ui, &(lens_textedit_opts){.box = {.id = "tf"}, .buf = buf, .cap = sizeof buf});
     lens_test_end(ui);
-    OT_EXPECT(lens_textedit_get_caret(ui, "tf", &cur));
+    OT_EXPECT(lens_textedit_get_caret(
+        ui, &(lens_textedit_get_caret_opts){.label = "tf", .out_caret = &cur}));
     OT_EXPECT(cur == 1);
 
     /* Ctrl+Left moves to 0 */
     lens_begin(ui, &in);
     lens_textedit(ui, &(lens_textedit_opts){.box = {.id = "tf"}, .buf = buf, .cap = sizeof buf});
     lens_test_end(ui);
-    OT_EXPECT(lens_textedit_get_caret(ui, "tf", &cur));
+    OT_EXPECT(lens_textedit_get_caret(
+        ui, &(lens_textedit_get_caret_opts){.label = "tf", .out_caret = &cur}));
     OT_EXPECT(cur == 0);
 
     /* Ctrl+Shift+Right selects "home" (0 to 5) */
@@ -438,7 +449,9 @@ static void test_ctrl_arrow_word_navigation(void) {
     lens_textedit(ui, &(lens_textedit_opts){.box = {.id = "tf"}, .buf = buf, .cap = sizeof buf});
     lens_test_end(ui);
     uint32_t sel_lo = 0, sel_hi = 0;
-    OT_EXPECT(lens_textedit_get_selection(ui, "tf", &sel_lo, &sel_hi));
+    OT_EXPECT(lens_textedit_get_selection(
+        ui, &(lens_textedit_get_selection_opts){
+                .label = "tf", .out_sel_start = &sel_lo, .out_sel_end = &sel_hi}));
     OT_EXPECT(sel_lo == 0);
     OT_EXPECT(sel_hi == 5);
 
@@ -448,7 +461,9 @@ static void test_ctrl_arrow_word_navigation(void) {
     lens_begin(ui, &in);
     lens_textedit(ui, &(lens_textedit_opts){.box = {.id = "tf"}, .buf = buf, .cap = sizeof buf});
     lens_test_end(ui);
-    OT_EXPECT(lens_textedit_get_selection(ui, "tf", &sel_lo, &sel_hi));
+    OT_EXPECT(lens_textedit_get_selection(
+        ui, &(lens_textedit_get_selection_opts){
+                .label = "tf", .out_sel_start = &sel_lo, .out_sel_end = &sel_hi}));
     OT_EXPECT(sel_lo == 0);
     OT_EXPECT(sel_hi == 15);
 
@@ -458,16 +473,17 @@ static void test_ctrl_arrow_word_navigation(void) {
     lens_begin(ui, &in);
     lens_textedit(ui, &(lens_textedit_opts){.box = {.id = "tf"}, .buf = buf, .cap = sizeof buf});
     lens_test_end(ui);
-    OT_EXPECT(lens_textedit_get_caret(ui, "tf", &cur));
+    OT_EXPECT(lens_textedit_get_caret(
+        ui, &(lens_textedit_get_caret_opts){.label = "tf", .out_caret = &cur}));
     OT_EXPECT(cur == 0);
 
     lens_release(ui);
 }
 
 static void test_textedit_undo_redo(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
-    char buf[64] = {0};
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
+    char buf[64] = {};
 
     focus_field(ui, "tf", buf, sizeof buf);
 

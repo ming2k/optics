@@ -30,8 +30,8 @@ typedef struct {
 } test_barrier;
 
 static void test_barrier_init(test_barrier *b, int parties) {
-    pthread_mutex_init(&b->mutex, NULL);
-    pthread_cond_init(&b->cond, NULL);
+    pthread_mutex_init(&b->mutex, nullptr);
+    pthread_cond_init(&b->cond, nullptr);
     b->parties = parties;
     b->count = 0;
     b->generation = 0;
@@ -76,18 +76,18 @@ static void *canvas_init_worker(void *p) {
     flux_surface_desc sd = FLUX_SURFACE_DESC_INIT;
     sd.width = 16;
     sd.height = 16;
-    flux_surface *surface = NULL;
+    flux_surface *surface = nullptr;
     if (flux_surface_create(a->d, &sd, &surface) != FLUX_OK)
-        return NULL;
+        return nullptr;
     flux_canvas_desc cd = FLUX_CANVAS_DESC_INIT;
     cd.surface = surface;
-    flux_canvas *canvas = NULL;
+    flux_canvas *canvas = nullptr;
     if (flux_canvas_create(&cd, &canvas) == FLUX_OK) {
         a->completed = 1;
         flux_canvas_release(canvas);
     }
     flux_surface_release(surface);
-    return NULL;
+    return nullptr;
 }
 
 /* Each worker iteration creates a small image and a small mesh,
@@ -103,9 +103,9 @@ static void *image_mesh_worker(void *p) {
             .height = 32,
             .format = FLUX_FORMAT_RGBA8_UNORM,
         };
-        flux_image *img = NULL;
+        flux_image *img = nullptr;
         if (flux_image_create(a->d, &idesc, &img) != FLUX_OK)
-            return NULL;
+            return nullptr;
         flux_image_release(img);
 
         flux_vertex verts[3] = {
@@ -118,14 +118,14 @@ static void *image_mesh_worker(void *p) {
             .vertices = verts,
             .vertex_count = 3,
         };
-        flux_mesh *mesh = NULL;
+        flux_mesh *mesh = nullptr;
         if (flux_mesh_create(a->d, &mdesc, &mesh) != FLUX_OK)
-            return NULL;
+            return nullptr;
         flux_mesh_release(mesh);
 
         a->completed++;
     }
-    return NULL;
+    return nullptr;
 }
 
 int main(void) {
@@ -139,17 +139,17 @@ int main(void) {
     {
         enum { N_THREADS = 4 };
         pthread_t threads[N_THREADS];
-        canvas_worker_arg args[N_THREADS] = {0};
+        canvas_worker_arg args[N_THREADS] = {};
         test_barrier start;
         test_barrier_init(&start, N_THREADS);
         for (int i = 0; i < N_THREADS; ++i) {
             args[i].d = d;
             args[i].start = &start;
-            pthread_create(&threads[i], NULL, canvas_init_worker, &args[i]);
+            pthread_create(&threads[i], nullptr, canvas_init_worker, &args[i]);
         }
         int total = 0;
         for (int i = 0; i < N_THREADS; ++i) {
-            pthread_join(threads[i], NULL);
+            pthread_join(threads[i], nullptr);
             total += args[i].completed;
         }
         test_barrier_destroy(&start);
@@ -164,9 +164,9 @@ int main(void) {
             .height = 64,
             .format = FLUX_FORMAT_RGBA8_UNORM,
         };
-        flux_image *img = NULL;
+        flux_image *img = nullptr;
         OT_EXPECT(flux_image_create(d, &desc, &img) == FLUX_OK);
-        OT_EXPECT(img != NULL);
+        OT_EXPECT(img != nullptr);
         flux_image_release(img);
     }
 
@@ -181,7 +181,7 @@ int main(void) {
                 .height = 64,
                 .format = FLUX_FORMAT_RGBA8_UNORM,
             };
-            flux_image *img = NULL;
+            flux_image *img = nullptr;
             OT_EXPECT(flux_image_create(d, &desc, &img) == FLUX_OK);
             flux_image_release(img);
         }
@@ -189,7 +189,7 @@ int main(void) {
 
     /* --- interleaved alloc/free pattern (worst-case fragmentation) --- */
     {
-        flux_image *imgs[16] = {0};
+        flux_image *imgs[16] = {};
         flux_image_desc desc = {
             .type = FLUX_TYPE_IMAGE_DESC,
             .width = 128,
@@ -202,7 +202,7 @@ int main(void) {
         /* Free even indices, then re-alloc — exercises non-contiguous free list. */
         for (int i = 0; i < 16; i += 2) {
             flux_image_release(imgs[i]);
-            imgs[i] = NULL;
+            imgs[i] = nullptr;
         }
         for (int i = 0; i < 16; i += 2) {
             OT_EXPECT(flux_image_create(d, &desc, &imgs[i]) == FLUX_OK);
@@ -221,7 +221,7 @@ int main(void) {
             .height = 2048,
             .format = FLUX_FORMAT_RGBA8_UNORM,
         };
-        flux_image *img = NULL;
+        flux_image *img = nullptr;
         flux_result r = flux_image_create(d, &desc, &img);
         if (r == FLUX_OK) {
             flux_image_release(img);
@@ -247,7 +247,7 @@ int main(void) {
             .index_count = 3,
         };
         for (int i = 0; i < 64; ++i) {
-            flux_mesh *mesh = NULL;
+            flux_mesh *mesh = nullptr;
             OT_EXPECT(flux_mesh_create(d, &mdesc, &mesh) == FLUX_OK);
             flux_mesh_release(mesh);
         }
@@ -262,11 +262,11 @@ int main(void) {
             args[i].d = d;
             args[i].iterations = N_PER;
             args[i].completed = 0;
-            pthread_create(&threads[i], NULL, image_mesh_worker, &args[i]);
+            pthread_create(&threads[i], nullptr, image_mesh_worker, &args[i]);
         }
         int total = 0;
         for (int i = 0; i < N_THREADS; ++i) {
-            pthread_join(threads[i], NULL);
+            pthread_join(threads[i], nullptr);
             total += args[i].completed;
         }
         OT_EXPECT(total == N_THREADS * N_PER);
@@ -286,13 +286,13 @@ int main(void) {
             .height = 64,
             .format = FLUX_FORMAT_RGBA8_UNORM,
         };
-        flux_image *img1 = NULL;
+        flux_image *img1 = nullptr;
         OT_EXPECT(flux_image_create(d, &desc, &img1) == FLUX_OK);
         flux_memory_stats s1;
         flux_device_memory_stats(d, &s1);
         flux_image_release(img1);
 
-        flux_image *img2 = NULL;
+        flux_image *img2 = nullptr;
         OT_EXPECT(flux_image_create(d, &desc, &img2) == FLUX_OK);
         flux_memory_stats s2;
         flux_device_memory_stats(d, &s2);

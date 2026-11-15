@@ -43,7 +43,7 @@ void flux_arena_deinit(flux_arena *a) {
         return;
     if (a->owns_buffer && a->base && a->alloc.free)
         a->alloc.free(a->base, a->alloc.user);
-    *a = (flux_arena){0};
+    *a = (flux_arena){};
 }
 
 void *flux_arena_alloc(flux_arena *a, size_t bytes) {

@@ -25,8 +25,8 @@ static lens_place_opts anchored(const char *id, flux_rect anchor, float pad, flo
 }
 
 static void test_open_close_persist(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     lens_begin(ui, &ZERO_IN);
     OT_EXPECT(lens_place_is_open(ui, "menu") == false);
@@ -46,8 +46,8 @@ static void test_open_close_persist(void) {
 
 /* The body only enters when the transient node is currently open. */
 static void test_begin_gated_by_open_state(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     int body_runs = 0;
     lens_begin(ui, &ZERO_IN);
@@ -74,8 +74,8 @@ static void test_begin_gated_by_open_state(void) {
 }
 
 static void test_open_place_reports_hover_for_its_whole_surface(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     lens_begin(ui, &ZERO_IN);
     lens_place_open(ui, "hover-card");
@@ -104,8 +104,8 @@ static void test_open_place_reports_hover_for_its_whole_surface(void) {
 /* Anchored placement: by default, below the anchor; flips above when
  * there's no room. */
 static void test_anchor_placement_and_flip(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     flux_rect bounds_below = {0, 0, 0, 0};
     flux_rect bounds_flip = {0, 0, 0, 0};
@@ -158,8 +158,8 @@ static void test_anchor_placement_and_flip(void) {
 /* Occlusion IS the hit-test order: a base widget under a POPUP-band node
  * is not hovered/clicked. */
 static void test_higher_band_blocks_base(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     lens_place_opts cover = anchored("cov", (flux_rect){0, 0, 200, 200}, 8, 200);
     cover.layout.bg = flux_color_rgba_premul(0, 0, 0, 255);
@@ -194,8 +194,8 @@ static void test_higher_band_blocks_base(void) {
 
 /* Click outside an open transient closes it (with a same-frame grace). */
 static void test_click_outside_dismisses(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     lens_place_opts o = anchored("m", (flux_rect){100, 100, 80, 24}, 4, 100);
     lens_begin(ui, &ZERO_IN);
@@ -226,8 +226,8 @@ static void test_click_outside_dismisses(void) {
 
 /* Escape closes the top open transient. */
 static void test_escape_dismisses_top(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     lens_begin(ui, &ZERO_IN);
     lens_place_open(ui, "a");
@@ -250,8 +250,8 @@ static void test_escape_dismisses_top(void) {
 /* A CENTERED placed node resolves to the middle of the display (the modal
  * content path). */
 static void test_centered_on_display(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     lens_begin(ui, &ZERO_IN);
     lens_place_open(ui, "m");
@@ -266,7 +266,7 @@ static void test_centered_on_display(void) {
     lens_test_end(ui);
 
     lens_node *content = lens_find(ui, lens_current_id(ui, "m"));
-    OT_EXPECT(content != NULL);
+    OT_EXPECT(content != nullptr);
     flux_rect r = lens_node_bounds(content);
     OT_EXPECT_NEAR(r.x + r.w * 0.5f, 200.0f, 0.01f); /* centred in 400 */
     OT_EXPECT_NEAR(r.y + r.h * 0.5f, 150.0f, 0.01f); /* centred in 300 */
@@ -278,8 +278,8 @@ static void test_centered_on_display(void) {
 /* A placed node keeps its parent chain in the one tree: it appears in the
  * a11y walk under its real semantic ancestor, not bolted onto the root. */
 static void test_placed_node_parents_into_tree(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     lens_begin(ui, &ZERO_IN);
     lens_place_open(ui, "pp");
@@ -293,12 +293,12 @@ static void test_placed_node_parents_into_tree(void) {
     /* The placed node is a child of the implicit root container in the
      * tree (its declaration site), and its children hang under it. */
     lens_node *root = lens_root(ui);
-    OT_EXPECT(root != NULL);
+    OT_EXPECT(root != nullptr);
     lens_node *popup = lens_find(ui, lens_current_id(ui, "pp"));
-    OT_EXPECT(popup != NULL);
+    OT_EXPECT(popup != nullptr);
     OT_EXPECT(lens_node_parent(popup) == root);
     lens_node *label = lens_node_first_child(popup);
-    OT_EXPECT(label != NULL);
+    OT_EXPECT(label != nullptr);
     OT_EXPECT(lens_node_parent(label) == popup);
 
     lens_release(ui);

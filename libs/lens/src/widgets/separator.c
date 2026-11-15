@@ -3,7 +3,7 @@
 #include "../internal.h"
 
 lens_response lens_separator(lens *ui, const lens_separator_opts *opts) {
-    lens_separator_opts default_opts = {0};
+    lens_separator_opts default_opts = {};
     if (!opts)
         opts = &default_opts;
 
@@ -14,7 +14,7 @@ lens_response lens_separator(lens *ui, const lens_separator_opts *opts) {
         opts->box.id ? lensi_gen_widget_id(ui, opts->box.id) : lensi_gen_widget_id(ui, "##sep");
     lens_node *n = lensi_store_touch(ui, id);
     if (!n)
-        return (lens_response){0};
+        return (lens_response){};
 
     lensi_link_child(ui, n);
     lensi_node_box(ui, n, &opts->box);

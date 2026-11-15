@@ -5,8 +5,8 @@
 #include <lens/lens.h>
 
 int main(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     lens_input in = {.display_size = {200, 100}, .dt_seconds = 0.016f};
 
@@ -17,7 +17,7 @@ int main(void) {
     lens_id id = lens_get_response(ui).id;
     OT_EXPECT(id != 0);
     lens_node *n = lens_find(ui, id);
-    OT_EXPECT(n != NULL);
+    OT_EXPECT(n != nullptr);
     OT_EXPECT(lens_node_phase_of(n) == LENS_NODE_ENTERING);
 
     /* frame 2: stable */
@@ -25,14 +25,14 @@ int main(void) {
     (void)lens_button(ui, &(lens_button_opts){.label = "A"});
     lens_test_end(ui);
     n = lens_find(ui, id);
-    OT_EXPECT(n != NULL);
+    OT_EXPECT(n != nullptr);
     OT_EXPECT(lens_node_phase_of(n) == LENS_NODE_STABLE);
 
     /* frame 3: leave (not built) */
     lens_begin(ui, &in);
     lens_test_end(ui);
     n = lens_find(ui, id);
-    OT_EXPECT(n != NULL); /* still in grace window */
+    OT_EXPECT(n != nullptr); /* still in grace window */
     OT_EXPECT(lens_node_phase_of(n) == LENS_NODE_LEAVING);
 
     /* stay absent until reaped */
@@ -43,8 +43,8 @@ int main(void) {
         if (lens_find(ui, id))
             found_before_reap = true;
     }
-    OT_EXPECT(found_before_reap);         /* grace kept it for a while */
-    OT_EXPECT(lens_find(ui, id) == NULL); /* eventually reaped */
+    OT_EXPECT(found_before_reap);            /* grace kept it for a while */
+    OT_EXPECT(lens_find(ui, id) == nullptr); /* eventually reaped */
 
     lens_release(ui);
     return OT_REPORT();

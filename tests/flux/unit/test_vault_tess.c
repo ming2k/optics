@@ -33,7 +33,7 @@ int main(void) {
     desc.points = quad_pts;
     desc.point_count = 4;
     desc.index_capacity = 6;
-    flux_vault_earcut_result res = {0};
+    flux_vault_earcut_result res = {};
     OT_EXPECT(flux_vault_earcut_triangulate(&desc, &res) == FLUX_OK);
     OT_EXPECT(res.triangle_count == 2);
     OT_EXPECT(res.index_count == 6);

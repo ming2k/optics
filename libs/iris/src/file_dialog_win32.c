@@ -59,25 +59,25 @@ HWND iris_win32__dialog_owner(void);
 
 /* UTF-8 -> freshly allocated NUL-terminated WCHAR (NULL on failure). */
 static WCHAR *wide_from_utf8(const char *utf8) {
-    int n = MultiByteToWideChar(CP_UTF8, 0, utf8, -1, NULL, 0);
+    int n = MultiByteToWideChar(CP_UTF8, 0, utf8, -1, nullptr, 0);
     if (n <= 0)
-        return NULL;
+        return nullptr;
     WCHAR *w = malloc((size_t)n * sizeof *w);
     if (!w)
-        return NULL;
+        return nullptr;
     MultiByteToWideChar(CP_UTF8, 0, utf8, -1, w, n);
     return w;
 }
 
 /* WCHAR -> freshly allocated NUL-terminated UTF-8 (NULL on failure). */
 static char *utf8_from_wide(const WCHAR *w) {
-    int n = WideCharToMultiByte(CP_UTF8, 0, w, -1, NULL, 0, NULL, NULL);
+    int n = WideCharToMultiByte(CP_UTF8, 0, w, -1, nullptr, 0, nullptr, nullptr);
     if (n <= 0)
-        return NULL;
+        return nullptr;
     char *u8 = malloc((size_t)n);
     if (!u8)
-        return NULL;
-    WideCharToMultiByte(CP_UTF8, 0, w, -1, u8, n, NULL, NULL);
+        return nullptr;
+    WideCharToMultiByte(CP_UTF8, 0, w, -1, u8, n, nullptr, nullptr);
     return u8;
 }
 
@@ -94,12 +94,12 @@ static bool uri_byte_unreserved(unsigned char c) {
 static char *path_to_file_uri(const WCHAR *wpath) {
     char *u8 = utf8_from_wide(wpath);
     if (!u8)
-        return NULL;
+        return nullptr;
     size_t len = strlen(u8);
     char *uri = malloc(strlen("file:///") + len * 3 + 1); /* worst case all %XX */
     if (!uri) {
         free(u8);
-        return NULL;
+        return nullptr;
     }
     char *p = uri;
     memcpy(p, "file:///", strlen("file:///"));
@@ -139,7 +139,7 @@ static int hex_value(char c) {
  * its leading slash. */
 static WCHAR *file_uri_to_path(const char *uri) {
     if (!uri || strncmp(uri, "file://", 7) != 0)
-        return NULL;
+        return nullptr;
     const char *p = uri + 7;
     if (strncmp(p, "localhost/", 10) == 0)
         p += 9; /* keep the slash that follows the authority */
@@ -147,7 +147,7 @@ static WCHAR *file_uri_to_path(const char *uri) {
     size_t len = strlen(p);
     char *tmp = malloc(len + 1);
     if (!tmp)
-        return NULL;
+        return nullptr;
     char *o = tmp;
     while (*p) {
         if (p[0] == '%' && p[1] && p[2] && hex_value(p[1]) >= 0 && hex_value(p[2]) >= 0) {
@@ -243,8 +243,8 @@ static void apply_common_options(IFileDialog *dlg, const iris_file_dialog_opts *
     if (opts->initial_uri) {
         WCHAR *path = file_uri_to_path(opts->initial_uri);
         if (path) {
-            IShellItem *folder = NULL;
-            if (SHCreateItemFromParsingName(path, NULL, &IID_IShellItem, (void **)&folder) ==
+            IShellItem *folder = nullptr;
+            if (SHCreateItemFromParsingName(path, nullptr, &IID_IShellItem, (void **)&folder) ==
                 S_OK) {
                 (void)dlg->lpVtbl->SetDefaultFolder(dlg, folder);
                 folder->lpVtbl->Release(folder);
@@ -258,9 +258,9 @@ static void apply_common_options(IFileDialog *dlg, const iris_file_dialog_opts *
  * caller). FOS_FORCEFILESYSTEM is set on every dialog, so SIGDN_FILESYSPATH
  * is always available. */
 static WCHAR *shell_item_path(IShellItem *item) {
-    LPWSTR path = NULL;
+    LPWSTR path = nullptr;
     if (item->lpVtbl->GetDisplayName(item, SIGDN_FILESYSPATH, &path) != S_OK || !path)
-        return NULL;
+        return nullptr;
     /* CoTaskMemFree happens in the caller-facing wrapper below. */
     return path;
 }
@@ -292,14 +292,14 @@ static int pick_open(const iris_file_dialog_opts *opts, bool multiple, bool fold
     /* Every successful CoInitializeEx (S_OK or S_FALSE) pairs with one
      * CoUninitialize; RPC_E_CHANGED_MODE (someone else required MTA) means
      * we must not. */
-    HRESULT hr = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+    HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
     if (FAILED(hr))
         return 0;
 
     int count = 0;
     size_t used = 0;
-    IFileOpenDialog *dlg = NULL;
-    hr = CoCreateInstance(&CLSID_FileOpenDialog, NULL, CLSCTX_ALL, &IID_IFileOpenDialog,
+    IFileOpenDialog *dlg = nullptr;
+    hr = CoCreateInstance(&CLSID_FileOpenDialog, nullptr, CLSCTX_ALL, &IID_IFileOpenDialog,
                           (void **)&dlg);
     if (FAILED(hr) || !dlg)
         goto done;
@@ -316,7 +316,7 @@ static int pick_open(const iris_file_dialog_opts *opts, bool multiple, bool fold
         goto done;
 
     apply_common_options((IFileDialog *)dlg, opts);
-    if (set_filters((IFileDialog *)dlg, opts ? opts->filters : NULL) != S_OK)
+    if (set_filters((IFileDialog *)dlg, opts ? opts->filters : nullptr) != S_OK)
         goto done;
 
     hr = dlg->lpVtbl->Show(dlg, iris_win32__dialog_owner());
@@ -326,13 +326,13 @@ static int pick_open(const iris_file_dialog_opts *opts, bool multiple, bool fold
         goto done;
 
     if (multiple) {
-        IShellItemArray *arr = NULL;
+        IShellItemArray *arr = nullptr;
         if (dlg->lpVtbl->GetResults(dlg, &arr) != S_OK || !arr)
             goto done;
         DWORD n = 0;
         (void)arr->lpVtbl->GetCount(arr, &n);
         for (DWORD i = 0; i < n; i++) {
-            IShellItem *item = NULL;
+            IShellItem *item = nullptr;
             if (arr->lpVtbl->GetItemAt(arr, i, &item) != S_OK || !item)
                 continue;
             LPWSTR path = shell_item_path(item);
@@ -362,7 +362,7 @@ static int pick_open(const iris_file_dialog_opts *opts, bool multiple, bool fold
         }
         arr->lpVtbl->Release(arr);
     } else {
-        IShellItem *item = NULL;
+        IShellItem *item = nullptr;
         if (dlg->lpVtbl->GetResult(dlg, &item) == S_OK && item) {
             LPWSTR path = shell_item_path(item);
             if (path) {
@@ -385,34 +385,43 @@ done:
     return count;
 }
 
-IRIS_API int iris_pick_file(const iris_file_dialog_opts *opts, char *out_path, size_t out_cap) {
+IRIS_API int iris_pick_file(const iris_file_dialog_opts *opts) {
+    if (!opts)
+        return IRIS_PICK_UNAVAILABLE;
     /* Contract (file_dialog.h): a single-file picker never widens into a
      * multi-select. multiple_selection belongs to iris_pick_files. */
-    (void)opts;
-    return pick_open(&(iris_file_dialog_opts){0}, false, false, out_path, out_cap, NULL, NULL) == 1
+    iris_file_dialog_opts o = *opts;
+    o.multiple_selection = false;
+    return pick_open(&o, false, false, opts->out_path, opts->out_cap, nullptr, nullptr) == 1
                ? 0
                : IRIS_PICK_CANCELLED;
 }
 
-IRIS_API int iris_pick_folder(const iris_file_dialog_opts *opts, char *out_path, size_t out_cap) {
-    iris_file_dialog_opts o = opts ? *opts : (iris_file_dialog_opts){0};
+IRIS_API int iris_pick_folder(const iris_file_dialog_opts *opts) {
+    if (!opts)
+        return IRIS_PICK_UNAVAILABLE;
+    iris_file_dialog_opts o = *opts;
     o.multiple_selection = false;
-    return pick_open(&o, false, true, out_path, out_cap, NULL, NULL) == 1 ? 0 : IRIS_PICK_CANCELLED;
+    return pick_open(&o, false, true, opts->out_path, opts->out_cap, nullptr, nullptr) == 1
+               ? 0
+               : IRIS_PICK_CANCELLED;
 }
 
-IRIS_API int iris_pick_save_path(const iris_file_dialog_opts *opts, const char *default_name,
-                                 char *out_path, size_t out_cap) {
-    if (!out_path || out_cap == 0)
+IRIS_API int iris_pick_save_path(const iris_file_dialog_opts *opts) {
+    if (!opts || !opts->out_path || opts->out_cap == 0)
         return 1;
+    char *out_path = opts->out_path;
+    size_t out_cap = opts->out_cap;
+    const char *default_name = opts->default_name;
     out_path[0] = '\0';
 
-    HRESULT hr = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+    HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
     if (FAILED(hr))
         return 1;
 
     int result = 1;
-    IFileSaveDialog *dlg = NULL;
-    hr = CoCreateInstance(&CLSID_FileSaveDialog, NULL, CLSCTX_ALL, &IID_IFileSaveDialog,
+    IFileSaveDialog *dlg = nullptr;
+    hr = CoCreateInstance(&CLSID_FileSaveDialog, nullptr, CLSCTX_ALL, &IID_IFileSaveDialog,
                           (void **)&dlg);
     if (FAILED(hr) || !dlg)
         goto done;
@@ -425,7 +434,7 @@ IRIS_API int iris_pick_save_path(const iris_file_dialog_opts *opts, const char *
         goto done;
 
     apply_common_options((IFileDialog *)dlg, opts);
-    if (set_filters((IFileDialog *)dlg, opts ? opts->filters : NULL) != S_OK)
+    if (set_filters((IFileDialog *)dlg, opts ? opts->filters : nullptr) != S_OK)
         goto done;
     if (default_name) {
         WCHAR *name = wide_from_utf8(default_name);
@@ -441,7 +450,7 @@ IRIS_API int iris_pick_save_path(const iris_file_dialog_opts *opts, const char *
     if (FAILED(hr))
         goto done;
 
-    IShellItem *item = NULL;
+    IShellItem *item = nullptr;
     if (dlg->lpVtbl->GetResult(dlg, &item) == S_OK && item) {
         LPWSTR path = shell_item_path(item);
         if (path) {
@@ -460,10 +469,12 @@ done:
     return result;
 }
 
-IRIS_API int iris_pick_files(const iris_file_dialog_opts *opts, char *out_paths, size_t out_cap,
-                             size_t *out_bytes_used) {
+IRIS_API int iris_pick_files(const iris_file_dialog_opts *opts) {
+    if (!opts)
+        return IRIS_PICK_UNAVAILABLE;
     int truncated = 0;
-    int count = pick_open(opts, true, false, out_paths, out_cap, out_bytes_used, &truncated);
+    int count = pick_open(opts, true, false, opts->out_path, opts->out_cap, opts->out_bytes_used,
+                          &truncated);
     if (truncated)
         return IRIS_PICK_TRUNCATED; /* never a silent prefix (file_dialog.h) */
     return count;

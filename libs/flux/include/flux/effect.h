@@ -107,9 +107,13 @@ typedef struct flux_effect_blur_regions_desc {
  *   FLUX_ERROR_OUT_OF_MEMORY    — transient pool exhausted.
  *   FLUX_ERROR_BACKEND_FAILURE  — Vulkan pipeline or image
  *     creation failed. */
-FLUX_NODISCARD FLUX_API flux_result flux_effect_blur(VkCommandBuffer cmd,
-                                                     const flux_effect_blur_desc *desc,
-                                                     flux_image **out);
+typedef struct flux_effect_blur_opts {
+    VkCommandBuffer cmd;
+    const flux_effect_blur_desc *desc;
+    flux_image **out;
+} flux_effect_blur_opts;
+
+FLUX_NODISCARD FLUX_API flux_result flux_effect_blur(const flux_effect_blur_opts *opts);
 
 /* Reusable, frame-slot-safe realtime blur. Unlike flux_effect_blur's exact
  * Gaussian kernel, this path uses a two-level Dual-Kawase pyramid: two
@@ -136,14 +140,23 @@ FLUX_NODISCARD FLUX_API flux_result flux_effect_blur(VkCommandBuffer cmd,
  * a still-pending output is rejected with FLUX_ERROR_INVALID_STATE. */
 typedef struct flux_blur_filter flux_blur_filter;
 
+typedef struct flux_blur_filter_apply_opts {
+    flux_frame *frame;
+    const flux_effect_blur_desc *desc;
+    flux_image **out;
+} flux_blur_filter_apply_opts;
+
+typedef struct flux_blur_filter_current_opts {
+    flux_frame *frame;
+    flux_image **out;
+} flux_blur_filter_current_opts;
+
 FLUX_NODISCARD FLUX_API flux_result flux_blur_filter_create(flux_device *device,
                                                             flux_blur_filter **out);
 FLUX_NODISCARD FLUX_API flux_blur_filter *flux_blur_filter_retain(flux_blur_filter *filter);
 FLUX_API void flux_blur_filter_release(flux_blur_filter *filter);
 FLUX_NODISCARD FLUX_API flux_result flux_blur_filter_apply(flux_blur_filter *filter,
-                                                           flux_frame *frame,
-                                                           const flux_effect_blur_desc *desc,
-                                                           flux_image **out);
+                                                           const flux_blur_filter_apply_opts *opts);
 
 /* Borrow the slot's current valid blurred output without re-registering the
  * Dual-Kawase pyramid dispatch.
@@ -154,12 +167,12 @@ FLUX_NODISCARD FLUX_API flux_result flux_blur_filter_apply(flux_blur_filter *fil
  * output is rejected.
  *
  * Errors:
- *   FLUX_ERROR_INVALID_ARGUMENT — null filter/frame/out.
+ *   FLUX_ERROR_INVALID_ARGUMENT — null filter/opts/frame/out.
  *   FLUX_ERROR_INVALID_STATE    — frame not recording, or slot has no
  *     valid recorded blur output.
  *   FLUX_ERROR_OUT_OF_RANGE     — frame slot index >= FLUX_MAX_FRAMES_IN_FLIGHT. */
-FLUX_NODISCARD FLUX_API flux_result flux_blur_filter_current(flux_blur_filter *filter,
-                                                             flux_frame *frame, flux_image **out);
+FLUX_NODISCARD FLUX_API flux_result
+flux_blur_filter_current(flux_blur_filter *filter, const flux_blur_filter_current_opts *opts);
 
 /* ------------------------------------------------------------------ */
 /*  Drop shadow                                                       */
@@ -220,9 +233,13 @@ typedef struct flux_effect_shadow_desc {
  * the input's storage class (RGBA8_UNORM or RGBA16_SFLOAT) at the
  * input's extent, leased from the per-device transient pool like any
  * other effect output (see "Output ownership and lifetime" above). */
-FLUX_NODISCARD FLUX_API flux_result flux_effect_shadow(VkCommandBuffer cmd,
-                                                       const flux_effect_shadow_desc *desc,
-                                                       flux_image **out);
+typedef struct flux_effect_shadow_opts {
+    VkCommandBuffer cmd;
+    const flux_effect_shadow_desc *desc;
+    flux_image **out;
+} flux_effect_shadow_opts;
+
+FLUX_NODISCARD FLUX_API flux_result flux_effect_shadow(const flux_effect_shadow_opts *opts);
 
 /* Reusable, frame-slot-safe realtime shadow. The exact flux_effect_shadow
  * leases its intermediates from the per-device transient pool, so a caller
@@ -244,14 +261,18 @@ FLUX_NODISCARD FLUX_API flux_result flux_effect_shadow(VkCommandBuffer cmd,
  * runs. Materialize it at a pass boundary before a canvas draw consumes it. */
 typedef struct flux_shadow_filter flux_shadow_filter;
 
+typedef struct flux_shadow_filter_apply_opts {
+    flux_frame *frame;
+    const flux_effect_shadow_desc *desc;
+    flux_image **out;
+} flux_shadow_filter_apply_opts;
+
 FLUX_NODISCARD FLUX_API flux_result flux_shadow_filter_create(flux_device *device,
                                                               flux_shadow_filter **out);
 FLUX_NODISCARD FLUX_API flux_shadow_filter *flux_shadow_filter_retain(flux_shadow_filter *filter);
 FLUX_API void flux_shadow_filter_release(flux_shadow_filter *filter);
-FLUX_NODISCARD FLUX_API flux_result flux_shadow_filter_apply(flux_shadow_filter *filter,
-                                                             flux_frame *frame,
-                                                             const flux_effect_shadow_desc *desc,
-                                                             flux_image **out);
+FLUX_NODISCARD FLUX_API flux_result
+flux_shadow_filter_apply(flux_shadow_filter *filter, const flux_shadow_filter_apply_opts *opts);
 
 /* ------------------------------------------------------------------ */
 /*  Promote a transient output to a caller-owned image                */

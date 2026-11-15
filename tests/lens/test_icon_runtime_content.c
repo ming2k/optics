@@ -47,7 +47,7 @@ int main(void) {
     OT_EXPECT((int)fill == (int)stroke + 1);
 
     const lens_icon_desc *desc = lensi_icon_desc((int32_t)stroke);
-    OT_EXPECT(desc != NULL);
+    OT_EXPECT(desc != nullptr);
 
     /* Both shapes survive: exactly two MOVE verbs (circle subpath + line
      * subpath), 4 cubic arcs for the circle, 1 line verb for the line, and no degenerate cubics. */
@@ -114,7 +114,7 @@ int main(void) {
     /* A 48-wide viewBox scales down into the 24 box (r=18 -> 9). */
     lens_icon_id wide = lens_icon_register_svg(SVG_WIDE_VIEWBOX);
     const lens_icon_desc *wd = lensi_icon_desc((int32_t)wide);
-    OT_EXPECT(wd != NULL && wd->count > 0);
+    OT_EXPECT(wd != nullptr && wd->count > 0);
     OT_EXPECT(wd->cmds[0].type == 0);
     OT_EXPECT(wd->cmds[0].params[0] > 20.9f && wd->cmds[0].params[0] < 21.1f);
     OT_EXPECT(wd->cmds[0].params[1] > 11.9f && wd->cmds[0].params[1] < 12.1f);

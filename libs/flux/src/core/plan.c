@@ -134,7 +134,7 @@ flux_result flux_frame_plan_upload(flux_frame *f, struct flux_image *destination
         if (upload_dependency != UINT32_MAX)
             break;
     }
-    uint32_t dependencies[1] = {0};
+    uint32_t dependencies[1] = {};
     uint32_t dependency_count = 0;
     if (upload_dependency != UINT32_MAX)
         dependencies[dependency_count++] = upload_dependency;
@@ -547,8 +547,12 @@ flux_result flux_frame_require_pass(flux_frame *f, flux_deferred_token *token) {
     return FLUX_OK;
 }
 
-flux_result flux_frame_reject_pending_inputs(flux_frame *f, const flux_image *const *images,
-                                             uint32_t count) {
+flux_result flux_frame_reject_pending_inputs(flux_frame *f,
+                                             const flux_frame_reject_pending_inputs_opts *opts) {
+    if (!f || !opts)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    const flux_image *const *images = opts->images;
+    uint32_t count = opts->count;
     if (!f || (count > 0u && !images))
         return FLUX_ERROR_INVALID_ARGUMENT;
     if (!f->surface || f->state != FLUX_FRAME_STATE_RECORDING) {

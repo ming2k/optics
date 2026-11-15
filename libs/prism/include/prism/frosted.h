@@ -88,10 +88,14 @@ prism_frosted_filter_retain(prism_frosted_filter *filter);
 
 PRISM_API void prism_frosted_filter_release(prism_frosted_filter *filter);
 
-PRISM_NODISCARD PRISM_API flux_result prism_frosted_filter_apply(prism_frosted_filter *filter,
-                                                                 flux_frame *frame,
-                                                                 const prism_frosted_desc *desc,
-                                                                 prism_material_output *out);
+typedef struct prism_frosted_filter_apply_opts {
+    flux_frame *frame;
+    const prism_frosted_desc *desc;
+    prism_material_output *out;
+} prism_frosted_filter_apply_opts;
+
+PRISM_NODISCARD PRISM_API flux_result prism_frosted_filter_apply(
+    prism_frosted_filter *filter, const prism_frosted_filter_apply_opts *opts);
 
 #ifdef __cplusplus
 }

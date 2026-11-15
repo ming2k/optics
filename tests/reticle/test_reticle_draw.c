@@ -246,7 +246,9 @@ static void encoder_recording_replays_identically(void) {
             .clear_color = &transparent,
         };
         if (flux_canvas_begin(canvas, &pass) == FLUX_OK) {
-            OT_EXPECT(flux_canvas_submit_display_list(canvas, list) == FLUX_OK);
+            OT_EXPECT(flux_canvas_submit_display_list(
+                          canvas, &(flux_canvas_submit_display_list_opts){.list = list}) ==
+                      FLUX_OK);
             OT_EXPECT(flux_canvas_end(canvas) == FLUX_OK);
             uint32_t w = 0, h = 0, stride = 0;
             const uint8_t *pixels = flux_canvas_cpu_pixels(canvas, &w, &h, &stride);

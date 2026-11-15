@@ -62,9 +62,9 @@ and examples:
 meson setup build -Dexamples=true -Dtests=true
 ```
 
-The root build links `flux`, `lens`, and `iris` directly. Do not install one
-library before building the next, and do not configure nested Meson
-subprojects.
+The default root build links `flux`, `lens`, and `iris` directly; a reduced
+feature build may omit the UI stack. Do not install one library before building
+the next, and do not configure nested Meson subprojects.
 
 Useful feature options are defined in `meson_options.txt`:
 
@@ -74,10 +74,26 @@ Useful feature options are defined in `meson_options.txt`:
 | `scene` | `true` | Build 3D mesh and material primitives. |
 | `compute` | `true` | Build compute pipelines. |
 | `effect` | `true` | Build image effects; requires canvas and compute. |
-| `text` | `true` | Build the `flux-text` sibling. |
-| `scene-graph` | `true` | Build the `flux-scene-graph` sibling. |
+| `glyph` | `true` | Build the `glyph` text shaping library. |
+| `vista` | `true` | Build the `vista` 3D scene-graph library. |
+| `prism` | `true` | Build the `prism` material library; requires compute. |
+| `transit` | `true` | Build the header-only `transit` motion vocabulary. |
+| `reticle` | `true` | Build the `reticle` SVG document compiler. |
 | `examples` | `false` | Build all available C examples. |
 | `tests` | `false` | Build C tests and benchmarks. |
+| `fuzz` | `false` | Build fuzz harnesses (libFuzzer when available). |
+
+Feature dependencies are enforced at configure time: `vista` requires `scene`,
+`prism` requires `compute`, `glyph` and `reticle` require `canvas`, and the
+`lens`/`iris` UI stack is built only when `canvas`, `glyph`, and `reticle` are
+all enabled. A flux-only build is therefore
+`-Dcanvas=false -Dscene=false -Dcompute=false -Deffect=false -Dglyph=false
+-Dreticle=false -Dvista=false -Dprism=false -Dtransit=false`.
+
+The test suite currently targets the default flux module graph. For a reduced
+flux-only build (with `canvas` or `scene` disabled), configure with
+`-Dtests=false`; library and example targets are gated by the feature graph,
+but the full flux test corpus assumes the default modules.
 
 After changing options or installing a missing dependency, reconfigure:
 
@@ -136,7 +152,7 @@ so a different local major version will refuse rather than produce noise).
 |---------|-------------|
 | Compiler rejects `#embed` | Nothing to do — the generated-header fallback builds automatically. To force it (or verify it), add `-DFLUX_SHADER_NO_EMBED=1` to `c_args`. |
 | `slangc` not found | Install Vulkan SDK 1.4+ or the pinned Slang release from the official tarball, then ensure `slangc` is in PATH. |
-| FreeType, HarfBuzz, Fontconfig, or FriBidi missing | Install the text development packages, or configure with `-Dtext=false`. |
+| FreeType, HarfBuzz, Fontconfig, or FriBidi missing | Install the text development packages for a UI build. A deliberately flux-only build disables `canvas`, `glyph`, and `reticle` as a group, which also disables `lens`/`iris`. |
 | GLFW warning and missing windowed `flux` examples | Install GLFW development files and reconfigure. |
 | `iris` reports that its backend was skipped | Install Wayland, XKB Common, and Vulkan development files, then reconfigure. |
 | Vulkan integration tests skip | Confirm `vulkaninfo --summary` finds a Vulkan 1.3 device or install Lavapipe. |

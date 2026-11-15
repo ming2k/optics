@@ -708,7 +708,7 @@ static void cpu_restore_layer(const flux_canvas_backend *self, flux_canvas *c) {
     }
 
     free(layer_fb);
-    v->layers[v->layer_top].fb = NULL;
+    v->layers[v->layer_top].fb = nullptr;
     v->fb = parent_fb;
 }
 

@@ -671,19 +671,21 @@ pub fn pick_folder(title: Option<&str>) -> Option<String> {
 
 fn pick_path(title: Option<&str>, folder: bool) -> Option<String> {
     let title_c = title.and_then(|t| CString::new(t).ok());
+    let mut buf = vec![0u8; 4096];
     let opts = sys::iris_file_dialog_opts {
         title: title_c
             .as_ref()
             .map(|c| c.as_ptr())
             .unwrap_or(std::ptr::null()),
+        out_path: buf.as_mut_ptr().cast(),
+        out_cap: buf.len(),
         ..Default::default()
     };
-    let mut buf = vec![0u8; 4096];
     let rc = unsafe {
         if folder {
-            sys::iris_pick_folder(&opts, buf.as_mut_ptr().cast(), buf.len())
+            sys::iris_pick_folder(&opts)
         } else {
-            sys::iris_pick_file(&opts, buf.as_mut_ptr().cast(), buf.len())
+            sys::iris_pick_file(&opts)
         }
     };
     if rc != 0 {
@@ -714,7 +716,12 @@ pub fn file_uri_to_path(uri: &str) -> Option<String> {
     // Longest realistic decoded path: URIs from the portal are bounded by
     // PATH_MAX-ish lengths; 8 KiB leaves headroom for percent expansion.
     let mut buf = vec![0u8; 8192];
-    let rc = unsafe { sys::iris_file_uri_to_path(c.as_ptr(), buf.as_mut_ptr().cast(), buf.len()) };
+    let opts = sys::iris_file_uri_to_path_opts {
+        uri: c.as_ptr(),
+        out_path: buf.as_mut_ptr().cast(),
+        out_cap: buf.len(),
+    };
+    let rc = unsafe { sys::iris_file_uri_to_path(&opts) };
     if rc != 0 {
         return None;
     }
@@ -808,12 +815,14 @@ pub fn window_focus() {
 
 /// Set the minimum client-area size, in logical pixels.
 pub fn window_set_min_size(width: i32, height: i32) {
-    unsafe { sys::iris_window_set_min_size(width, height) };
+    let opts = sys::iris_window_set_min_size_opts { width, height };
+    unsafe { sys::iris_window_set_min_size(&opts) };
 }
 
 /// Set the maximum client-area size, in logical pixels.
 pub fn window_set_max_size(width: i32, height: i32) {
-    unsafe { sys::iris_window_set_max_size(width, height) };
+    let opts = sys::iris_window_set_max_size_opts { width, height };
+    unsafe { sys::iris_window_set_max_size(&opts) };
 }
 
 /// Current window size, in logical pixels. `None` when no window is
@@ -845,13 +854,12 @@ pub fn window_create_activation_token(app_id: Option<&str>) -> Option<String> {
     let mut buf = [0u8; 512];
     let app_id_c = app_id.and_then(|s| std::ffi::CString::new(s).ok());
     let ptr = app_id_c.as_ref().map_or(std::ptr::null(), |c| c.as_ptr());
-    let rc = unsafe {
-        sys::iris_window_create_activation_token(
-            ptr,
-            buf.as_mut_ptr() as *mut std::os::raw::c_char,
-            buf.len(),
-        )
+    let opts = sys::iris_window_create_activation_token_opts {
+        app_id: ptr,
+        out_buf: buf.as_mut_ptr() as *mut std::os::raw::c_char,
+        out_cap: buf.len(),
     };
+    let rc = unsafe { sys::iris_window_create_activation_token(&opts) };
     if rc == 0 {
         let cstr = unsafe { std::ffi::CStr::from_ptr(buf.as_ptr() as *const std::os::raw::c_char) };
         cstr.to_str().ok().map(|s| s.to_string())
@@ -940,25 +948,21 @@ pub fn pick_save_path(
 ) -> Result<String, PickError> {
     let title_c = title.and_then(|t| CString::new(t).ok());
     let name_c = default_name.and_then(|t| CString::new(t).ok());
+    let mut buf = vec![0u8; 8192];
     let opts = sys::iris_file_dialog_opts {
         title: title_c
             .as_ref()
             .map(|c| c.as_ptr())
             .unwrap_or(std::ptr::null()),
+        default_name: name_c
+            .as_ref()
+            .map(|c| c.as_ptr())
+            .unwrap_or(std::ptr::null()),
+        out_path: buf.as_mut_ptr().cast(),
+        out_cap: buf.len(),
         ..Default::default()
     };
-    let mut buf = vec![0u8; 8192];
-    let rc = unsafe {
-        sys::iris_pick_save_path(
-            &opts,
-            name_c
-                .as_ref()
-                .map(|c| c.as_ptr())
-                .unwrap_or(std::ptr::null()),
-            buf.as_mut_ptr().cast(),
-            buf.len(),
-        )
-    };
+    let rc = unsafe { sys::iris_pick_save_path(&opts) };
     match rc {
         0 => {
             let len = buf.iter().position(|b| *b == 0).unwrap_or(buf.len());
@@ -995,8 +999,13 @@ pub fn pick_files(title: Option<&str>) -> Result<Vec<String>, PickError> {
     loop {
         let mut buf = vec![0u8; cap];
         let mut used = 0usize;
-        let rc =
-            unsafe { sys::iris_pick_files(&opts, buf.as_mut_ptr().cast(), buf.len(), &mut used) };
+        let call_opts = sys::iris_file_dialog_opts {
+            out_path: buf.as_mut_ptr().cast(),
+            out_cap: buf.len(),
+            out_bytes_used: &mut used,
+            ..opts
+        };
+        let rc = unsafe { sys::iris_pick_files(&call_opts) };
         if rc == sys::IRIS_PICK_TRUNCATED {
             let needed = used.max(cap + 1);
             if needed > 16 * 1024 * 1024 {
@@ -1187,6 +1196,7 @@ impl<'a> FileDialog<'a> {
             },
             multiple_selection: self.multiple,
             directory_only: self.directory_only,
+            ..Default::default()
         };
         Prepared {
             _title: title,
@@ -1217,11 +1227,16 @@ impl<'a> FileDialog<'a> {
     pub fn pick_path(&self) -> Result<String, PickError> {
         let p = self.prepare();
         let mut buf = vec![0u8; 8192];
+        let opts = sys::iris_file_dialog_opts {
+            out_path: buf.as_mut_ptr().cast(),
+            out_cap: buf.len(),
+            ..p.opts
+        };
         let rc = unsafe {
             if self.directory_only {
-                sys::iris_pick_folder(&p.opts, buf.as_mut_ptr().cast(), buf.len())
+                sys::iris_pick_folder(&opts)
             } else {
-                sys::iris_pick_file(&p.opts, buf.as_mut_ptr().cast(), buf.len())
+                sys::iris_pick_file(&opts)
             }
         };
         Self::map_single_rc(&mut buf, rc)
@@ -1235,9 +1250,13 @@ impl<'a> FileDialog<'a> {
         loop {
             let mut buf = vec![0u8; cap];
             let mut used = 0usize;
-            let rc = unsafe {
-                sys::iris_pick_files(&p.opts, buf.as_mut_ptr().cast(), buf.len(), &mut used)
+            let opts = sys::iris_file_dialog_opts {
+                out_path: buf.as_mut_ptr().cast(),
+                out_cap: buf.len(),
+                out_bytes_used: &mut used,
+                ..p.opts
             };
+            let rc = unsafe { sys::iris_pick_files(&opts) };
             if rc == sys::IRIS_PICK_TRUNCATED {
                 let needed = used.max(cap + 1);
                 if needed > 16 * 1024 * 1024 {
@@ -1274,17 +1293,16 @@ impl<'a> FileDialog<'a> {
         let p = self.prepare();
         let name_c = default_name.and_then(|t| std::ffi::CString::new(t).ok());
         let mut buf = vec![0u8; 8192];
-        let rc = unsafe {
-            sys::iris_pick_save_path(
-                &p.opts,
-                name_c
-                    .as_ref()
-                    .map(|c| c.as_ptr())
-                    .unwrap_or(std::ptr::null()),
-                buf.as_mut_ptr().cast(),
-                buf.len(),
-            )
+        let opts = sys::iris_file_dialog_opts {
+            default_name: name_c
+                .as_ref()
+                .map(|c| c.as_ptr())
+                .unwrap_or(std::ptr::null()),
+            out_path: buf.as_mut_ptr().cast(),
+            out_cap: buf.len(),
+            ..p.opts
         };
+        let rc = unsafe { sys::iris_pick_save_path(&opts) };
         Self::map_single_rc(&mut buf, rc)
     }
 }
@@ -1581,8 +1599,7 @@ mod tests {
             title: std::ptr::null(),
             ..Default::default()
         };
-        let rc =
-            unsafe { sys::iris_pick_save_path(&opts, std::ptr::null(), std::ptr::null_mut(), 0) };
+        let rc = unsafe { sys::iris_pick_save_path(&opts) };
         assert_eq!(rc, sys::IRIS_PICK_UNAVAILABLE);
     }
 

@@ -128,7 +128,7 @@ bool lens_place_hovered(const lens *ui, const char *id) {
 bool lens_place_begin(lens *ui, const lens_place_opts *opts) {
     if (!ui)
         return false;
-    lens_place_opts default_opts = {0};
+    lens_place_opts default_opts = {};
     if (!opts)
         opts = &default_opts;
 

@@ -82,7 +82,7 @@ static void build_ui(lens *ui, const lens_input *in, void *user) {
     lens_label(ui, &(lens_label_opts){.text = "• Esc closes the top transient popup."});
     lens_label(ui, &(lens_label_opts){.text = "• Modal draws a fake backdrop over the base tree."});
 
-    lens_row_begin(ui, NULL);
+    lens_row_begin(ui, nullptr);
     lens_size(ui, 80, 0);
     lens_label(ui, &(lens_label_opts){.text = "Name:"});
     lens_flex(ui, 1.0f);
@@ -185,7 +185,7 @@ static void build_ui(lens *ui, const lens_input *in, void *user) {
             lens_label(ui, &(lens_label_opts){.text = "Modal Dialog", .size = 18.0f});
             lens_label(ui, &(lens_label_opts){
                                .text = "Popups can stack. Escape or click outside to close."});
-            lens_row_begin(ui, NULL);
+            lens_row_begin(ui, nullptr);
             lens_flex(ui, 1.0f);
             lens_spacer(ui, 0);
             if (lens_button(ui, &(lens_button_opts){.label = "OK"}).clicked) {
@@ -205,9 +205,9 @@ static void build_ui(lens *ui, const lens_input *in, void *user) {
 int main(void) {
     app a = {
         .dark_theme = true,
-        .text_buf = {0},
-        .file_btn_rect = {0},
-        .edit_btn_rect = {0},
+        .text_buf = {},
+        .file_btn_rect = {},
+        .edit_btn_rect = {},
     };
 
     printf("iris — Placement & dropdown demo. Native Wayland, HiDPI-aware.\n"

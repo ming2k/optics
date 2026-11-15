@@ -38,6 +38,21 @@
 #define DISTINCT_GLYPHS 9000
 static uint32_t g_codepoints[DISTINCT_GLYPHS];
 
+static glyph_metrics measure(glyph_ctx *t, const char *s, size_t len, const glyph_style *style) {
+    return glyph_measure(t, &(glyph_measure_opts){.utf8 = s, .len = len, .style = style});
+}
+
+static void draw(glyph_ctx *t, flux_canvas *canvas, flux_arena *arena, float x, float y,
+                 const char *s, size_t len, const glyph_style *style) {
+    glyph_draw(t, &(glyph_draw_opts){.canvas = canvas,
+                                     .arena = arena,
+                                     .x = x,
+                                     .y = y,
+                                     .utf8 = s,
+                                     .len = len,
+                                     .style = style});
+}
+
 /* Draws N codepoints in windows of 16 (a label-sized chunk), like a
  * scrolling list would. Returns the number of draw calls made. */
 static uint64_t draw_window(glyph_ctx *t, flux_canvas *c, uint32_t start, uint32_t count,
@@ -60,10 +75,10 @@ static uint64_t draw_window(glyph_ctx *t, flux_canvas *c, uint32_t start, uint32
                 utf8[len++] = (char)(0x80 | (cp & 0x3F));
             }
         }
-        glyph_style style = {0};
+        glyph_style style = {};
         style.size_px = size_px;
         style.color = flux_color_rgba_premul(255, 255, 255, 255);
-        glyph_draw(t, c, nullptr, 8.0f, 8.0f, utf8, len, &style);
+        draw(t, c, nullptr, 8.0f, 8.0f, utf8, len, &style);
         draws++;
     }
     return draws;
@@ -82,8 +97,8 @@ int main(void) {
     /* Skip when no shaping backend, or when no CJK face is installed: the
      * oversize working set below is made of U+4E00.. glyphs, so a Latin-only
      * font set cannot drive the cache past its ceiling. */
-    glyph_metrics probe = glyph_measure(t, "A", 1, nullptr);
-    glyph_metrics cjk = glyph_measure(t, "\xE4\xB8\x80", 1, nullptr);
+    glyph_metrics probe = measure(t, "A", 1, nullptr);
+    glyph_metrics cjk = measure(t, "\xE4\xB8\x80", 1, nullptr);
     if (probe.width <= 0.0f || cjk.width <= 0.0f) {
         fprintf(stderr, "text_soak: no shaping backend or CJK face; skipping\n");
         glyph_release(t);

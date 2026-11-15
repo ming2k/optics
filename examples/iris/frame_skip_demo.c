@@ -55,7 +55,7 @@ static void build(lens *ui, const lens_input *in, void *user) {
 
     /* iris brackets this callback with lens_begin/lens_end: a build only
      * emits widgets. */
-    lens_column_begin(ui, NULL);
+    lens_column_begin(ui, nullptr);
     lens_label(ui, &(lens_label_opts){.text = "frame_skip demo: watch stderr counters"});
     lens_label(ui, &(lens_label_opts){.text = "one paint in four; close the window to finish"});
     lens_close(ui);

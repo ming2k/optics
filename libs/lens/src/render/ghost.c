@@ -18,7 +18,7 @@ static lens_ghost_node *snapshot_node(lens *ui, lens_node *n) {
     lens_ghost_node *g = lensi_alloc(ui, sizeof *g);
     if (!g) {
         lensi_set_overflow(ui);
-        return NULL;
+        return nullptr;
     }
     memset(g, 0, sizeof *g);
     g->final_rect =
@@ -35,7 +35,7 @@ static lens_ghost_node *snapshot_node(lens *ui, lens_node *n) {
         if (!g->cmds) {
             lensi_free(ui, g);
             lensi_set_overflow(ui);
-            return NULL;
+            return nullptr;
         }
         for (uint32_t i = 0; i < n->cmd_count; i++) {
             lens_draw_cmd *c = &n->cmds[i];
@@ -50,10 +50,10 @@ static lens_ghost_node *snapshot_node(lens *ui, lens_node *n) {
                     memcpy(copy, c->text, len);
                     g->cmds[i].cmd.text = copy;
                 } else {
-                    g->cmds[i].cmd.text = NULL;
+                    g->cmds[i].cmd.text = nullptr;
                     free_snapshot(ui, g);
                     lensi_set_overflow(ui);
-                    return NULL;
+                    return nullptr;
                 }
             }
         }
@@ -70,7 +70,7 @@ static lens_ghost_node *snapshot_node(lens *ui, lens_node *n) {
         if (!cg) {
             free_snapshot(ui, g);
             lensi_set_overflow(ui);
-            return NULL;
+            return nullptr;
         }
         *next = cg;
         next = &cg->next_sibling;

@@ -57,7 +57,7 @@ static ink_counts render_and_classify(lens_icon_id id, float size) {
         lens_release(ui);
         return k;
     }
-    flux_color clear = {0};
+    flux_color clear = {};
     if (flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
                                                       .clear_color = &clear}) == FLUX_OK) {
         lens_scene_snapshot *s = nullptr;

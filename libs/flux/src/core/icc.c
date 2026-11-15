@@ -181,7 +181,7 @@ static float icc_trc_eval(const icc_trc *t, float x) {
 
 /* Parse a curv/para tag body. Returns false on malformed or unsupported. */
 static bool icc_trc_parse(icc_cursor *c, icc_trc *out) {
-    *out = (icc_trc){0};
+    *out = (icc_trc){};
     uint32_t sig = cur_u32(c);
     cur_u32(c); /* reserved */
     if (sig == 0x63757276u /* 'curv' */) {
@@ -497,7 +497,7 @@ static bool icc_parse_mft(icc_tag_view tag, bool sixteen, icc_lut *out) {
     out->out_ents = out_ents;
 
     for (int ch = 0; ch < 3; ++ch) {
-        out->in_curves[ch] = (icc_trc){0};
+        out->in_curves[ch] = (icc_trc){};
         out->in_curves[ch].count = in_ents;
         for (uint32_t i = 0; i < in_ents; ++i)
             out->in_curves[ch].table[i] =
@@ -511,7 +511,7 @@ static bool icc_parse_mft(icc_tag_view tag, bool sixteen, icc_lut *out) {
     for (size_t i = 0; i < clut_entries; ++i)
         out->clut[i] = sixteen ? (float)cur_u16(&c) / 65535.0f : (float)cur_u8(&c) / 255.0f;
     for (int ch = 0; ch < 3; ++ch) {
-        out->out_curves[ch] = (icc_trc){0};
+        out->out_curves[ch] = (icc_trc){};
         out->out_curves[ch].count = out_ents;
         for (uint32_t i = 0; i < out_ents; ++i)
             out->out_curves[ch].table[i] =
@@ -807,9 +807,9 @@ FLUX_API flux_result flux_icc_profile_create(const void *data, size_t size,
             have_tf = true;
         }
         if (have_tf) {
-            float xy[8] = {0}; /* degenerate colorants leave it untouched */
+            float xy[8] = {}; /* degenerate colorants leave it untouched */
             flux_color_primaries prim = icc_match_primaries(colorants_d65, xy);
-            p->space = (flux_color_space){0};
+            p->space = (flux_color_space){};
             p->space.primaries = prim;
             p->space.transfer = tf;
             p->space.gamma = gamma;

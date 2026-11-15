@@ -29,6 +29,7 @@
 #define FLUX_DMABUF_H
 
 #include <flux/core.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -51,7 +52,7 @@ typedef struct flux_canvas flux_canvas;
  * EXCLUSIVE means the producer has transferred ownership for the image's
  * lifetime. The image may be snapshotted and retained across frames, but it is
  * still immutable: flux never writes to imported memory. */
-typedef enum flux_dmabuf_ownership {
+typedef enum flux_dmabuf_ownership : uint32_t {
     FLUX_DMABUF_OWNERSHIP_BORROWED = 0,
     FLUX_DMABUF_OWNERSHIP_EXCLUSIVE = 1,
 } flux_dmabuf_ownership;
@@ -96,9 +97,13 @@ FLUX_NODISCARD FLUX_API flux_result flux_image_import_dmabuf(flux_device *d,
  *
  * Call after flux_canvas_begin_frame and before drawing `image`. On FLUX_OK flux
  * owns and closes acquire_sync_fd; on error the caller keeps it. */
-FLUX_NODISCARD FLUX_API flux_result flux_canvas_wait_dmabuf_acquire(flux_canvas *canvas,
-                                                                    flux_image *image,
-                                                                    int acquire_sync_fd);
+typedef struct flux_canvas_wait_dmabuf_acquire_opts {
+    flux_image *image;
+    int acquire_sync_fd;
+} flux_canvas_wait_dmabuf_acquire_opts;
+
+FLUX_NODISCARD FLUX_API flux_result flux_canvas_wait_dmabuf_acquire(
+    flux_canvas *canvas, const flux_canvas_wait_dmabuf_acquire_opts *opts);
 
 /* Whether the logical device has the complete dma-buf import capability.
  * Use flux_dmabuf_format_modifiers or flux_image_import_dmabuf to validate a
@@ -121,9 +126,14 @@ FLUX_API bool flux_dmabuf_sync_supported(const flux_device *d);
  * `*inout_count` to the required length (without writing anything), so a
  * two-pass caller can probe then allocate. Pass `format` as a flux_format
  * matching the fourcc the host will advertise. */
-FLUX_NODISCARD FLUX_API flux_result flux_dmabuf_format_modifiers(flux_device *d, flux_format format,
-                                                                 uint64_t *out_modifiers,
-                                                                 uint32_t *inout_count);
+typedef struct flux_dmabuf_format_modifiers_opts {
+    flux_format format;
+    uint64_t *out_modifiers;
+    uint32_t *inout_count;
+} flux_dmabuf_format_modifiers_opts;
+
+FLUX_NODISCARD FLUX_API flux_result
+flux_dmabuf_format_modifiers(flux_device *d, const flux_dmabuf_format_modifiers_opts *opts);
 
 #ifdef __cplusplus
 }

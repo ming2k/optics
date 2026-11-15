@@ -10,7 +10,7 @@
 
 int main(void) {
     const char *v = iris_version_string();
-    OT_EXPECT(v != NULL);
+    OT_EXPECT(v != nullptr);
 
     /* Exact string built from the macros, so a release bump cannot leave
      * this test holding a stale hardcoded literal. */

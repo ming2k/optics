@@ -61,32 +61,32 @@
 
 static WCHAR *utf8_to_wide(const char *s) {
     if (!s)
-        return NULL;
-    int n = MultiByteToWideChar(CP_UTF8, 0, s, -1, NULL, 0);
+        return nullptr;
+    int n = MultiByteToWideChar(CP_UTF8, 0, s, -1, nullptr, 0);
     if (n <= 0)
-        return NULL;
+        return nullptr;
     WCHAR *w = (WCHAR *)malloc((size_t)n * sizeof(WCHAR));
     if (!w)
-        return NULL;
+        return nullptr;
     if (!MultiByteToWideChar(CP_UTF8, 0, s, -1, w, n)) {
         free(w);
-        return NULL;
+        return nullptr;
     }
     return w;
 }
 
 static char *wide_to_utf8(const WCHAR *w) {
     if (!w)
-        return NULL;
-    int n = WideCharToMultiByte(CP_UTF8, 0, w, -1, NULL, 0, NULL, NULL);
+        return nullptr;
+    int n = WideCharToMultiByte(CP_UTF8, 0, w, -1, nullptr, 0, nullptr, nullptr);
     if (n <= 0)
-        return NULL;
+        return nullptr;
     char *s = (char *)malloc((size_t)n);
     if (!s)
-        return NULL;
-    if (!WideCharToMultiByte(CP_UTF8, 0, w, -1, s, n, NULL, NULL)) {
+        return nullptr;
+    if (!WideCharToMultiByte(CP_UTF8, 0, w, -1, s, n, nullptr, nullptr)) {
         free(s);
-        return NULL;
+        return nullptr;
     }
     return s;
 }
@@ -118,10 +118,10 @@ void txtp_charset_free(txtp_charset *cs) {
 
 static txtp_charset *txtp_charset_from_font(IDWriteFont *font) {
     if (!font)
-        return NULL;
+        return nullptr;
     txtp_charset *cs = (txtp_charset *)calloc(1, sizeof *cs);
     if (!cs)
-        return NULL;
+        return nullptr;
     font->lpVtbl->AddRef(font);
     cs->font = font;
     return cs;
@@ -135,9 +135,9 @@ void txtp_font_match_clear(txtp_font_match *m) {
     if (!m)
         return;
     free(m->path);
-    m->path = NULL;
+    m->path = nullptr;
     txtp_charset_free(m->charset);
-    m->charset = NULL;
+    m->charset = nullptr;
     m->index = 0;
 }
 
@@ -167,11 +167,11 @@ static DWRITE_FONT_WEIGHT css_to_dw_weight(float w) {
 /* Extract (path, face index, coverage) from an IDWriteFont. The font is
  * NOT consumed; the returned charset holds its own AddRef. */
 static bool font_to_match(IDWriteFont *font, txtp_font_match *out) {
-    IDWriteFontFace *face = NULL;
-    IDWriteFontFile **files = NULL;
-    IDWriteFontFileLoader *loader = NULL;
-    IDWriteLocalFontFileLoader *local = NULL;
-    WCHAR *wpath = NULL;
+    IDWriteFontFace *face = nullptr;
+    IDWriteFontFile **files = nullptr;
+    IDWriteFontFileLoader *loader = nullptr;
+    IDWriteLocalFontFileLoader *local = nullptr;
+    WCHAR *wpath = nullptr;
     UINT32 num_files = 0;
     bool ok = false;
 
@@ -180,7 +180,7 @@ static bool font_to_match(IDWriteFont *font, txtp_font_match *out) {
 
     out->index = (long)face->lpVtbl->GetIndex(face);
 
-    if (FAILED(face->lpVtbl->GetFiles(face, &num_files, NULL)) || num_files == 0)
+    if (FAILED(face->lpVtbl->GetFiles(face, &num_files, nullptr)) || num_files == 0)
         goto done;
     files = (IDWriteFontFile **)calloc(num_files, sizeof *files);
     if (!files)
@@ -190,7 +190,7 @@ static bool font_to_match(IDWriteFont *font, txtp_font_match *out) {
 
     /* A font can be backed by several files; the first carries the face
      * (the multi-file case is effectively unheard of for local fonts). */
-    const void *key = NULL;
+    const void *key = nullptr;
     UINT32 key_size = 0;
     if (FAILED(files[0]->lpVtbl->GetReferenceKey(files[0], &key, &key_size)) || !key)
         goto done;
@@ -224,7 +224,7 @@ static bool font_to_match(IDWriteFont *font, txtp_font_match *out) {
 done:
     if (!ok) { /* never hand back a half-filled match; callers don't clear on false */
         free(out->path);
-        out->path = NULL;
+        out->path = nullptr;
     }
     free(wpath);
     if (local)
@@ -242,19 +242,19 @@ done:
 }
 
 static IDWriteFactory *create_factory(void) {
-    IDWriteFactory *factory = NULL;
+    IDWriteFactory *factory = nullptr;
     if (FAILED(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, TXT_IID_OF(IDWriteFactory),
                                    (IUnknown **)&factory)))
-        return NULL;
+        return nullptr;
     return factory;
 }
 
 /* Generic names arrive from face.c; map them to families that exist on
  * every supported Windows release, most preferred first. A custom family
  * name (FLUX_TEXT_FONT) is tried verbatim first. */
-static const WCHAR *const sans_fallbacks[] = {L"Segoe UI", L"Arial", NULL};
-static const WCHAR *const serif_fallbacks[] = {L"Georgia", L"Times New Roman", NULL};
-static const WCHAR *const mono_fallbacks[] = {L"Consolas", L"Courier New", NULL};
+static const WCHAR *const sans_fallbacks[] = {L"Segoe UI", L"Arial", nullptr};
+static const WCHAR *const serif_fallbacks[] = {L"Georgia", L"Times New Roman", nullptr};
+static const WCHAR *const mono_fallbacks[] = {L"Consolas", L"Courier New", nullptr};
 
 static const WCHAR *const *generic_fallbacks(const char *family_name) {
     if (strcmp(family_name, "serif") == 0)
@@ -263,7 +263,7 @@ static const WCHAR *const *generic_fallbacks(const char *family_name) {
         return mono_fallbacks;
     if (strcmp(family_name, "sans-serif") == 0)
         return sans_fallbacks;
-    return NULL; /* custom family: tried verbatim */
+    return nullptr; /* custom family: tried verbatim */
 }
 
 /* ------------------------------------------------------------------ */
@@ -273,17 +273,17 @@ static const WCHAR *const *generic_fallbacks(const char *family_name) {
 txtp_font_list *txt_platform_font_query_family(const char *family_name, float weight, bool italic,
                                                int max_results) {
     if (!family_name || max_results <= 0)
-        return NULL;
+        return nullptr;
 
     IDWriteFactory *factory = create_factory();
     if (!factory)
-        return NULL;
+        return nullptr;
 
-    txtp_font_list *list = NULL;
-    IDWriteFontCollection *collection = NULL;
-    IDWriteFontFamily *family = NULL;
-    IDWriteFontList *fonts = NULL;
-    WCHAR *custom_wname = NULL;
+    txtp_font_list *list = nullptr;
+    IDWriteFontCollection *collection = nullptr;
+    IDWriteFontFamily *family = nullptr;
+    IDWriteFontList *fonts = nullptr;
+    WCHAR *custom_wname = nullptr;
 
     if (FAILED(factory->lpVtbl->GetSystemFontCollection(factory, &collection, TRUE)) || !collection)
         goto done;
@@ -322,13 +322,13 @@ txtp_font_list *txt_platform_font_query_family(const char *family_name, float we
     list->matches = (txtp_font_match *)calloc((size_t)max_results, sizeof *list->matches);
     if (!list->matches) {
         free(list);
-        list = NULL;
+        list = nullptr;
         goto done;
     }
 
     UINT32 n = fonts->lpVtbl->GetFontCount(fonts);
     for (UINT32 i = 0; i < n && list->count < max_results; i++) {
-        IDWriteFont *font = NULL;
+        IDWriteFont *font = nullptr;
         if (FAILED(fonts->lpVtbl->GetFont(fonts, i, &font)) || !font)
             continue;
         txtp_font_match *m = &list->matches[list->count];
@@ -372,7 +372,7 @@ static HRESULT STDMETHODCALLTYPE tas_QueryInterface(IDWriteTextAnalysisSource *s
         self->lpVtbl->AddRef(self);
         return S_OK;
     }
-    *ppv = NULL;
+    *ppv = nullptr;
     return E_NOINTERFACE;
 }
 
@@ -395,7 +395,7 @@ static HRESULT STDMETHODCALLTYPE tas_GetTextAtPosition(IDWriteTextAnalysisSource
         *str = s->text + pos;
         *len = s->len - pos;
     } else {
-        *str = NULL;
+        *str = nullptr;
         *len = 0;
     }
     return S_OK;
@@ -409,7 +409,7 @@ static HRESULT STDMETHODCALLTYPE tas_GetTextBeforePosition(IDWriteTextAnalysisSo
         *str = s->text;
         *len = pos;
     } else {
-        *str = NULL;
+        *str = nullptr;
         *len = 0;
     }
     return S_OK;
@@ -436,7 +436,7 @@ static HRESULT STDMETHODCALLTYPE tas_GetNumberSubstitution(IDWriteTextAnalysisSo
     (void)self;
     (void)pos;
     *len = 0;
-    *sub = NULL;
+    *sub = nullptr;
     return S_OK;
 }
 
@@ -465,11 +465,11 @@ bool txt_platform_font_query_codepoint(const char *family_name, float weight, bo
         return false;
 
     bool ok = false;
-    IDWriteFactory2 *factory2 = NULL;
-    IDWriteFontFallback *fallback = NULL;
-    IDWriteFont *mapped = NULL;
-    WCHAR *wname = NULL;
-    txt_analysis_source *src = NULL;
+    IDWriteFactory2 *factory2 = nullptr;
+    IDWriteFontFallback *fallback = nullptr;
+    IDWriteFont *mapped = nullptr;
+    WCHAR *wname = nullptr;
+    txt_analysis_source *src = nullptr;
 
     /* GetSystemFontFallback needs IDWriteFactory2 (Windows 8.1+). */
     if (FAILED(factory->lpVtbl->QueryInterface(factory, TXT_IID_OF(IDWriteFactory2),
@@ -482,7 +482,7 @@ bool txt_platform_font_query_codepoint(const char *family_name, float weight, bo
     /* Base family for the fallback mapping: the custom name verbatim, or
      * the first generic fallback. MapCharacters treats it as a bias, not
      * a hard constraint. */
-    const WCHAR *base = NULL;
+    const WCHAR *base = nullptr;
     const WCHAR *const *fallbacks = generic_fallbacks(family_name);
     if (fallbacks) {
         base = fallbacks[0];
@@ -515,7 +515,7 @@ bool txt_platform_font_query_codepoint(const char *family_name, float weight, bo
     FLOAT scale = 0.0f;
     UINT32 mapped_len = 0; /* covered text length — we map a single scalar, so unused */
     if (FAILED(fallback->lpVtbl->MapCharacters(
-            fallback, (IDWriteTextAnalysisSource *)src, 0, text_len, NULL, base,
+            fallback, (IDWriteTextAnalysisSource *)src, 0, text_len, nullptr, base,
             css_to_dw_weight(weight), italic ? DWRITE_FONT_STYLE_ITALIC : DWRITE_FONT_STYLE_NORMAL,
             DWRITE_FONT_STRETCH_NORMAL, &mapped_len, &mapped, &scale)) ||
         !mapped)

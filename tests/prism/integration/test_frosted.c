@@ -31,8 +31,10 @@ static uint32_t render_frosted_frame(flux_surface *surface, flux_canvas *canvas,
     OT_EXPECT(flux_surface_begin_frame(surface, nullptr, &frame) == FLUX_OK);
     uint32_t slot = flux_frame_index(frame);
 
-    prism_material_output out = {0};
-    OT_EXPECT(prism_frosted_filter_apply(filter, frame, desc, &out) == FLUX_OK);
+    prism_material_output out = {};
+    OT_EXPECT(prism_frosted_filter_apply(
+                  filter, &(prism_frosted_filter_apply_opts){
+                              .frame = frame, .desc = desc, .out = &out}) == FLUX_OK);
     OT_EXPECT(out.image != nullptr);
 
     flux_color clear_col = flux_color_rgba(0, 0, 0, 0);
@@ -119,7 +121,7 @@ int main(void) {
     desc.group_count = 1;
 
     /* Render across several frames to guarantee multi-slot stability */
-    uint8_t first_center[4] = {0};
+    uint8_t first_center[4] = {};
     for (int f = 0; f < 6; ++f) {
         render_frosted_frame(s, c, input, blurred, filter, &desc, pixels);
 

@@ -703,7 +703,7 @@ void canvas_tess_fill_path(flux_canvas *c, const flux_path *p, const canvas_pain
     uint32_t hole_count = 0;
     for (uint32_t ci = 0; ci < fm.contour_count; ++ci) {
         flux_canvas_contour *co = &cons[ci];
-        infos[ci] = (struct contour_info){0};
+        infos[ci] = (struct contour_info){};
         if (co->count < 3)
             continue;
 

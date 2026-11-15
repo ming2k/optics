@@ -48,7 +48,7 @@ int main(void) {
 
     /* ---- SDF rounded rect on a transparent clear: corners are cut ---- */
     OT_EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
-                                                            .clear_color = &(flux_color){0}}) ==
+                                                            .clear_color = &(flux_color){}}) ==
               FLUX_OK);
     flux_color white = flux_color_rgba_premul(255, 255, 255, 255);
     flux_canvas_fill_rrect(c, (flux_rect){0, 0, 64, 64}, 20.0f, white);
@@ -73,7 +73,7 @@ int main(void) {
 
     /* ---- Shared triangle edge is covered once, not blended twice ---- */
     OT_EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
-                                                            .clear_color = &(flux_color){0}}) ==
+                                                            .clear_color = &(flux_color){}}) ==
               FLUX_OK);
     flux_color half_red = flux_color_rgba_premul(255, 0, 0, 128);
     flux_canvas_fill_rect_color(c, (flux_rect){16, 16, 32, 32}, half_red);
@@ -270,7 +270,7 @@ int main(void) {
 
     pd.clear_color = nullptr;
     pd.antialias = FLUX_CANVAS_ANTIALIAS_MSAA_4X;
-    pd.damage = (flux_damage){0};
+    pd.damage = (flux_damage){};
     pd.frame = nullptr;
     OT_EXPECT(flux_canvas_begin(c, &pd) == FLUX_ERROR_INVALID_ARGUMENT);
 

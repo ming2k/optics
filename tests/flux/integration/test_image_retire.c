@@ -110,8 +110,11 @@ int main(void) {
     flux_device_wait_idle(d);
 
     flux_observe_counters c = {};
-    OT_EXPECT(flux_observe_read_counters(d, FLUX_SCOPE_DEVICE, "vk_image", "flux/core", &c) ==
-              FLUX_OK);
+    OT_EXPECT(
+        flux_observe_read_counters(d, &(flux_observe_read_counters_opts){.scope = FLUX_SCOPE_DEVICE,
+                                                                         .kind = "vk_image",
+                                                                         .owner = "flux/core",
+                                                                         .out = &c}) == FLUX_OK);
     /* At this point only the surface's swapchain/offscreen images remain live. */
     uint64_t baseline_live = c.live;
 
@@ -133,8 +136,11 @@ int main(void) {
         /* If recording_frames leaked, zombie_a would be tagged (submit_serial + 1)
          * and wait_idle would not reclaim it. */
         flux_device_wait_idle(d);
-        OT_EXPECT(flux_observe_read_counters(d, FLUX_SCOPE_DEVICE, "vk_image", "flux/core", &c) ==
-                  FLUX_OK);
+        OT_EXPECT(flux_observe_read_counters(
+                      d, &(flux_observe_read_counters_opts){.scope = FLUX_SCOPE_DEVICE,
+                                                            .kind = "vk_image",
+                                                            .owner = "flux/core",
+                                                            .out = &c}) == FLUX_OK);
         OT_EXPECT(c.live == baseline_live);
     }
 
@@ -159,8 +165,11 @@ int main(void) {
         flux_image_release(zombie_b);
         flux_device_wait_idle(d);
 
-        OT_EXPECT(flux_observe_read_counters(d, FLUX_SCOPE_DEVICE, "vk_image", "flux/core", &c) ==
-                  FLUX_OK);
+        OT_EXPECT(flux_observe_read_counters(
+                      d, &(flux_observe_read_counters_opts){.scope = FLUX_SCOPE_DEVICE,
+                                                            .kind = "vk_image",
+                                                            .owner = "flux/core",
+                                                            .out = &c}) == FLUX_OK);
         OT_EXPECT(c.live == baseline_live);
     }
 

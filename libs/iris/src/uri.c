@@ -35,9 +35,12 @@ static bool push(char *out, size_t cap, size_t *n, char c) {
     return true;
 }
 
-IRIS_API int iris_file_uri_to_path(const char *uri, char *out_path, size_t out_cap) {
-    if (!uri || !out_path || out_cap == 0)
+IRIS_API int iris_file_uri_to_path(const iris_file_uri_to_path_opts *opts) {
+    if (!opts || !opts->uri || !opts->out_path || opts->out_cap == 0)
         return -1;
+    const char *uri = opts->uri;
+    char *out_path = opts->out_path;
+    size_t out_cap = opts->out_cap;
     out_path[0] = '\0';
 
     static const char scheme[] = "file://";

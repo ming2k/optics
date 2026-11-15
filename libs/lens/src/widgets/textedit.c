@@ -419,10 +419,14 @@ static size_t line_length(const char *buf, size_t len, size_t start) {
 static float prefix_width(lens *ui, const char *str, size_t len, float font_size) {
     if (!str || len == 0)
         return 0.0f;
-    return glyph_measure(ui->text, str, len,
-                         &(glyph_style){.size_px = font_size,
-                                        .weight = 0.0f,
-                                        .family = (glyph_family)ui->text_family})
+    return glyph_measure(ui->text,
+                         &(glyph_measure_opts){
+                             .utf8 = str,
+                             .len = len,
+                             .style = &(glyph_style){.size_px = font_size,
+                                                     .weight = 0.0f,
+                                                     .family = (glyph_family)ui->text_family},
+                         })
         .width;
 }
 
@@ -448,7 +452,7 @@ static size_t hit_test_line(lens *ui, const char *line, size_t line_len, float f
 /* ------------------------------------------------------------------ */
 
 lens_response lens_textedit(lens *ui, const lens_textedit_opts *opts) {
-    lens_textedit_opts default_opts = {0};
+    lens_textedit_opts default_opts = {};
     if (!opts)
         opts = &default_opts;
 
@@ -461,7 +465,7 @@ lens_response lens_textedit(lens *ui, const lens_textedit_opts *opts) {
     const char *placeholder = opts->placeholder;
     ui->next_disabled = false;
     ui->next_error = false;
-    ui->next_placeholder = NULL;
+    ui->next_placeholder = nullptr;
     lens_style eff = lensi_style_effective(ui);
     float font_size = lensi_style_font_size(ui, &eff, t);
     float padding = lensi_style_padding(&eff, t);
@@ -470,7 +474,7 @@ lens_response lens_textedit(lens *ui, const lens_textedit_opts *opts) {
     lens_id id = lensi_gen_widget_id(ui, label);
     lens_node *n = lensi_store_touch(ui, id);
     if (!n)
-        return (lens_response){0};
+        return (lens_response){};
     lensi_link_child(ui, n);
     lensi_node_box(ui, n, &opts->box);
     n->is_container = false;
@@ -481,7 +485,7 @@ lens_response lens_textedit(lens *ui, const lens_textedit_opts *opts) {
 
     lens_textedit_state *ts = lens_node_state(n, sizeof *ts);
     if (!ts)
-        return (lens_response){0};
+        return (lens_response){};
 
     if (buf && buf_cap > 0)
         buf[buf_cap - 1] = '\0';
@@ -721,8 +725,8 @@ lens_response lens_textedit(lens *ui, const lens_textedit_opts *opts) {
             if (hi > len)
                 hi = (uint32_t)len;
             if (hi > lo) {
-                if (textedit_replace_range(ts, buf, &len, buf_cap, lo, hi, NULL, 0, lo, UINT32_MAX,
-                                           now_ms, false)) {
+                if (textedit_replace_range(ts, buf, &len, buf_cap, lo, hi, nullptr, 0, lo,
+                                           UINT32_MAX, now_ms, false)) {
                     changed = true;
                 }
             }
@@ -841,14 +845,14 @@ lens_response lens_textedit(lens *ui, const lens_textedit_opts *opts) {
             } else if (k.key == LENS_KEY_BACKSPACE) {
                 if (sel_active(ts)) {
                     uint32_t lo = sel_lo(ts), hi = sel_hi(ts);
-                    if (textedit_replace_range(ts, buf, &len, buf_cap, lo, hi, NULL, 0, lo,
+                    if (textedit_replace_range(ts, buf, &len, buf_cap, lo, hi, nullptr, 0, lo,
                                                UINT32_MAX, now_ms, false)) {
                         changed = true;
                     }
                 } else if (ts->cursor > 0) {
                     size_t prev = (ctrl ? prev_word_boundary(buf, ts->cursor)
                                         : prev_char_boundary(buf, ts->cursor));
-                    if (textedit_replace_range(ts, buf, &len, buf_cap, prev, ts->cursor, NULL, 0,
+                    if (textedit_replace_range(ts, buf, &len, buf_cap, prev, ts->cursor, nullptr, 0,
                                                (uint32_t)prev, UINT32_MAX, now_ms, true)) {
                         changed = true;
                     }
@@ -856,14 +860,14 @@ lens_response lens_textedit(lens *ui, const lens_textedit_opts *opts) {
             } else if (k.key == LENS_KEY_DELETE) {
                 if (sel_active(ts)) {
                     uint32_t lo = sel_lo(ts), hi = sel_hi(ts);
-                    if (textedit_replace_range(ts, buf, &len, buf_cap, lo, hi, NULL, 0, lo,
+                    if (textedit_replace_range(ts, buf, &len, buf_cap, lo, hi, nullptr, 0, lo,
                                                UINT32_MAX, now_ms, false)) {
                         changed = true;
                     }
                 } else if (ts->cursor < len) {
                     size_t next = (ctrl ? next_word_boundary(buf, len, ts->cursor)
                                         : next_char_boundary(buf, len, ts->cursor));
-                    if (textedit_replace_range(ts, buf, &len, buf_cap, ts->cursor, next, NULL, 0,
+                    if (textedit_replace_range(ts, buf, &len, buf_cap, ts->cursor, next, nullptr, 0,
                                                ts->cursor, UINT32_MAX, now_ms, false)) {
                         changed = true;
                     }
@@ -886,13 +890,13 @@ lens_response lens_textedit(lens *ui, const lens_textedit_opts *opts) {
             } else if (ctrl && (k.key == 'c' || k.key == 'C')) {
                 if (sel_active(ts)) {
                     uint32_t lo = sel_lo(ts), hi = sel_hi(ts);
-                    lens_copy(ui, buf + lo, hi - lo);
+                    lens_copy(ui, &(lens_copy_opts){.utf8 = buf + lo, .len = hi - lo});
                 }
             } else if (ctrl && (k.key == 'x' || k.key == 'X')) {
                 if (sel_active(ts)) {
                     uint32_t lo = sel_lo(ts), hi = sel_hi(ts);
-                    lens_copy(ui, buf + lo, hi - lo);
-                    if (textedit_replace_range(ts, buf, &len, buf_cap, lo, hi, NULL, 0, lo,
+                    lens_copy(ui, &(lens_copy_opts){.utf8 = buf + lo, .len = hi - lo});
+                    if (textedit_replace_range(ts, buf, &len, buf_cap, lo, hi, nullptr, 0, lo,
                                                UINT32_MAX, now_ms, false)) {
                         changed = true;
                     }
@@ -943,8 +947,8 @@ lens_response lens_textedit(lens *ui, const lens_textedit_opts *opts) {
     float base_caret_x = prefix_width(ui, buf, ts->cursor, font_size);
     float caret_x = base_caret_x;
     float caret_y = optical_baseline - font_asc;
-    flux_rect preedit_underline = {0};
-    flux_rect preedit_clause = {0};
+    flux_rect preedit_underline = {};
+    flux_rect preedit_clause = {};
     if (has_preedit) {
         const char *pe = ui->input.preedit_utf8;
         size_t pe_len = strlen(pe);
@@ -986,7 +990,7 @@ lens_response lens_textedit(lens *ui, const lens_textedit_opts *opts) {
     }
     flux_rect caret_rect = {pad_x + caret_x, caret_y, 1.5f, caret_h};
     /* Build text lines for multiline or single-line */
-    lens_text_line *lines = NULL;
+    lens_text_line *lines = nullptr;
     int line_count = 0;
     if (multiline) {
         int line_cap = 8;
@@ -1013,7 +1017,7 @@ lens_response lens_textedit(lens *ui, const lens_textedit_opts *opts) {
     }
 
     /* Caret & selection geometry for skin */
-    flux_rect sel_rect = {0};
+    flux_rect sel_rect = {};
     int sel_rect_count = 0;
     if (sel_active(ts) && !multiline) {
         uint32_t lo = sel_lo(ts), hi = sel_hi(ts);
@@ -1035,7 +1039,7 @@ lens_response lens_textedit(lens *ui, const lens_textedit_opts *opts) {
                         .content =
                             {
                                 .multiline = multiline,
-                                .edit_text = multiline ? NULL : display_text,
+                                .edit_text = multiline ? nullptr : display_text,
                                 .edit_text_x = pad_x,
                                 .edit_text_y = text_y,
                                 .show_placeholder = show_placeholder,
@@ -1075,60 +1079,58 @@ lens_response lens_textedit(lens *ui, const lens_textedit_opts *opts) {
     return r;
 }
 
-void lens_textedit_set_caret(lens *ui, const char *label, uint32_t caret) {
-    if (!ui || !label)
+void lens_textedit_set_caret(lens *ui, const lens_textedit_set_caret_opts *opts) {
+    if (!ui || !opts || !opts->label)
         return;
-    lens_node *n = lens_find(ui, lens_current_id(ui, label));
+    lens_node *n = lens_find(ui, lens_current_id(ui, opts->label));
     if (!n)
         return;
     lens_textedit_state *ts = lens_node_state(n, sizeof *ts);
     if (ts) {
-        ts->cursor = caret;
+        ts->cursor = opts->caret;
         sel_clear(ts);
     }
 }
 
-bool lens_textedit_get_caret(const lens *ui, const char *label, uint32_t *caret) {
-    if (!ui || !label)
+bool lens_textedit_get_caret(const lens *ui, const lens_textedit_get_caret_opts *opts) {
+    if (!ui || !opts || !opts->label)
         return false;
-    lens_node *n = lens_find((lens *)ui, lens_current_id(ui, label));
+    lens_node *n = lens_find((lens *)ui, lens_current_id(ui, opts->label));
     if (!n)
         return false;
     lens_textedit_state *ts = lens_node_state(n, sizeof *ts);
     if (!ts)
         return false;
-    if (caret)
-        *caret = ts->cursor;
+    if (opts->out_caret)
+        *opts->out_caret = ts->cursor;
     return true;
 }
 
-void lens_textedit_set_selection(lens *ui, const char *label, uint32_t sel_start,
-                                 uint32_t sel_end) {
-    if (!ui || !label)
+void lens_textedit_set_selection(lens *ui, const lens_textedit_set_selection_opts *opts) {
+    if (!ui || !opts || !opts->label)
         return;
-    lens_node *n = lens_find(ui, lens_current_id(ui, label));
+    lens_node *n = lens_find(ui, lens_current_id(ui, opts->label));
     if (!n)
         return;
     lens_textedit_state *ts = lens_node_state(n, sizeof *ts);
     if (ts) {
-        ts->sel_anchor = sel_start;
-        ts->cursor = sel_end;
+        ts->sel_anchor = opts->sel_start;
+        ts->cursor = opts->sel_end;
     }
 }
 
-bool lens_textedit_get_selection(const lens *ui, const char *label, uint32_t *sel_start,
-                                 uint32_t *sel_end) {
-    if (!ui || !label)
+bool lens_textedit_get_selection(const lens *ui, const lens_textedit_get_selection_opts *opts) {
+    if (!ui || !opts || !opts->label)
         return false;
-    lens_node *n = lens_find((lens *)ui, lens_current_id(ui, label));
+    lens_node *n = lens_find((lens *)ui, lens_current_id(ui, opts->label));
     if (!n)
         return false;
     lens_textedit_state *ts = lens_node_state(n, sizeof *ts);
     if (!ts || !sel_active(ts))
         return false;
-    if (sel_start)
-        *sel_start = sel_lo(ts);
-    if (sel_end)
-        *sel_end = sel_hi(ts);
+    if (opts->out_sel_start)
+        *opts->out_sel_start = sel_lo(ts);
+    if (opts->out_sel_end)
+        *opts->out_sel_end = sel_hi(ts);
     return true;
 }

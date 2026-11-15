@@ -210,7 +210,7 @@ static VkCommandPool transient_pool_acquire(flux_device *d, uint32_t family) {
  * flux_vk_staging_pool_destroy, which device teardown already runs. */
 static void transient_pool_cache_destroy(flux_device *d) {
     flux_transient_pool *idle = d->transient_pool_idle;
-    d->transient_pool_idle = NULL;
+    d->transient_pool_idle = nullptr;
     d->transient_pool_idle_count = 0;
     while (idle) {
         flux_transient_pool *next = idle->next;
@@ -287,11 +287,11 @@ static void staging_destroy(flux_device *d, flux_staging_buf *sb) {
 
 flux_result flux_vk_staging_acquire(flux_device *d, VkDeviceSize size, VkBufferUsageFlags usage,
                                     flux_staging_buf **out) {
-    *out = NULL;
+    *out = nullptr;
 
     /* Smallest-fit idle entry with matching usage. */
     flux_platform_mutex_lock(&d->staging_lock);
-    flux_staging_buf **best = NULL;
+    flux_staging_buf **best = nullptr;
     for (flux_staging_buf **pp = &d->staging_idle; *pp; pp = &(*pp)->next) {
         if ((*pp)->usage != usage || (*pp)->capacity < size)
             continue;
@@ -303,7 +303,7 @@ flux_result flux_vk_staging_acquire(flux_device *d, VkDeviceSize size, VkBufferU
         *best = sb->next;
         d->staging_idle_bytes -= sb->capacity;
         flux_platform_mutex_unlock(&d->staging_lock);
-        sb->next = NULL;
+        sb->next = nullptr;
         *out = sb;
         return FLUX_OK;
     }
@@ -321,7 +321,7 @@ flux_result flux_vk_staging_acquire(flux_device *d, VkDeviceSize size, VkBufferU
     }
     sb->capacity = size;
     sb->usage = usage;
-    sb->next = NULL;
+    sb->next = nullptr;
     /* Ledger-derived name (ADR-0132). Staging buffers are pooled and reused,
      * so the per-instance name is what makes one distinguishable from another
      * in a capture; the size is already in the ledger's byte column. */
@@ -348,7 +348,7 @@ void flux_vk_staging_release(flux_device *d, flux_staging_buf *sb) {
 
 void flux_vk_staging_pool_destroy(flux_device *d) {
     flux_staging_buf *idle = d->staging_idle;
-    d->staging_idle = NULL;
+    d->staging_idle = nullptr;
     d->staging_idle_bytes = 0;
     while (idle) {
         flux_staging_buf *next = idle->next;
@@ -390,7 +390,7 @@ static void upload_pending_recycle(flux_device *d, VkFence fence, VkCommandPool 
         vkDestroySemaphore(d->device, sem, nullptr);
     while (stagings) {
         flux_staging_buf *next = stagings->next;
-        stagings->next = NULL;
+        stagings->next = nullptr;
         flux_vk_staging_release(d, stagings);
         stagings = next;
     }
@@ -410,7 +410,7 @@ static void upload_pending_sweep(flux_device *d) {
         flux_upload_pending *p = *pp;
         if (vkGetFenceStatus(d->device, p->fence) == VK_SUCCESS) {
             *pp = p->next;
-            p->next = NULL;
+            p->next = nullptr;
             if (p->serial)
                 flux_vk_note_graphics_completed(d, p->serial);
             upload_pending_recycle(d, p->fence, p->pool, p->pool_family, p->pool_cmd, p->pool2,
@@ -432,7 +432,7 @@ void flux_vk_upload_pending_drain(flux_device *d) {
         flux_platform_mutex_unlock(&d->upload_pending_lock);
         if (!p)
             break;
-        p->next = NULL;
+        p->next = nullptr;
         vkWaitForFences(d->device, 1, &p->fence, VK_TRUE, UINT64_MAX);
         if (p->serial)
             flux_vk_note_graphics_completed(d, p->serial);
@@ -605,7 +605,7 @@ flux_result flux_uploads_flush(flux_device *d) {
     flux_staging_buf *stagings = d->upload_batch_stagings;
     d->upload_batch_pool = VK_NULL_HANDLE;
     d->upload_batch_cmd = VK_NULL_HANDLE;
-    d->upload_batch_stagings = NULL;
+    d->upload_batch_stagings = nullptr;
     d->upload_batch_open = false;
     d->upload_batch_depth = 0;
     flux_platform_mutex_unlock(&d->upload_lock);
@@ -675,7 +675,7 @@ flux_result flux_vk_upload_to_buffer(flux_device *d, VkBuffer dst, VkDeviceSize 
         return FLUX_OK;
 
     upload_pending_sweep(d);
-    flux_staging_buf *staging = NULL;
+    flux_staging_buf *staging = nullptr;
     VkCommandPool xfer_pool = VK_NULL_HANDLE;
     VkCommandBuffer xfer_cmd = VK_NULL_HANDLE;
     VkCommandPool gfx_pool = VK_NULL_HANDLE;
@@ -914,7 +914,7 @@ flux_result flux_vk_upload_to_image(flux_device *d, struct flux_image *plan_dest
         return FLUX_OK;
 
     upload_pending_sweep(d);
-    flux_staging_buf *staging = NULL;
+    flux_staging_buf *staging = nullptr;
     VkCommandPool xfer_pool = VK_NULL_HANDLE;
     VkCommandBuffer xfer_cmd = VK_NULL_HANDLE;
     VkCommandPool gfx_pool = VK_NULL_HANDLE;
@@ -1228,7 +1228,7 @@ flux_result flux_vk_transition_image_layout(flux_device *d, VkImage img, VkImage
         if (vr == VK_SUCCESS) {
             flux_vk_upload_pending_park_families(d, fence, pool, d->graphics_family, cmd,
                                                  VK_NULL_HANDLE, 0, VK_NULL_HANDLE, VK_NULL_HANDLE,
-                                                 NULL, serial);
+                                                 nullptr, serial);
             return FLUX_OK;
         }
     }

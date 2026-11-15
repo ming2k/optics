@@ -24,14 +24,18 @@
 
 static flux_observe_counters row(flux_device *d, const char *kind) {
     flux_observe_counters c = {};
-    if (flux_observe_read_counters(d, SCOPE, kind, OWNER, &c) != FLUX_OK)
+    if (flux_observe_read_counters(
+            d, &(flux_observe_read_counters_opts){
+                   .scope = SCOPE, .kind = kind, .owner = OWNER, .out = &c}) != FLUX_OK)
         c = (flux_observe_counters){};
     return c;
 }
 
 static flux_observe_counters flux_row(flux_device *d, const char *kind) {
     flux_observe_counters c = {};
-    if (flux_observe_read_counters(d, SCOPE, kind, "flux/core", &c) != FLUX_OK)
+    if (flux_observe_read_counters(
+            d, &(flux_observe_read_counters_opts){
+                   .scope = SCOPE, .kind = kind, .owner = "flux/core", .out = &c}) != FLUX_OK)
         c = (flux_observe_counters){};
     return c;
 }

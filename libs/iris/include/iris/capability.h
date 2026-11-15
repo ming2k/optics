@@ -30,6 +30,7 @@
 #define IRIS_CAPABILITY_H
 
 #include <iris/app.h> /* IRIS_API */
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -39,7 +40,7 @@ extern "C" {
 /*  Capabilities                                                      */
 /* ================================================================== */
 
-typedef enum iris_capability {
+typedef enum iris_capability : uint32_t {
     /* Window control (window.h). Degradation: functions are no-ops and
      * iris_window_get_* report zeros; the window itself keeps running.
      * Backends: Wayland (compositor-limited subsets), Win32, Cocoa. */

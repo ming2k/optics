@@ -3,7 +3,7 @@
 #include "../internal.h"
 
 lens_response lens_image(lens *ui, const lens_image_opts *opts) {
-    lens_image_opts default_opts = {0};
+    lens_image_opts default_opts = {};
     if (!opts)
         opts = &default_opts;
 
@@ -16,7 +16,7 @@ lens_response lens_image(lens *ui, const lens_image_opts *opts) {
         opts->box.id ? lensi_gen_widget_id(ui, opts->box.id) : lensi_gen_container_id(ui, "image");
     lens_node *n = lensi_store_touch(ui, nid);
     if (!n)
-        return (lens_response){0};
+        return (lens_response){};
 
     lensi_link_child(ui, n);
     lensi_node_box(ui, n, &opts->box);

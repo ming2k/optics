@@ -110,9 +110,18 @@ int main(void) {
             .depth = &depth_att,
         };
         flux_frame_begin_pass(frame, &pass);
-        flux_frame_set_viewport(frame, 0.0f, 0.0f, (float)SURF_W, (float)SURF_H, 0.0f, 1.0f);
-        flux_frame_set_scissor(frame, 0, 0, SURF_W, SURF_H);
-        flux_scene_draw_mesh(frame, &cam, flux_mat4_identity(), mesh, material);
+        flux_frame_set_viewport(frame, &(flux_frame_set_viewport_opts){.x = 0.0f,
+                                                                       .y = 0.0f,
+                                                                       .width = (float)SURF_W,
+                                                                       .height = (float)SURF_H,
+                                                                       .min_depth = 0.0f,
+                                                                       .max_depth = 1.0f});
+        flux_frame_set_scissor(frame, &(flux_frame_set_scissor_opts){
+                                          .x = 0, .y = 0, .width = SURF_W, .height = SURF_H});
+        flux_scene_draw_mesh(frame, &(flux_scene_draw_mesh_opts){.camera = &cam,
+                                                                 .world = flux_mat4_identity(),
+                                                                 .mesh = mesh,
+                                                                 .material = material});
         flux_frame_end_pass(frame);
         OT_EXPECT(flux_frame_submit(frame) == FLUX_OK);
         OT_EXPECT(flux_frame_present(frame) == FLUX_OK);

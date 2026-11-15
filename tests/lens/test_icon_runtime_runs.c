@@ -58,8 +58,8 @@ int main(void) {
     OT_EXPECT((int)red >= (int)LENS_ICON_COUNT);
     {
         const lens_icon_desc *d = lensi_icon_desc((int32_t)red);
-        OT_EXPECT(d != NULL);
-        OT_EXPECT(d->runs != NULL);
+        OT_EXPECT(d != nullptr);
+        OT_EXPECT(d->runs != nullptr);
         OT_EXPECT(d->run_count == 1);
         OT_EXPECT(d->runs[0].color == 0xFFFF0000u); /* R=FF A=FF */
         OT_EXPECT(d->runs[0].fill == 0);
@@ -72,8 +72,8 @@ int main(void) {
     OT_EXPECT((int)theme >= (int)LENS_ICON_COUNT);
     {
         const lens_icon_desc *d = lensi_icon_desc((int32_t)theme);
-        OT_EXPECT(d != NULL);
-        OT_EXPECT(d->runs == NULL);
+        OT_EXPECT(d != nullptr);
+        OT_EXPECT(d->runs == nullptr);
         OT_EXPECT(d->run_count == 0);
         /* Two shapes still produce two subpaths (two MOVE verbs). */
         uint32_t moves = 0;
@@ -88,8 +88,8 @@ int main(void) {
     OT_EXPECT((int)two >= (int)LENS_ICON_COUNT);
     {
         const lens_icon_desc *d = lensi_icon_desc((int32_t)two);
-        OT_EXPECT(d != NULL);
-        OT_EXPECT(d->runs != NULL);
+        OT_EXPECT(d != nullptr);
+        OT_EXPECT(d->runs != nullptr);
         OT_EXPECT(d->run_count == 1);
         OT_EXPECT(d->runs[0].color == 0xFF00FF00u); /* G=FF A=FF */
         OT_EXPECT(d->runs[0].fill == 1);
@@ -102,8 +102,8 @@ int main(void) {
     OT_EXPECT((int)mixed >= (int)LENS_ICON_COUNT);
     {
         const lens_icon_desc *d = lensi_icon_desc((int32_t)mixed);
-        OT_EXPECT(d != NULL);
-        OT_EXPECT(d->runs != NULL);
+        OT_EXPECT(d != nullptr);
+        OT_EXPECT(d->runs != nullptr);
         OT_EXPECT(d->run_count == 3);
         OT_EXPECT(d->runs[0].color == 0xFF112233u); /* R=11 G=22 B=33 A=FF */
         OT_EXPECT(d->runs[0].fill == 1);
@@ -128,8 +128,8 @@ int main(void) {
     OT_EXPECT((int)theme_mixed >= (int)LENS_ICON_COUNT);
     {
         const lens_icon_desc *d = lensi_icon_desc((int32_t)theme_mixed);
-        OT_EXPECT(d != NULL);
-        OT_EXPECT(d->runs != NULL);
+        OT_EXPECT(d != nullptr);
+        OT_EXPECT(d->runs != nullptr);
         OT_EXPECT(d->run_count == 2);
         OT_EXPECT(d->runs[0].color == 0u);
         OT_EXPECT(d->runs[0].fill == 0); /* stroke */

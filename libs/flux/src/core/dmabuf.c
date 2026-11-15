@@ -449,7 +449,7 @@ static flux_result dmabuf_transition_image_layout(flux_device *d, VkImage img,
              * graphics-family transient pool cache when the batch retires. */
             flux_vk_upload_pending_park_families(d, fence, pool, d->graphics_family, cmd,
                                                  VK_NULL_HANDLE, UINT32_MAX, VK_NULL_HANDLE,
-                                                 acquire_sem, NULL, serial);
+                                                 acquire_sem, nullptr, serial);
             return FLUX_OK;
         }
     }
@@ -472,10 +472,13 @@ bool flux_dmabuf_sync_supported(const flux_device *d) {
     return d && (d->enabled_features & FLUX_DEVICE_FEATURE_DMABUF_SYNC_FILE) != 0;
 }
 
-flux_result flux_dmabuf_format_modifiers(flux_device *d, flux_format format,
-                                         uint64_t *out_modifiers, uint32_t *inout_count) {
-    if (!d || !inout_count)
+flux_result flux_dmabuf_format_modifiers(flux_device *d,
+                                         const flux_dmabuf_format_modifiers_opts *opts) {
+    if (!d || !opts || !opts->inout_count)
         return FLUX_ERROR_INVALID_ARGUMENT;
+    flux_format format = opts->format;
+    uint64_t *out_modifiers = opts->out_modifiers;
+    uint32_t *inout_count = opts->inout_count;
     if (!out_modifiers && *inout_count != 0)
         return FLUX_ERROR_INVALID_ARGUMENT;
     /* A device missing the dma-buf extensions has no importable modifiers to

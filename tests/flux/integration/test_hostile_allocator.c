@@ -154,8 +154,11 @@ static void lane_funnel_contract(flux_device *d) {
 
     /* The ledger must show the row under the caller's owner, not flux's. */
     flux_observe_counters c = {};
-    OT_EXPECT(flux_observe_read_counters(d, FLUX_SCOPE_DEVICE, "probe", "tests/hostile", &c) ==
-              FLUX_OK);
+    OT_EXPECT(
+        flux_observe_read_counters(d, &(flux_observe_read_counters_opts){.scope = FLUX_SCOPE_DEVICE,
+                                                                         .kind = "probe",
+                                                                         .owner = "tests/hostile",
+                                                                         .out = &c}) == FLUX_OK);
     OT_EXPECT(c.live == 1);
 
     flux_device_free(d, &(flux_device_free_opts){
@@ -166,9 +169,12 @@ static void lane_funnel_contract(flux_device *d) {
                             .scope = FLUX_SCOPE_DEVICE,
                         });
     OT_EXPECT(g_live_bytes == before);
-    OT_EXPECT(flux_observe_read_counters(d, FLUX_SCOPE_DEVICE, "probe", "tests/hostile", &c) ==
-                  FLUX_OK &&
-              c.live == 0);
+    OT_EXPECT(
+        flux_observe_read_counters(d, &(flux_observe_read_counters_opts){.scope = FLUX_SCOPE_DEVICE,
+                                                                         .kind = "probe",
+                                                                         .owner = "tests/hostile",
+                                                                         .out = &c}) == FLUX_OK &&
+        c.live == 0);
 }
 
 /* Missing owner/kind is rejected, not defaulted: an unattributable allocation
@@ -214,9 +220,12 @@ static void lane_funnel_oom(flux_device *d) {
     /* A failed allocation must not leave a ledger row behind. */
     OT_EXPECT(g_live_bytes == before);
     flux_observe_counters c = {};
-    OT_EXPECT(flux_observe_read_counters(d, FLUX_SCOPE_DEVICE, "oom", "tests/hostile", &c) !=
-                  FLUX_OK ||
-              c.live == 0);
+    OT_EXPECT(
+        flux_observe_read_counters(d, &(flux_observe_read_counters_opts){.scope = FLUX_SCOPE_DEVICE,
+                                                                         .kind = "oom",
+                                                                         .owner = "tests/hostile",
+                                                                         .out = &c}) != FLUX_OK ||
+        c.live == 0);
 }
 
 /* --- 2/3. libraries must route through it ----------------------------- */

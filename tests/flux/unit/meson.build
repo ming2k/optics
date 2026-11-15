@@ -110,24 +110,26 @@ test_canvas_coverage = executable('test_canvas_coverage',
 )
 test('canvas_coverage', test_canvas_coverage, suite : 'unit')
 
-# Headless CPU-canvas GLYPH run test (ADR-0019): draws text on a device-less
-# canvas via the host R8 coverage atlas path. Links glyph for shaping.
-test_canvas_cpu_text = executable('test_canvas_cpu_text',
-  'test_canvas_cpu_text.c',
-  dependencies : [flux_unit_support_dep, glyph_dep],
-)
-test('canvas_cpu_text', test_canvas_cpu_text, suite : 'unit')
+if opt_glyph
+  # Headless CPU-canvas GLYPH run test (ADR-0019): draws text on a device-less
+  # canvas via the host R8 coverage atlas path. Links glyph for shaping.
+  test_canvas_cpu_text = executable('test_canvas_cpu_text',
+    'test_canvas_cpu_text.c',
+    dependencies : [flux_unit_support_dep, glyph_dep],
+  )
+  test('canvas_cpu_text', test_canvas_cpu_text, suite : 'unit')
 
-# Atlas-clear invalidation: a segment recorded before an atlas_clear carries
-# pre-clear glyph UVs, so replay must be refused via the host-atlas
-# generation check (flux_glyph_run_host_atlas_desc) and a live re-draw must
-# reproduce the recorded pixels exactly. CPU backend; forces real clears
-# with oversized (512px) glyph cells.
-test_canvas_text_atlas = executable('test_canvas_text_atlas',
-  'test_canvas_text_atlas.c',
-  dependencies : [flux_unit_support_dep, glyph_dep],
-)
-test('canvas_text_atlas', test_canvas_text_atlas, suite : 'unit')
+  # Atlas-clear invalidation: a segment recorded before an atlas_clear carries
+  # pre-clear glyph UVs, so replay must be refused via the host-atlas
+  # generation check (flux_glyph_run_host_atlas_desc) and a live re-draw must
+  # reproduce the recorded pixels exactly. CPU backend; forces real clears
+  # with oversized (512px) glyph cells.
+  test_canvas_text_atlas = executable('test_canvas_text_atlas',
+    'test_canvas_text_atlas.c',
+    dependencies : [flux_unit_support_dep, glyph_dep],
+  )
+  test('canvas_text_atlas', test_canvas_text_atlas, suite : 'unit')
+endif
 
 # Headless CPU-canvas display-list test: record/replay segments render
 # pixel-identically to live emission and refuse stale anchors (clip,
@@ -221,11 +223,13 @@ test('scene_camera', test_scene_camera, suite : 'unit')
 shape_test = executable('test_canvas_shapes', 'test_canvas_shapes.c', dependencies : [flux_unit_support_dep])
 test('canvas_shapes', shape_test, suite : 'unit')
 
-test_rfc0094 = executable('test_rfc0094_contracts',
-  'test_rfc0094_contracts.c',
-  dependencies : [flux_unit_support_dep, glyph_dep],
-)
-test('rfc0094_contracts', test_rfc0094, suite : 'unit')
+if opt_glyph
+  test_rfc0094 = executable('test_rfc0094_contracts',
+    'test_rfc0094_contracts.c',
+    dependencies : [flux_unit_support_dep, glyph_dep],
+  )
+  test('rfc0094_contracts', test_rfc0094, suite : 'unit')
+endif
 
 test_display_list = executable('test_display_list', 'test_display_list.c',
   dependencies : [flux_unit_support_dep],

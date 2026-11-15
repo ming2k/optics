@@ -238,7 +238,7 @@ flux_result sg_parse_animation_glb(const vista_scene *target, const void *bytes,
                                    vista_animation **out) {
     if (!target || !bytes || !out)
         return FLUX_ERROR_INVALID_ARGUMENT;
-    *out = NULL;
+    *out = nullptr;
     sg_glb glb;
     flux_result result = sg_glb_parse(bytes, len, &glb);
     if (result != FLUX_OK)
@@ -248,14 +248,14 @@ flux_result sg_parse_animation_glb(const vista_scene *target, const void *bytes,
      * block at the bottom can release them from any exit (the repo's
      * standard single-exit discipline). */
     flux_result r = FLUX_OK;
-    jv *root = NULL;
-    vista_node *source_nodes = NULL;
+    jv *root = nullptr;
+    vista_node *source_nodes = nullptr;
     uint32_t source_node_count = 0;
-    vista_animation *animation = NULL;
+    vista_animation *animation = nullptr;
     /* The retarget source scratch scene. Declared here so early `goto fail`
      * exits (before it is populated) can still release its cached world
      * order; zero-init leaves `world_order` NULL, which `free` accepts. */
-    vista_scene source_scene = {0};
+    vista_scene source_scene = {};
 
     size_t error_offset = 0;
     root = jv_parse((const char *)glb.json, glb.json_len, &error_offset);
@@ -271,7 +271,7 @@ flux_result sg_parse_animation_glb(const vista_scene *target, const void *bytes,
     }
     source_node_count =
         nodes_json && nodes_json->kind == J_ARR ? (uint32_t)nodes_json->arr.count : 0;
-    source_nodes = source_node_count ? calloc(source_node_count, sizeof(*source_nodes)) : NULL;
+    source_nodes = source_node_count ? calloc(source_node_count, sizeof(*source_nodes)) : nullptr;
     if (source_node_count && !source_nodes) {
         r = FLUX_ERROR_OUT_OF_MEMORY;
         goto fail;
@@ -295,7 +295,7 @@ flux_result sg_parse_animation_glb(const vista_scene *target, const void *bytes,
     for (int i = 0; i < SG_HUMAN_BONE_COUNT; ++i)
         source_bones[i] = -1;
     const jv *extensions = jv_obj_get(root, "extensions");
-    bool vrma = jv_obj_get(extensions, "VRMC_vrm_animation") != NULL;
+    bool vrma = jv_obj_get(extensions, "VRMC_vrm_animation") != nullptr;
     if (vrma)
         sg_read_humanoid(root, "VRMC_vrm_animation", false, source_bones);
 
@@ -518,10 +518,14 @@ void vista_scene_reset_pose(vista_scene *scene) {
     sg_update_skin_palettes(scene);
 }
 
-flux_result vista_scene_apply_animation(vista_scene *scene, const vista_animation *animation,
-                                        float time_seconds, bool loop) {
-    if (!scene || !animation || animation->target != scene || !isfinite(time_seconds))
+flux_result vista_scene_apply_animation(vista_scene *scene,
+                                        const vista_scene_apply_animation_opts *opts) {
+    if (!scene || !opts || !opts->animation || opts->animation->target != scene ||
+        !isfinite(opts->time_seconds))
         return FLUX_ERROR_INVALID_ARGUMENT;
+    const vista_animation *animation = opts->animation;
+    float time_seconds = opts->time_seconds;
+    bool loop = opts->loop;
     vista_scene_reset_pose(scene);
     float time = fmaxf(time_seconds, 0.0f);
     if (animation->duration > FLT_EPSILON)
@@ -545,9 +549,11 @@ flux_result vista_scene_apply_animation(vista_scene *scene, const vista_animatio
     return FLUX_OK;
 }
 
-flux_result vista_load_animation_glb(const vista_scene *target, const void *glb_bytes,
-                                     size_t byte_count, vista_animation **out) {
-    return sg_parse_animation_glb(target, glb_bytes, byte_count, out);
+flux_result vista_load_animation_glb(const vista_scene *target,
+                                     const vista_load_animation_glb_opts *opts) {
+    if (!opts || !opts->bytes || !opts->out)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    return sg_parse_animation_glb(target, opts->bytes, opts->byte_count, opts->out);
 }
 
 vista_animation *vista_animation_retain(vista_animation *animation) {

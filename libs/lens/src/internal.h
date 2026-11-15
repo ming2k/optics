@@ -14,6 +14,7 @@
 #include <lens/icon.h>
 #include <lens/lens.h>
 #include <math.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -38,7 +39,7 @@
 /* Node placement (ADR-0060): FLOW participates in its parent's flexbox;
  * ABS escapes the flow and the ancestor clips and is emitted in its z
  * band. Only container sub-roots may be ABS (lens_place_begin). */
-typedef enum lens_place {
+typedef enum lens_place : uint32_t {
     LENS_PLACE_FLOW = 0,
     LENS_PLACE_ABS = 1,
 } lens_place;
@@ -47,7 +48,7 @@ typedef enum lens_place {
 /*  Draw command (ADR-0030) — coordinates relative to the node box    */
 /* ------------------------------------------------------------------ */
 
-typedef enum lens_draw_kind {
+typedef enum lens_draw_kind : uint32_t {
     LENS_DRAW_RECT = 0,
     LENS_DRAW_BORDER = 1,
     LENS_DRAW_TEXT = 2,

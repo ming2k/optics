@@ -105,14 +105,16 @@ static int copy_uri(NSURL *url, char *out_path, size_t out_cap) {
 /*  Public API                                                         */
 /* ------------------------------------------------------------------ */
 
-IRIS_API int iris_pick_file(const iris_file_dialog_opts *opts, char *out_path, size_t out_cap) {
-    if (!out_path || out_cap == 0)
+IRIS_API int iris_pick_file(const iris_file_dialog_opts *opts) {
+    if (!opts || !opts->out_path || opts->out_cap == 0)
         return IRIS_PICK_UNAVAILABLE;
+    char *out_path = opts->out_path;
+    size_t out_cap = opts->out_cap;
     out_path[0] = '\0';
     @autoreleasepool {
         NSOpenPanel *panel = [NSOpenPanel openPanel];
-        [panel setCanChooseFiles:!opts || !opts->directory_only];
-        [panel setCanChooseDirectories:opts && opts->directory_only];
+        [panel setCanChooseFiles:!opts->directory_only];
+        [panel setCanChooseDirectories:opts->directory_only];
         [panel setAllowsMultipleSelection:NO];
         apply_opts(panel, opts);
         if ([panel runModal] != NSModalResponseOK)
@@ -121,9 +123,11 @@ IRIS_API int iris_pick_file(const iris_file_dialog_opts *opts, char *out_path, s
     }
 }
 
-IRIS_API int iris_pick_folder(const iris_file_dialog_opts *opts, char *out_path, size_t out_cap) {
-    if (!out_path || out_cap == 0)
+IRIS_API int iris_pick_folder(const iris_file_dialog_opts *opts) {
+    if (!opts || !opts->out_path || opts->out_cap == 0)
         return IRIS_PICK_UNAVAILABLE;
+    char *out_path = opts->out_path;
+    size_t out_cap = opts->out_cap;
     out_path[0] = '\0';
     @autoreleasepool {
         NSOpenPanel *panel = [NSOpenPanel openPanel];
@@ -137,10 +141,12 @@ IRIS_API int iris_pick_folder(const iris_file_dialog_opts *opts, char *out_path,
     }
 }
 
-IRIS_API int iris_pick_save_path(const iris_file_dialog_opts *opts, const char *default_name,
-                                 char *out_path, size_t out_cap) {
-    if (!out_path || out_cap == 0)
+IRIS_API int iris_pick_save_path(const iris_file_dialog_opts *opts) {
+    if (!opts || !opts->out_path || opts->out_cap == 0)
         return IRIS_PICK_UNAVAILABLE;
+    char *out_path = opts->out_path;
+    size_t out_cap = opts->out_cap;
+    const char *default_name = opts->default_name;
     out_path[0] = '\0';
     @autoreleasepool {
         NSSavePanel *panel = [NSSavePanel savePanel];
@@ -156,10 +162,12 @@ IRIS_API int iris_pick_save_path(const iris_file_dialog_opts *opts, const char *
     }
 }
 
-IRIS_API int iris_pick_files(const iris_file_dialog_opts *opts, char *out_paths, size_t out_cap,
-                             size_t *out_bytes_used) {
-    if (!out_paths || out_cap == 0)
+IRIS_API int iris_pick_files(const iris_file_dialog_opts *opts) {
+    if (!opts || !opts->out_path || opts->out_cap == 0)
         return IRIS_PICK_UNAVAILABLE;
+    char *out_paths = opts->out_path;
+    size_t out_cap = opts->out_cap;
+    size_t *out_bytes_used = opts->out_bytes_used;
     out_paths[0] = '\0';
     @autoreleasepool {
         NSOpenPanel *panel = [NSOpenPanel openPanel];

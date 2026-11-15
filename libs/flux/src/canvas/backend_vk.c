@@ -169,7 +169,7 @@ static void owned_image_destroy(flux_canvas *c, canvas_owned_image *owned) {
         flux_device_retire_image(d, owned->view, owned->image, &owned->alloc, VK_NULL_HANDLE, 0,
                                  bindless, FLUX_BINDLESS_INVALID);
     }
-    *owned = (canvas_owned_image){0};
+    *owned = (canvas_owned_image){};
     owned->bindless = FLUX_BINDLESS_INVALID;
 }
 
@@ -385,7 +385,7 @@ static canvas_attachment_set *target_attachments_get(flux_canvas *c, uint32_t sl
     if (ts->count < FLUX_CANVAS_TARGET_ATTACHMENT_CAP) {
         uint32_t idx = ts->count++;
         canvas_target_attachment_entry *entry = &ts->entries[idx];
-        *entry = (canvas_target_attachment_entry){0};
+        *entry = (canvas_target_attachment_entry){};
         entry->attachments.linear.bindless = FLUX_BINDLESS_INVALID;
         entry->width = bw;
         entry->height = bh;
@@ -404,7 +404,7 @@ static canvas_attachment_set *target_attachments_get(flux_canvas *c, uint32_t sl
 
     canvas_target_attachment_entry *lru = &ts->entries[lru_idx];
     attachments_destroy(c, &lru->attachments);
-    *lru = (canvas_target_attachment_entry){0};
+    *lru = (canvas_target_attachment_entry){};
     lru->attachments.linear.bindless = FLUX_BINDLESS_INVALID;
     lru->width = bw;
     lru->height = bh;
@@ -422,7 +422,7 @@ static flux_result vk_canvas_init(const flux_canvas_backend *self, flux_canvas *
     flux_vk_canvas *v = flux_internal_alloc(d, sizeof(*v));
     if (!v)
         return FLUX_ERROR_OUT_OF_MEMORY;
-    *v = (flux_vk_canvas){0};
+    *v = (flux_vk_canvas){};
     c->backend_data = v;
 
     v->color_format = flux_surface_vk_format(c->surface);
@@ -766,7 +766,7 @@ static flux_result vk_begin_pass(const flux_canvas_backend *self, flux_canvas *c
         dither_levels = 1023.0f;
     }
 
-    v->out_encode = (flux_output_push){0};
+    v->out_encode = (flux_output_push){};
     mat3_to_push(&enc, v->out_encode.primaries);
     v->out_encode.image_handle = linear->bindless;
     v->out_encode.sampler_handle = flux_device_default_sampler_handle(c->device);
@@ -1213,8 +1213,12 @@ static void vk_submit(const flux_canvas_backend *self, flux_canvas *c, canvas_pi
     /* Vertices travel through the frame's transient ring; the shader reads
      * them by buffer-reference address (push.verts_address). */
     flux_transient slice;
-    flux_result r = flux_frame_alloc_transient(c->frame, vertex_count * sizeof(flux_canvas_vertex),
-                                               alignof(flux_canvas_vertex), &slice);
+    flux_result r =
+        flux_frame_alloc_transient(c->frame, &(flux_frame_alloc_transient_opts){
+                                                 .bytes = vertex_count * sizeof(flux_canvas_vertex),
+                                                 .alignment = alignof(flux_canvas_vertex),
+                                                 .out = &slice,
+                                             });
     if (r != FLUX_OK) {
         c->dropped_draws++;
         return;
@@ -1468,7 +1472,9 @@ static flux_result vk_submit_cover(const flux_canvas_backend *self, flux_canvas 
      * Evaluated directly in canvas_vector.frag at 1x sample rate on the physical GPU. */
     size_t segs_bytes = (size_t)n_segs * sizeof(flux_tile_segment);
     flux_transient slice;
-    flux_result r = flux_frame_alloc_transient(c->frame, segs_bytes, 16, &slice);
+    flux_result r = flux_frame_alloc_transient(
+        c->frame,
+        &(flux_frame_alloc_transient_opts){.bytes = segs_bytes, .alignment = 16, .out = &slice});
     if (r != FLUX_OK)
         return r;
     memcpy(slice.cpu, segs, segs_bytes);

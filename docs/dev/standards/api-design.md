@@ -17,10 +17,10 @@ Every public functional entry point across all libraries in Optics must follow t
 1. **Pointers to Descriptors**: The `opts` argument must always be a `const *` pointer to allow passing `{}` or `nullptr` safely.
 2. **C23 Compound Literals**: Callers pass options using modern C23 compound literal syntax (`{}` for zero initialization, `nullptr` for null pointers):
    ```c
-   // Terse, idiomatic C23 invocation:
-   flux_canvas_draw_rect(canvas, &(flux_canvas_draw_rect_opts){
-       .bounds = {0.0f, 0.0f, 100.0f, 100.0f},
-       .color = {1.0f, 1.0f, 1.0f, 1.0f},
+   // Terse, idiomatic C23 invocation (a real canonical widget call):
+   lens_button(ui, &(lens_button_opts){
+       .label = "Save",
+       .variant = LENS_BUTTON_PRIMARY,
    });
    ```
 3. **C23 Language Baseline**:
@@ -30,7 +30,22 @@ Every public functional entry point across all libraries in Optics must follow t
    - **Attributes**: Standard C23 `[[nodiscard]]`, `[[reproducible]]`, `[[unsequenced]]`.
    - **Static Assertions**: Standard C23 `static_assert(cond, msg)`.
 4. **Structured Return**:
-   - Public entry points return explicit structured types (e.g. status structs, response handles, or result descriptors) rather than bare error codes or out-parameters, providing clear contextual outcome state.
+   - Fallible public entry points return `flux_result` (the stack-wide status type) or a typed response descriptor; query/accessor entry points may return a value directly. Bare `int` error codes and unchecked out-parameters are prohibited.
+
+### Migration Status
+
+Waves 1–6 (`glyph`, `vista`, `prism`, `iris`, `flux`, `lens`) are all landed;
+`reticle` was already compliant. Every operation entry point across the stack
+now accepts a typed `const <module>_<op>_opts *` descriptor (or its existing
+`*_desc *` descriptor), with folded variants (`glyph_draw_outlined`,
+`flux_scene_draw_mesh_{lit,skinned,skinned_lit}`,
+`flux_image_update_region_{strided,premultiply}`,
+`flux_encoder_draw_geometry_slot`, `flux_canvas_submit_display_list_bound`)
+unified into their canonical descriptor fields. Math, pure getters/single-scalar
+setters, lifecycle primitives, version accessors, callbacks, and raw Vulkan
+handle/readback accessors remain explicit exceptions per
+([ADR-0165](../../adr/0165-single-opts-descriptor-migration-by-library.md)).
+`tools/check_api.py` enforces the suffix ratchet against regressions.
 
 ---
 

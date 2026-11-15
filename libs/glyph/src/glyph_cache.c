@@ -151,7 +151,7 @@ static void *gc_alloc(flux_device *d, size_t bytes) {
                               .scope = FLUX_SCOPE_CONTEXT,
                           },
                           &p) != FLUX_OK)
-        return NULL;
+        return nullptr;
     return p;
 }
 
@@ -174,19 +174,19 @@ static void gc_free(flux_device *d, void *p) {
 glyph_cache *glyph_cache_new(flux_device *device, uint32_t init_cap, uint32_t max_cap) {
     /* max_cap must be a power of two (mask arithmetic relies on it). */
     if (max_cap == 0 || (max_cap & (max_cap - 1)) != 0)
-        return NULL;
+        return nullptr;
 
     uint32_t cap = round_pow2(init_cap, MIN_CAP, max_cap);
 
     glyph_cache *c = gc_alloc(device, sizeof *c);
     if (!c)
-        return NULL;
+        return nullptr;
     c->device = device;
 
     c->slots = gc_alloc(device, (size_t)cap * sizeof *c->slots);
     if (!c->slots) {
         gc_free(device, c);
-        return NULL;
+        return nullptr;
     }
     c->cap = cap;
     c->max_cap = max_cap;
@@ -286,7 +286,7 @@ static bool rehash(glyph_cache *c, uint32_t new_cap) {
 glyph_entry *glyph_cache_lookup(glyph_cache *c, int face_id, uint32_t gid, uint32_t rpx,
                                 uint8_t phase) {
     if (!c)
-        return NULL;
+        return nullptr;
 
     uint32_t mask = c->cap - 1u;
     uint32_t idx = glyph_hash(face_id, gid, rpx, phase) & mask;
@@ -305,7 +305,7 @@ glyph_entry *glyph_cache_lookup(glyph_cache *c, int face_id, uint32_t gid, uint3
         idx = (idx + 1u) & mask;
     }
     c->stats.misses++;
-    return NULL;
+    return nullptr;
 }
 
 /* ------------------------------------------------------------------ */
@@ -330,7 +330,7 @@ static void evict_for_capacity(glyph_cache *c, glyph_entry *e) {
 glyph_entry *glyph_cache_put(glyph_cache *c, int face_id, uint32_t gid, uint32_t rpx,
                              uint8_t phase) {
     if (!c)
-        return NULL;
+        return nullptr;
 
     /* Admission control — two INDEPENDENT rules, deliberately not
      * chained as else-if:
@@ -412,9 +412,9 @@ glyph_entry *glyph_cache_put(glyph_cache *c, int face_id, uint32_t gid, uint32_t
         }
         idx = (idx + 1u) & mask;
     }
-    return NULL; /* table completely full — unreachable: the trigger
-                  * above always either grows, evicts, or rehashes
-                  * before we walk a full chain. */
+    return nullptr; /* table completely full — unreachable: the trigger
+                     * above always either grows, evicts, or rehashes
+                     * before we walk a full chain. */
 }
 
 /* ------------------------------------------------------------------ */

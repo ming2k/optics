@@ -107,11 +107,10 @@ int main(void) {
         OT_EXPECT(flux_color_space_is_valid(bt2020_hlg));
 
         OT_EXPECT(!flux_color_space_is_valid(
-            (flux_color_space){FLUX_PRIMARIES_BT709, FLUX_TRANSFER_GAMMA, 0.0f, {0}}));
+            (flux_color_space){FLUX_PRIMARIES_BT709, FLUX_TRANSFER_GAMMA, 0.0f, {}}));
+        OT_EXPECT(!flux_color_space_is_valid((flux_color_space){99, FLUX_TRANSFER_SRGB, 0.0f, {}}));
         OT_EXPECT(
-            !flux_color_space_is_valid((flux_color_space){99, FLUX_TRANSFER_SRGB, 0.0f, {0}}));
-        OT_EXPECT(
-            !flux_color_space_is_valid((flux_color_space){FLUX_PRIMARIES_BT709, 99, 0.0f, {0}}));
+            !flux_color_space_is_valid((flux_color_space){FLUX_PRIMARIES_BT709, 99, 0.0f, {}}));
 
         /* A real custom space: DCI-P3 theatre white (greenish). */
         flux_color_space dci = {FLUX_PRIMARIES_CUSTOM,
@@ -132,8 +131,8 @@ int main(void) {
         OT_EXPECT(flux_color_space_equal(scrgb, srgb_linear));
         /* Same primaries, different gamma: not equal. */
         OT_EXPECT(!flux_color_space_equal(
-            (flux_color_space){FLUX_PRIMARIES_BT2020, FLUX_TRANSFER_GAMMA, 2.4f, {0}},
-            (flux_color_space){FLUX_PRIMARIES_BT2020, FLUX_TRANSFER_GAMMA, 2.2f, {0}}));
+            (flux_color_space){FLUX_PRIMARIES_BT2020, FLUX_TRANSFER_GAMMA, 2.4f, {}},
+            (flux_color_space){FLUX_PRIMARIES_BT2020, FLUX_TRANSFER_GAMMA, 2.2f, {}}));
     }
 
     /* --- mat3 --- */
@@ -213,7 +212,7 @@ int main(void) {
 
         /* Invalid input fails and yields identity. */
         OT_EXPECT(!flux_color_space_transform_matrix(
-            (flux_color_space){FLUX_PRIMARIES_BT709, FLUX_TRANSFER_GAMMA, 0.0f, {0}}, srgb, &m));
+            (flux_color_space){FLUX_PRIMARIES_BT709, FLUX_TRANSFER_GAMMA, 0.0f, {}}, srgb, &m));
         OT_EXPECT(mat3_near(m, flux_mat3_identity(), EPS));
     }
 

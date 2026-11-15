@@ -129,7 +129,7 @@ static uint8_t *build_cube_glb(size_t *out_len) {
 
     uint8_t *glb = calloc(1, total);
     if (!glb)
-        return NULL;
+        return nullptr;
 
     uint32_t *hdr = (uint32_t *)glb;
     hdr[0] = 0x46546C67;
@@ -156,24 +156,24 @@ static uint8_t *build_cube_glb(size_t *out_len) {
 static uint8_t *read_file(const char *path, size_t *out_len) {
     FILE *f = fopen(path, "rb");
     if (!f)
-        return NULL;
+        return nullptr;
     fseek(f, 0, SEEK_END);
     long len = ftell(f);
     fseek(f, 0, SEEK_SET);
     if (len <= 0) {
         fclose(f);
-        return NULL;
+        return nullptr;
     }
     uint8_t *buf = malloc((size_t)len);
     if (!buf) {
         fclose(f);
-        return NULL;
+        return nullptr;
     }
     size_t read_bytes = fread(buf, 1, (size_t)len, f);
     fclose(f);
     if (read_bytes != (size_t)len) {
         free(buf);
-        return NULL;
+        return nullptr;
     }
     *out_len = (size_t)len;
     return buf;
@@ -183,7 +183,9 @@ static bool on_start(lens *ui, flux_device *device, void *user) {
     (void)ui;
     gltf_viewer_app *app = user;
 
-    flux_result r = vista_load_glb(device, app->glb, app->glb_len, &app->scene);
+    flux_result r = vista_load_glb(
+        device,
+        &(vista_load_glb_opts){.bytes = app->glb, .byte_count = app->glb_len, .out = &app->scene});
     if (r != FLUX_OK) {
         fprintf(stderr, "vista_load_glb failed: %d\n", (int)r);
         return false;
@@ -191,7 +193,8 @@ static bool on_start(lens *ui, flux_device *device, void *user) {
 
     if (app->orbit) {
         flux_vec3 bmin, bmax;
-        if (vista_scene_bounds(app->scene, &bmin, &bmax)) {
+        if (vista_scene_bounds(app->scene,
+                               &(vista_scene_bounds_opts){.out_min = &bmin, .out_max = &bmax})) {
             app->fr.center = flux_vec3_scale(flux_vec3_add(bmin, bmax), 0.5f);
             app->fr.half_diag = flux_vec3_length(flux_vec3_sub(bmax, bmin)) * 0.5f;
         }
@@ -356,16 +359,17 @@ static void on_prepare(flux_frame *frame, flux_canvas *canvas, flux_device *devi
         app->orbit ? (flux_vec3){-0.5f, -0.9f, -0.35f} : (flux_vec3){-0.6f, -1.0f, -0.4f};
     light.ambient = app->orbit ? 0.22f : 0.12f;
 
-    vista_draw_opts draw_opts = {.material = app->mat, .light = &light};
-    vista_draw(frame, &cam, app->scene, &draw_opts);
+    vista_draw_opts draw_opts = {
+        .camera = &cam, .scene = app->scene, .material = app->mat, .light = &light};
+    vista_draw(frame, &draw_opts);
 
     flux_frame_end_pass(frame);
 }
 
 int main(int argc, char **argv) {
-    uint8_t *mem_glb = NULL;
+    uint8_t *mem_glb = nullptr;
     size_t mem_len = 0;
-    const char *file_path = NULL;
+    const char *file_path = nullptr;
     bool orbit = false;
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--file") == 0 && i + 1 < argc)
@@ -374,9 +378,9 @@ int main(int argc, char **argv) {
             orbit = true;
     }
 
-    const void *glb = NULL;
+    const void *glb = nullptr;
     size_t glb_len = 0;
-    uint8_t *file_buf = NULL;
+    uint8_t *file_buf = nullptr;
     if (file_path) {
         file_buf = read_file(file_path, &glb_len);
         if (!file_buf) {

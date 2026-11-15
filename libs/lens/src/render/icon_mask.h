@@ -30,6 +30,7 @@
 #define LENSI_ICON_MASK_H
 
 #include "../internal.h"
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -39,7 +40,7 @@ extern "C" {
  * coloured (the outline is a distinct paint, drawn under the body), so they must
  * be separately masked: one union mask would force them to share one ink and
  * silently drop the outline colour. */
-typedef enum lensi_icon_mask_layer {
+typedef enum lensi_icon_mask_layer : uint32_t {
     LENSI_ICON_MASK_BODY = 0,   /* fill, or the run's own stroke width        */
     LENSI_ICON_MASK_OUTLINE = 1 /* stroke widened by the outline width        */
 } lensi_icon_mask_layer;

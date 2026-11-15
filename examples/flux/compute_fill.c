@@ -182,7 +182,14 @@ int main(void) {
         .out_buffer_address = buffer_addr,
         .count = COUNT,
     };
-    flux_compute_dispatch(cmd, pipe, &pc, sizeof(pc), (COUNT + WORKGROUP - 1) / WORKGROUP, 1, 1);
+    flux_compute_dispatch(
+        &(flux_compute_dispatch_opts){.cmd = cmd,
+                                      .pipeline = pipe,
+                                      .push_constants = &pc,
+                                      .push_bytes = sizeof(pc),
+                                      .group_x = (COUNT + WORKGROUP - 1) / WORKGROUP,
+                                      .group_y = 1,
+                                      .group_z = 1});
 
     /* Make the host-visible write available to the CPU. */
     VkMemoryBarrier2 mb = {

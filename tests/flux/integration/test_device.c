@@ -219,7 +219,7 @@ int main(void) {
         OT_EXPECT(flux_device_bindless_set(d) != VK_NULL_HANDLE);
         OT_EXPECT(flux_device_bindless_layout(d) != VK_NULL_HANDLE);
 
-        VkPhysicalDeviceFeatures physical_features = {0};
+        VkPhysicalDeviceFeatures physical_features = {};
         vkGetPhysicalDeviceFeatures(flux_device_vk_physical_device(d), &physical_features);
         OT_EXPECT(flux_device_supports_large_points(d) == (bool)physical_features.largePoints);
         OT_EXPECT(!flux_device_supports_large_points(nullptr));
@@ -228,7 +228,7 @@ int main(void) {
     /* --- capability queries: discovery by query, not by failure --- */
     {
         /* Argument validation. */
-        flux_device_limits zero = {0};
+        flux_device_limits zero = {};
         OT_EXPECT(flux_device_get_limits(d, nullptr) == FLUX_ERROR_INVALID_ARGUMENT);
         OT_EXPECT(flux_device_get_limits(nullptr, &zero) == FLUX_ERROR_INVALID_ARGUMENT);
         OT_EXPECT(flux_device_supports_image_usage(nullptr, FLUX_FORMAT_RGBA8_UNORM,

@@ -59,6 +59,7 @@
 #include <iris/cursor.h>
 #include <iris/dnd.h>
 #include <iris/theme.h>
+#include <iris/window.h>
 
 #include <flux/flux.h>
 #include <flux/vulkan.h>
@@ -210,12 +211,12 @@ static int64_t w32_query_refresh_ns(HWND hwnd);
  * the active app's platform through this single static pointer. Set at the
  * top of iris_app_run_win32, cleared before teardown. Documented as
  * thread-affine: callers must drive them from the iris_app_run thread. */
-static w32_platform *g_active_pl = NULL;
+static w32_platform *g_active_pl = nullptr;
 
 /* Internal seam for file_dialog_win32.c: the common file dialogs take an
  * owner HWND so they stay modal to the app window. Not a public symbol. */
 HWND iris_win32__dialog_owner(void) {
-    return g_active_pl ? g_active_pl->hwnd : NULL;
+    return g_active_pl ? g_active_pl->hwnd : nullptr;
 }
 
 void iris_request_animation_frame_win32(void) {
@@ -456,12 +457,12 @@ static void accum_text_cp(w32_platform *pl, uint32_t cp) {
 /* UTF-8 -> freshly allocated NUL-terminated WCHAR (NULL on failure).
  * Caller frees with free(). */
 static WCHAR *w32_wide_from_utf8(const char *utf8) {
-    int n = MultiByteToWideChar(CP_UTF8, 0, utf8, -1, NULL, 0);
+    int n = MultiByteToWideChar(CP_UTF8, 0, utf8, -1, nullptr, 0);
     if (n <= 0)
-        return NULL;
+        return nullptr;
     WCHAR *w = malloc((size_t)n * sizeof *w);
     if (!w)
-        return NULL;
+        return nullptr;
     MultiByteToWideChar(CP_UTF8, 0, utf8, -1, w, n);
     return w;
 }
@@ -704,7 +705,7 @@ static void ime_read_composition(w32_platform *pl, LPARAM flags) {
         if (bytes > 0) {
             char u8[768]; /* 256 WCHARs fit: BMP is 1 WCHAR -> 3 bytes */
             int n = WideCharToMultiByte(CP_UTF8, 0, wbuf, (int)(bytes / 2), u8, (int)sizeof u8,
-                                        NULL, NULL);
+                                        nullptr, nullptr);
             if (n > 0)
                 accum_text_append(pl, u8, (size_t)n);
         }
@@ -718,17 +719,19 @@ static void ime_read_composition(w32_platform *pl, LPARAM flags) {
         LONG wlen = bytes > 0 ? bytes / 2 : 0;
         char u8[768];
         int n = wlen > 0 ? WideCharToMultiByte(CP_UTF8, 0, wbuf, (int)wlen, u8, (int)sizeof u8,
-                                               NULL, NULL)
+                                               nullptr, nullptr)
                          : 0;
         char pre[LENS_PREEDIT_MAX];
         size_t kept = iris_utf8_floor_boundary(u8, (size_t)n, sizeof pre - 1);
         memcpy(pre, u8, kept);
         pre[kept] = '\0';
 
-        LONG cur = ImmGetCompositionStringW(himc, GCS_CURSORPOS, NULL, 0);
+        LONG cur = ImmGetCompositionStringW(himc, GCS_CURSORPOS, nullptr, 0);
         if (cur < 0 || cur > wlen)
             cur = wlen;
-        int cb = cur > 0 ? WideCharToMultiByte(CP_UTF8, 0, wbuf, (int)cur, NULL, 0, NULL, NULL) : 0;
+        int cb = cur > 0
+                     ? WideCharToMultiByte(CP_UTF8, 0, wbuf, (int)cur, nullptr, 0, nullptr, nullptr)
+                     : 0;
         uint32_t pcursor = (uint32_t)((size_t)cb <= kept ? (size_t)cb : kept);
 
         /* Active clause: the run of ATTR_TARGET_* bytes under conversion.
@@ -751,8 +754,10 @@ static void ime_read_composition(w32_platform *pl, LPARAM flags) {
             if (lo >= 0) {
                 if (hi < 0)
                     hi = abytes;
-                int blo = WideCharToMultiByte(CP_UTF8, 0, wbuf, (int)lo, NULL, 0, NULL, NULL);
-                int bhi = WideCharToMultiByte(CP_UTF8, 0, wbuf, (int)hi, NULL, 0, NULL, NULL);
+                int blo =
+                    WideCharToMultiByte(CP_UTF8, 0, wbuf, (int)lo, nullptr, 0, nullptr, nullptr);
+                int bhi =
+                    WideCharToMultiByte(CP_UTF8, 0, wbuf, (int)hi, nullptr, 0, nullptr, nullptr);
                 p_lo = (uint32_t)((size_t)blo <= kept ? (size_t)blo : kept);
                 p_hi = (uint32_t)((size_t)bhi <= kept ? (size_t)bhi : kept);
             }
@@ -770,7 +775,7 @@ static void ime_read_composition(w32_platform *pl, LPARAM flags) {
 /* lens_clipboard.set_text — publish `utf8` as the system clipboard text. */
 static void clip_set_text(const char *utf8, size_t len, void *user) {
     w32_platform *pl = user;
-    int wlen = MultiByteToWideChar(CP_UTF8, 0, utf8, (int)len, NULL, 0);
+    int wlen = MultiByteToWideChar(CP_UTF8, 0, utf8, (int)len, nullptr, 0);
     if (wlen <= 0)
         return;
     HGLOBAL hg = GlobalAlloc(GMEM_MOVEABLE, ((SIZE_T)wlen + 1) * sizeof(WCHAR));
@@ -804,17 +809,17 @@ static void clip_set_text(const char *utf8, size_t len, void *user) {
  * lens_begin/end pair. */
 static void clip_request_text(void *user) {
     w32_platform *pl = user;
-    char *utf8 = NULL;
+    char *utf8 = nullptr;
     if (OpenClipboard(pl->hwnd)) {
         HANDLE h = GetClipboardData(CF_UNICODETEXT);
         if (h) {
             const WCHAR *w = GlobalLock(h);
             if (w) {
-                int n = WideCharToMultiByte(CP_UTF8, 0, w, -1, NULL, 0, NULL, NULL);
+                int n = WideCharToMultiByte(CP_UTF8, 0, w, -1, nullptr, 0, nullptr, nullptr);
                 if (n > 1) { /* > 1: ignore the empty string */
                     utf8 = malloc((size_t)n);
                     if (utf8)
-                        WideCharToMultiByte(CP_UTF8, 0, w, -1, utf8, n, NULL, NULL);
+                        WideCharToMultiByte(CP_UTF8, 0, w, -1, utf8, n, nullptr, nullptr);
                 }
                 GlobalUnlock(h);
             }
@@ -835,22 +840,22 @@ static void clip_request_text(void *user) {
 static HCURSOR w32_cursor_handle(iris_cursor c) {
     switch (c) {
     case IRIS_CURSOR_TEXT:
-        return LoadCursorW(NULL, IDC_IBEAM);
+        return LoadCursorW(nullptr, IDC_IBEAM);
     case IRIS_CURSOR_POINTER:
-        return LoadCursorW(NULL, IDC_HAND);
+        return LoadCursorW(nullptr, IDC_HAND);
     case IRIS_CURSOR_BUSY:
-        return LoadCursorW(NULL, IDC_WAIT);
+        return LoadCursorW(nullptr, IDC_WAIT);
     case IRIS_CURSOR_CROSSHAIR:
-        return LoadCursorW(NULL, IDC_CROSS);
+        return LoadCursorW(nullptr, IDC_CROSS);
     case IRIS_CURSOR_NOT_ALLOWED:
-        return LoadCursorW(NULL, IDC_NO);
+        return LoadCursorW(nullptr, IDC_NO);
     case IRIS_CURSOR_RESIZE_EW:
-        return LoadCursorW(NULL, IDC_SIZEWE);
+        return LoadCursorW(nullptr, IDC_SIZEWE);
     case IRIS_CURSOR_RESIZE_NS:
-        return LoadCursorW(NULL, IDC_SIZENS);
+        return LoadCursorW(nullptr, IDC_SIZENS);
     case IRIS_CURSOR_DEFAULT:
     default:
-        return LoadCursorW(NULL, IDC_ARROW);
+        return LoadCursorW(nullptr, IDC_ARROW);
     }
 }
 
@@ -908,7 +913,7 @@ IRIS_API void iris_window_fullscreen(void) {
     pl->saved_placement.length = sizeof pl->saved_placement;
     GetWindowPlacement(pl->hwnd, &pl->saved_placement);
 
-    MONITORINFO mi = {0};
+    MONITORINFO mi = {};
     mi.cbSize = sizeof mi;
     GetMonitorInfoW(MonitorFromWindow(pl->hwnd, MONITOR_DEFAULTTONEAREST), &mi);
     SetWindowLongW(pl->hwnd, GWL_STYLE, pl->saved_style & ~(DWORD)WS_OVERLAPPEDWINDOW);
@@ -927,7 +932,7 @@ IRIS_API void iris_window_unfullscreen(void) {
     SetWindowLongW(pl->hwnd, GWL_STYLE, pl->saved_style);
     SetWindowLongW(pl->hwnd, GWL_EXSTYLE, pl->saved_ex_style);
     SetWindowPlacement(pl->hwnd, &pl->saved_placement); /* restores geometry + show state */
-    SetWindowPos(pl->hwnd, NULL, 0, 0, 0, 0,
+    SetWindowPos(pl->hwnd, nullptr, 0, 0, 0, 0,
                  SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
 }
 
@@ -965,20 +970,20 @@ IRIS_API void iris_window_start_move(void) {
     SendMessageW(pl->hwnd, WM_SYSCOMMAND, (WPARAM)(0xF010 /* SC_MOVE + HTCAPTION */ | 0x0002), 0);
 }
 
-IRIS_API void iris_window_set_min_size(int32_t width, int32_t height) {
+IRIS_API void iris_window_set_min_size(const iris_window_set_min_size_opts *opts) {
     w32_platform *pl = g_active_pl;
-    if (!pl)
+    if (!pl || !opts)
         return;
-    pl->min_w = width;
-    pl->min_h = height;
+    pl->min_w = opts->width;
+    pl->min_h = opts->height;
 }
 
-IRIS_API void iris_window_set_max_size(int32_t width, int32_t height) {
+IRIS_API void iris_window_set_max_size(const iris_window_set_max_size_opts *opts) {
     w32_platform *pl = g_active_pl;
-    if (!pl)
+    if (!pl || !opts)
         return;
-    pl->max_w = width;
-    pl->max_h = height;
+    pl->max_w = opts->width;
+    pl->max_h = opts->height;
 }
 
 IRIS_API bool iris_window_get_geometry(int32_t *out_width, int32_t *out_height) {
@@ -992,11 +997,9 @@ IRIS_API bool iris_window_get_geometry(int32_t *out_width, int32_t *out_height) 
     return true;
 }
 
-IRIS_API int iris_window_create_activation_token(const char *app_id, char *out_buf,
-                                                 size_t out_cap) {
-    (void)app_id;
-    (void)out_buf;
-    (void)out_cap;
+IRIS_API int
+iris_window_create_activation_token(const iris_window_create_activation_token_opts *opts) {
+    (void)opts;
     return -1;
 }
 
@@ -1021,7 +1024,7 @@ static HRESULT STDMETHODCALLTYPE dt_QueryInterface(IDropTarget *This, REFIID rii
         This->lpVtbl->AddRef(This);
         return S_OK;
     }
-    *ppvObject = NULL;
+    *ppvObject = nullptr;
     return E_NOINTERFACE;
 }
 
@@ -1074,18 +1077,22 @@ static HRESULT STDMETHODCALLTYPE dt_Drop(IDropTarget *This, IDataObject *pDataOb
     float scale = (impl->pl->scale > 0.0f) ? impl->pl->scale : 1.0f;
     flux_point drop_pos = {(float)p.x / scale, (float)p.y / scale};
 
-    FORMATETC fmt_text = {CF_UNICODETEXT, NULL, DVASPECT_CONTENT, -1, TYMED_HGLOBAL};
-    STGMEDIUM med = {0};
+    FORMATETC fmt_text = {CF_UNICODETEXT, nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL};
+    STGMEDIUM med = {};
     if (SUCCEEDED(pDataObj->lpVtbl->GetData(pDataObj, &fmt_text, &med))) {
         const wchar_t *wstr = (const wchar_t *)GlobalLock(med.hGlobal);
         if (wstr) {
-            int utf8_len = WideCharToMultiByte(CP_UTF8, 0, wstr, -1, NULL, 0, NULL, NULL);
+            int utf8_len = WideCharToMultiByte(CP_UTF8, 0, wstr, -1, nullptr, 0, nullptr, nullptr);
             if (utf8_len > 1) {
                 char *utf8 = (char *)malloc((size_t)utf8_len);
                 if (utf8) {
-                    WideCharToMultiByte(CP_UTF8, 0, wstr, -1, utf8, utf8_len, NULL, NULL);
-                    lens_paste(impl->pl->ui, utf8, (size_t)(utf8_len - 1));
-                    lens_deliver_drop(impl->pl->ui, utf8, (size_t)(utf8_len - 1), drop_pos);
+                    WideCharToMultiByte(CP_UTF8, 0, wstr, -1, utf8, utf8_len, nullptr, nullptr);
+                    lens_paste(impl->pl->ui,
+                               &(lens_paste_opts){.utf8 = utf8, .len = (size_t)(utf8_len - 1)});
+                    lens_deliver_drop(impl->pl->ui,
+                                      &(lens_deliver_drop_opts){.payload = utf8,
+                                                                .len = (size_t)(utf8_len - 1),
+                                                                .pos = drop_pos});
                     free(utf8);
                 }
             }
@@ -1093,24 +1100,29 @@ static HRESULT STDMETHODCALLTYPE dt_Drop(IDropTarget *This, IDataObject *pDataOb
         }
         ReleaseStgMedium(&med);
     } else {
-        FORMATETC fmt_file = {CF_HDROP, NULL, DVASPECT_CONTENT, -1, TYMED_HGLOBAL};
+        FORMATETC fmt_file = {CF_HDROP, nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL};
         if (SUCCEEDED(pDataObj->lpVtbl->GetData(pDataObj, &fmt_file, &med))) {
             HDROP hdrop = (HDROP)GlobalLock(med.hGlobal);
             if (hdrop) {
-                UINT count = DragQueryFileW(hdrop, 0xFFFFFFFF, NULL, 0);
+                UINT count = DragQueryFileW(hdrop, 0xFFFFFFFF, nullptr, 0);
                 if (count > 0) {
                     wchar_t path_w[MAX_PATH];
                     if (DragQueryFileW(hdrop, 0, path_w, MAX_PATH) > 0) {
-                        int utf8_len =
-                            WideCharToMultiByte(CP_UTF8, 0, path_w, -1, NULL, 0, NULL, NULL);
+                        int utf8_len = WideCharToMultiByte(CP_UTF8, 0, path_w, -1, nullptr, 0,
+                                                           nullptr, nullptr);
                         if (utf8_len > 1) {
                             char *utf8 = (char *)malloc((size_t)utf8_len);
                             if (utf8) {
-                                WideCharToMultiByte(CP_UTF8, 0, path_w, -1, utf8, utf8_len, NULL,
-                                                    NULL);
-                                lens_paste(impl->pl->ui, utf8, (size_t)(utf8_len - 1));
-                                lens_deliver_drop(impl->pl->ui, utf8, (size_t)(utf8_len - 1),
-                                                  drop_pos);
+                                WideCharToMultiByte(CP_UTF8, 0, path_w, -1, utf8, utf8_len, nullptr,
+                                                    nullptr);
+                                lens_paste(impl->pl->ui,
+                                           &(lens_paste_opts){.utf8 = utf8,
+                                                              .len = (size_t)(utf8_len - 1)});
+                                lens_deliver_drop(impl->pl->ui, &(lens_deliver_drop_opts){
+                                                                    .payload = utf8,
+                                                                    .len = (size_t)(utf8_len - 1),
+                                                                    .pos = drop_pos,
+                                                                });
                                 free(utf8);
                             }
                         }
@@ -1153,7 +1165,7 @@ static HRESULT STDMETHODCALLTYPE ds_QueryInterface(IDropSource *This, REFIID rii
         This->lpVtbl->AddRef(This);
         return S_OK;
     }
-    *ppvObject = NULL;
+    *ppvObject = nullptr;
     return E_NOINTERFACE;
 }
 
@@ -1209,7 +1221,7 @@ static HRESULT STDMETHODCALLTYPE do_QueryInterface(IDataObject *This, REFIID rii
         This->lpVtbl->AddRef(This);
         return S_OK;
     }
-    *ppvObject = NULL;
+    *ppvObject = nullptr;
     return E_NOINTERFACE;
 }
 
@@ -1244,7 +1256,7 @@ static HRESULT STDMETHODCALLTYPE do_GetData(IDataObject *This, FORMATETC *pforma
         GlobalUnlock(hg);
         pmedium->tymed = TYMED_HGLOBAL;
         pmedium->hGlobal = hg;
-        pmedium->pUnkForRelease = NULL;
+        pmedium->pUnkForRelease = nullptr;
         return S_OK;
     }
     return DV_E_FORMATETC;
@@ -1291,7 +1303,7 @@ static HRESULT STDMETHODCALLTYPE do_EnumFormatEtc(IDataObject *This, DWORD dwDir
     (void)This;
     (void)dwDirection;
     if (ppenumFormatEtc)
-        *ppenumFormatEtc = NULL;
+        *ppenumFormatEtc = nullptr;
     return E_NOTIMPL;
 }
 
@@ -1314,7 +1326,7 @@ static HRESULT STDMETHODCALLTYPE do_DUnadvise(IDataObject *This, DWORD dwConnect
 static HRESULT STDMETHODCALLTYPE do_EnumDAdvise(IDataObject *This, IEnumSTATDATA **ppenumAdvise) {
     (void)This;
     if (ppenumAdvise)
-        *ppenumAdvise = NULL;
+        *ppenumAdvise = nullptr;
     return OLE_E_ADVISENOTSUPPORTED;
 }
 
@@ -1341,10 +1353,10 @@ IRIS_API int iris_dnd_start(const iris_dnd_source *source) {
     pl->drag_source = *source;
     pl->drag_active = true;
 
-    wchar_t *wstr = NULL;
+    wchar_t *wstr = nullptr;
     if (source->static_text && source->static_text_len) {
         int wlen = MultiByteToWideChar(CP_UTF8, 0, source->static_text,
-                                       (int)source->static_text_len, NULL, 0);
+                                       (int)source->static_text_len, nullptr, 0);
         if (wlen > 0) {
             wstr = (wchar_t *)malloc((size_t)(wlen + 1) * sizeof(wchar_t));
             if (wstr) {
@@ -1493,7 +1505,7 @@ static LRESULT CALLBACK w32_wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
         pl->pending_scale = (float)HIWORD(wParam) / 96.0f;
         pl->refresh_ns = w32_query_refresh_ns(hwnd);
         const RECT *suggested = (const RECT *)lParam;
-        SetWindowPos(hwnd, NULL, suggested->left, suggested->top,
+        SetWindowPos(hwnd, nullptr, suggested->left, suggested->top,
                      suggested->right - suggested->left, suggested->bottom - suggested->top,
                      SWP_NOZORDER | SWP_NOACTIVATE);
         return 0;
@@ -1634,7 +1646,7 @@ static LRESULT CALLBACK w32_wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
         /* Asynchronous clipboard delivery (clip_request_text contract). */
         char *utf8 = (char *)lParam;
         if (pl && pl->ui && utf8)
-            lens_paste(pl->ui, utf8, strlen(utf8));
+            lens_paste(pl->ui, &(lens_paste_opts){.utf8 = utf8, .len = strlen(utf8)});
         free(utf8);
         return 0;
     }
@@ -1724,10 +1736,10 @@ static void w32_wakeup_kick(void *user) {
  * Returns true when any message was dispatched (an event wake, as opposed to
  * a deadline expiry), so the frame loop can tell the two apart. */
 static bool pump_events(w32_platform *pl, DWORD timeout_ms) {
-    (void)MsgWaitForMultipleObjectsEx(0, NULL, timeout_ms, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+    (void)MsgWaitForMultipleObjectsEx(0, nullptr, timeout_ms, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
     bool any = false;
     MSG msg;
-    while (PeekMessageW(&msg, NULL, 0, 0, PM_REMOVE)) {
+    while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
         any = true;
         if (msg.message == WM_QUIT) {
             pl->running = false;
@@ -1736,7 +1748,7 @@ static bool pump_events(w32_platform *pl, DWORD timeout_ms) {
         /* Cross-thread wakeup: a subsystem posted a callback from its own
          * thread. Thread messages have no HWND and must not go through
          * DispatchMessage — drain the queue here, on the loop thread. */
-        if (msg.message == WM_IRIS_WAKEUP && msg.hwnd == NULL) {
+        if (msg.message == WM_IRIS_WAKEUP && msg.hwnd == nullptr) {
             iris_platform_wakeup_drain();
             continue;
         }
@@ -1779,7 +1791,7 @@ static int64_t w32_query_refresh_ns(HWND hwnd) {
         }
     }
     DEVMODEW dm = {.dmSize = sizeof(dm)};
-    if (EnumDisplaySettingsW(NULL, ENUM_CURRENT_SETTINGS, &dm) && dm.dmDisplayFrequency > 1)
+    if (EnumDisplaySettingsW(nullptr, ENUM_CURRENT_SETTINGS, &dm) && dm.dmDisplayFrequency > 1)
         return 1000000000LL / (int64_t)dm.dmDisplayFrequency;
     return IRIS_PACE_DEFAULT_REFRESH_NS;
 }
@@ -1812,7 +1824,7 @@ static VkSurfaceKHR w32_create_vk_surface(const flux_device *device, HINSTANCE h
         .hwnd = hwnd,
     };
     VkSurfaceKHR vk_surface = VK_NULL_HANDLE;
-    if (vkCreateWin32SurfaceKHR(flux_device_vk_instance(device), &ci, NULL, &vk_surface) !=
+    if (vkCreateWin32SurfaceKHR(flux_device_vk_instance(device), &ci, nullptr, &vk_surface) !=
         VK_SUCCESS)
         return VK_NULL_HANDLE;
     return vk_surface;
@@ -1820,7 +1832,7 @@ static VkSurfaceKHR w32_create_vk_surface(const flux_device *device, HINSTANCE h
 
 static void w32_destroy_vk_surface(const flux_device *device, VkSurfaceKHR vk_surface) {
     if (vk_surface && device)
-        vkDestroySurfaceKHR(flux_device_vk_instance(device), vk_surface, NULL);
+        vkDestroySurfaceKHR(flux_device_vk_instance(device), vk_surface, nullptr);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1911,7 +1923,9 @@ static DWORD WINAPI win32_presenter_thread_main(LPVOID arg) {
                 bool drew = false;
                 if (flux_canvas_begin(ctx->canvas, &pass_desc) == FLUX_OK) {
                     if (pkt->host_list) {
-                        (void)flux_canvas_submit_display_list(ctx->canvas, pkt->host_list);
+                        (void)flux_canvas_submit_display_list(
+                            ctx->canvas,
+                            &(flux_canvas_submit_display_list_opts){.list = pkt->host_list});
                         drew = true;
                     }
                     if (pkt->snapshot) {
@@ -1942,11 +1956,11 @@ int iris_app_run_win32(const iris_app_config *cfg) {
     /* All resources declared up front and NULL/VK_NULL_HANDLE-initialized so
      * a single `fail:` cleanup block can run on every exit path (error or
      * success) without referencing out-of-scope or indeterminate pointers. */
-    flux_device *device = NULL;
+    flux_device *device = nullptr;
     VkSurfaceKHR vk_surface = VK_NULL_HANDLE;
-    flux_surface *surface = NULL;
-    flux_canvas *canvas = NULL;
-    lens *ui = NULL;
+    flux_surface *surface = nullptr;
+    flux_canvas *canvas = nullptr;
+    lens *ui = nullptr;
     bool host_started = false;
     int rc = 1; /* pessimistic; set to 0 only on success */
 
@@ -1966,7 +1980,7 @@ int iris_app_run_win32(const iris_app_config *cfg) {
      * out (success or fail). */
     g_active_pl = &pl;
 
-    OleInitialize(NULL);
+    OleInitialize(nullptr);
 
     w32_drop_target_impl drop_target = {
         .target = {.lpVtbl = &g_drop_target_vtbl},
@@ -1980,7 +1994,7 @@ int iris_app_run_win32(const iris_app_config *cfg) {
      * the app simply stays system-DPI-scaled by DWM. */
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 
-    pl.hinstance = GetModuleHandleW(NULL);
+    pl.hinstance = GetModuleHandleW(nullptr);
     pl.loop_thread_id = GetCurrentThreadId();
 
     /* Cross-thread wakeup seam: the kick posts WM_IRIS_WAKEUP to this
@@ -1994,8 +2008,8 @@ int iris_app_run_win32(const iris_app_config *cfg) {
         .style = CS_HREDRAW | CS_VREDRAW,
         .lpfnWndProc = w32_wnd_proc,
         .hInstance = pl.hinstance,
-        .hCursor = LoadCursorW(NULL, IDC_ARROW),
-        .hbrBackground = NULL, /* no GDI background: WM_ERASEBKGND returns 1 */
+        .hCursor = LoadCursorW(nullptr, IDC_ARROW),
+        .hbrBackground = nullptr, /* no GDI background: WM_ERASEBKGND returns 1 */
         .lpszClassName = IRIS_WNDCLASS_NAME,
     };
     (void)RegisterClassExW(&wc); /* ERROR_CLASS_ALREADY_EXISTS is fine */
@@ -2016,7 +2030,7 @@ int iris_app_run_win32(const iris_app_config *cfg) {
     WCHAR *title_w = w32_wide_from_utf8(cfg->title ? cfg->title : "iris");
     pl.hwnd = CreateWindowExW(exstyle, IRIS_WNDCLASS_NAME, title_w ? title_w : L"iris", style,
                               CW_USEDEFAULT, CW_USEDEFAULT, want.right - want.left,
-                              want.bottom - want.top, NULL, NULL, pl.hinstance, &pl);
+                              want.bottom - want.top, nullptr, nullptr, pl.hinstance, &pl);
     free(title_w);
     if (!pl.hwnd) {
         fprintf(stderr, "CreateWindowExW failed (%lu)\n", GetLastError());
@@ -2036,7 +2050,7 @@ int iris_app_run_win32(const iris_app_config *cfg) {
         RECT r = {0, 0, (LONG)lroundf((float)pl.width * pl.scale),
                   (LONG)lroundf((float)pl.height * pl.scale)};
         AdjustWindowRectExForDpi(&r, style, FALSE, exstyle, wnd_dpi);
-        SetWindowPos(pl.hwnd, NULL, 0, 0, r.right - r.left, r.bottom - r.top,
+        SetWindowPos(pl.hwnd, nullptr, 0, 0, r.right - r.left, r.bottom - r.top,
                      SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
     }
 
@@ -2127,15 +2141,16 @@ int iris_app_run_win32(const iris_app_config *cfg) {
      * mailbox as an immutable display list. */
     if (!cfg->prepare) {
         iris_mailbox_init(&pl.mailbox);
-        pl.present_event = CreateEventW(NULL, FALSE, FALSE, NULL);
+        pl.present_event = CreateEventW(nullptr, FALSE, FALSE, nullptr);
         if (pl.present_event) {
             atomic_init(&pl.presenter_running, true);
-            pl.present_thread = CreateThread(NULL, 0, win32_presenter_thread_main, &pctx, 0, NULL);
+            pl.present_thread =
+                CreateThread(nullptr, 0, win32_presenter_thread_main, &pctx, 0, nullptr);
             if (pl.present_thread) {
                 pl.has_presenter_thread = true;
             } else {
                 CloseHandle(pl.present_event);
-                pl.present_event = NULL;
+                pl.present_event = nullptr;
                 iris_mailbox_destroy(&pl.mailbox);
             }
         } else {
@@ -2179,7 +2194,7 @@ int iris_app_run_win32(const iris_app_config *cfg) {
     long long wait_ns = 0;
     long long last_sim_ns = 0;
     double prev_cx = pl.acc.cx, prev_cy = pl.acc.cy;
-    const bool has_host_content = (cfg->prepare != NULL || cfg->record != NULL);
+    const bool has_host_content = (cfg->prepare != nullptr || cfg->record != nullptr);
 
     pl.ui = ui;
 
@@ -2430,8 +2445,8 @@ int iris_app_run_win32(const iris_app_config *cfg) {
                 continue;
             }
 
-            flux_frame *frame = NULL;
-            flux_result r = flux_surface_begin_frame(surface, NULL, &frame);
+            flux_frame *frame = nullptr;
+            flux_result r = flux_surface_begin_frame(surface, nullptr, &frame);
             if (r == FLUX_ERROR_SURFACE_LOST) {
                 (void)flux_surface_resize(surface, (uint32_t)lroundf((float)pl.width * pl.scale),
                                           (uint32_t)lroundf((float)pl.height * pl.scale));
@@ -2457,7 +2472,7 @@ int iris_app_run_win32(const iris_app_config *cfg) {
              * content draws *under* lens's chrome. */
             lens_theme th = lens_get_theme(ui);
             flux_color clear = th.color_bg;
-            flux_color *pass_clear = cfg->no_clear ? NULL : &clear;
+            flux_color *pass_clear = cfg->no_clear ? nullptr : &clear;
             bool drew = false;
             lens_scene_snapshot *snapshot = nullptr;
             flux_display_list *host_list = iris_record_host_canvas(cfg, pl.scale);
@@ -2466,7 +2481,7 @@ int iris_app_run_win32(const iris_app_config *cfg) {
              * the pass. A host with opaque canvas content (or a forced repaint)
              * asks for the full extent instead — its own content is not something
              * lens can localise. */
-            iris_frame_damage dmg = {0};
+            iris_frame_damage dmg = {};
             const bool localize = !surface_forced && !has_host_content;
             if (localize) {
                 dmg = iris_frame_lens_damage(ui, pl.scale, (int32_t)info.width,
@@ -2489,7 +2504,9 @@ int iris_app_run_win32(const iris_app_config *cfg) {
 
             if (flux_canvas_begin(canvas, &pass_desc) == FLUX_OK) {
                 if (host_list) {
-                    drew = flux_canvas_submit_display_list(canvas, host_list) == FLUX_OK;
+                    drew = flux_canvas_submit_display_list(canvas,
+                                                           &(flux_canvas_submit_display_list_opts){
+                                                               .list = host_list}) == FLUX_OK;
                 }
                 if (lens_snapshot_create(ui, &snapshot) == FLUX_OK) {
                     drew = lens_snapshot_submit(snapshot, canvas) == FLUX_OK || drew;
@@ -2548,7 +2565,7 @@ fail:
 
     /* Stop publishing this w32_platform to the context-free APIs — any host
      * call after this returns is a no-op rather than a use-after-free. */
-    g_active_pl = NULL;
+    g_active_pl = nullptr;
 
     /* Stop decoupled presenter thread before teardown (ADR-0124, INV-THREAD-04) */
     if (pl.has_presenter_thread) {
@@ -2566,7 +2583,7 @@ fail:
         flux_device_wait_idle(device);
     if (ui)
         lens_release(ui);
-    pl.ui = NULL; /* after this, queued main-thread callbacks must not touch lens */
+    pl.ui = nullptr; /* after this, queued main-thread callbacks must not touch lens */
     /* The Win32 theme watcher holds no thread or handle; unwatch just drops
      * the backend's internal registration (the host's public watch, if any,
      * is untouched). */
@@ -2581,7 +2598,7 @@ fail:
      * above (Win32 has no watcher thread), except detached subsystem
      * threads — unregister the kick first so late posts fail cleanly, then
      * drain whatever was legitimately queued. */
-    iris_platform_wakeup_set_kick(NULL, NULL);
+    iris_platform_wakeup_set_kick(nullptr, nullptr);
     iris_platform_wakeup_drain();
     if (canvas)
         flux_canvas_release(canvas);

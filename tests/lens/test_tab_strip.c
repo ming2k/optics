@@ -25,9 +25,9 @@ static void build_strip(lens *ui, uint32_t active) {
 }
 
 int main(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(NULL, &ui) == FLUX_OK);
-    OT_EXPECT(ui != NULL);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(nullptr, &ui) == FLUX_OK);
+    OT_EXPECT(ui != nullptr);
 
     lens_input in = {.display_size = {800, 600}, .dt_seconds = 0.016f};
 
@@ -43,7 +43,7 @@ int main(void) {
     in.mouse_down[LENS_MOUSE_LEFT] = true;
     in.mouse_pressed[LENS_MOUSE_LEFT] = true;
     lens_begin(ui, &in);
-    lens_tab_action a = {0};
+    lens_tab_action a = {};
     {
         lens_tab_item tabs[3] = {{.title = "Alpha"}, {.title = "Beta"}, {.title = "Gamma"}};
         lens_tab_strip_opts opts = {.min_tab_width = 80.0f, .max_tab_width = 120.0f};

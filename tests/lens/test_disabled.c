@@ -11,8 +11,8 @@
 static const lens_input IN0 = {.display_size = {400, 200}, .dt_seconds = 0.016f};
 
 static void test_disabled_button_no_click(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     /* frame 1: build disabled button at (0,0) 100x30 */
     lens_begin(ui, &IN0);
@@ -35,8 +35,8 @@ static void test_disabled_button_no_click(void) {
 }
 
 static void test_disabled_slider_no_change(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     float val = 0.5f;
 
@@ -67,8 +67,8 @@ static void test_disabled_slider_no_change(void) {
 }
 
 static void test_disabled_checkbox_no_toggle(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     bool on = false;
 
@@ -86,8 +86,8 @@ static void test_disabled_checkbox_no_toggle(void) {
 }
 
 static void test_disabled_textfield_no_input(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     char buf[64] = "hello";
 
@@ -126,8 +126,8 @@ static void a11y_cb(const lens_semantics *s, flux_rect bounds, lens_id id, lens_
 }
 
 static void test_disabled_a11y_flag(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     lens_begin(ui, &IN0);
     lens_button(ui, &(lens_button_opts){.label = "disabled", .box = {.disabled = true}});

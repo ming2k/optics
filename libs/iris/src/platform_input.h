@@ -24,8 +24,9 @@
 #define IRIS_PLATFORM_INPUT_H
 
 #include <lens/lens.h>
+#include <stdint.h>
 
-typedef enum iris_pointer_button {
+typedef enum iris_pointer_button : int32_t {
     IRIS_POINTER_BUTTON_UNKNOWN = -1,
     IRIS_POINTER_BUTTON_LEFT = 0,
     IRIS_POINTER_BUTTON_RIGHT,
@@ -63,7 +64,7 @@ static inline int iris_pointer_button_to_lens(iris_pointer_button button) {
  * steps (scroll_x/y — discrete notches, widgets scale them by their line
  * factor) or continuous pixels (scroll_pixels_x/y — touchpad finger
  * motion, widgets consume unscaled). */
-typedef enum iris_scroll_channel {
+typedef enum iris_scroll_channel : uint32_t {
     IRIS_SCROLL_WHEEL_STEPS = 0,
     IRIS_SCROLL_PIXELS,
 } iris_scroll_channel;

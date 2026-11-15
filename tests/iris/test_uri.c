@@ -8,9 +8,17 @@
 #include <stdio.h>
 #include <string.h>
 
+static int uri_to_path(const char *uri, char *out_path, size_t out_cap) {
+    return iris_file_uri_to_path(&(iris_file_uri_to_path_opts){
+        .uri = uri,
+        .out_path = out_path,
+        .out_cap = out_cap,
+    });
+}
+
 static int check_decodes(const char *uri, const char *want) {
     char buf[512];
-    int rc = iris_file_uri_to_path(uri, buf, sizeof buf);
+    int rc = uri_to_path(uri, buf, sizeof buf);
     if (rc != 0) {
         fprintf(stderr, "uri %s: unexpected rc %d\n", uri, rc);
         return 0;
@@ -41,25 +49,26 @@ int main(void) {
     OT_EXPECT(check_decodes("file:///a+b.txt", "/a+b.txt"));
 
     /* Non-empty authority is refused (a remote resource, not a local path). */
-    OT_EXPECT(iris_file_uri_to_path("file://server/share/x", buf, sizeof buf) == -2);
+    OT_EXPECT(uri_to_path("file://server/share/x", buf, sizeof buf) == -2);
 
     /* Malformed escapes are refused, not repaired. */
-    OT_EXPECT(iris_file_uri_to_path("file:///a%2", buf, sizeof buf) == -3);
-    OT_EXPECT(iris_file_uri_to_path("file:///a%zz", buf, sizeof buf) == -3);
-    OT_EXPECT(iris_file_uri_to_path("file:///a%", buf, sizeof buf) == -3);
+    OT_EXPECT(uri_to_path("file:///a%2", buf, sizeof buf) == -3);
+    OT_EXPECT(uri_to_path("file:///a%zz", buf, sizeof buf) == -3);
+    OT_EXPECT(uri_to_path("file:///a%", buf, sizeof buf) == -3);
 
     /* Wrong scheme / missing path are refused. */
-    OT_EXPECT(iris_file_uri_to_path("http://example.com/x", buf, sizeof buf) == -1);
-    OT_EXPECT(iris_file_uri_to_path("file://host", buf, sizeof buf) == -1);
+    OT_EXPECT(uri_to_path("http://example.com/x", buf, sizeof buf) == -1);
+    OT_EXPECT(uri_to_path("file://host", buf, sizeof buf) == -1);
 
     /* Null / zero-cap arguments. */
-    OT_EXPECT(iris_file_uri_to_path(NULL, buf, sizeof buf) == -1);
-    OT_EXPECT(iris_file_uri_to_path("file:///x", NULL, 8) == -1);
-    OT_EXPECT(iris_file_uri_to_path("file:///x", buf, 0) == -1);
+    OT_EXPECT(iris_file_uri_to_path(nullptr) == -1);
+    OT_EXPECT(uri_to_path(nullptr, buf, sizeof buf) == -1);
+    OT_EXPECT(uri_to_path("file:///x", nullptr, 8) == -1);
+    OT_EXPECT(uri_to_path("file:///x", buf, 0) == -1);
 
     /* Too-small output reports -4 and leaves a NUL-terminated prefix
      * (shorter than the decoded path, never unterminated). */
-    OT_EXPECT(iris_file_uri_to_path("file:///abcdefgh", buf, 5) == -4);
+    OT_EXPECT(uri_to_path("file:///abcdefgh", buf, 5) == -4);
     OT_EXPECT(strlen(buf) == 4); /* cap-1 usable bytes */
     OT_EXPECT(buf[4] == '\0');
 

@@ -40,7 +40,7 @@ int main(void) {
     /* --- wrong tagged-struct type --- */
     {
         flux_compute_pipeline *p = nullptr;
-        uint32_t spv[4] = {0};
+        uint32_t spv[4] = {};
         flux_compute_pipeline_desc desc = {
             .type = FLUX_TYPE_UNKNOWN, /* deliberately wrong */
             .spirv = spv,
@@ -69,7 +69,7 @@ int main(void) {
     /* --- push constants larger than device-reported max --- */
     {
         flux_compute_pipeline *p = nullptr;
-        uint32_t spv[4] = {0};
+        uint32_t spv[4] = {};
         flux_compute_pipeline_desc desc = {
             .type = FLUX_TYPE_COMPUTE_PIPELINE_DESC,
             .spirv = spv,

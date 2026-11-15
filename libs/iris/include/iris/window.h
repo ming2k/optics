@@ -75,8 +75,18 @@ IRIS_API void iris_window_start_move(void);
 /* Configure the minimum and maximum logical window size the compositor
  * should respect. Pass 0 to clear the respective bound. Compositors
  * combine these with their own constraints (display size, layout, …). */
-IRIS_API void iris_window_set_min_size(int32_t width, int32_t height);
-IRIS_API void iris_window_set_max_size(int32_t width, int32_t height);
+typedef struct iris_window_set_min_size_opts {
+    int32_t width;
+    int32_t height;
+} iris_window_set_min_size_opts;
+
+typedef struct iris_window_set_max_size_opts {
+    int32_t width;
+    int32_t height;
+} iris_window_set_max_size_opts;
+
+IRIS_API void iris_window_set_min_size(const iris_window_set_min_size_opts *opts);
+IRIS_API void iris_window_set_max_size(const iris_window_set_max_size_opts *opts);
 
 /* ================================================================== */
 /*  Queries                                                            */
@@ -90,7 +100,14 @@ IRIS_API bool iris_window_get_geometry(int32_t *out_width, int32_t *out_height);
  * to an external or child process for seamless focus handoff.
  * Returns 0 on success with NUL-terminated token written into out_buf,
  * or -1 if unsupported, inactive, or creation fails. */
-IRIS_API int iris_window_create_activation_token(const char *app_id, char *out_buf, size_t out_cap);
+typedef struct iris_window_create_activation_token_opts {
+    const char *app_id;
+    char *out_buf;
+    size_t out_cap;
+} iris_window_create_activation_token_opts;
+
+IRIS_API int
+iris_window_create_activation_token(const iris_window_create_activation_token_opts *opts);
 
 #ifdef __cplusplus
 }

@@ -15,7 +15,7 @@
 static void build_ui(lens *ui, bool *wrap, float *zoom, int *clicks) {
     lens_label(ui, &(lens_label_opts){.text = "lens headless demo"});
 
-    lens_row_begin(ui, NULL);
+    lens_row_begin(ui, nullptr);
     if (lens_button(ui, &(lens_button_opts){.label = "New"}).clicked)
         (*clicks)++;
     if (lens_button(ui, &(lens_button_opts){.label = "Open"}).clicked)
@@ -29,7 +29,7 @@ static void build_ui(lens *ui, bool *wrap, float *zoom, int *clicks) {
 }
 
 int main(void) {
-    lens *ui = NULL;
+    lens *ui = nullptr;
     if (lens_create(&(lens_desc){.theme = lens_theme_dark()}, &ui) != FLUX_OK) {
         fprintf(stderr, "lens_create failed\n");
         return 1;

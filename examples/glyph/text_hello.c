@@ -66,7 +66,7 @@ static void on_record(flux_encoder *enc, float scale, void *user) {
     glyph_set_scale(app->text, scale);
 
     flux_encoder_save(enc);
-    flux_encoder_scale(enc, scale, scale);
+    flux_encoder_scale(enc, &(flux_encoder_scale_opts){.sx = scale, .sy = scale});
 
     const char *s = "hello, glyph \xe4\xbd\xa0\xe5\xa5\xbd"; /* + "你好" */
     glyph_style style = {
@@ -76,8 +76,9 @@ static void on_record(flux_encoder *enc, float scale, void *user) {
         .family = GLYPH_FAMILY_SANS,
     };
     (void)glyph_record(
-        app->text, enc,
-        &(glyph_record_desc){.x = 40.0f, .y = 80.0f, .utf8 = s, .len = strlen(s), .style = style});
+        app->text,
+        &(glyph_record_opts){
+            .encoder = enc, .x = 40.0f, .y = 80.0f, .utf8 = s, .len = strlen(s), .style = style});
 
     const char *sub = "Native Optics Wayland stack (zero GLFW, HiDPI aware, Esc to quit)";
     glyph_style sub_style = {
@@ -86,16 +87,18 @@ static void on_record(flux_encoder *enc, float scale, void *user) {
         .color = flux_color_rgba(0x9a, 0xa0, 0xb4, 0xff),
         .family = GLYPH_FAMILY_SANS,
     };
-    (void)glyph_record(
-        app->text, enc,
-        &(glyph_record_desc){
-            .x = 40.0f, .y = 130.0f, .utf8 = sub, .len = strlen(sub), .style = sub_style});
+    (void)glyph_record(app->text, &(glyph_record_opts){.encoder = enc,
+                                                       .x = 40.0f,
+                                                       .y = 130.0f,
+                                                       .utf8 = sub,
+                                                       .len = strlen(sub),
+                                                       .style = sub_style});
 
     flux_encoder_restore(enc);
 }
 
 int main(void) {
-    text_hello_app app = {0};
+    text_hello_app app = {};
     printf("glyph hello — native Iris window (Esc to quit)\n");
     return iris_app_run(&(iris_app_opts){
         .title = "glyph — hello",

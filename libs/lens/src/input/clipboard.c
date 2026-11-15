@@ -61,16 +61,16 @@ void lensi_set_text_context(lens *ui, const char *utf8, uint32_t len, uint32_t c
 }
 
 lens_text_context lens_text_context_get(const lens *ui) {
-    return ui ? ui->text_context : (lens_text_context){0};
+    return ui ? ui->text_context : (lens_text_context){};
 }
 
 /* ---- copy / request-paste / paste (host channel) ---- */
 
-void lens_copy(lens *ui, const char *utf8, size_t len) {
-    if (!ui || !utf8 || !len)
+void lens_copy(lens *ui, const lens_copy_opts *opts) {
+    if (!ui || !opts || !opts->utf8 || !opts->len)
         return;
     if (ui->clipboard.set_text)
-        ui->clipboard.set_text(utf8, len, ui->clipboard.user);
+        ui->clipboard.set_text(opts->utf8, opts->len, ui->clipboard.user);
 }
 
 void lens_request_paste(lens *ui) {
@@ -86,9 +86,11 @@ void lens_request_paste(lens *ui) {
         ui->clipboard.request_text(ui->clipboard.user);
 }
 
-void lens_paste(lens *ui, const char *utf8, size_t len) {
+void lens_paste(lens *ui, const lens_paste_opts *opts) {
     if (!ui)
         return;
+    const char *utf8 = opts ? opts->utf8 : nullptr;
+    size_t len = opts ? opts->len : 0;
     if (!utf8 || !len) {
         ui->paste_len = 0;
         return;
@@ -105,7 +107,7 @@ const char *lensi_take_paste(lens *ui, uint32_t *out_len) {
     if (out_len)
         *out_len = 0;
     if (!ui || !ui->paste_len)
-        return NULL;
+        return nullptr;
     /* Drop the payload instead of delivering when the frame window passed
      * (a paste is only fresh for the frame it arrived in and the build
      * right after) or when focus moved away from the requesting widget. */
@@ -113,7 +115,7 @@ const char *lensi_take_paste(lens *ui, uint32_t *out_len) {
     bool wrong_target = ui->paste_target != 0 && ui->paste_target != ui->focused_id;
     if (stale || wrong_target) {
         ui->paste_len = 0;
-        return NULL;
+        return nullptr;
     }
     if (out_len)
         *out_len = ui->paste_len;
@@ -123,18 +125,18 @@ const char *lensi_take_paste(lens *ui, uint32_t *out_len) {
 
 /* ---- app-owned editing surfaces (public wrappers) ---- */
 
-uint32_t lens_take_paste(lens *ui, char *dst, uint32_t cap) {
+uint32_t lens_take_paste(lens *ui, const lens_take_paste_opts *opts) {
     uint32_t len = 0;
     const char *src;
-    if (!dst || !cap)
+    if (!opts || !opts->dst || !opts->cap)
         return 0;
     src = lensi_take_paste(ui, &len);
     if (!src)
         return 0;
-    if (len > cap - 1)
-        len = cap - 1;
-    memcpy(dst, src, len);
-    dst[len] = '\0';
+    if (len > opts->cap - 1)
+        len = opts->cap - 1;
+    memcpy(opts->dst, src, len);
+    opts->dst[len] = '\0';
     return len;
 }
 

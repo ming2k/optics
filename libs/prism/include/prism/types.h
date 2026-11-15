@@ -7,6 +7,7 @@
 
 #include <flux/core.h>
 #include <flux/math.h>
+#include <stdint.h>
 
 #if defined(_WIN32) && !defined(PRISM_STATIC)
 #ifdef PRISM_BUILDING
@@ -66,7 +67,7 @@ extern "C" {
 /* prism descriptors open with `prism_struct_type type; const void *next;`
  * following the same extension-chain pattern as flux. The registry is
  * prism-local: values are not shared with flux_struct_type. */
-typedef enum prism_struct_type {
+typedef enum prism_struct_type : uint32_t {
     PRISM_TYPE_UNKNOWN = 0,
     PRISM_TYPE_LIQUID_GLASS_DESC = 1,
     PRISM_TYPE_FROSTED_DESC = 2,
@@ -77,7 +78,7 @@ typedef enum prism_struct_type {
     /* Append only. Never repurpose. */
 } prism_struct_type;
 /* Quality and accessibility degradation hint. */
-typedef enum prism_material_quality {
+typedef enum prism_material_quality : uint32_t {
     PRISM_QUALITY_FULL = 0,
     PRISM_QUALITY_LOW_POWER = 1,
     PRISM_QUALITY_OPAQUE_FALLBACK = 2,

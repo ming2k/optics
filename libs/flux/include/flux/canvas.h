@@ -18,6 +18,7 @@
 
 #include <flux/core.h>
 #include <flux/math.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -34,18 +35,21 @@ typedef struct flux_sampler flux_sampler;
 /*  Paint                                                             */
 /* ------------------------------------------------------------------ */
 
-typedef enum flux_line_cap {
+typedef enum flux_line_cap : uint32_t {
     FLUX_CAP_BUTT = 0,
     FLUX_CAP_ROUND = 1,
     FLUX_CAP_SQUARE = 2
 } flux_line_cap;
-typedef enum flux_line_join {
+typedef enum flux_line_join : uint32_t {
     FLUX_JOIN_MITER = 0,
     FLUX_JOIN_ROUND = 1,
     FLUX_JOIN_BEVEL = 2
 } flux_line_join;
-typedef enum flux_fill_rule { FLUX_FILL_NON_ZERO = 0, FLUX_FILL_EVEN_ODD = 1 } flux_fill_rule;
-typedef enum flux_blend_mode {
+typedef enum flux_fill_rule : uint32_t {
+    FLUX_FILL_NON_ZERO = 0,
+    FLUX_FILL_EVEN_ODD = 1
+} flux_fill_rule;
+typedef enum flux_blend_mode : uint32_t {
     FLUX_BLEND_SRC_OVER = 0,
     FLUX_BLEND_SRC = 1,
     FLUX_BLEND_PLUS = 2,
@@ -96,7 +100,7 @@ FLUX_API uint32_t flux_path_dropped_count(const flux_path *p);
 /* Backend selection for flux_canvas_create (Skia SkSurface-style: the factory
  * binds the backend, then the same drawing API is used regardless). AUTO picks
  * GPU when a surface is provided, otherwise the software (CPU) backend. */
-typedef enum flux_canvas_backend_kind {
+typedef enum flux_canvas_backend_kind : uint32_t {
     FLUX_CANVAS_BACKEND_AUTO = 0,
     FLUX_CANVAS_BACKEND_GPU = 1,
     FLUX_CANVAS_BACKEND_CPU = 2,
@@ -124,7 +128,7 @@ typedef struct flux_canvas_desc {
  * one-sample GPU target. MSAA_4X requires a clear colour because a
  * multisample attachment cannot load a one-sample resolve destination. The
  * CPU backend accepts the policy and retains its native software rasterizer. */
-typedef enum flux_canvas_antialias {
+typedef enum flux_canvas_antialias : uint32_t {
     FLUX_CANVAS_ANTIALIAS_AUTO = 0,
     FLUX_CANVAS_ANTIALIAS_NONE = 1,
     FLUX_CANVAS_ANTIALIAS_MSAA_4X = 2,
@@ -300,13 +304,30 @@ FLUX_API void flux_canvas_restore(flux_canvas *c);
 /* Save a compositing layer (ADR-0088 / Opacity Group).
  * Subtree draws are recorded into a tightly scissored transient offscreen buffer
  * and composited back into the parent target with `opacity` on flux_canvas_restore. */
-FLUX_API void flux_canvas_save_layer(flux_canvas *c, const flux_rect *bounds, float opacity);
+typedef struct flux_canvas_save_layer_opts {
+    const flux_rect *bounds;
+    float opacity;
+} flux_canvas_save_layer_opts;
+
+FLUX_API void flux_canvas_save_layer(flux_canvas *c, const flux_canvas_save_layer_opts *opts);
 /* Intersect the current clip with `r`. The rectangle is expressed in the
  * current logical coordinate system and transformed to the physical-pixel
  * scissor, including content scale and affine transforms. */
 FLUX_API void flux_canvas_clip_rect(flux_canvas *c, flux_rect r);
-FLUX_API void flux_canvas_translate(flux_canvas *c, float x, float y);
-FLUX_API void flux_canvas_scale(flux_canvas *c, float sx, float sy);
+
+typedef struct flux_canvas_translate_opts {
+    float x;
+    float y;
+} flux_canvas_translate_opts;
+
+FLUX_API void flux_canvas_translate(flux_canvas *c, const flux_canvas_translate_opts *opts);
+
+typedef struct flux_canvas_scale_opts {
+    float sx;
+    float sy;
+} flux_canvas_scale_opts;
+
+FLUX_API void flux_canvas_scale(flux_canvas *c, const flux_canvas_scale_opts *opts);
 FLUX_API void flux_canvas_rotate(flux_canvas *c, float radians);
 FLUX_API void flux_canvas_transform(flux_canvas *c, flux_mat3x2 m);
 
@@ -415,8 +436,12 @@ typedef struct flux_brush {
     };
 } flux_brush;
 
-FLUX_API void flux_canvas_draw_geometry(flux_canvas *c, const flux_geometry *geom,
-                                        const flux_brush *brush);
+typedef struct flux_canvas_draw_geometry_opts {
+    const flux_geometry *geom;
+    const flux_brush *brush;
+} flux_canvas_draw_geometry_opts;
+
+FLUX_API void flux_canvas_draw_geometry(flux_canvas *c, const flux_canvas_draw_geometry_opts *opts);
 
 /* ================================================================== */
 /*  Immutable DisplayList & Encoder (ADR-0088 Clean-Break)            */
@@ -445,23 +470,40 @@ FLUX_NODISCARD FLUX_API flux_result flux_encoder_create(const flux_encoder_desc 
  * FLUX_OK is a no-op; the first failure cannot be replaced or cleared. */
 FLUX_API void flux_encoder_fail(flux_encoder *enc, flux_result error);
 FLUX_API flux_result flux_encoder_status(const flux_encoder *enc);
-FLUX_API void flux_encoder_draw_geometry(flux_encoder *enc, const flux_geometry *geom,
-                                         const flux_brush *brush);
+typedef struct flux_encoder_draw_geometry_opts {
+    const flux_geometry *geom;
+    const flux_brush *brush;
+    uint32_t slot;
+    bool use_slot;
+} flux_encoder_draw_geometry_opts;
 
-/* Record an image-brush geometry whose image is a dynamic input slot rather
- * than a concrete image. `brush` must be FLUX_BRUSH_IMAGE_PATTERN; its
- * image/sampler fields are ignored and supplied at execution. `slot` must be
- * below FLUX_DISPLAY_LIST_MAX_INPUTS. The list retains no image for this draw,
- * so a slot without a binding fails before any pixels are written. */
-FLUX_API void flux_encoder_draw_geometry_slot(flux_encoder *enc, const flux_geometry *geom,
-                                              const flux_brush *brush, uint32_t slot);
+FLUX_API void flux_encoder_draw_geometry(flux_encoder *enc,
+                                         const flux_encoder_draw_geometry_opts *opts);
 FLUX_API void flux_encoder_draw_glyph_run(flux_encoder *enc, const flux_glyph_run_desc *desc);
 FLUX_API void flux_encoder_save(flux_encoder *enc);
 FLUX_API void flux_encoder_restore(flux_encoder *enc);
 FLUX_API void flux_encoder_clip_rect(flux_encoder *enc, flux_rect r);
-FLUX_API void flux_encoder_save_layer(flux_encoder *enc, const flux_rect *bounds, float opacity);
-FLUX_API void flux_encoder_translate(flux_encoder *enc, float x, float y);
-FLUX_API void flux_encoder_scale(flux_encoder *enc, float sx, float sy);
+
+typedef struct flux_encoder_save_layer_opts {
+    const flux_rect *bounds;
+    float opacity;
+} flux_encoder_save_layer_opts;
+
+FLUX_API void flux_encoder_save_layer(flux_encoder *enc, const flux_encoder_save_layer_opts *opts);
+
+typedef struct flux_encoder_translate_opts {
+    float x;
+    float y;
+} flux_encoder_translate_opts;
+
+FLUX_API void flux_encoder_translate(flux_encoder *enc, const flux_encoder_translate_opts *opts);
+
+typedef struct flux_encoder_scale_opts {
+    float sx;
+    float sy;
+} flux_encoder_scale_opts;
+
+FLUX_API void flux_encoder_scale(flux_encoder *enc, const flux_encoder_scale_opts *opts);
 FLUX_API void flux_encoder_rotate(flux_encoder *enc, float radians);
 FLUX_API void flux_encoder_transform(flux_encoder *enc, flux_mat3x2 m);
 
@@ -494,13 +536,15 @@ typedef struct flux_display_list_binding {
 /* Submit an immutable display list to a canvas for batch execution. A list
  * that declares dynamic inputs fails with FLUX_ERROR_INVALID_STATE here; use
  * the bound form below. */
-FLUX_NODISCARD FLUX_API flux_result flux_canvas_submit_display_list(flux_canvas *c,
-                                                                    const flux_display_list *list);
-/* Submit a list with every dynamic image slot bound exactly once. Missing,
- * duplicate, out-of-range, or null bindings fail before execution. */
-FLUX_NODISCARD FLUX_API flux_result flux_canvas_submit_display_list_bound(
-    flux_canvas *c, const flux_display_list *list, const flux_display_list_binding *bindings,
-    uint32_t binding_count);
+typedef struct flux_canvas_submit_display_list_opts {
+    const flux_display_list *list;
+    const flux_display_list_binding *bindings;
+    uint32_t binding_count;
+} flux_canvas_submit_display_list_opts;
+
+/* Submit a display list, optionally binding dynamic image slots. */
+FLUX_NODISCARD FLUX_API flux_result
+flux_canvas_submit_display_list(flux_canvas *c, const flux_canvas_submit_display_list_opts *opts);
 
 /* ================================================================== */
 /*  DisplayList serialization (ADR-0157)                              */
@@ -511,7 +555,7 @@ FLUX_NODISCARD FLUX_API flux_result flux_canvas_submit_display_list_bound(
  * by caller-assigned nonzero IDs; child lists are flattened into the command
  * stream with their state isolation preserved by SAVE/RESTORE. */
 
-typedef enum flux_display_list_resource_kind {
+typedef enum flux_display_list_resource_kind : uint32_t {
     FLUX_DISPLAY_LIST_RESOURCE_IMAGE = 1,
     FLUX_DISPLAY_LIST_RESOURCE_SAMPLER = 2,
 } flux_display_list_resource_kind;
@@ -534,13 +578,18 @@ typedef struct flux_display_list_serialize_opts {
     const void *next;
     flux_display_list_resource_id_fn resource_id;
     void *user;
+    uint8_t **out_data;
+    size_t *out_size;
 } flux_display_list_serialize_opts;
 
 typedef struct flux_display_list_deserialize_opts {
     flux_struct_type type; /* FLUX_TYPE_DISPLAY_LIST_DESERIALIZE_OPTS */
     const void *next;
+    const uint8_t *data;
+    size_t size;
     flux_display_list_resource_resolve_fn resolve;
     void *user;
+    flux_display_list **out_list;
 } flux_display_list_deserialize_opts;
 
 #define FLUX_DISPLAY_LIST_SERIALIZE_OPTS_INIT {.type = FLUX_TYPE_DISPLAY_LIST_SERIALIZE_OPTS}
@@ -548,17 +597,15 @@ typedef struct flux_display_list_deserialize_opts {
 
 /* Serialize to a newly allocated byte stream. Release with
  * flux_display_list_serialized_free. A list with resources requires
- * opts->resource_id; a list without resources may pass nullptr opts. */
+ * opts->resource_id. */
 FLUX_NODISCARD FLUX_API flux_result flux_display_list_serialize(
-    const flux_display_list *list, const flux_display_list_serialize_opts *opts, uint8_t **out_data,
-    size_t *out_size);
+    const flux_display_list *list, const flux_display_list_serialize_opts *opts);
 
 /* Load a serialized list. Every table entry must resolve; malformed input,
  * duplicate IDs, unknown opcodes, bad lengths, and missing resources fail
  * with no published list and no retained reference. */
-FLUX_NODISCARD FLUX_API flux_result flux_display_list_deserialize(
-    const uint8_t *data, size_t size, const flux_display_list_deserialize_opts *opts,
-    flux_display_list **out_list);
+FLUX_NODISCARD FLUX_API flux_result
+flux_display_list_deserialize(const flux_display_list_deserialize_opts *opts);
 
 FLUX_API void flux_display_list_serialized_free(uint8_t *data);
 
@@ -685,7 +732,7 @@ typedef struct flux_canvas_cache_entry {
     uint64_t generation;
 } flux_canvas_cache_entry;
 
-#define FLUX_CANVAS_CACHE_ENTRY_INIT {.slot = NULL, .generation = 0}
+#define FLUX_CANVAS_CACHE_ENTRY_INIT {.slot = nullptr, .generation = 0}
 
 /* Start capturing every draw submitted between here and the matching
  * flux_canvas_cache_end into a new segment. Recording is passive: draws

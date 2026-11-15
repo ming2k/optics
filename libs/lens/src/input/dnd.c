@@ -51,12 +51,11 @@ bool lens_dnd_source(lens *ui, const lens_dnd_source_desc *desc) {
     return ui->dnd_source.active && (ui->dnd_source.source_id == desc->id);
 }
 
-bool lens_dnd_drop_target(lens *ui, lens_id id, uint32_t accepted_actions,
-                          lens_dnd_drop_info *out_info) {
-    if (!ui || !id)
+bool lens_dnd_drop_target(lens *ui, const lens_dnd_drop_target_opts *opts) {
+    if (!ui || !opts || !opts->id)
         return false;
 
-    lens_node *n = lens_find(ui, id);
+    lens_node *n = lens_find(ui, opts->id);
     if (!n || !n->has_prev)
         return false;
 
@@ -75,37 +74,38 @@ bool lens_dnd_drop_target(lens *ui, lens_id id, uint32_t accepted_actions,
         }
     }
 
-    if (out_info) {
-        out_info->is_hovered = in_bounds;
-        out_info->is_dropped = dropped_here;
-        out_info->drop_pos = (flux_point){p.x - b.x, p.y - b.y};
-        out_info->action = accepted_actions;
+    if (opts->out_info) {
+        opts->out_info->is_hovered = in_bounds;
+        opts->out_info->is_dropped = dropped_here;
+        opts->out_info->drop_pos = (flux_point){p.x - b.x, p.y - b.y};
+        opts->out_info->action = opts->accepted_actions;
     }
 
     return in_bounds;
 }
 
-void lens_deliver_drop(lens *ui, const char *payload, size_t len, flux_point pos) {
-    if (!ui || !payload || !len)
+void lens_deliver_drop(lens *ui, const lens_deliver_drop_opts *opts) {
+    if (!ui || !opts || !opts->payload || !opts->len)
         return;
 
-    size_t cp =
-        len < (sizeof(ui->dnd_drop.drop_buf) - 1) ? len : (sizeof(ui->dnd_drop.drop_buf) - 1);
-    memcpy(ui->dnd_drop.drop_buf, payload, cp);
+    size_t cp = opts->len < (sizeof(ui->dnd_drop.drop_buf) - 1)
+                    ? opts->len
+                    : (sizeof(ui->dnd_drop.drop_buf) - 1);
+    memcpy(ui->dnd_drop.drop_buf, opts->payload, cp);
     ui->dnd_drop.drop_buf[cp] = '\0';
     ui->dnd_drop.drop_len = (uint32_t)cp;
-    ui->dnd_drop.drop_pos = pos;
+    ui->dnd_drop.drop_pos = opts->pos;
     ui->dnd_drop.drop_frame = ui->frame;
     ui->dnd_drop.dropped = true;
 }
 
-uint32_t lens_take_drop(lens *ui, char *dst, uint32_t cap) {
-    if (!ui || !dst || cap == 0 || !ui->dnd_drop.drop_len)
+uint32_t lens_take_drop(lens *ui, const lens_take_drop_opts *opts) {
+    if (!ui || !opts || !opts->dst || opts->cap == 0 || !ui->dnd_drop.drop_len)
         return 0;
 
-    uint32_t n = ui->dnd_drop.drop_len < (cap - 1) ? ui->dnd_drop.drop_len : (cap - 1);
-    memcpy(dst, ui->dnd_drop.drop_buf, n);
-    dst[n] = '\0';
+    uint32_t n = ui->dnd_drop.drop_len < (opts->cap - 1) ? ui->dnd_drop.drop_len : (opts->cap - 1);
+    memcpy(opts->dst, ui->dnd_drop.drop_buf, n);
+    opts->dst[n] = '\0';
     ui->dnd_drop.drop_len = 0;
     ui->dnd_drop.dropped = false;
     return n;

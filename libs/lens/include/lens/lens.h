@@ -79,22 +79,22 @@ typedef struct lens_font lens_font; /* opaque font handle (text seam)     */
 
 typedef uint64_t lens_id; /* stable widget identity; 0 == none  */
 
-typedef enum lens_axis { LENS_ROW = 0, LENS_COLUMN = 1 } lens_axis;
-typedef enum lens_align {
+typedef enum lens_axis : uint32_t { LENS_ROW = 0, LENS_COLUMN = 1 } lens_axis;
+typedef enum lens_align : uint32_t {
     LENS_START = 0,
     LENS_CENTER = 1,
     LENS_END = 2,
     LENS_STRETCH = 3
 } lens_align;
 
-typedef enum lens_mouse_button {
+typedef enum lens_mouse_button : uint32_t {
     LENS_MOUSE_LEFT = 0,
     LENS_MOUSE_RIGHT = 1,
     LENS_MOUSE_MIDDLE = 2,
 } lens_mouse_button;
 #define LENS_MOUSE_COUNT 3
 
-typedef enum lens_node_phase {
+typedef enum lens_node_phase : uint32_t {
     LENS_NODE_ENTERING = 0, /* first frame this id was seen        */
     LENS_NODE_STABLE = 1,   /* seen this frame and last frame      */
     LENS_NODE_LEAVING = 2,  /* not seen this frame; in grace window */
@@ -269,7 +269,7 @@ typedef struct lens_response {
 /* Semantic cursor requested by the hovered Lens widget. Lens only reports
  * intent; the windowing host remains responsible for mapping it to the
  * platform cursor API once per frame. */
-typedef enum lens_cursor_hint {
+typedef enum lens_cursor_hint : uint32_t {
     LENS_CURSOR_DEFAULT = 0,
     LENS_CURSOR_POINTER,
     LENS_CURSOR_TEXT,
@@ -281,7 +281,7 @@ typedef enum lens_cursor_hint {
 /*  Accessibility semantics (ADR-0035)                                */
 /* ================================================================== */
 
-typedef enum lens_role {
+typedef enum lens_role : uint32_t {
     LENS_ROLE_NONE = 0, /* decorative; not surfaced to assistive tech */
     LENS_ROLE_GROUP,    /* a semantic grouping container              */
     LENS_ROLE_LABEL,
@@ -563,7 +563,7 @@ LENS_API void lens_pop_style(lens *ui);
  * keeps the engine's default (sans-serif). Like lens_set_theme, this is a
  * context switch read at widget-build time: set it, build the widgets that
  * need another voice (e.g. a serif display title), then set it back. */
-typedef enum lens_text_family {
+typedef enum lens_text_family : uint32_t {
     LENS_TEXT_FAMILY_DEFAULT = 0,
     LENS_TEXT_FAMILY_SANS = 1,
     LENS_TEXT_FAMILY_SERIF = 2,
@@ -579,12 +579,17 @@ typedef struct lens_text_metrics {
     float baseline; /* from top */
 } lens_text_metrics;
 
+/* Query descriptor, not a widget descriptor: text measurement has no layout
+ * box. Widget `lens_*_opts` still begin with `lens_box` at offset 0. */
+typedef struct lens_text_measure_opts {
+    const char *utf8; /* NUL-terminated text to shape */
+    float size_px;    /* 0 uses the engine default */
+    float weight;     /* 0 uses the regular slot; >500 selects bold */
+} lens_text_measure_opts;
+
 /* The only text entry point layout (ADR-0028 pass 1) may call. Backed
  * by glyph_measure via the text seam (ADR-0033). */
-LENS_API lens_text_metrics lens_text_measure(lens *ui, lens_font *font, const char *utf8,
-                                             float size_px);
-LENS_API lens_text_metrics lens_text_measure_ex(lens *ui, lens_font *font, const char *utf8,
-                                                float size_px, float weight);
+LENS_API lens_text_metrics lens_text_measure(lens *ui, const lens_text_measure_opts *opts);
 
 /* Release the text engine's high-water scratch and shaping cache (the
  * shared engine's `glyph_compact`). The engine grows layout/run/
@@ -643,14 +648,14 @@ typedef struct lens_text_line {
     float advance;
 } lens_text_line;
 
-typedef enum lens_button_variant {
+typedef enum lens_button_variant : uint32_t {
     LENS_BUTTON_DEFAULT = 0,
     LENS_BUTTON_PRIMARY = 1,
     LENS_BUTTON_SUBTLE = 2,
     LENS_BUTTON_LINK = 3,
 } lens_button_variant;
 
-typedef enum lens_checkbox_appearance {
+typedef enum lens_checkbox_appearance : uint32_t {
     LENS_CHECKBOX_BOX = 0,    /* square checkbox */
     LENS_CHECKBOX_SWITCH = 1, /* toggle switch */
     LENS_CHECKBOX_RADIO = 2,  /* radio circle */
@@ -770,18 +775,51 @@ LENS_API float *lens_skin_scratch(lens *ui, lens_node *node);
  * text, a negative rel.w centres horizontally in the resolved node rect
  * and a negative rel.h centres vertically (centring is resolved at render
  * time, so it stays correct when a parent constrains the node). */
-LENS_API void lens_skin_rect(lens *ui, lens_node *node, flux_rect rel, flux_color color,
-                             float radius);
-LENS_API void lens_skin_border(lens *ui, lens_node *node, flux_rect rel, flux_color color,
-                               float radius, float width);
-LENS_API void lens_skin_text(lens *ui, lens_node *node, flux_rect rel, flux_color color,
-                             const char *utf8, float size_px, float weight);
-LENS_API void lens_skin_icon(lens *ui, lens_node *node, flux_rect rel, flux_color color,
-                             float stroke, lens_icon_id icon);
+typedef struct lens_skin_rect_opts {
+    lens_node *node;
+    flux_rect rel;
+    flux_color color;
+    float radius;
+} lens_skin_rect_opts;
+
+typedef struct lens_skin_border_opts {
+    lens_node *node;
+    flux_rect rel;
+    flux_color color;
+    float radius;
+    float width;
+} lens_skin_border_opts;
+
+typedef struct lens_skin_text_opts {
+    lens_node *node;
+    flux_rect rel;
+    flux_color color;
+    const char *utf8;
+    float size_px;
+    float weight;
+} lens_skin_text_opts;
+
+typedef struct lens_skin_icon_opts {
+    lens_node *node;
+    flux_rect rel;
+    flux_color color;
+    float stroke;
+    lens_icon_id icon;
+} lens_skin_icon_opts;
+
+typedef struct lens_skin_clip_push_opts {
+    lens_node *node;
+    flux_rect rel;
+} lens_skin_clip_push_opts;
+
+LENS_API void lens_skin_rect(lens *ui, const lens_skin_rect_opts *opts);
+LENS_API void lens_skin_border(lens *ui, const lens_skin_border_opts *opts);
+LENS_API void lens_skin_text(lens *ui, const lens_skin_text_opts *opts);
+LENS_API void lens_skin_icon(lens *ui, const lens_skin_icon_opts *opts);
 /* Nested logical clip for skins that clip sub-regions (the table's cells).
  * Balanced push/pop; the rect is intersected with the enclosing clip at
  * render time. */
-LENS_API void lens_skin_clip_push(lens *ui, lens_node *node, flux_rect rel);
+LENS_API void lens_skin_clip_push(lens *ui, const lens_skin_clip_push_opts *opts);
 LENS_API void lens_skin_clip_pop(lens *ui, lens_node *node);
 
 /* Emit a skin record for a HOST-RESERVED widget kind (ADR-0073).
@@ -796,8 +834,13 @@ LENS_API void lens_skin_clip_pop(lens *ui, lens_node *node);
  * semantics). Content fields default as in lens_widget_record; set what
  * the skin needs via `content`. No-op (not an error) when the node is
  * NULL or no skin is registered for the kind. */
-LENS_API void lens_skin_emit_user(lens *ui, lens_node *node, lens_widget_kind kind,
-                                  lens_widget_record rec);
+typedef struct lens_skin_emit_user_opts {
+    lens_node *node;
+    lens_widget_kind kind;
+    lens_widget_record rec;
+} lens_skin_emit_user_opts;
+
+LENS_API void lens_skin_emit_user(lens *ui, const lens_skin_emit_user_opts *opts);
 
 /* ================================================================== */
 /*  Context lifecycle (ADR-0032)                                      */
@@ -864,7 +907,12 @@ LENS_API float lens_dt(const lens *ui); /* frame delta, seconds */
  * (advisory, never a host crash). Ghosts never hit-test, focus, or enter
  * the accessibility tree; they render after live content in their band.
  * Mechanism, not animation: the host owns the clock and the easing. */
-LENS_API void lens_set_ghost(lens *ui, lens_id subtree_root, float alpha);
+typedef struct lens_set_ghost_opts {
+    lens_id subtree_root;
+    float alpha;
+} lens_set_ghost_opts;
+
+LENS_API void lens_set_ghost(lens *ui, const lens_set_ghost_opts *opts);
 
 /* Device-pixel scale (HiDPI). The application reports the compositor /
  * window-system scale here; layout, input, and `lens_input.display_size`
@@ -1098,10 +1146,23 @@ typedef struct lens_scroll_opts {
     bool autohide;
 } lens_scroll_opts;
 
+typedef struct lens_scroll_offset_opts {
+    const char *id;
+    float *out_x;
+    float *out_y;
+} lens_scroll_offset_opts;
+
+typedef struct lens_scroll_to_opts {
+    const char *id;
+    float x;
+    float y;
+} lens_scroll_to_opts;
+
 LENS_API bool lens_scroll_begin(lens *ui, const lens_scroll_opts *opts);
 LENS_API void lens_scroll_end(lens *ui);
-LENS_NODISCARD LENS_API bool lens_scroll_offset(const lens *ui, const char *id, float *x, float *y);
-LENS_API void lens_scroll_to(lens *ui, const char *id, float x, float y);
+LENS_NODISCARD LENS_API bool lens_scroll_offset(const lens *ui,
+                                                const lens_scroll_offset_opts *opts);
+LENS_API void lens_scroll_to(lens *ui, const lens_scroll_to_opts *opts);
 
 typedef struct lens_pressable_opts {
     lens_box box;
@@ -1138,7 +1199,7 @@ typedef enum lens_band : uint32_t {
     LENS_BAND_COUNT = 7,
 } lens_band;
 
-typedef enum lens_place_mode {
+typedef enum lens_place_mode : uint32_t {
     LENS_PLACE_EXACT = 0,
     LENS_PLACE_ANCHORED = 1,
     LENS_PLACE_CENTERED = 2,
@@ -1277,14 +1338,35 @@ typedef struct lens_textedit_opts {
     bool submit_on_enter; /* single-line: Return sets r.submitted, consumes Return key */
 } lens_textedit_opts;
 
+typedef struct lens_textedit_set_caret_opts {
+    const char *label;
+    uint32_t caret;
+} lens_textedit_set_caret_opts;
+
+typedef struct lens_textedit_get_caret_opts {
+    const char *label;
+    uint32_t *out_caret;
+} lens_textedit_get_caret_opts;
+
+typedef struct lens_textedit_set_selection_opts {
+    const char *label;
+    uint32_t sel_start;
+    uint32_t sel_end;
+} lens_textedit_set_selection_opts;
+
+typedef struct lens_textedit_get_selection_opts {
+    const char *label;
+    uint32_t *out_sel_start;
+    uint32_t *out_sel_end;
+} lens_textedit_get_selection_opts;
+
 LENS_API void lens_consume_key(lens *ui, int32_t key);
 LENS_API lens_response lens_textedit(lens *ui, const lens_textedit_opts *opts);
-LENS_API void lens_textedit_set_caret(lens *ui, const char *label, uint32_t caret);
-LENS_API bool lens_textedit_get_caret(const lens *ui, const char *label, uint32_t *caret);
-LENS_API void lens_textedit_set_selection(lens *ui, const char *label, uint32_t sel_start,
-                                          uint32_t sel_end);
-LENS_API bool lens_textedit_get_selection(const lens *ui, const char *label, uint32_t *sel_start,
-                                          uint32_t *sel_end);
+LENS_API void lens_textedit_set_caret(lens *ui, const lens_textedit_set_caret_opts *opts);
+LENS_API bool lens_textedit_get_caret(const lens *ui, const lens_textedit_get_caret_opts *opts);
+LENS_API void lens_textedit_set_selection(lens *ui, const lens_textedit_set_selection_opts *opts);
+LENS_API bool lens_textedit_get_selection(const lens *ui,
+                                          const lens_textedit_get_selection_opts *opts);
 LENS_API void lens_set_cursor_hint(lens *ui, lens_cursor_hint hint);
 
 #if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
@@ -1387,9 +1469,24 @@ typedef struct lens_text_context {
 
 LENS_API lens_text_context lens_text_context_get(const lens *ui);
 
+typedef struct lens_copy_opts {
+    const char *utf8;
+    size_t len;
+} lens_copy_opts;
+
+typedef struct lens_paste_opts {
+    const char *utf8;
+    size_t len;
+} lens_paste_opts;
+
+typedef struct lens_take_paste_opts {
+    char *dst;
+    uint32_t cap;
+} lens_take_paste_opts;
+
 /* Place text on the system clipboard (calls the host lens_clipboard.set_text
  * if any). No-op when no clipboard interface was supplied. */
-LENS_API void lens_copy(lens *ui, const char *utf8, size_t len);
+LENS_API void lens_copy(lens *ui, const lens_copy_opts *opts);
 
 /* Ask the host for clipboard text (calls lens_clipboard.request_text). The
  * host later delivers it via lens_paste. */
@@ -1397,7 +1494,7 @@ LENS_API void lens_request_paste(lens *ui);
 
 /* Host-driven delivery of clipboard text into lens. Queues the payload
  * for the focused text widget to consume on the next frame's build. */
-LENS_API void lens_paste(lens *ui, const char *utf8, size_t len);
+LENS_API void lens_paste(lens *ui, const lens_paste_opts *opts);
 
 /* Drain a pending paste payload for an app-owned editing surface (one that
  * renders text outside lens widgets and therefore has no focused widget to
@@ -1406,7 +1503,7 @@ LENS_API void lens_paste(lens *ui, const char *utf8, size_t len);
  * Returns 0 when nothing is pending; a drained payload is consumed.
  * Text widgets keep their own internal drain — app code should only call
  * this while its own surface is the paste target. */
-LENS_API uint32_t lens_take_paste(lens *ui, char *dst, uint32_t cap);
+LENS_API uint32_t lens_take_paste(lens *ui, const lens_take_paste_opts *opts);
 
 /* Report the caret rect of an app-owned editing surface, same consumer as
  * the widget-reported rect: the platform layer forwards it to the IME so
@@ -1432,18 +1529,34 @@ typedef struct lens_dnd_drop_info {
     uint32_t action;     /* Negotiated action */
 } lens_dnd_drop_info;
 
+typedef struct lens_dnd_drop_target_opts {
+    lens_id id;
+    uint32_t accepted_actions;
+    lens_dnd_drop_info *out_info;
+} lens_dnd_drop_target_opts;
+
+typedef struct lens_deliver_drop_opts {
+    const char *payload;
+    size_t len;
+    flux_point pos;
+} lens_deliver_drop_opts;
+
+typedef struct lens_take_drop_opts {
+    char *dst;
+    uint32_t cap;
+} lens_take_drop_opts;
+
 /* Declare a node as a drag source. Returns true if drag was actively initiated/active. */
 LENS_API bool lens_dnd_source(lens *ui, const lens_dnd_source_desc *desc);
 
 /* Declare a node as a drop target zone. Returns true if hovered or dropped. */
-LENS_API bool lens_dnd_drop_target(lens *ui, lens_id id, uint32_t accepted_actions,
-                                   lens_dnd_drop_info *out_info);
+LENS_API bool lens_dnd_drop_target(lens *ui, const lens_dnd_drop_target_opts *opts);
 
 /* Platform delivery of drop payload into lens. */
-LENS_API void lens_deliver_drop(lens *ui, const char *payload, size_t len, flux_point pos);
+LENS_API void lens_deliver_drop(lens *ui, const lens_deliver_drop_opts *opts);
 
 /* Retrieve and consume pending drop payload during drop frame. Returns bytes copied. */
-LENS_API uint32_t lens_take_drop(lens *ui, char *dst, uint32_t cap);
+LENS_API uint32_t lens_take_drop(lens *ui, const lens_take_drop_opts *opts);
 
 /* ================================================================== */
 /*  Escape hatch — retained nodes (ADR-0031)                          */

@@ -170,7 +170,8 @@ int main(void) {
                         .src_rect = (flux_rect){0, 0, 16, 16},
                     },
             };
-            flux_encoder_draw_geometry(enc, &geom, &brush);
+            flux_encoder_draw_geometry(
+                enc, &(flux_encoder_draw_geometry_opts){.geom = &geom, .brush = &brush});
             flux_sampler_release(s);
 
             flux_display_list *dl = nullptr;
@@ -185,7 +186,8 @@ int main(void) {
                                                            .frame = frame,
                                                            .clear_color = &clear}) == FLUX_OK);
 
-            OT_EXPECT(flux_canvas_submit_display_list(canvas, dl) == FLUX_OK);
+            OT_EXPECT(flux_canvas_submit_display_list(
+                          canvas, &(flux_canvas_submit_display_list_opts){.list = dl}) == FLUX_OK);
             /* Caller drops ownership right away while frame is in-flight. */
             flux_display_list_release(dl);
 

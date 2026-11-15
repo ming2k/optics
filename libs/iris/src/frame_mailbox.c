@@ -20,7 +20,7 @@
  * "everything" are different facts and are never conflated here. */
 static iris_frame_damage iris_damage_from(const flux_rect *rects, uint32_t count, float scale,
                                           int32_t width, int32_t height, bool force_full) {
-    iris_frame_damage out = {0};
+    iris_frame_damage out = {};
     if (force_full || !rects || count == 0 || width <= 0 || height <= 0) {
         out.full = true;
         return out;
@@ -59,7 +59,7 @@ static iris_frame_damage iris_damage_from(const flux_rect *rects, uint32_t count
 }
 
 iris_frame_damage iris_frame_packet_damage(const iris_frame_packet *pkt) {
-    iris_frame_damage out = {0};
+    iris_frame_damage out = {};
     if (!pkt) {
         out.full = true;
         return out;

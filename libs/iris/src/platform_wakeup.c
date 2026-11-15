@@ -51,10 +51,10 @@ typedef struct iris_wakeup_job {
 } iris_wakeup_job;
 
 static iris_wakeup_mutex g_lock = IRIS_WAKEUP_MUTEX_INIT;
-static iris_wakeup_kick_fn g_kick = NULL;
-static void *g_kick_user = NULL;
-static iris_wakeup_job *g_head = NULL;
-static iris_wakeup_job *g_tail = NULL;
+static iris_wakeup_kick_fn g_kick = nullptr;
+static void *g_kick_user = nullptr;
+static iris_wakeup_job *g_head = nullptr;
+static iris_wakeup_job *g_tail = nullptr;
 
 void iris_platform_wakeup_set_kick(iris_wakeup_kick_fn kick, void *user) {
     iris_wakeup_lock(&g_lock);
@@ -72,7 +72,7 @@ int iris_platform_wakeup_post(iris_wakeup_fn fn, void *user) {
         return -1;
     job->fn = fn;
     job->user = user;
-    job->next = NULL;
+    job->next = nullptr;
 
     iris_wakeup_kick_fn kick;
     void *kick_user;
@@ -105,7 +105,7 @@ void iris_platform_wakeup_drain(void) {
         if (job) {
             g_head = job->next;
             if (!g_head)
-                g_tail = NULL;
+                g_tail = nullptr;
         }
         iris_wakeup_unlock(&g_lock);
 

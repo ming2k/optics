@@ -84,7 +84,7 @@ flatten_multi flatten_path_to_contours(const flux_path *p, float pixel_scale, fl
     (void)pts_cap;
     (void)out_cons;
     (void)cons_cap;
-    return (flatten_multi){0};
+    return (flatten_multi){};
 }
 
 static uint32_t *g_prev;

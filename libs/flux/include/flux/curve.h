@@ -21,6 +21,7 @@
 
 #include <flux/core.h>
 #include <flux/math.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -30,7 +31,7 @@ extern "C" {
 /*  Reduced segments                                                  */
 /* ================================================================== */
 
-typedef enum flux_curve_op {
+typedef enum flux_curve_op : uint32_t {
     FLUX_CURVE_LINE = 0, /* straight p0 -> p2; p1 is the midpoint */
     FLUX_CURVE_QUAD = 1, /* quadratic Bézier through p0, p1, p2 */
 } flux_curve_op;
@@ -60,7 +61,7 @@ FLUX_API flux_curve_seg flux_curve_seg_make(flux_curve_op op, flux_point p0, flu
 /* Fill rule for containment. Mirrors flux_fill_rule (canvas) but is
  * declared here so the kernel stays a leaf module. The caller maps one to
  * the other; they are the same two values. */
-typedef enum flux_curve_fill {
+typedef enum flux_curve_fill : uint32_t {
     FLUX_CURVE_FILL_NONZERO = 0,
     FLUX_CURVE_FILL_EVENODD = 1,
 } flux_curve_fill;

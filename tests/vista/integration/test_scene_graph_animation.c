@@ -20,6 +20,42 @@ typedef struct test_glb {
     size_t size;
 } test_glb;
 
+static flux_result load_glb(flux_device *device, const void *bytes, size_t size,
+                            vista_scene **out) {
+    return vista_load_glb(device,
+                          &(vista_load_glb_opts){.bytes = bytes, .byte_count = size, .out = out});
+}
+
+static flux_result set_materials(vista_scene *scene, flux_material *const *materials,
+                                 uint32_t count, flux_material *fallback) {
+    return vista_scene_set_materials(
+        scene, &(vista_scene_set_materials_opts){
+                   .materials = materials, .material_count = count, .fallback = fallback});
+}
+
+static flux_result load_animation_glb(const vista_scene *target, const void *bytes, size_t size,
+                                      vista_animation **out) {
+    return vista_load_animation_glb(
+        target, &(vista_load_animation_glb_opts){.bytes = bytes, .byte_count = size, .out = out});
+}
+
+static bool bone_position(const vista_scene *scene, const char *name, flux_vec3 *out) {
+    return vista_scene_humanoid_bone_position(
+        scene, &(vista_scene_humanoid_bone_position_opts){.bone_name = name, .out_position = out});
+}
+
+static flux_result apply_animation(vista_scene *scene, const vista_animation *animation, float time,
+                                   bool loop) {
+    return vista_scene_apply_animation(
+        scene, &(vista_scene_apply_animation_opts){
+                   .animation = animation, .time_seconds = time, .loop = loop});
+}
+
+static bool scene_bounds(const vista_scene *scene, flux_vec3 *out_min, flux_vec3 *out_max) {
+    return vista_scene_bounds(scene,
+                              &(vista_scene_bounds_opts){.out_min = out_min, .out_max = out_max});
+}
+
 static void put_u32_le(uint8_t *dst, uint32_t value) {
     dst[0] = (uint8_t)value;
     dst[1] = (uint8_t)(value >> 8);
@@ -33,12 +69,12 @@ static test_glb make_glb(const char *json, const void *bin, size_t bin_size) {
     size_t bin_padded = (bin_size + 3u) & ~(size_t)3u;
     if (json_padded > UINT32_MAX || bin_padded > UINT32_MAX ||
         json_padded > SIZE_MAX - bin_padded - 28u || json_padded + bin_padded + 28u > UINT32_MAX)
-        return (test_glb){0};
+        return (test_glb){};
 
     size_t total = 12u + 8u + json_padded + 8u + bin_padded;
     uint8_t *bytes = calloc(1, total);
     if (!bytes)
-        return (test_glb){0};
+        return (test_glb){};
 
     put_u32_le(bytes, 0x46546c67u); /* glTF */
     put_u32_le(bytes + 4u, 2u);     /* GLB 2 */
@@ -151,8 +187,8 @@ int main(void) {
 
     test_glb target_glb = make_target();
     test_glb animation_glb = make_animation();
-    OT_EXPECT(target_glb.bytes != NULL);
-    OT_EXPECT(animation_glb.bytes != NULL);
+    OT_EXPECT(target_glb.bytes != nullptr);
+    OT_EXPECT(animation_glb.bytes != nullptr);
     if (!target_glb.bytes || !animation_glb.bytes) {
         free(target_glb.bytes);
         free(animation_glb.bytes);
@@ -160,8 +196,8 @@ int main(void) {
         return OT_REPORT();
     }
 
-    vista_scene *scene = NULL;
-    flux_result load_result = vista_load_glb(device, target_glb.bytes, target_glb.size, &scene);
+    vista_scene *scene = nullptr;
+    flux_result load_result = load_glb(device, target_glb.bytes, target_glb.size, &scene);
     if (load_result != FLUX_OK)
         fprintf(stderr, "target GLB load failed: %s\n", flux_result_string(load_result));
     OT_EXPECT(load_result == FLUX_OK);
@@ -172,55 +208,55 @@ int main(void) {
             .base_color = {1, 1, 1, 1},
             .color_format = FLUX_FORMAT_RGBA8_UNORM,
         };
-        flux_material *material = NULL;
+        flux_material *material = nullptr;
         OT_EXPECT(flux_material_create(device, &material_desc, &material) == FLUX_OK);
         flux_material *table[1] = {material};
-        OT_EXPECT(vista_scene_set_materials(scene, table, 1, material) == FLUX_OK);
+        OT_EXPECT(set_materials(scene, table, 1, material) == FLUX_OK);
         /* The scene retains both table and fallback references. */
         flux_material_release(material);
-        OT_EXPECT(vista_scene_set_materials(scene, NULL, 0, NULL) == FLUX_OK);
-        OT_EXPECT(vista_scene_set_materials(NULL, NULL, 0, NULL) == FLUX_ERROR_INVALID_ARGUMENT);
+        OT_EXPECT(set_materials(scene, nullptr, 0, nullptr) == FLUX_OK);
+        OT_EXPECT(set_materials(nullptr, nullptr, 0, nullptr) == FLUX_ERROR_INVALID_ARGUMENT);
     }
-    vista_animation *animation = NULL;
+    vista_animation *animation = nullptr;
     if (scene)
-        OT_EXPECT(vista_load_animation_glb(scene, animation_glb.bytes, animation_glb.size,
-                                           &animation) == FLUX_OK);
+        OT_EXPECT(load_animation_glb(scene, animation_glb.bytes, animation_glb.size, &animation) ==
+                  FLUX_OK);
 
     if (scene && animation) {
         OT_EXPECT_NEAR(vista_animation_duration(animation), 1.0f, 1e-6);
         OT_EXPECT(vista_animation_channel_count(animation) == 2u);
 
-        flux_vec3 eye = {0};
-        OT_EXPECT(vista_scene_humanoid_bone_position(scene, "leftEye", &eye));
+        flux_vec3 eye = {};
+        OT_EXPECT(bone_position(scene, "leftEye", &eye));
         OT_EXPECT_NEAR(eye.x, 1.0f, 1e-5);
         OT_EXPECT_NEAR(eye.y, 2.0f, 1e-5);
 
         /* Matrix-authored nodes must preserve their column-major rotation
          * during TRS decomposition: +X under +90-degree Z becomes +Y. */
-        flux_vec3 jaw = {0};
-        OT_EXPECT(vista_scene_humanoid_bone_position(scene, "jaw", &jaw));
+        flux_vec3 jaw = {};
+        OT_EXPECT(bone_position(scene, "jaw", &jaw));
         OT_EXPECT_NEAR(jaw.x, 0.0f, 1e-5);
         OT_EXPECT_NEAR(jaw.y, 3.0f, 1e-5);
 
-        OT_EXPECT(vista_scene_apply_animation(scene, animation, 0.5f, false) == FLUX_OK);
-        OT_EXPECT(vista_scene_humanoid_bone_position(scene, "leftEye", &eye));
+        OT_EXPECT(apply_animation(scene, animation, 0.5f, false) == FLUX_OK);
+        OT_EXPECT(bone_position(scene, "leftEye", &eye));
         OT_EXPECT_NEAR(eye.x, 0.70710678f, 1e-4);
         OT_EXPECT_NEAR(eye.y, 3.20710678f, 1e-4);
 
-        OT_EXPECT(vista_scene_apply_animation(scene, animation, 1.0f, false) == FLUX_OK);
-        OT_EXPECT(vista_scene_humanoid_bone_position(scene, "leftEye", &eye));
+        OT_EXPECT(apply_animation(scene, animation, 1.0f, false) == FLUX_OK);
+        OT_EXPECT(bone_position(scene, "leftEye", &eye));
         OT_EXPECT_NEAR(eye.x, 0.0f, 1e-4);
         OT_EXPECT_NEAR(eye.y, 4.0f, 1e-4);
 
-        OT_EXPECT(vista_scene_apply_animation(scene, animation, 1.0f, true) == FLUX_OK);
-        OT_EXPECT(vista_scene_humanoid_bone_position(scene, "leftEye", &eye));
+        OT_EXPECT(apply_animation(scene, animation, 1.0f, true) == FLUX_OK);
+        OT_EXPECT(bone_position(scene, "leftEye", &eye));
         OT_EXPECT_NEAR(eye.x, 1.0f, 1e-5);
         OT_EXPECT_NEAR(eye.y, 2.0f, 1e-5);
 
         vista_animation *retained = vista_animation_retain(animation);
         vista_animation_release(animation);
         animation = retained;
-        OT_EXPECT(vista_scene_apply_animation(scene, animation, -1.0f, false) == FLUX_OK);
+        OT_EXPECT(apply_animation(scene, animation, -1.0f, false) == FLUX_OK);
     }
 
     /* A node array where children precede their parents must still fold the
@@ -228,11 +264,11 @@ int main(void) {
      * relied on array-order convergence; this locks the correct composed
      * transforms regardless of ordering. */
     test_glb reversed_glb = make_reversed_chain();
-    OT_EXPECT(reversed_glb.bytes != NULL);
+    OT_EXPECT(reversed_glb.bytes != nullptr);
     if (reversed_glb.bytes) {
-        vista_scene *reversed = NULL;
+        vista_scene *reversed = nullptr;
         flux_result reversed_result =
-            vista_load_glb(device, reversed_glb.bytes, reversed_glb.size, &reversed);
+            load_glb(device, reversed_glb.bytes, reversed_glb.size, &reversed);
         OT_EXPECT(reversed_result == FLUX_OK);
         if (reversed) {
             /* Two children each carry the mesh. Their translated AABBs
@@ -240,9 +276,9 @@ int main(void) {
              * both parents, proving the parent world matrix reached each
              * child even though the children precede the parents in the
              * node array. */
-            flux_vec3 bounds_min = {0};
-            flux_vec3 bounds_max = {0};
-            OT_EXPECT(vista_scene_bounds(reversed, &bounds_min, &bounds_max));
+            flux_vec3 bounds_min = {};
+            flux_vec3 bounds_max = {};
+            OT_EXPECT(scene_bounds(reversed, &bounds_min, &bounds_max));
             /* Positions span x in [-0.1, 0.1], y in [-0.1, 0.1], z = 0.
              * childA's world is (0, 3, 0); childB's is (4, 0, 3). */
             OT_EXPECT_NEAR(bounds_min.x, -0.1f, 1e-4);

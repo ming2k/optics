@@ -118,13 +118,17 @@ static void build(lens *ui, const lens_input *in, void *user) {
     lens_column_begin(
         ui, &(lens_layout_opts){.pad = 16, .gap = 8, .cross = LENS_STRETCH, .bg = zone_bg});
 
-    lens_dnd_drop_info dinfo = {0};
-    bool in_target = lens_dnd_drop_target(ui, drop_zone_id, IRIS_DND_ACTION_COPY, &dinfo);
+    lens_dnd_drop_info dinfo = {};
+    bool in_target = lens_dnd_drop_target(ui, &(lens_dnd_drop_target_opts){
+                                                  .id = drop_zone_id,
+                                                  .accepted_actions = IRIS_DND_ACTION_COPY,
+                                                  .out_info = &dinfo,
+                                              });
     a->target_hovered = in_target && dinfo.is_hovered;
 
     if (dinfo.is_dropped) {
-        char buf[1024] = {0};
-        uint32_t n = lens_take_drop(ui, buf, sizeof(buf));
+        char buf[1024] = {};
+        uint32_t n = lens_take_drop(ui, &(lens_take_drop_opts){.dst = buf, .cap = sizeof(buf)});
         if (n > 0) {
             memcpy(a->last_dropped_payload, buf, n);
             a->last_dropped_payload[n] = '\0';
@@ -158,7 +162,7 @@ static void build(lens *ui, const lens_input *in, void *user) {
 int main(int argc, char **argv) {
     (void)argc;
     (void)argv;
-    app a = {0};
+    app a = {};
     iris_app_config cfg = {
         .title = "Optics — Drag and Drop Demonstration",
         .width = 900,

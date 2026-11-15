@@ -35,7 +35,7 @@ bool lensi_point_clipped_by_scroll(const lens_node *n, flux_point p) {
  * bits only it knows (SELECTED/ACTIVE/DRAGGED) before publishing the
  * response. */
 lens_response lensi_interact(lens *ui, lens_node *n, bool focusable, bool disabled) {
-    lens_response r = {0};
+    lens_response r = {};
     r.id = n->id;
     r.rect = n->prev_rect;
 

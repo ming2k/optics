@@ -10,7 +10,7 @@
 extern "C" {
 #endif
 
-typedef enum lens_icon_id {
+typedef enum lens_icon_id : uint32_t {
     LENS_ICON_ACTIVITY = 0,
     LENS_ICON_AIRPLAY = 1,
     LENS_ICON_ALERT_CIRCLE = 2,

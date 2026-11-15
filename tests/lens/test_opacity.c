@@ -21,16 +21,16 @@ static uint8_t alpha_of(flux_color c) {
 
 static const lens_draw_cmd *first_text_cmd(const lens_node *n) {
     if (!n)
-        return NULL;
+        return nullptr;
     for (uint32_t i = 0; i < n->cmd_count; i++)
         if (n->cmds[i].kind == LENS_DRAW_TEXT)
             return &n->cmds[i];
-    return NULL;
+    return nullptr;
 }
 
 int main(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     /* Default, and the setter clamps into 0..1. */
     OT_EXPECT(lens_opacity(ui) == 1.0f);
@@ -51,11 +51,11 @@ int main(void) {
     lens_test_end(ui);
 
     lens_node *dimmed = lens_node_first_child(lens_root(ui));
-    lens_node *solid = dimmed ? dimmed->next_sibling : NULL;
+    lens_node *solid = dimmed ? dimmed->next_sibling : nullptr;
     const lens_draw_cmd *dim_cmd = first_text_cmd(dimmed);
     const lens_draw_cmd *solid_cmd = first_text_cmd(solid);
-    OT_EXPECT(dim_cmd != NULL);
-    OT_EXPECT(solid_cmd != NULL);
+    OT_EXPECT(dim_cmd != nullptr);
+    OT_EXPECT(solid_cmd != nullptr);
     OT_EXPECT(alpha_of(dim_cmd->color) == (uint8_t)full);
     OT_EXPECT(dimmed->opacity == 0.5f);
     OT_EXPECT(alpha_of(solid_cmd->color) == (uint8_t)full);
@@ -67,7 +67,7 @@ int main(void) {
     lens_test_end(ui);
     dimmed = lens_node_first_child(lens_root(ui));
     dim_cmd = first_text_cmd(dimmed);
-    OT_EXPECT(dim_cmd != NULL);
+    OT_EXPECT(dim_cmd != nullptr);
     OT_EXPECT(alpha_of(dim_cmd->color) == (uint8_t)full);
 
     /* Premultiplied sRGB invariant (ADR-0109): lensi_opacity_color scales all

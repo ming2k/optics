@@ -108,7 +108,7 @@ void lensi_skin_button(lens *ui, lens_node *n, const lens_widget_record *rec) {
     /* Content layout & drawing */
     float glyph_s = rec->content.glyph_size > 0.0f ? rec->content.glyph_size : rs->font_size;
     bool has_icon = rec->content.icon != LENS_ICON_INVALID && rec->content.icon != 0;
-    bool has_image = rec->content.image != NULL;
+    bool has_image = rec->content.image != nullptr;
     bool has_label = rec->content.label && rec->content.label[0];
 
     flux_color text_col;

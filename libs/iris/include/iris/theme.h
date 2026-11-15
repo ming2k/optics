@@ -20,12 +20,13 @@
 #define IRIS_THEME_H
 
 #include <iris/app.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-typedef enum iris_color_scheme {
+typedef enum iris_color_scheme : uint32_t {
     IRIS_COLOR_SCHEME_NO_PREFERENCE = 0,
     IRIS_COLOR_SCHEME_PREFER_DARK = 1,
     IRIS_COLOR_SCHEME_PREFER_LIGHT = 2,

@@ -84,7 +84,7 @@ FLUX_API const char *flux_version_string(void);
 /*  Result codes                                                      */
 /* ================================================================== */
 
-typedef enum flux_result {
+typedef enum flux_result : uint32_t {
     FLUX_OK = 0,
     FLUX_ERROR_INVALID_ARGUMENT = 1,
     FLUX_ERROR_OUT_OF_MEMORY = 2,
@@ -161,7 +161,7 @@ FLUX_API void flux_set_diagnostic(flux_result code, const char *function, const 
  * (declared in <flux/vulkan.h>). The UNORM/SRGB distinction follows
  * Vulkan: UNORM writes data verbatim; SRGB applies the sRGB
  * transfer function on store. */
-typedef enum flux_format {
+typedef enum flux_format : uint32_t {
     FLUX_FORMAT_UNDEFINED = 0,
 
     /* 8-bit colour */
@@ -202,7 +202,7 @@ typedef enum flux_format {
  * All named primaries are D65; custom primaries carry their own white
  * point and conversions adapt chromatically (Bradford). */
 
-typedef enum flux_color_primaries {
+typedef enum flux_color_primaries : uint32_t {
     FLUX_PRIMARIES_BT709 = 0,      /* sRGB gamut, D65 */
     FLUX_PRIMARIES_DISPLAY_P3 = 1, /* D65 */
     FLUX_PRIMARIES_BT2020 = 2,     /* D65 */
@@ -215,7 +215,7 @@ typedef enum flux_color_primaries {
  * values are in units of 10000 cd/m² (1.0 = 10000 nits); HLG is
  * nominal 0..1 scene light. The working-space luminance scale follows
  * scRGB: 1.0 = 80 cd/m². */
-typedef enum flux_transfer_func {
+typedef enum flux_transfer_func : uint32_t {
     FLUX_TRANSFER_LINEAR = 0,
     FLUX_TRANSFER_SRGB = 1,
     FLUX_TRANSFER_GAMMA = 2, /* pure power law, exponent from flux_color_space.gamma */
@@ -235,28 +235,54 @@ typedef struct flux_color_space {
 
 /* Brace-initializer presets (same convention as FLUX_SURFACE_DESC_INIT).
  * The set follows CSS Color 4 plus the HDR surface spaces. */
-#define FLUX_COLOR_SPACE_SRGB {FLUX_PRIMARIES_BT709, FLUX_TRANSFER_SRGB, 0.0f, {0}}
-#define FLUX_COLOR_SPACE_SRGB_LINEAR {FLUX_PRIMARIES_BT709, FLUX_TRANSFER_LINEAR, 0.0f, {0}}
+#define FLUX_COLOR_SPACE_SRGB                                                                      \
+    {                                                                                              \
+        FLUX_PRIMARIES_BT709, FLUX_TRANSFER_SRGB, 0.0f, {}                                         \
+    }
+#define FLUX_COLOR_SPACE_SRGB_LINEAR                                                               \
+    {                                                                                              \
+        FLUX_PRIMARIES_BT709, FLUX_TRANSFER_LINEAR, 0.0f, {}                                       \
+    }
 /* scRGB: the fixed working space (extended linear BT.709, 1.0 = 80 nits).
  * Same {primaries, transfer} as SRGB_LINEAR; the distinct preset names the
  * extended-range surface intent (VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT). */
-#define FLUX_COLOR_SPACE_SCRGB {FLUX_PRIMARIES_BT709, FLUX_TRANSFER_LINEAR, 0.0f, {0}}
-#define FLUX_COLOR_SPACE_DISPLAY_P3 {FLUX_PRIMARIES_DISPLAY_P3, FLUX_TRANSFER_SRGB, 0.0f, {0}}
+#define FLUX_COLOR_SPACE_SCRGB                                                                     \
+    {                                                                                              \
+        FLUX_PRIMARIES_BT709, FLUX_TRANSFER_LINEAR, 0.0f, {}                                       \
+    }
+#define FLUX_COLOR_SPACE_DISPLAY_P3                                                                \
+    {                                                                                              \
+        FLUX_PRIMARIES_DISPLAY_P3, FLUX_TRANSFER_SRGB, 0.0f, {}                                    \
+    }
 #define FLUX_COLOR_SPACE_DISPLAY_P3_LINEAR                                                         \
-    {FLUX_PRIMARIES_DISPLAY_P3, FLUX_TRANSFER_LINEAR, 0.0f, {0}}
+    {                                                                                              \
+        FLUX_PRIMARIES_DISPLAY_P3, FLUX_TRANSFER_LINEAR, 0.0f, {}                                  \
+    }
 /* Adobe RGB (1998): the official profile's TRC is a pure 563/256 power. */
-#define FLUX_COLOR_SPACE_ADOBE_RGB {FLUX_PRIMARIES_ADOBE_RGB, FLUX_TRANSFER_GAMMA, 2.19921875f, {0}}
+#define FLUX_COLOR_SPACE_ADOBE_RGB                                                                 \
+    {                                                                                              \
+        FLUX_PRIMARIES_ADOBE_RGB, FLUX_TRANSFER_GAMMA, 2.19921875f, {}                             \
+    }
 /* SDR BT.2020 per BT.1886 practice: pure 2.4 power. */
-#define FLUX_COLOR_SPACE_BT2020 {FLUX_PRIMARIES_BT2020, FLUX_TRANSFER_GAMMA, 2.4f, {0}}
+#define FLUX_COLOR_SPACE_BT2020                                                                    \
+    {                                                                                              \
+        FLUX_PRIMARIES_BT2020, FLUX_TRANSFER_GAMMA, 2.4f, {}                                       \
+    }
 /* HDR10. */
-#define FLUX_COLOR_SPACE_BT2020_PQ {FLUX_PRIMARIES_BT2020, FLUX_TRANSFER_PQ, 0.0f, {0}}
-#define FLUX_COLOR_SPACE_BT2020_HLG {FLUX_PRIMARIES_BT2020, FLUX_TRANSFER_HLG, 0.0f, {0}}
+#define FLUX_COLOR_SPACE_BT2020_PQ                                                                 \
+    {                                                                                              \
+        FLUX_PRIMARIES_BT2020, FLUX_TRANSFER_PQ, 0.0f, {}                                          \
+    }
+#define FLUX_COLOR_SPACE_BT2020_HLG                                                                \
+    {                                                                                              \
+        FLUX_PRIMARIES_BT2020, FLUX_TRANSFER_HLG, 0.0f, {}                                         \
+    }
 
 /* ================================================================== */
 /*  Tagged-struct discriminator                                       */
 /* ================================================================== */
 
-typedef enum flux_struct_type {
+typedef enum flux_struct_type : uint32_t {
     FLUX_TYPE_UNKNOWN = 0,
     FLUX_TYPE_DEVICE_DESC = 1,
     FLUX_TYPE_SURFACE_DESC = 2,
@@ -417,7 +443,7 @@ typedef struct flux_allocator {
     void *user;
 } flux_allocator;
 
-typedef enum flux_log_level {
+typedef enum flux_log_level : uint32_t {
     FLUX_LOG_TRACE = 0,
     FLUX_LOG_DEBUG = 1,
     FLUX_LOG_INFO = 2,
@@ -562,7 +588,7 @@ FLUX_NODISCARD FLUX_API flux_result flux_image_create_compute_writable(
  * storage; this query answers the question BEFORE the attempt. Returns
  * false (never an error) for unknown formats, NULL devices, or
  * unsupported usage combinations on this device. */
-typedef enum flux_image_usage_query {
+typedef enum flux_image_usage_query : uint32_t {
     FLUX_IMAGE_USAGE_SAMPLED = 0,       /* shader sampling (all flux images)   */
     FLUX_IMAGE_USAGE_COMPUTE_WRITE = 1, /* storage write (compute_writable)  */
 } flux_image_usage_query;
@@ -575,33 +601,19 @@ FLUX_API bool flux_device_supports_image_usage(const flux_device *d, flux_format
  * be in its steady sampled state (SHADER_READ_ONLY_OPTIMAL — true after
  * flux_image_create and after flux_frame_finish_image_target); anything
  * else returns FLUX_ERROR_INVALID_STATE. */
-FLUX_NODISCARD FLUX_API flux_result flux_image_update_region(flux_image *image, uint32_t x,
-                                                             uint32_t y, uint32_t width,
-                                                             uint32_t height, const void *data,
-                                                             size_t bytes);
+typedef struct flux_image_update_region_opts {
+    uint32_t x;
+    uint32_t y;
+    uint32_t width;
+    uint32_t height;
+    const void *data;
+    size_t row_bytes;
+    size_t bytes;
+    bool premultiply;
+} flux_image_update_region_opts;
 
-/* `flux_image_update_region` for source rows that are wider than the
- * uploaded region: row `i` of `data` starts at `i * row_bytes`. Pass
- * `row_bytes == width * bytes_per_pixel(format)` and this is exactly the
- * packed entry point above. The same validation contract applies, with the
- * minimum buffer size derived from the stride: at least
- * `(height - 1) * row_bytes + width * bpp` bytes; larger buffers are
- * accepted (trailing bytes ignored), matching the packed variant. */
 FLUX_NODISCARD FLUX_API flux_result
-flux_image_update_region_strided(flux_image *image, uint32_t x, uint32_t y, uint32_t width,
-                                 uint32_t height, const void *data, size_t row_bytes, size_t bytes);
-
-/* `flux_image_update_region_strided` that takes straight (non-premultiplied)
- * RGBA8 and premultiplies during the upload, so callers never replicate the
- * canvas premultiplied-alpha convention themselves. Only
- * FLUX_FORMAT_RGBA8_UNORM is supported (byte order R,G,B,A; anything else
- * returns FLUX_ERROR_UNSUPPORTED). Each pixel is converted with the exact
- * integer math of flux_color_rgba_premul — (c * a + 127) / 255, with the
- * a == 255 and a == 0 fast paths — so the uploaded texels are bit-identical
- * to what that function produces. The source buffer is never modified. */
-FLUX_NODISCARD FLUX_API flux_result flux_image_update_region_premultiply(
-    flux_image *image, uint32_t x, uint32_t y, uint32_t width, uint32_t height, const void *data,
-    size_t row_bytes, size_t bytes);
+flux_image_update_region(flux_image *image, const flux_image_update_region_opts *opts);
 
 /* Emit a printf-style diagnostic through a device's logger (if any).
  * No-op when the device has no logger wired. Modules that treat
@@ -651,7 +663,7 @@ typedef void (*flux_pipeline_cache_save_fn)(void *userdata, const void *data, si
 /*  Device                                                            */
 /* ================================================================== */
 
-typedef enum flux_validation_mode {
+typedef enum flux_validation_mode : uint32_t {
     FLUX_VALIDATION_AUTO = 0, /* on iff debug build */
     FLUX_VALIDATION_OFF = 1,
     FLUX_VALIDATION_ON = 2,
@@ -900,7 +912,7 @@ FLUX_NODISCARD FLUX_API flux_result flux_uploads_flush(flux_device *d);
 /* Bitmask of intended uses; OR these together in flux_buffer_desc.usage.
  * The library maps them to VkBufferUsageFlags internally and adds
  * TRANSFER_DST automatically when initial_data is provided. */
-typedef enum flux_buffer_usage {
+typedef enum flux_buffer_usage : uint32_t {
     FLUX_BUFFER_USAGE_VERTEX = 1u << 0,
     FLUX_BUFFER_USAGE_INDEX = 1u << 1,
     FLUX_BUFFER_USAGE_UNIFORM = 1u << 2,
@@ -909,7 +921,7 @@ typedef enum flux_buffer_usage {
     FLUX_BUFFER_USAGE_TRANSFER_DST = 1u << 5,
 } flux_buffer_usage;
 
-typedef enum flux_buffer_location {
+typedef enum flux_buffer_location : uint32_t {
     /* DEVICE_LOCAL memory: fastest GPU access; not host-mappable.
      * Use initial_data or a TRANSFER_SRC buffer to populate. */
     FLUX_BUFFER_GPU_LOCAL = 0,
@@ -961,7 +973,7 @@ FLUX_API size_t flux_buffer_size(const flux_buffer *b);
 /*  the refcount lifecycle of flux_buffer / flux_mesh.                */
 /* ================================================================== */
 
-typedef enum flux_target_usage {
+typedef enum flux_target_usage : uint32_t {
     FLUX_TARGET_DEPTH = 1u << 0, /* depth/stencil attachment image  */
     FLUX_TARGET_COLOR = 1u << 1, /* colour attachment image         */
 } flux_target_usage;
@@ -1392,7 +1404,7 @@ FLUX_NODISCARD FLUX_API flux_result flux_surface_begin_frame(flux_surface *s,
 
 /* Frame lifecycle state. Frames follow a strict single-use machine:
  * INVALID -> RECORDING (begin_frame) -> SUBMITTED -> PRESENTED. */
-typedef enum flux_frame_state {
+typedef enum flux_frame_state : uint32_t {
     FLUX_FRAME_STATE_INVALID = 0,
     FLUX_FRAME_STATE_RECORDING,
     FLUX_FRAME_STATE_SUBMITTED,
@@ -1453,9 +1465,14 @@ typedef struct flux_transient {
 /* `alignment` must be a power of two between 1 and 256 inclusive.
  * Larger alignments are rejected with FLUX_ERROR_INVALID_ARGUMENT.
  * Returns FLUX_ERROR_OUT_OF_RANGE if the per-frame ring is exhausted. */
-FLUX_NODISCARD FLUX_API flux_result flux_frame_alloc_transient(flux_frame *f, size_t bytes,
-                                                               size_t alignment,
-                                                               flux_transient *out);
+typedef struct flux_frame_alloc_transient_opts {
+    size_t bytes;
+    size_t alignment;
+    flux_transient *out;
+} flux_frame_alloc_transient_opts;
+
+FLUX_NODISCARD FLUX_API flux_result
+flux_frame_alloc_transient(flux_frame *f, const flux_frame_alloc_transient_opts *opts);
 
 /* Materialize a deferred effect output (ADR-0147).
  *
@@ -1533,10 +1550,15 @@ FLUX_API uint32_t flux_frame_image_index(const flux_frame *f);
  * FLUX_DAMAGE_CAPACITY to receive every case. If the scope does not fit,
  * FLUX_ERROR_OUT_OF_RANGE is returned and `*out_full` is set so the caller can
  * conservatively repaint everything. */
-FLUX_NODISCARD FLUX_API flux_result flux_frame_repaint_scope(const flux_frame *f,
-                                                             flux_rect *out_rects,
-                                                             uint32_t capacity, uint32_t *out_count,
-                                                             bool *out_full);
+typedef struct flux_frame_repaint_scope_opts {
+    flux_rect *out_rects;
+    uint32_t capacity;
+    uint32_t *out_count;
+    bool *out_full;
+} flux_frame_repaint_scope_opts;
+
+FLUX_NODISCARD FLUX_API flux_result
+flux_frame_repaint_scope(const flux_frame *f, const flux_frame_repaint_scope_opts *opts);
 
 /* The pixels changed since this surface's most recent successful present, in
  * physical surface pixels. This is the damage a scanout/KMS consumer should
@@ -1546,11 +1568,15 @@ FLUX_NODISCARD FLUX_API flux_result flux_frame_repaint_scope(const flux_frame *f
  * `*out_full = true` means there is no usable history (nothing presented yet,
  * history was invalidated, or the retained window overflowed). Empty with
  * `*out_full = false` means the display is already current. */
-FLUX_NODISCARD FLUX_API flux_result flux_surface_scanout_damage(const flux_surface *s,
-                                                                flux_rect *out_rects,
-                                                                uint32_t capacity,
-                                                                uint32_t *out_count,
-                                                                bool *out_full);
+typedef struct flux_surface_scanout_damage_opts {
+    flux_rect *out_rects;
+    uint32_t capacity;
+    uint32_t *out_count;
+    bool *out_full;
+} flux_surface_scanout_damage_opts;
+
+FLUX_NODISCARD FLUX_API flux_result
+flux_surface_scanout_damage(const flux_surface *s, const flux_surface_scanout_damage_opts *opts);
 
 /* Forget every damage epoch and image-history entry. Call after the display
  * content was lost or replaced outside the normal present path (VT switch,
@@ -1573,9 +1599,13 @@ typedef struct flux_timestamp_result {
 /* Returns timestamps from the most recent COMPLETED frame at this
  * frame's slot. Caller-supplied buffer; out_count receives the actual
  * number written. */
-FLUX_NODISCARD FLUX_API flux_result flux_frame_collect_timestamps(flux_frame *f,
-                                                                  flux_timestamp_result *out,
-                                                                  uint32_t *inout_count);
+typedef struct flux_frame_collect_timestamps_opts {
+    flux_timestamp_result *out;
+    uint32_t *inout_count;
+} flux_frame_collect_timestamps_opts;
+
+FLUX_NODISCARD FLUX_API flux_result
+flux_frame_collect_timestamps(flux_frame *f, const flux_frame_collect_timestamps_opts *opts);
 
 #ifdef __cplusplus
 }

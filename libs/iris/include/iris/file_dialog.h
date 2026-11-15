@@ -34,6 +34,10 @@ typedef struct iris_file_dialog_opts {
     const iris_file_filter *filters; /* NULL-terminated array (opt)   */
     bool multiple_selection;         /* allow more than one (open mode only)  */
     bool directory_only;             /* restrict to directories               */
+    const char *default_name;        /* suggested filename for save (opt)     */
+    char *out_path;                  /* destination buffer for URI(s)         */
+    size_t out_cap;                  /* capacity of out_path in bytes         */
+    size_t *out_bytes_used;          /* bytes written / needed (pick_files)   */
 } iris_file_dialog_opts;
 
 /* Result codes shared by every picker. Non-zero means "no selection".
@@ -46,36 +50,34 @@ typedef struct iris_file_dialog_opts {
 #define IRIS_PICK_TRUNCATED (-3)   /* out buffer too small: retry with more  */
 
 /* Open a single-file picker. On success, writes a NUL-terminated UTF-8
- * file URI (e.g. "file:///home/user/foo.txt") into out_path and returns 0.
- * `multiple_selection` is ignored here (it belongs to iris_pick_files);
- * passing it does not widen this dialog on any backend. Returns
- * IRIS_PICK_CANCELLED / IRIS_PICK_UNAVAILABLE / IRIS_PICK_TRUNCATED. */
-IRIS_API int iris_pick_file(const iris_file_dialog_opts *opts, char *out_path, size_t out_cap);
+ * file URI (e.g. "file:///home/user/foo.txt") into opts->out_path and
+ * returns 0. `multiple_selection` is ignored here (it belongs to
+ * iris_pick_files); passing it does not widen this dialog on any backend.
+ * Returns IRIS_PICK_CANCELLED / IRIS_PICK_UNAVAILABLE / IRIS_PICK_TRUNCATED. */
+IRIS_API int iris_pick_file(const iris_file_dialog_opts *opts);
 
 /* Open a single-folder picker. The return convention and URI encoding match
  * iris_pick_file. */
-IRIS_API int iris_pick_folder(const iris_file_dialog_opts *opts, char *out_path, size_t out_cap);
+IRIS_API int iris_pick_folder(const iris_file_dialog_opts *opts);
 
 /* Save dialog: asks the user for a destination path. `default_name` is the
  * suggested filename (UTF-8, optional); on success a file:// URI is written
- * to out_path. The file is not created — opening it for write is the host's
- * responsibility. */
-IRIS_API int iris_pick_save_path(const iris_file_dialog_opts *opts, const char *default_name,
-                                 char *out_path, size_t out_cap);
+ * to opts->out_path. The file is not created — opening it for write is the
+ * host's responsibility. */
+IRIS_API int iris_pick_save_path(const iris_file_dialog_opts *opts);
 
 /* Multi-selection picker. On success, writes NUL-separated UTF-8 file URIs
- * into out_paths (the list is terminated by an empty URI: one extra NUL
+ * into opts->out_path (the list is terminated by an empty URI: one extra NUL
  * after the last entry) and returns the number of URIs (>= 1).
  *
  * Buffer-too-small is IRIS_PICK_TRUNCATED on EVERY backend: the result is
  * never a silent prefix and never indistinguishable from a cancel. The
  * complete selection is not recoverable after truncation — reopen the
- * dialog with a larger buffer. *out_bytes_used (optional) receives the
+ * dialog with a larger buffer. *opts->out_bytes_used (optional) receives the
  * total bytes written excluding the trailing list terminator NUL; on
  * IRIS_PICK_TRUNCATED it receives the number of bytes the FULL selection
  * would have required, so the retry size is directly computable. */
-IRIS_API int iris_pick_files(const iris_file_dialog_opts *opts, char *out_paths, size_t out_cap,
-                             size_t *out_bytes_used);
+IRIS_API int iris_pick_files(const iris_file_dialog_opts *opts);
 
 /* Convert a `file://` URI (as returned by the pickers above) into a local
  * filesystem path, percent-decoding %XX escapes. Returns 0 on success.
@@ -85,7 +87,13 @@ IRIS_API int iris_pick_files(const iris_file_dialog_opts *opts, char *out_paths,
  * followed by two hex digits), and -4 when out_cap is too small for the
  * decoded path. Non-ASCII bytes pass through verbatim: the portal emits
  * percent-encoded ASCII, and a host supplying raw UTF-8 gets it back. */
-IRIS_API int iris_file_uri_to_path(const char *uri, char *out_path, size_t out_cap);
+typedef struct iris_file_uri_to_path_opts {
+    const char *uri;
+    char *out_path;
+    size_t out_cap;
+} iris_file_uri_to_path_opts;
+
+IRIS_API int iris_file_uri_to_path(const iris_file_uri_to_path_opts *opts);
 
 #ifdef __cplusplus
 }

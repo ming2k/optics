@@ -233,7 +233,7 @@ static flux_result canvas_begin_pass_impl(flux_canvas *c, flux_frame *f, flux_im
      * whole damage pipeline exists to prevent. Over-covering costs one full
      * repaint; under-covering costs permanent corruption. */
     if (config.damage.count > FLUX_DAMAGE_CAPACITY) {
-        config.damage = (flux_damage){0};
+        config.damage = (flux_damage){};
         config.clear_extent = true;
     }
 
@@ -253,7 +253,7 @@ static flux_result canvas_begin_pass_impl(flux_canvas *c, flux_frame *f, flux_im
     const bool windowed_without_content = c->surface && !c->surface->offscreen &&
                                           c->surface->content.image == VK_NULL_HANDLE && !target;
     if (windowed_without_content && (config.damage.count > 0 || !config.clear_extent)) {
-        config.damage = (flux_damage){0};
+        config.damage = (flux_damage){};
         config.clear_extent = true;
     }
 
@@ -427,7 +427,7 @@ flux_result flux_canvas_begin(flux_canvas *c, const flux_canvas_pass_desc *desc)
             .mode = FLUX_RENDER_ACCESS_WRITE,
             .region = region,
         };
-        uint32_t deps[1] = {0};
+        uint32_t deps[1] = {};
         uint32_t dep_count = plan->node_count ? 1u : 0u;
         if (dep_count)
             deps[0] = plan->node_count - 1u;
@@ -568,15 +568,19 @@ void flux_canvas_save(flux_canvas *c) {
     c->states[c->state_top].layer_opacity = 1.0f;
 }
 
-void flux_canvas_save_layer(flux_canvas *c, const flux_rect *bounds, float opacity) {
+void flux_canvas_save_layer(flux_canvas *c, const flux_canvas_save_layer_opts *opts) {
     if (!c || !c->recording) {
         FLUX_FAIL(FLUX_ERROR_INVALID_STATE, "Canvas command requires an active pass");
         return;
     }
 
-    if (!c)
+    if (!opts) {
+        c->pass_error = FLUX_ERROR_INVALID_ARGUMENT;
         return;
-    if (!c->recording || c->pass_error != FLUX_OK)
+    }
+    const flux_rect *bounds = opts->bounds;
+    float opacity = opts->opacity;
+    if (c->pass_error != FLUX_OK)
         return;
     if (!isfinite(opacity) || opacity < 0.0f || opacity > 1.0f) {
         c->pass_error = FLUX_ERROR_INVALID_ARGUMENT;
@@ -637,14 +641,17 @@ void flux_canvas_restore(flux_canvas *c) {
     }
 }
 
-void flux_canvas_translate(flux_canvas *c, float x, float y) {
+void flux_canvas_translate(flux_canvas *c, const flux_canvas_translate_opts *opts) {
     if (!c || !c->recording) {
         FLUX_FAIL(FLUX_ERROR_INVALID_STATE, "Canvas command requires an active pass");
         return;
     }
-
-    if (!c)
+    if (!opts) {
+        canvas_fail(c, FLUX_ERROR_INVALID_ARGUMENT, "non-finite Canvas transform/clip");
         return;
+    }
+    float x = opts->x;
+    float y = opts->y;
     if (!(isfinite(x) && isfinite(y))) {
         canvas_fail(c, FLUX_ERROR_INVALID_ARGUMENT, "non-finite Canvas transform/clip");
         return;
@@ -653,14 +660,17 @@ void flux_canvas_translate(flux_canvas *c, float x, float y) {
     s->transform = flux_mat3x2_multiply(s->transform, flux_mat3x2_translate(x, y));
 }
 
-void flux_canvas_scale(flux_canvas *c, float sx, float sy) {
+void flux_canvas_scale(flux_canvas *c, const flux_canvas_scale_opts *opts) {
     if (!c || !c->recording) {
         FLUX_FAIL(FLUX_ERROR_INVALID_STATE, "Canvas command requires an active pass");
         return;
     }
-
-    if (!c)
+    if (!opts) {
+        canvas_fail(c, FLUX_ERROR_INVALID_ARGUMENT, "non-finite Canvas transform/clip");
         return;
+    }
+    float sx = opts->sx;
+    float sy = opts->sy;
     if (!(isfinite(sx) && isfinite(sy))) {
         canvas_fail(c, FLUX_ERROR_INVALID_ARGUMENT, "non-finite Canvas transform/clip");
         return;
@@ -1291,7 +1301,7 @@ void flux_canvas_draw_glyph_run(flux_canvas *c, const flux_glyph_run_desc *desc)
     if (host) {
         /* Drop the borrow so a subsequent non-glyph draw never sees a stale
          * host atlas pointer. */
-        c->pending_host_atlas = NULL;
+        c->pending_host_atlas = nullptr;
         c->pending_host_atlas_w = 0;
         c->pending_host_atlas_h = 0;
         c->pending_host_atlas_gen = FLUX_HOST_ATLAS_UNVERSIONED;
@@ -1325,15 +1335,17 @@ static bool canvas_axis_uniform(const flux_canvas *c) {
            fabsf(t.m[0] - t.m[3]) < 0.000001f;
 }
 
-void flux_canvas_draw_geometry(flux_canvas *c, const flux_geometry *geom, const flux_brush *brush) {
+void flux_canvas_draw_geometry(flux_canvas *c, const flux_canvas_draw_geometry_opts *opts) {
     if (!c || !c->recording) {
         FLUX_FAIL(FLUX_ERROR_INVALID_STATE, "draw requires an active Canvas pass");
         return;
     }
-    if (!geom) {
+    if (!opts || !opts->geom) {
         canvas_fail(c, FLUX_ERROR_INVALID_ARGUMENT, "draw requires geometry");
         return;
     }
+    const flux_geometry *geom = opts->geom;
+    const flux_brush *brush = opts->brush;
     if (!isfinite(geom->stroke.width) || geom->stroke.width < 0.0f) {
         canvas_fail(c, FLUX_ERROR_INVALID_ARGUMENT, "invalid stroke width");
         return;
@@ -1588,7 +1600,7 @@ void flux_canvas_draw_geometry(flux_canvas *c, const flux_geometry *geom, const 
 
 flux_render_plan_stats flux_canvas_get_plan_stats(const flux_canvas *c) {
     if (!c)
-        return (flux_render_plan_stats){0};
+        return (flux_render_plan_stats){};
     return (flux_render_plan_stats){
         .pass_count = c->pass_count,
         .layer_depth_peak = c->layer_depth_peak,

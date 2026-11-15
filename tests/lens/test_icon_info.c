@@ -28,24 +28,24 @@ static void test_builtin_ids_resolve(void) {
     for (size_t i = 0; i < sizeof ids / sizeof ids[0]; i++) {
         uint8_t mode = 0xFF;
         const lens_icon_desc *d = lens_icon_info(ids[i], &mode);
-        OT_EXPECT(d != NULL);
+        OT_EXPECT(d != nullptr);
         OT_EXPECT(d->count > 0);
-        OT_EXPECT(d->cmds != NULL);
+        OT_EXPECT(d->cmds != nullptr);
         OT_EXPECT(mode <= 1); /* 0 = fill, 1 = stroke render style */
     }
 }
 
 static void test_invalid_id_is_null(void) {
-    OT_EXPECT(lens_icon_info(LENS_ICON_INVALID, NULL) == NULL);
-    OT_EXPECT(lens_icon_info((lens_icon_id)-1, NULL) == NULL);
-    OT_EXPECT(lens_icon_info((lens_icon_id)(LENS_ICON_COUNT + 100000), NULL) == NULL);
+    OT_EXPECT(lens_icon_info(LENS_ICON_INVALID, nullptr) == nullptr);
+    OT_EXPECT(lens_icon_info((lens_icon_id)-1, nullptr) == nullptr);
+    OT_EXPECT(lens_icon_info((lens_icon_id)(LENS_ICON_COUNT + 100000), nullptr) == nullptr);
 }
 
 static void test_mode_out_param_is_optional(void) {
     /* NULL mode pointer must not crash; both spellings resolve equally. */
-    const lens_icon_desc *a = lens_icon_info(LENS_ICON_ZAP, NULL);
-    const lens_icon_desc *b = lens_icon_info(LENS_ICON_ZAP, &(uint8_t){0});
-    OT_EXPECT(a != NULL && a == b);
+    const lens_icon_desc *a = lens_icon_info(LENS_ICON_ZAP, nullptr);
+    const lens_icon_desc *b = lens_icon_info(LENS_ICON_ZAP, &(uint8_t){});
+    OT_EXPECT(a != nullptr && a == b);
 }
 
 static void test_runtime_registered_id_resolves(void) {
@@ -55,7 +55,7 @@ static void test_runtime_registered_id_resolves(void) {
 
     uint8_t mode = 0xFF;
     const lens_icon_desc *d = lens_icon_info(id, &mode);
-    OT_EXPECT(d != NULL);
+    OT_EXPECT(d != nullptr);
     OT_EXPECT(d->count > 0);
     OT_EXPECT(mode == 1 || mode == 0);
 }

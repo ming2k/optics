@@ -9,8 +9,8 @@
 static const lens_input IN0 = {.display_size = {400, 200}, .dt_seconds = 0.016f};
 
 static void test_slider_drag(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     float value = 0.0f;
 
     /* Warm-up frame to establish prev_rect */
@@ -38,8 +38,8 @@ static void test_slider_drag(void) {
 }
 
 static void test_slider_disabled(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     float value = 0.5f;
 
     /* Warm-up frame */
@@ -67,8 +67,8 @@ static void test_slider_disabled(void) {
 }
 
 static void test_slider_hover_schedules_feedback_transition(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     float value = 0.5f;
 
     lens_begin(ui, &IN0);
@@ -94,8 +94,8 @@ static void test_slider_geometry_uses_theme_tokens(void) {
     OT_EXPECT_NEAR(lens_theme_dark().slider_track_thickness, 6.0f, 0.001f);
     OT_EXPECT_NEAR(lens_theme_dark().slider_knob_size, 14.0f, 0.001f);
 
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     lens_theme theme = lens_theme_dark();
     theme.slider_track_thickness = 2.5f;
     theme.slider_knob_size = 10.0f;
@@ -112,7 +112,7 @@ static void test_slider_geometry_uses_theme_tokens(void) {
     }
 
     lens_node *slider = lens_node_first_child(lens_root(ui));
-    OT_EXPECT(slider != NULL);
+    OT_EXPECT(slider != nullptr);
     OT_EXPECT(slider && slider->cmd_count == 3);
     if (slider && slider->cmd_count == 3) {
         const lens_draw_cmd *track = &slider->cmds[0];
@@ -129,8 +129,8 @@ static void test_slider_geometry_uses_theme_tokens(void) {
 }
 
 static void test_vertical_slider_drag_and_wheel(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     float value = 0.25f;
 
     lens_begin(ui, &IN0);

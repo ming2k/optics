@@ -11,7 +11,9 @@
 
 static float btn_w(lens *ui, const char *s) {
     lens_theme theme = lens_get_theme(ui);
-    return lens_text_measure(ui, theme.font, s, theme.font_size).width + 2.0f * theme.padding;
+    return lens_text_measure(ui, &(lens_text_measure_opts){.utf8 = s, .size_px = theme.font_size})
+               .width +
+           2.0f * theme.padding;
 }
 static float btn_h(lens *ui, const char *s) {
     (void)s;
@@ -20,15 +22,15 @@ static float btn_h(lens *ui, const char *s) {
 }
 
 static void test_row_packs_children(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     lens_input in = {.display_size = {200, 100}, .dt_seconds = 0.016f};
 
     float wa = btn_w(ui, "A"), h = btn_h(ui, "A");
     float gap = lens_get_theme(ui).gap;
 
     lens_begin(ui, &in);
-    lens_row_begin(ui, NULL);
+    lens_row_begin(ui, nullptr);
     (void)lens_button(ui, &(lens_button_opts){.label = "A"});
     (void)lens_button(ui, &(lens_button_opts){.label = "B"});
     lens_close(ui);
@@ -36,11 +38,11 @@ static void test_row_packs_children(void) {
 
     lens_node *root = lens_root(ui);
     lens_node *row = lens_node_first_child(root);
-    OT_EXPECT(row != NULL);
+    OT_EXPECT(row != nullptr);
     lens_node *a = lens_node_first_child(row);
-    lens_node *b = a ? lens_node_next_sibling(a) : NULL;
-    OT_EXPECT(a != NULL);
-    OT_EXPECT(b != NULL);
+    lens_node *b = a ? lens_node_next_sibling(a) : nullptr;
+    OT_EXPECT(a != nullptr);
+    OT_EXPECT(b != nullptr);
 
     flux_rect ra = lens_node_bounds(a);
     flux_rect rb = lens_node_bounds(b);
@@ -56,8 +58,8 @@ static void test_row_packs_children(void) {
 }
 
 static void test_flex_distributes_slack(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     lens_input in = {.display_size = {200, 100}, .dt_seconds = 0.016f};
 
     lens_begin(ui, &in);
@@ -87,8 +89,8 @@ static void test_flex_distributes_slack(void) {
 }
 
 static void test_flex_child_shrinks_between_fixed_siblings(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     lens_input in = {.display_size = {200, 100}, .dt_seconds = 0.016f};
 
     lens_begin(ui, &in);
@@ -96,7 +98,7 @@ static void test_flex_child_shrinks_between_fixed_siblings(void) {
     lens_size(ui, 40.0f, 0.0f);
     (void)lens_button(ui, &(lens_button_opts){.label = "sidebar"});
     lens_flex(ui, 1.0f);
-    lens_column_begin(ui, NULL);
+    lens_column_begin(ui, nullptr);
     (void)lens_button(ui,
                       &(lens_button_opts){.label = "workspace content with a wide intrinsic size"});
     lens_close(ui);
@@ -125,8 +127,8 @@ static void test_flex_child_shrinks_between_fixed_siblings(void) {
 }
 
 static void test_column_stacks_children(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     lens_input in = {.display_size = {200, 200}, .dt_seconds = 0.016f};
 
     float h = btn_h(ui, "A");
@@ -158,19 +160,19 @@ static void test_column_stacks_children(void) {
  * fill its parent (e.g. a bottom-pinned settings button never reached the
  * bottom edge). */
 static void test_flex_applies_to_terse_container(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     lens_input in = {.display_size = {200, 300}, .dt_seconds = 0.016f};
 
     lens_begin(ui, &in);
     lens_flex(ui, 1.0f); /* should stretch the row to fill the column */
-    lens_row_begin(ui, NULL);
+    lens_row_begin(ui, nullptr);
     (void)lens_button(ui, &(lens_button_opts){.label = "A"});
     lens_close(ui);
     lens_test_end(ui);
 
     lens_node *row = lens_node_first_child(lens_root(ui));
-    OT_EXPECT(row != NULL);
+    OT_EXPECT(row != nullptr);
     flux_rect rr = lens_node_bounds(row);
     OT_EXPECT_NEAR(rr.h, 300.0f, 0.5f); /* grew to the full display height */
 
@@ -178,8 +180,8 @@ static void test_flex_applies_to_terse_container(void) {
 }
 
 static void test_container_width_constraints_bound_intrinsic_size(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     lens_input in = {.display_size = {500, 100}, .dt_seconds = 0.016f};
     const float pad = 8.0f;
     const float natural = btn_w(ui, "natural") + 2.0f * pad;
@@ -212,8 +214,8 @@ static void test_container_width_constraints_bound_intrinsic_size(void) {
 }
 
 static void test_flex_redistributes_space_after_max_width(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     lens_input in = {.display_size = {300, 100}, .dt_seconds = 0.016f};
 
     lens_begin(ui, &in);
@@ -237,8 +239,8 @@ static void test_flex_redistributes_space_after_max_width(void) {
 }
 
 static void test_flex_respects_min_width_while_shrinking(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     lens_input in = {.display_size = {100, 100}, .dt_seconds = 0.016f};
 
     lens_begin(ui, &in);
@@ -263,8 +265,8 @@ static void test_flex_respects_min_width_while_shrinking(void) {
 }
 
 static void test_grid_uniform_tracks(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     lens_input in = {.display_size = {300, 200}, .dt_seconds = 0.016f};
 
     lens_begin(ui, &in);
@@ -291,8 +293,8 @@ static void test_grid_uniform_tracks(void) {
 }
 
 static void test_grid_column_span(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     lens_input in = {.display_size = {320, 200}, .dt_seconds = 0.016f};
 
     lens_begin(ui, &in);
@@ -315,8 +317,8 @@ static void test_grid_column_span(void) {
 }
 
 static void test_grid_row_span_and_bento_packing(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     lens_input in = {.display_size = {300, 300}, .dt_seconds = 0.016f};
 
     lens_begin(ui, &in);
@@ -362,8 +364,8 @@ static void test_grid_row_span_and_bento_packing(void) {
 }
 
 static void test_grid_explicit_coordinates(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     lens_input in = {.display_size = {300, 200}, .dt_seconds = 0.016f};
 
     lens_begin(ui, &in);
@@ -388,8 +390,8 @@ static void test_grid_explicit_coordinates(void) {
 }
 
 static void test_nested_1d_flex_inside_2d_grid(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     lens_input in = {.display_size = {300, 200}, .dt_seconds = 0.016f};
 
     lens_begin(ui, &in);
@@ -427,8 +429,8 @@ static void test_nested_1d_flex_inside_2d_grid(void) {
 }
 
 static void test_nested_2d_grid_inside_1d_column(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     lens_input in = {.display_size = {200, 300}, .dt_seconds = 0.016f};
 
     lens_begin(ui, &in);
@@ -473,8 +475,8 @@ static void test_nested_2d_grid_inside_1d_column(void) {
 }
 
 static void test_grid_positional_hints(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     lens_input in = {.display_size = {300, 200}, .dt_seconds = 0.016f};
 
     lens_begin(ui, &in);
@@ -501,8 +503,8 @@ static void test_grid_positional_hints(void) {
 }
 
 static void test_flow_wrap_layout(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     lens_input in = {.display_size = {400, 300}, .dt_seconds = 0.016f};
 
     /* Wrap container: fixed width 200, pad 0, gap 10, row_gap 12.
@@ -529,14 +531,14 @@ static void test_flow_wrap_layout(void) {
 
     lens_node *root = lens_root(ui);
     lens_node *wrap_node = lens_node_first_child(root);
-    OT_EXPECT(wrap_node != NULL);
+    OT_EXPECT(wrap_node != nullptr);
     lens_node *n0 = lens_node_first_child(wrap_node);
-    lens_node *n1 = n0 ? lens_node_next_sibling(n0) : NULL;
-    lens_node *n2 = n1 ? lens_node_next_sibling(n1) : NULL;
+    lens_node *n1 = n0 ? lens_node_next_sibling(n0) : nullptr;
+    lens_node *n2 = n1 ? lens_node_next_sibling(n1) : nullptr;
 
-    OT_EXPECT(n0 != NULL);
-    OT_EXPECT(n1 != NULL);
-    OT_EXPECT(n2 != NULL);
+    OT_EXPECT(n0 != nullptr);
+    OT_EXPECT(n1 != nullptr);
+    OT_EXPECT(n2 != nullptr);
 
     flux_rect r0 = lens_node_bounds(n0);
     flux_rect r1 = lens_node_bounds(n1);
@@ -553,8 +555,8 @@ static void test_flow_wrap_layout(void) {
 }
 
 static void test_stack_layering_layout(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     lens_input in = {.display_size = {400, 300}, .dt_seconds = 0.016f};
 
     /* Stack container: width 100, height 100.
@@ -580,12 +582,12 @@ static void test_stack_layering_layout(void) {
 
     lens_node *root = lens_root(ui);
     lens_node *stack_node = lens_node_first_child(root);
-    OT_EXPECT(stack_node != NULL);
+    OT_EXPECT(stack_node != nullptr);
     lens_node *n_base = lens_node_first_child(stack_node);
-    lens_node *n_badge = n_base ? lens_node_next_sibling(n_base) : NULL;
+    lens_node *n_badge = n_base ? lens_node_next_sibling(n_base) : nullptr;
 
-    OT_EXPECT(n_base != NULL);
-    OT_EXPECT(n_badge != NULL);
+    OT_EXPECT(n_base != nullptr);
+    OT_EXPECT(n_badge != nullptr);
 
     flux_rect r_base = lens_node_bounds(n_base);
     flux_rect r_badge = lens_node_bounds(n_badge);

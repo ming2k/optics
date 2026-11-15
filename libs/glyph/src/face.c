@@ -60,7 +60,7 @@ static bool face_load(glyph_ctx *t, int slot_idx, int face_idx, uint32_t req_px)
     }
     if (FT_Set_Pixel_Sizes(f->face, 0, req_px) != 0) {
         FT_Done_Face(f->face);
-        f->face = NULL;
+        f->face = nullptr;
         return false;
     }
     f->face_px = req_px;
@@ -73,7 +73,7 @@ static bool face_load(glyph_ctx *t, int slot_idx, int face_idx, uint32_t req_px)
     f->hb_font = hb_ft_font_create_referenced(f->face);
     if (!f->hb_font) {
         FT_Done_Face(f->face);
-        f->face = NULL;
+        f->face = nullptr;
         return false;
     }
     /* The initial size enters the retained-size LRU as its front entry so
@@ -82,7 +82,7 @@ static bool face_load(glyph_ctx *t, int slot_idx, int face_idx, uint32_t req_px)
      * destroy path). The face's own implicit size object backs slot 0
      * here (no FT_New_Size yet); a later miss recycles it normally. */
     f->size_px[0] = req_px;
-    f->sizes[0] = NULL; /* the face's implicit size: no explicit handle */
+    f->sizes[0] = nullptr; /* the face's implicit size: no explicit handle */
     f->size_fonts[0] = f->hb_font;
     /* hb-ft sets scale/ppem from the face's current size; keep its default so
      * advances track the pixel size (see txt_face_set_px). */
@@ -105,10 +105,10 @@ bool txt_ensure_face_loaded(glyph_ctx *t, int slot_idx, int face_idx, uint32_t r
     }
     if (!face_load(t, slot_idx, face_idx, req_px)) {
         free(f->path); // RAW_ALLOC_OK(paired-platform)
-        f->path = NULL;
+        f->path = nullptr;
         if (f->charset) {
             txtp_charset_free(f->charset);
-            f->charset = NULL;
+            f->charset = nullptr;
         }
         return false;
     }
@@ -150,7 +150,7 @@ static int txt_load_patch_face(glyph_ctx *t, int slot_idx, uint32_t cp) {
      * override the primary chain honoured — patch queries stay on the
      * generic family so an env override cannot skew rare-codepoint
      * fallback (same semantics as before the platform split). */
-    txtp_font_match m = {0};
+    txtp_font_match m = {};
     if (!txt_platform_font_query_codepoint(family_fc(slot->family), slot->weight, slot->italic, cp,
                                            &m))
         return -1;
@@ -182,7 +182,7 @@ static int txt_load_patch_face(glyph_ctx *t, int slot_idx, uint32_t cp) {
     f->path = txt_strdup(m.path);
     f->index = m.index;
     f->charset = m.charset; /* steal; the interface has no charset copy op */
-    m.charset = NULL;
+    m.charset = nullptr;
     int new_idx = slot->count;
     txtp_font_match_clear(&m);
 
@@ -195,10 +195,10 @@ static int txt_load_patch_face(glyph_ctx *t, int slot_idx, uint32_t cp) {
                  "glyph will render as .notdef",
                  f->path ? f->path : "<unknown>", (unsigned)cp);
         free(f->path); // RAW_ALLOC_OK(paired-platform)
-        f->path = NULL;
+        f->path = nullptr;
         if (f->charset) {
             txtp_charset_free(f->charset);
-            f->charset = NULL;
+            f->charset = nullptr;
         }
         memset(f, 0, sizeof *f);
         return -1;
@@ -278,7 +278,7 @@ bool txt_init_slot_faces(glyph_ctx *t, int slot_idx, float weight, bool italic,
         f->index = m->index;
 
         f->charset = m->charset; /* steal; the interface has no charset copy op */
-        m->charset = NULL;
+        m->charset = nullptr;
 
         slot->count++;
     }
@@ -327,7 +327,7 @@ glyph_ctx *txt_engine_init(flux_device *dev) {
     glyph_ctx *t = calloc(1, sizeof *t); // RAW_ALLOC_OK(paired-platform)
     if (!t) {
         txt_logf(t, FLUX_LOG_ERROR, "out of memory");
-        return NULL;
+        return nullptr;
     }
     /* Retained, matching the canvas discipline: the atlas image and the
      * nearest sampler are released at shutdown and must never see a dead
@@ -377,7 +377,7 @@ glyph_ctx *txt_engine_init(flux_device *dev) {
         sd.address_v = FLUX_ADDRESS_CLAMP_TO_EDGE;
         sd.address_w = FLUX_ADDRESS_CLAMP_TO_EDGE;
         if (flux_sampler_create(t->dev, &sd, &t->nearest_sampler) != FLUX_OK)
-            t->nearest_sampler = NULL;
+            t->nearest_sampler = nullptr;
     }
 
     if (!txt_atlas_init(t)) {
@@ -406,7 +406,7 @@ glyph_ctx *txt_engine_init(flux_device *dev) {
 
 fail:
     txt_engine_shutdown(t);
-    return NULL;
+    return nullptr;
 }
 
 void txt_engine_shutdown(glyph_ctx *t) {
@@ -418,7 +418,7 @@ void txt_engine_shutdown(glyph_ctx *t) {
     txt_observe_release(t, "context", 0);
     txt_atlas_destroy(t);
     glyph_cache_destroy(t->cache);
-    t->cache = NULL;
+    t->cache = nullptr;
     txt_layout_cache_reset(t);
     /* Already freed by the callees above on most paths; these are the belt-and-
      * braces frees for a context that never reached them. Routed through the
@@ -443,17 +443,17 @@ void txt_engine_shutdown(glyph_ctx *t) {
             for (int k = 0; k < TXT_FACE_SIZE_LRU; k++) {
                 if (f->size_fonts[k]) {
                     hb_font_destroy(f->size_fonts[k]);
-                    f->size_fonts[k] = NULL;
+                    f->size_fonts[k] = nullptr;
                 }
                 if (f->sizes[k]) {
                     /* FT_Done_Size deactivates if current; safe while the
                      * face is still alive. */
                     FT_Done_Size(f->sizes[k]);
-                    f->sizes[k] = NULL;
+                    f->sizes[k] = nullptr;
                 }
                 f->size_px[k] = 0;
             }
-            f->hb_font = NULL; /* alias only; ownership was in the slots */
+            f->hb_font = nullptr; /* alias only; ownership was in the slots */
             if (f->face)
                 FT_Done_Face(f->face);
             if (f->charset)
@@ -461,7 +461,7 @@ void txt_engine_shutdown(glyph_ctx *t) {
             free(f->path); // RAW_ALLOC_OK(paired-platform)
         }
         txt_free(t, slot->faces, "faces");
-        slot->faces = NULL;
+        slot->faces = nullptr;
         slot->count = slot->cap = 0;
     }
     if (t->ft)
@@ -479,9 +479,9 @@ void txt_engine_shutdown(glyph_ctx *t) {
 flux_result glyph_create(const glyph_desc *desc, glyph_ctx **out) {
     if (!out)
         return FLUX_ERROR_INVALID_ARGUMENT;
-    *out = NULL;
+    *out = nullptr;
 
-    flux_device *dev = desc ? desc->device : NULL;
+    flux_device *dev = desc ? desc->device : nullptr;
     float scale = (desc && desc->scale > 0.0f) ? desc->scale : 1.0f;
 
     /* Try the real backend; on any failure fall back to a measure-only
@@ -520,7 +520,7 @@ void glyph_release(glyph_ctx *t) {
 void glyph_get_stats(const glyph_ctx *t, glyph_stats *out) {
     if (!out)
         return;
-    glyph_stats zero = {0};
+    glyph_stats zero = {};
     *out = zero;
     if (!t)
         return;

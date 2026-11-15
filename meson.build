@@ -59,36 +59,54 @@ else
   tracy_dep = declare_dependency()
 endif
 
+opt_canvas = get_option('canvas')
+opt_scene = get_option('scene')
+opt_compute = get_option('compute')
+opt_effect = get_option('effect')
+opt_glyph = get_option('glyph')
+opt_vista = get_option('vista')
+opt_transit = get_option('transit')
+opt_reticle = get_option('reticle')
+opt_prism = get_option('prism')
+# lens consumes glyph and reticle, and both consume the flux canvas. iris
+# consumes lens. The feature graph is explicit here so a disabled dependency
+# cannot turn into a late undefined reference.
+opt_lens = opt_canvas and opt_glyph and opt_reticle
+
+if opt_vista and not opt_scene
+  error('vista requires the flux scene module — pass -Dvista=false with -Dscene=false')
+endif
+if opt_reticle and not opt_canvas
+  error('reticle requires the flux canvas module — pass -Dreticle=false with -Dcanvas=false')
+endif
+
 subdir('libs/flux')
 
-opt_glyph = get_option('glyph')
 if opt_glyph
   subdir('libs/glyph')
 else
   glyph_dep = declare_dependency()
 endif
 
-opt_vista = get_option('vista')
 if opt_vista
   subdir('libs/vista')
 else
   vista_dep = declare_dependency()
 endif
 
-opt_transit = get_option('transit')
 if opt_transit
   subdir('libs/transit')
 else
   transit_dep = declare_dependency()
 endif
 
-if get_option('reticle')
+if opt_reticle
   subdir('libs/reticle')
 else
   reticle_dep = declare_dependency()
 endif
 
-if get_option('prism')
+if opt_prism
   subdir('libs/prism')
 else
   # Always defined so tests/examples can reference it unconditionally; empty
@@ -96,41 +114,56 @@ else
   prism_dep = declare_dependency()
 endif
 
-subdir('libs/lens')
-subdir('libs/iris')
+if opt_lens
+  subdir('libs/lens')
+  subdir('libs/iris')
+else
+  lens_dep = declare_dependency()
+  iris_dep = declare_dependency()
+endif
 
 # ====================================================================
 # Optics Umbrella Facade & Dependencies (ADR-0160)
 # ====================================================================
 optics_inc = include_directories('include')
 
-optics_deps = [flux_dep, lens_dep, iris_dep]
-optics_requires = [
-  'flux = ' + meson.project_version(),
-  'lens = ' + meson.project_version(),
-  'iris = ' + meson.project_version(),
-]
+optics_deps = [flux_dep]
+optics_requires = ['flux = ' + meson.project_version()]
+optics_compile_args = []
 
 if opt_transit
   optics_deps += [transit_dep]
   optics_requires += ['transit = ' + meson.project_version()]
+  optics_compile_args += '-DOPTICS_HAVE_TRANSIT=1'
 endif
 
 if opt_glyph
   optics_deps += [glyph_dep]
   optics_requires += ['glyph = ' + meson.project_version()]
+  optics_compile_args += '-DOPTICS_HAVE_GLYPH=1'
 endif
 if opt_vista
   optics_deps += [vista_dep]
   optics_requires += ['vista = ' + meson.project_version()]
+  optics_compile_args += '-DOPTICS_HAVE_VISTA=1'
 endif
-if get_option('reticle')
+if opt_reticle
   optics_deps += [reticle_dep]
   optics_requires += ['reticle = ' + meson.project_version()]
+  optics_compile_args += '-DOPTICS_HAVE_RETICLE=1'
 endif
-if get_option('prism')
+if opt_prism
   optics_deps += [prism_dep]
   optics_requires += ['prism = ' + meson.project_version()]
+  optics_compile_args += '-DOPTICS_HAVE_PRISM=1'
+endif
+if opt_lens
+  optics_deps += [lens_dep, iris_dep]
+  optics_requires += [
+    'lens = ' + meson.project_version(),
+    'iris = ' + meson.project_version(),
+  ]
+  optics_compile_args += ['-DOPTICS_HAVE_LENS=1', '-DOPTICS_HAVE_IRIS=1']
 endif
 
 install_headers('include/optics/optics.h', subdir : 'optics')
@@ -138,35 +171,41 @@ install_headers('include/optics/optics.h', subdir : 'optics')
 optics_dep = declare_dependency(
   include_directories : optics_inc,
   dependencies        : optics_deps,
+  compile_args        : optics_compile_args,
 )
 
 pkg.generate(
-  libraries   : optics_dep,
-  name        : 'optics',
-  filebase    : 'optics',
-  description : 'High-performance C23 graphics and UI stack (umbrella facade)',
-  version     : meson.project_version(),
-  requires    : optics_requires,
+  libraries    : optics_dep,
+  name         : 'optics',
+  filebase     : 'optics',
+  description  : 'High-performance C23 graphics and UI stack (umbrella facade)',
+  version      : meson.project_version(),
+  requires     : optics_requires,
+  extra_cflags : optics_compile_args,
 )
 
 if get_option('examples')
   subdir('examples/flux')
-  subdir('examples/showcase')
-  if opt_glyph
+  if opt_lens and opt_effect and opt_prism
+    subdir('examples/showcase')
+  endif
+  if opt_lens and opt_glyph
     subdir('examples/glyph')
   endif
-  if opt_vista
+  if opt_lens and opt_vista
     subdir('examples/vista')
   endif
-  if opt_transit
+  if opt_lens and opt_transit
     subdir('examples/transit')
   endif
-  if get_option('reticle')
+  if opt_reticle
     subdir('examples/reticle')
   endif
-  subdir('examples/lens')
-  subdir('examples/iris')
-  subdir('examples/scenarios')
+  if opt_lens
+    subdir('examples/lens')
+    subdir('examples/iris')
+    subdir('examples/scenarios')
+  endif
 endif
 
 if get_option('fuzz')

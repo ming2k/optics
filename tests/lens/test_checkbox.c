@@ -7,8 +7,8 @@
 static const lens_input IN0 = {.display_size = {400, 200}, .dt_seconds = 0.016f};
 
 static void test_checkbox_toggle(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     bool value = false;
 
     /* Warm-up frame */
@@ -42,8 +42,8 @@ static void test_checkbox_toggle(void) {
 }
 
 static void test_checkbox_no_toggle_when_disabled(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     bool value = false;
 
     /* Warm-up frame */
@@ -68,8 +68,8 @@ static void test_checkbox_no_toggle_when_disabled(void) {
 }
 
 static void test_switch_toggle_and_disabled(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     bool value = false;
 
     lens_begin(ui, &IN0);

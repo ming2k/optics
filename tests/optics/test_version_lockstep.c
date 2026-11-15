@@ -4,7 +4,7 @@
  * (ADR-0016 / ADR-0106).
  *
  * Meson injects OPTICS_PROJECT_VERSION_{MAJOR,MINOR,PATCH} and one
- * OPTICS_TEST_WITH_<LIB> define per optional library. The runtime half proves:
+ * OPTICS_HAVE_<LIB> define per optional library. The runtime half proves:
  *   - version(), version_number(), and version_string() agree with the macros;
  *   - version_string() is derived from the macros, not a stale literal;
  *   - the packed integer has major in bits 16..23, minor 8..15, patch 0..7;
@@ -34,23 +34,28 @@
                   #PREFIX " patch differs from meson.project_version()")
 
 CHECK_PROJECT_VERSION(FLUX);
-CHECK_PROJECT_VERSION(IRIS);
-CHECK_PROJECT_VERSION(LENS);
 CHECK_PROJECT_VERSION(OPTICS);
 
-#if defined(OPTICS_TEST_WITH_GLYPH)
+#if defined(OPTICS_HAVE_IRIS)
+CHECK_PROJECT_VERSION(IRIS);
+#endif
+#if defined(OPTICS_HAVE_LENS)
+CHECK_PROJECT_VERSION(LENS);
+#endif
+
+#if defined(OPTICS_HAVE_GLYPH)
 CHECK_PROJECT_VERSION(GLYPH);
 #endif
-#if defined(OPTICS_TEST_WITH_PRISM)
+#if defined(OPTICS_HAVE_PRISM)
 CHECK_PROJECT_VERSION(PRISM);
 #endif
-#if defined(OPTICS_TEST_WITH_RETICLE)
+#if defined(OPTICS_HAVE_RETICLE)
 CHECK_PROJECT_VERSION(RETICLE);
 #endif
-#if defined(OPTICS_TEST_WITH_TRANSIT)
+#if defined(OPTICS_HAVE_TRANSIT)
 CHECK_PROJECT_VERSION(TRANSIT);
 #endif
-#if defined(OPTICS_TEST_WITH_VISTA)
+#if defined(OPTICS_HAVE_VISTA)
 CHECK_PROJECT_VERSION(VISTA);
 #endif
 
@@ -80,33 +85,38 @@ CHECK_PROJECT_VERSION(VISTA);
 
 int main(void) {
     CHECK_VERSION_SUITE(flux, FLUX);
-    CHECK_VERSION_SUITE(lens, LENS);
-    CHECK_VERSION_SUITE(iris, IRIS);
 
     OT_EXPECT(OPTICS_VERSION_NUMBER ==
               ((uint32_t)OPTICS_VERSION_MAJOR << 16 | (uint32_t)OPTICS_VERSION_MINOR << 8 |
                (uint32_t)OPTICS_VERSION_PATCH));
     OT_EXPECT(FLUX_VERSION_NUMBER == OPTICS_VERSION_NUMBER);
-    OT_EXPECT(LENS_VERSION_NUMBER == OPTICS_VERSION_NUMBER);
-    OT_EXPECT(IRIS_VERSION_NUMBER == OPTICS_VERSION_NUMBER);
 
-#if defined(OPTICS_TEST_WITH_GLYPH)
+#if defined(OPTICS_HAVE_LENS)
+    CHECK_VERSION_SUITE(lens, LENS);
+    OT_EXPECT(LENS_VERSION_NUMBER == OPTICS_VERSION_NUMBER);
+#endif
+#if defined(OPTICS_HAVE_IRIS)
+    CHECK_VERSION_SUITE(iris, IRIS);
+    OT_EXPECT(IRIS_VERSION_NUMBER == OPTICS_VERSION_NUMBER);
+#endif
+
+#if defined(OPTICS_HAVE_GLYPH)
     CHECK_VERSION_SUITE(glyph, GLYPH);
     OT_EXPECT(GLYPH_VERSION_NUMBER == OPTICS_VERSION_NUMBER);
 #endif
-#if defined(OPTICS_TEST_WITH_PRISM)
+#if defined(OPTICS_HAVE_PRISM)
     CHECK_VERSION_SUITE(prism, PRISM);
     OT_EXPECT(PRISM_VERSION_NUMBER == OPTICS_VERSION_NUMBER);
 #endif
-#if defined(OPTICS_TEST_WITH_RETICLE)
+#if defined(OPTICS_HAVE_RETICLE)
     CHECK_VERSION_SUITE(reticle, RETICLE);
     OT_EXPECT(RETICLE_VERSION_NUMBER == OPTICS_VERSION_NUMBER);
 #endif
-#if defined(OPTICS_TEST_WITH_TRANSIT)
+#if defined(OPTICS_HAVE_TRANSIT)
     CHECK_VERSION_SUITE(transit, TRANSIT);
     OT_EXPECT(TRANSIT_VERSION_NUMBER == OPTICS_VERSION_NUMBER);
 #endif
-#if defined(OPTICS_TEST_WITH_VISTA)
+#if defined(OPTICS_HAVE_VISTA)
     CHECK_VERSION_SUITE(vista, VISTA);
     OT_EXPECT(VISTA_VERSION_NUMBER == OPTICS_VERSION_NUMBER);
 #endif

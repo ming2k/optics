@@ -107,8 +107,8 @@ static flux_image *make_image(flux_device *device, uint32_t width, uint32_t heig
     desc.height = height;
     desc.format = FLUX_FORMAT_RGBA8_UNORM;
     desc.initial_data = pixels;
-    flux_image *image = NULL;
-    return flux_image_create(device, &desc, &image) == FLUX_OK ? image : NULL;
+    flux_image *image = nullptr;
+    return flux_image_create(device, &desc, &image) == FLUX_OK ? image : nullptr;
 }
 
 static void record_image(flux_encoder *enc, flux_image *image, flux_rect dst, flux_rect src,
@@ -122,18 +122,21 @@ static void record_image(flux_encoder *enc, flux_image *image, flux_rect dst, fl
                   .src_rect = src,
                   .tint = flux_color_rgba_premul(255, 255, 255, 255)},
     };
-    flux_encoder_draw_geometry(enc, &geom, &brush);
+    flux_encoder_draw_geometry(enc,
+                               &(flux_encoder_draw_geometry_opts){.geom = &geom, .brush = &brush});
 }
 
 static void draw_panel(flux_encoder *enc, flux_rect panel) {
     flux_geometry fill = flux_geom_rrect(panel, 22.0f);
     flux_brush fill_brush = flux_brush_solid(flux_color_rgba_premul(27, 31, 46, 245));
-    flux_encoder_draw_geometry(enc, &fill, &fill_brush);
+    flux_encoder_draw_geometry(
+        enc, &(flux_encoder_draw_geometry_opts){.geom = &fill, .brush = &fill_brush});
 
     flux_geometry stroke = flux_geom_rrect(panel, 22.0f);
     stroke.stroke.width = 1.5f;
     flux_brush stroke_brush = flux_brush_solid(flux_color_rgba_premul(80, 92, 125, 160));
-    flux_encoder_draw_geometry(enc, &stroke, &stroke_brush);
+    flux_encoder_draw_geometry(
+        enc, &(flux_encoder_draw_geometry_opts){.geom = &stroke, .brush = &stroke_brush});
 }
 
 static bool on_start(lens *ui, flux_device *device, void *user) {
@@ -193,7 +196,7 @@ static void on_record(flux_encoder *enc, float scale, void *user) {
     float height = (float)log_h;
 
     flux_encoder_save(enc);
-    flux_encoder_scale(enc, scale, scale);
+    flux_encoder_scale(enc, &(flux_encoder_scale_opts){.sx = scale, .sy = scale});
 
     float margin = 24.0f;
     float gap = 18.0f;
@@ -217,11 +220,13 @@ static void on_record(flux_encoder *enc, float scale, void *user) {
         float orbit = 40.0f;
 
         flux_encoder_save(enc);
-        flux_encoder_translate(enc, cx + cosf(time * 0.8f) * orbit, cy + sinf(time * 0.8f) * orbit);
+        flux_encoder_translate(enc,
+                               &(flux_encoder_translate_opts){.x = cx + cosf(time * 0.8f) * orbit,
+                                                              .y = cy + sinf(time * 0.8f) * orbit});
         flux_encoder_rotate(enc, angle);
         record_image(enc, app->card_a,
                      (flux_rect){-CARD_SIZE * 0.5f, -CARD_SIZE * 0.5f, CARD_SIZE, CARD_SIZE},
-                     (flux_rect){0}, 1.0f);
+                     (flux_rect){}, 1.0f);
         flux_encoder_restore(enc);
     }
 
@@ -249,12 +254,12 @@ static void on_record(flux_encoder *enc, float scale, void *user) {
         float fade = 0.5f + 0.5f * sinf(time * 1.5f);
 
         flux_encoder_save(enc);
-        flux_encoder_translate(enc, cx, cy);
-        flux_encoder_scale(enc, s, s);
+        flux_encoder_translate(enc, &(flux_encoder_translate_opts){.x = cx, .y = cy});
+        flux_encoder_scale(enc, &(flux_encoder_scale_opts){.sx = s, .sy = s});
 
         flux_rect dst = {-CARD_SIZE * 0.5f, -CARD_SIZE * 0.5f, CARD_SIZE, CARD_SIZE};
-        record_image(enc, app->card_a, dst, (flux_rect){0}, 1.0f - fade);
-        record_image(enc, app->card_b, dst, (flux_rect){0}, fade);
+        record_image(enc, app->card_a, dst, (flux_rect){}, 1.0f - fade);
+        record_image(enc, app->card_b, dst, (flux_rect){}, fade);
         flux_encoder_restore(enc);
     }
 
@@ -267,12 +272,12 @@ static void on_record(flux_encoder *enc, float scale, void *user) {
         float shy = cosf(time * 1.7f) * 0.25f;
 
         flux_encoder_save(enc);
-        flux_encoder_translate(enc, cx, cy);
+        flux_encoder_translate(enc, &(flux_encoder_translate_opts){.x = cx, .y = cy});
         flux_mat3x2 skew_m = {.m = {1.0f, shy, shx, 1.0f, 0.0f, 0.0f}};
         flux_encoder_transform(enc, skew_m);
         record_image(enc, app->card_b,
                      (flux_rect){-CARD_SIZE * 0.5f, -CARD_SIZE * 0.5f, CARD_SIZE, CARD_SIZE},
-                     (flux_rect){0}, 1.0f);
+                     (flux_rect){}, 1.0f);
         flux_encoder_restore(enc);
     }
 
@@ -280,7 +285,7 @@ static void on_record(flux_encoder *enc, float scale, void *user) {
 }
 
 int main(void) {
-    image_animation_app app = {0};
+    image_animation_app app = {};
     printf("flux image_animation — native Iris window (Esc to quit)\n");
     return iris_app_run(&(iris_app_opts){
         .title = "flux image animation",

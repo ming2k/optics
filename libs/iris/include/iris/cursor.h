@@ -33,7 +33,7 @@ extern "C" {
 /* The cursor appearance iris currently shows for the app's window.
  * Pass IRIS_CURSOR_DEFAULT to reset to the platform's arrow. Unknown
  * values (forward-compat from a newer libiris) fall back to DEFAULT. */
-typedef enum {
+typedef enum : uint32_t {
     IRIS_CURSOR_DEFAULT = 0, /* arrow                                    */
     IRIS_CURSOR_TEXT,        /* I-beam — over text the user can edit    */
     IRIS_CURSOR_POINTER,     /* pointing hand — over clickable elements */

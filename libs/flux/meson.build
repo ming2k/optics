@@ -7,10 +7,8 @@
 vulkan_dep  = dependency('vulkan',  version : '>=1.3', required : true)
 threads_dep = dependency('threads')
 
-opt_canvas  = get_option('canvas')
-opt_scene   = get_option('scene')
-opt_compute = get_option('compute')
-opt_effect  = get_option('effect')
+# opt_canvas / opt_scene / opt_compute / opt_effect are declared in the root
+# meson.build so the whole feature graph is visible in one place.
 
 if opt_effect and not opt_canvas
   error('effect module requires canvas (flux_image) — pass -Dcanvas=true with -Deffect=true')

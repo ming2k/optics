@@ -77,14 +77,14 @@ static jv *parse_string(parser *ps) {
     }
     if (q >= ps->end) {
         ps->err_off = (size_t)(ps->end - ps->p);
-        return NULL;
+        return nullptr;
     }
 
     /* Second pass: unescape into a heap buffer. */
     size_t cap = (size_t)(q - start) + 1;
     char *out = malloc(cap);
     if (!out)
-        return NULL;
+        return nullptr;
     size_t n = 0;
     for (const char *s = start; s < q; ++s) {
         if (*s != '\\') {
@@ -140,7 +140,7 @@ static jv *parse_string(parser *ps) {
     jv *v = jv_new(J_STR);
     if (!v) {
         free(out);
-        return NULL;
+        return nullptr;
     }
     v->str.data = out;
     v->str.len = n;
@@ -149,15 +149,15 @@ static jv *parse_string(parser *ps) {
 
 static jv *parse_number(parser *ps) {
     /* strtod handles sign, integer, fraction, exponent. */
-    char *endp = NULL;
+    char *endp = nullptr;
     double d = strtod(ps->p, &endp);
     if (endp == ps->p) {
         ps->err_off = (size_t)(ps->p - ps->p);
-        return NULL;
+        return nullptr;
     }
     jv *v = jv_new(J_NUM);
     if (!v)
-        return NULL;
+        return nullptr;
     v->num = d;
     ps->p = endp;
     return v;
@@ -176,7 +176,7 @@ static jv *parse_array(parser *ps) {
     ps->p++; /* '[' */
     jv *v = jv_new(J_ARR);
     if (!v)
-        return NULL;
+        return nullptr;
     size_t cap = 0;
     skip_ws(ps);
     if (ps->p < ps->end && *ps->p == ']') {
@@ -218,14 +218,14 @@ static jv *parse_array(parser *ps) {
     }
 fail:
     jv_free(v);
-    return NULL;
+    return nullptr;
 }
 
 static jv *parse_object(parser *ps) {
     ps->p++; /* '{' */
     jv *v = jv_new(J_OBJ);
     if (!v)
-        return NULL;
+        return nullptr;
     size_t cap = 0;
     skip_ws(ps);
     if (ps->p < ps->end && *ps->p == '}') {
@@ -287,14 +287,14 @@ static jv *parse_object(parser *ps) {
     }
 fail:
     jv_free(v);
-    return NULL;
+    return nullptr;
 }
 
 static jv *parse_value(parser *ps) {
     skip_ws(ps);
     if (ps->p >= ps->end) {
         ps->err_off = (size_t)(ps->p - ps->p);
-        return NULL;
+        return nullptr;
     }
     char c = *ps->p;
     if (c == '"')
@@ -310,7 +310,7 @@ static jv *parse_value(parser *ps) {
                 v->b = true;
             return v;
         }
-        return NULL;
+        return nullptr;
     }
     if (c == 'f') {
         if (match_lit(ps, "false", 5)) {
@@ -319,12 +319,12 @@ static jv *parse_value(parser *ps) {
                 v->b = false;
             return v;
         }
-        return NULL;
+        return nullptr;
     }
     if (c == 'n') {
         if (match_lit(ps, "null", 4))
             return jv_new(J_NULL);
-        return NULL;
+        return nullptr;
     }
     return parse_number(ps);
 }
@@ -335,7 +335,7 @@ jv *jv_parse(const char *json, size_t len, size_t *err_off) {
     if (!v) {
         if (err_off)
             *err_off = ps.err_off;
-        return NULL;
+        return nullptr;
     }
     /* Tolerate trailing whitespace only. */
     skip_ws(&ps);
@@ -343,23 +343,23 @@ jv *jv_parse(const char *json, size_t len, size_t *err_off) {
         if (err_off)
             *err_off = (size_t)(ps.p - json);
         jv_free(v);
-        return NULL;
+        return nullptr;
     }
     return v;
 }
 
 const jv *jv_obj_get(const jv *v, const char *key) {
     if (!v || v->kind != J_OBJ)
-        return NULL;
+        return nullptr;
     for (size_t i = 0; i < v->obj.count; ++i)
         if (strcmp(v->obj.keys[i], key) == 0)
             return v->obj.vals[i];
-    return NULL;
+    return nullptr;
 }
 
 const jv *jv_arr_at(const jv *v, size_t i) {
     if (!v || v->kind != J_ARR || i >= v->arr.count)
-        return NULL;
+        return nullptr;
     return v->arr.items[i];
 }
 

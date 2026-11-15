@@ -6,11 +6,11 @@
 #include <lens/lens.h>
 
 int main(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
-    OT_EXPECT(lens_test_snapshot_render(NULL, NULL) == FLUX_ERROR_INVALID_ARGUMENT);
-    OT_EXPECT(lens_test_snapshot_render(ui, NULL) == FLUX_ERROR_INVALID_ARGUMENT);
+    OT_EXPECT(lens_test_snapshot_render(nullptr, nullptr) == FLUX_ERROR_INVALID_ARGUMENT);
+    OT_EXPECT(lens_test_snapshot_render(ui, nullptr) == FLUX_ERROR_INVALID_ARGUMENT);
 
     lens_release(ui);
     return OT_REPORT();

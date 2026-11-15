@@ -31,6 +31,42 @@
 #include <stdio.h>
 #include <string.h>
 
+static glyph_metrics measure(glyph_ctx *t, const char *s, size_t len, const glyph_style *style) {
+    return glyph_measure(t, &(glyph_measure_opts){.utf8 = s, .len = len, .style = style});
+}
+
+static float caret_x(glyph_ctx *t, const char *s, size_t len, size_t byte,
+                     const glyph_style *style) {
+    return glyph_x_for_byte(
+        t, &(glyph_x_for_byte_opts){.utf8 = s, .len = len, .byte = byte, .style = style});
+}
+
+static size_t caret_byte(glyph_ctx *t, const char *s, size_t len, float x,
+                         const glyph_style *style) {
+    return glyph_byte_for_x(
+        t, &(glyph_byte_for_x_opts){.utf8 = s, .len = len, .local_x = x, .style = style});
+}
+
+static size_t visual_move(glyph_ctx *t, const char *s, size_t len, size_t byte, bool forward,
+                          const glyph_style *style) {
+    return glyph_visual_move(
+        t, &(glyph_visual_move_opts){
+               .utf8 = s, .len = len, .byte = byte, .forward = forward, .style = style});
+}
+
+static int selection(glyph_ctx *t, const char *s, size_t len, size_t lo, size_t hi,
+                     const glyph_style *style, glyph_xrange *out, int max) {
+    return glyph_selection_rects(t, &(glyph_selection_rects_opts){
+                                        .utf8 = s,
+                                        .len = len,
+                                        .lo = lo,
+                                        .hi = hi,
+                                        .style = style,
+                                        .out = out,
+                                        .max = max,
+                                    });
+}
+
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     if (size == 0)
         return 0;
@@ -48,7 +84,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
         glyph_style st = {};
         st.size_px = size_px;
 
-        glyph_metrics m = glyph_measure(t, text, len, &st);
+        glyph_metrics m = measure(t, text, len, &st);
         if (!isfinite(m.width) || !isfinite(m.height) || !isfinite(m.baseline) || m.width < 0.0f ||
             m.height < 0.0f) {
             fprintf(stderr, "fuzz_text_shape: non-finite/negative metrics at len=%zu\n", len);
@@ -58,13 +94,13 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
 
         /* Caret mapping: a byte index derived from the input itself. */
         size_t byte = (len > 0) ? (size_t)data[(len - 1) % size] % (len + 1) : 0;
-        float x = glyph_x_for_byte(t, text, len, byte, &st);
+        float x = caret_x(t, text, len, byte, &st);
         if (!isfinite(x) || x < 0.0f) {
             fprintf(stderr, "fuzz_text_shape: bad x_for_byte at len=%zu byte=%zu\n", len, byte);
             glyph_release(t);
             return 1;
         }
-        size_t back = glyph_byte_for_x(t, text, len, x, &st);
+        size_t back = caret_byte(t, text, len, x, &st);
         if (back > len) {
             fprintf(stderr, "fuzz_text_shape: byte_for_x out of range at len=%zu\n", len);
             glyph_release(t);
@@ -73,7 +109,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
 
         /* Visual movement (LTR/RTL bidi-aware cursor steps). */
         bool forward = (data[0] & 1u) != 0;
-        size_t moved = glyph_visual_move(t, text, len, byte, forward, &st);
+        size_t moved = visual_move(t, text, len, byte, forward, &st);
         if (moved > len) {
             fprintf(stderr, "fuzz_text_shape: visual_move out of range at len=%zu\n", len);
             glyph_release(t);
@@ -90,7 +126,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
             hi = tmp;
         }
         glyph_xrange rects[4];
-        int n = glyph_selection_rects(t, text, len, lo, hi, &st, rects, 4);
+        int n = selection(t, text, len, lo, hi, &st, rects, 4);
         if (n > 4) {
             fprintf(stderr, "fuzz_text_shape: selection_rects overflow at len=%zu\n", len);
             glyph_release(t);

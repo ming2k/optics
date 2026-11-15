@@ -451,7 +451,7 @@ static bool physical_device_has_extension(VkPhysicalDevice pd, const char *name)
 }
 
 static bool physical_device_drm_identity(VkPhysicalDevice pd, flux_drm_device_identity *out) {
-    *out = (flux_drm_device_identity){0};
+    *out = (flux_drm_device_identity){};
     if (!physical_device_has_extension(pd, VK_EXT_PHYSICAL_DEVICE_DRM_EXTENSION_NAME))
         return false;
 
@@ -708,7 +708,7 @@ static flux_result create_logical_device(flux_device *d, const flux_device_desc 
     /* Enumerate what the physical device advertises: validates the
      * caller-required list and gates the optional extensions below. */
     uint32_t avail = 0;
-    VkExtensionProperties *available = NULL;
+    VkExtensionProperties *available = nullptr;
     VkResult er =
         vkEnumerateDeviceExtensionProperties(d->physical_device, nullptr, &avail, nullptr);
     if (er != VK_SUCCESS) {
@@ -858,7 +858,7 @@ static flux_result create_logical_device(flux_device *d, const flux_device_desc 
     VkPhysicalDeviceFeatures2 feat2 = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
         .pNext = &feat12,
-        .features = {0},
+        .features = {},
     };
 
     /* Confirm the device actually supports every flag we set. */
@@ -1042,7 +1042,7 @@ flux_result flux_device_create(const flux_device_desc *desc, flux_device **out) 
     }
     *out = nullptr;
 
-    flux_device_config config = {0};
+    flux_device_config config = {};
     flux_result r = parse_device_extensions(desc, &config);
     if (r != FLUX_OK)
         return r;
@@ -1256,7 +1256,7 @@ flux_device_feature_flags flux_device_enabled_features(const flux_device *d) {
 flux_result flux_device_get_limits(const flux_device *d, flux_device_limits *out) {
     if (!out)
         return FLUX_ERROR_INVALID_ARGUMENT;
-    *out = (flux_device_limits){0};
+    *out = (flux_device_limits){};
     out->struct_size = sizeof(flux_device_limits);
     if (!d)
         return FLUX_ERROR_INVALID_ARGUMENT;
@@ -1283,7 +1283,7 @@ flux_result flux_device_get_limits(const flux_device *d, flux_device_limits *out
 bool flux_device_get_drm_identity(const flux_device *d, flux_drm_device_identity *out_identity) {
     if (!out_identity)
         return false;
-    *out_identity = (flux_drm_device_identity){0};
+    *out_identity = (flux_drm_device_identity){};
     if (!d || (!d->drm_identity.has_primary && !d->drm_identity.has_render))
         return false;
     *out_identity = d->drm_identity;
@@ -1656,7 +1656,7 @@ void flux_device_retire_image(flux_device *d, VkImageView view, VkImage image,
     }
     z->view = view;
     z->image = image;
-    z->alloc = alloc ? *alloc : (flux_vk_alloc){0};
+    z->alloc = alloc ? *alloc : (flux_vk_alloc){};
     z->imported_memory = imported_memory;
     z->imported_size = imported_size;
     z->bindless = bindless;
@@ -1679,7 +1679,7 @@ void flux_device_retire_buffer(flux_device *d, VkBuffer buffer, const flux_vk_al
         return;
     }
     z->buffer = buffer;
-    z->alloc = alloc ? *alloc : (flux_vk_alloc){0};
+    z->alloc = alloc ? *alloc : (flux_vk_alloc){};
     z->bindless = FLUX_BINDLESS_INVALID;
     z->bindless_storage = FLUX_BINDLESS_INVALID;
     zombie_park(d, z);

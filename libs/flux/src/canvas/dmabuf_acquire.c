@@ -12,10 +12,12 @@
 #include "internal.h"
 #include <flux/dmabuf.h>
 
-flux_result flux_canvas_wait_dmabuf_acquire(flux_canvas *canvas, flux_image *image,
-                                            int acquire_sync_fd) {
-    if (!canvas || !image || acquire_sync_fd < 0)
+flux_result flux_canvas_wait_dmabuf_acquire(flux_canvas *canvas,
+                                            const flux_canvas_wait_dmabuf_acquire_opts *opts) {
+    if (!canvas || !opts || !opts->image || opts->acquire_sync_fd < 0)
         return FLUX_ERROR_INVALID_ARGUMENT;
+    flux_image *image = opts->image;
+    int acquire_sync_fd = opts->acquire_sync_fd;
     if (!canvas->recording || !canvas->frame) {
         FLUX_FAIL(FLUX_ERROR_INVALID_STATE, "dma-buf acquire wait requires an active canvas frame");
         return FLUX_ERROR_INVALID_STATE;

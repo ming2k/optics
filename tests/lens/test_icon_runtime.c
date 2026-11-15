@@ -39,7 +39,7 @@ int main(void) {
     OT_EXPECT((int)fill == (int)stroke + 1);
 
     /* Malformed or empty input is rejected, never crashes. */
-    OT_EXPECT((int)lens_icon_register_svg(NULL) == (int)LENS_ICON_INVALID);
+    OT_EXPECT((int)lens_icon_register_svg(nullptr) == (int)LENS_ICON_INVALID);
     OT_EXPECT((int)lens_icon_register_svg("") == (int)LENS_ICON_INVALID);
     OT_EXPECT((int)lens_icon_register_svg("this is not svg <<<") == (int)LENS_ICON_INVALID);
     OT_EXPECT((int)lens_icon_register_svg("<html><body/></html>") == (int)LENS_ICON_INVALID);
@@ -48,8 +48,8 @@ int main(void) {
     OT_EXPECT((int)lens_icon_register_svg("<svg><circle cx=\"1\" cy=\"1\" r=\"1\"/></svg>") >=
               (int)LENS_ICON_COUNT);
 
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     /* Runtime ids work through every icon widget, alongside a built-in. */
     lens_begin(ui, &IN0);
@@ -83,7 +83,7 @@ int main(void) {
     lens_icon(ui, &(lens_icon_opts){.id = (lens_icon_id)(fill + 1000), .size = 16.0f});
     lens_test_end(ui);
     OT_EXPECT(!lens_overflowed(ui));
-    OT_EXPECT(lens_node_first_child(lens_root(ui)) == NULL);
+    OT_EXPECT(lens_node_first_child(lens_root(ui)) == nullptr);
 
     /* Flood the per-frame arena */
     lens_begin(ui, &IN0);

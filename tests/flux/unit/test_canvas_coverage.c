@@ -31,7 +31,7 @@
  * steps a pixel can express. Higher is smoother. */
 static int partial_levels(const uint8_t *buf, uint32_t w, uint32_t h, uint32_t stride,
                           uint32_t channels) {
-    int seen[256] = {0};
+    int seen[256] = {};
     for (uint32_t y = 0; y < h; ++y) {
         for (uint32_t x = 0; x < w; ++x) {
             uint8_t v = buf[(size_t)y * stride + (size_t)x * channels + (channels - 1)];
@@ -56,7 +56,7 @@ static void draw_stroked_path(flux_canvas *c) {
         flux_geometry g = {.kind = FLUX_GEOM_PATH, .path = {.path = p}};
         g.stroke.width = 1.2f;
         flux_brush b = flux_brush_solid(flux_color_rgba_premul(255, 255, 255, 255));
-        flux_canvas_draw_geometry(c, &g, &b);
+        flux_canvas_draw_geometry(c, &(flux_canvas_draw_geometry_opts){.geom = &g, .brush = &b});
     }
     flux_arena_deinit(&arena);
 }
@@ -72,7 +72,7 @@ static flux_canvas *bake_canvas(uint32_t supersample) {
     d.next = &ss;
     if (flux_canvas_create(&d, &c) != FLUX_OK)
         return nullptr;
-    flux_color none = {0};
+    flux_color none = {};
     if (flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
                                                       .clear_color = &none}) != FLUX_OK) {
         flux_canvas_release(c);

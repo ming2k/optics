@@ -153,7 +153,8 @@ static void test_analytic_dispatch_matches_path(void) {
         OT_EXPECT(flux_canvas_begin(analytic,
                                     &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
                                                              .clear_color = &clear}) == FLUX_OK);
-        flux_canvas_draw_geometry(analytic, &geom, &brush);
+        flux_canvas_draw_geometry(
+            analytic, &(flux_canvas_draw_geometry_opts){.geom = &geom, .brush = &brush});
         OT_EXPECT(flux_canvas_end(analytic) == FLUX_OK);
 
         /* Tessellated: force the path route by drawing a gradient-free but
@@ -243,7 +244,8 @@ static void run_dispatch_case(flux_mat3x2 tx, float curvature, bool expect_analy
         flux_canvas_begin(analytic, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
                                                              .clear_color = &clear}) == FLUX_OK);
     flux_canvas_transform(analytic, tx);
-    flux_canvas_draw_geometry(analytic, &geom, &brush);
+    flux_canvas_draw_geometry(analytic,
+                              &(flux_canvas_draw_geometry_opts){.geom = &geom, .brush = &brush});
     OT_EXPECT(flux_canvas_end(analytic) == FLUX_OK);
 
     flux_arena local;

@@ -47,7 +47,7 @@ flatten_multi flatten_path_to_contours(const flux_path *p, float pixel_scale, fl
     (void)pixel_scale;
     if (g_script_contour_n > 0) {
         if (g_script_pts_n > pts_cap || g_script_contour_n > cons_cap) {
-            return (flatten_multi){0};
+            return (flatten_multi){};
         }
         for (uint32_t i = 0; i < g_script_pts_n; ++i)
             out_pts[i] = g_script_pts[i];
@@ -56,7 +56,7 @@ flatten_multi flatten_path_to_contours(const flux_path *p, float pixel_scale, fl
         return (flatten_multi){.point_count = g_script_pts_n, .contour_count = g_script_contour_n};
     }
     if (g_polygon_n == 0 || g_polygon_n > pts_cap || cons_cap < 1) {
-        return (flatten_multi){0};
+        return (flatten_multi){};
     }
     for (uint32_t i = 0; i < g_polygon_n; ++i)
         out_pts[i] = g_polygon[i];
@@ -164,7 +164,7 @@ static void reset_capture(void) {
 }
 
 static flux_canvas make_fake_canvas(void) {
-    flux_canvas c = {0};
+    flux_canvas c = {};
     c.recording = true;
     c.scratch_pts = fk_pts;
     c.scratch_verts = fk_vrts;
@@ -179,7 +179,7 @@ static flux_canvas make_fake_canvas(void) {
 
 /* The tess cache keys on the raw verb stream, so the scripted fills
  * need a path whose `segments` pointer is readable for `count` verbs. */
-static flux_path_segment g_dummy_seg = {0};
+static flux_path_segment g_dummy_seg = {};
 
 static void run_fill(flux_point *poly, uint32_t n) {
     g_script_contour_n = 0;
@@ -189,8 +189,8 @@ static void run_fill(flux_point *poly, uint32_t n) {
     reset_capture();
 
     flux_canvas c = make_fake_canvas();
-    flux_path dummy = {0}; /* opaque to our scripted flatten */
-    dummy.count = 1;       /* defeat the empty-path early-return */
+    flux_path dummy = {}; /* opaque to our scripted flatten */
+    dummy.count = 1;      /* defeat the empty-path early-return */
     dummy.segments = &g_dummy_seg;
     canvas_paint paint = (canvas_paint){.color = 0xFF000000u};
     canvas_tess_fill_path(&c, &dummy, &paint);
@@ -199,7 +199,7 @@ static void run_fill(flux_point *poly, uint32_t n) {
 static void run_fill_scripted(void) {
     reset_capture();
     flux_canvas c = make_fake_canvas();
-    flux_path dummy = {0};
+    flux_path dummy = {};
     dummy.count = 1;
     dummy.segments = &g_dummy_seg;
     canvas_paint paint = (canvas_paint){.color = 0xFF000000u};

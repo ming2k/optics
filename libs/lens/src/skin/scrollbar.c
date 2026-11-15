@@ -23,7 +23,7 @@ static void lensi_skin_scrollbar(lens *ui, lens_node *n) {
      * (ADR-0060) and never count toward scrollable content (same rule as
      * the clamp pass: seeding from the viewport inflates the union when a
      * large single-frame delta flings every child past the viewport edge). */
-    lens_node *seed = NULL;
+    lens_node *seed = nullptr;
     for (lens_node *c = n->first_child; c; c = c->next_sibling) {
         if (c->place != LENS_PLACE_ABS) {
             seed = c;

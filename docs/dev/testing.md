@@ -14,7 +14,7 @@ checked mechanically by `tools/check_test_layers.py`.
 
 ```text
                      ┌─────────────────────┐
-                     │        e2e          │  3 binaries
+                     │        e2e          │  4 binaries
                      │ public API → pixels │  slowest, smallest
                      └──────────┬──────────┘
                 ┌───────────────┴────────────────┐
@@ -80,6 +80,7 @@ Current E2E scenarios:
 
 | Test | Chain under assertion |
 |------|-----------------------|
+| `e2e_flux_version` | Umbrella version → flux runtime version, with no lens/canvas requirement |
 | `e2e_public_api` | Umbrella version lockstep → lens frame → snapshot → CPU pixels |
 | `e2e_interaction_session` | Pointer press/release → checkbox toggle → focused text input → accessibility walk → snapshot replay |
 | `e2e_document_pipeline` | SVG → reticle raster; SVG → runtime icon → lens snapshot → immutable `DisplayList` → serialize/deserialize → byte-identical pixels |
@@ -161,6 +162,8 @@ The `lint` lane also runs tree-level gates that no single test binary can own:
 | `wayland_listeners` | Every Wayland listener event has a non-NULL slot. |
 | `version_lockstep_tree` | Meson, the umbrella header, every library header, and the Cargo workspace name one version. |
 | `library_purity` | Shared libraries do not write to stdout; `flux` does not reference named materials. |
+| `c23_lexical` | No code-level `NULL`/`{0}` remains, and every `typedef enum` has an explicit underlying type. |
+| `api_surface` | No prohibited `_ex`/`_wrapped`/`_sized`/variant suffixes appear in public headers. |
 | `docs_links` | Every relative documentation link resolves; public docs do not link into `docs/dev/`. |
 
 ## Running Tests

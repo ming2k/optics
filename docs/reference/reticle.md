@@ -10,7 +10,7 @@ or a full CSS cascade.
 - Header: `<reticle/reticle.h>`
 - Library: `libreticle.so` / `libreticle.dylib` / `reticle.dll`
 - pkg-config: `reticle` (declares `Requires: flux`)
-- Meson option: `-Dreticle=true` (default)
+- Meson option: `-Dreticle=true` (default; requires `-Dcanvas=true`)
 - Rust crate: `reticle` / `reticle-sys`
 
 The compiler is a document-layer sibling of `flux`, not a runtime layer. It

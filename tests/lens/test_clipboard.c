@@ -27,15 +27,15 @@ static void host_request_text(void *user) {
 }
 
 static void test_copy_and_request(void) {
-    host_clip host = {0};
-    lens *ui = NULL;
+    host_clip host = {};
+    lens *ui = nullptr;
     OT_EXPECT(lens_create(&(lens_desc){.clipboard = {.set_text = host_set_text,
                                                      .request_text = host_request_text,
                                                      .user = &host}},
                           &ui) == FLUX_OK);
 
     /* copy forwards to host.set_text */
-    lens_copy(ui, "hello", 5);
+    lens_copy(ui, &(lens_copy_opts){.utf8 = "hello", .len = 5});
     OT_EXPECT(host.copied_len == 5);
     OT_EXPECT(strcmp(host.copied, "hello") == 0);
 
@@ -45,8 +45,8 @@ static void test_copy_and_request(void) {
     OT_EXPECT(host.request_count == 2);
 
     /* no-args / zero-len are safe no-ops */
-    lens_copy(ui, NULL, 0);
-    lens_copy(ui, "x", 0);
+    lens_copy(ui, nullptr);
+    lens_copy(ui, &(lens_copy_opts){.utf8 = "x", .len = 0});
     OT_EXPECT(host.copied_len == 5);
 
     lens_release(ui);
@@ -54,17 +54,17 @@ static void test_copy_and_request(void) {
 
 static void test_copy_without_clipboard_is_noop(void) {
     /* No clipboard supplied → all clipboard calls must be safe no-ops. */
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
-    lens_copy(ui, "x", 1);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
+    lens_copy(ui, &(lens_copy_opts){.utf8 = "x", .len = 1});
     lens_request_paste(ui);
-    lens_paste(ui, "y", 1); /* queues but no consumer */
+    lens_paste(ui, &(lens_paste_opts){.utf8 = "y", .len = 1}); /* queues but no consumer */
     lens_release(ui);
 }
 
 static void test_caret_rect_default_zero(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     lens_input in = {.display_size = {100, 100}, .dt_seconds = 0.016f};
     lens_begin(ui, &in);
     lens_test_end(ui);
@@ -79,8 +79,8 @@ static void test_caret_rect_default_zero(void) {
  * to a small prefix should still drive the frame without UB and leave
  * pre-edit fields cleared. */
 static void test_input_size_guard(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     /* Legacy: size==0 → trust full struct (current behaviour). */
     lens_input legacy = {.display_size = {100, 100}, .dt_seconds = 0.016f};
@@ -111,13 +111,13 @@ static void test_input_size_guard(void) {
 /* ---- focused-widget text context (lens_text_context_get, ADR-0036) ---- */
 
 static void test_text_context_default_null(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     lens_input in = {.display_size = {100, 100}, .dt_seconds = 0.016f};
     lens_begin(ui, &in);
     lens_test_end(ui);
     lens_text_context tc = lens_text_context_get(ui);
-    OT_EXPECT(tc.utf8 == NULL);
+    OT_EXPECT(tc.utf8 == nullptr);
     OT_EXPECT(tc.len == 0 && tc.cursor == 0 && tc.multiline == false);
     lens_release(ui);
 }
@@ -126,8 +126,8 @@ static void test_text_context_default_null(void) {
  * multiline=false; the context clears again once no text widget is
  * built. (Focus pattern mirrors test_textfield.c's setup_textfield.) */
 static void test_text_context_textfield(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     lens_input in = {.display_size = {100, 100}, .dt_seconds = 0.016f};
 
     char buf[64] = "hello";
@@ -158,7 +158,7 @@ static void test_text_context_textfield(void) {
     lens_begin(ui, &in);
     lens_test_end(ui);
     tc = lens_text_context_get(ui);
-    OT_EXPECT(tc.utf8 == NULL);
+    OT_EXPECT(tc.utf8 == nullptr);
     OT_EXPECT(tc.len == 0 && tc.cursor == 0 && tc.multiline == false);
 
     lens_release(ui);
@@ -167,8 +167,8 @@ static void test_text_context_textfield(void) {
 /* A focused textarea reports multiline=true (focus pattern from
  * test_textarea.c's focus_textarea). */
 static void test_text_context_textarea(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     lens_input in = {.display_size = {100, 100}, .dt_seconds = 0.016f};
 
     char buf[64] = "ab\ncd";
@@ -196,7 +196,7 @@ static void test_text_context_textarea(void) {
     lens_begin(ui, &in);
     lens_test_end(ui);
     tc = lens_text_context_get(ui);
-    OT_EXPECT(tc.utf8 == NULL);
+    OT_EXPECT(tc.utf8 == nullptr);
 
     lens_release(ui);
 }

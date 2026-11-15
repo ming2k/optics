@@ -5,8 +5,8 @@
 #include <lens/lens.h>
 
 static void test_hover_press_click(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     /* frame 1: button enters, no input */
     lens_input in1 = {.display_size = {200, 100}, .dt_seconds = 0.016f};
@@ -47,8 +47,8 @@ static void test_hover_press_click(void) {
 }
 
 static void test_drag_outside_no_click(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     /* frame 1: button enters */
     lens_input in = {.display_size = {200, 100}, .dt_seconds = 0.016f};
@@ -80,8 +80,8 @@ static void test_drag_outside_no_click(void) {
 }
 
 static void test_tab_focus(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     lens_input in = {.display_size = {200, 100}, .dt_seconds = 0.016f};
 

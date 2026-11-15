@@ -13,6 +13,10 @@
 
 #include <string.h>
 
+static glyph_metrics measure(glyph_ctx *t, const char *s, size_t len, const glyph_style *style) {
+    return glyph_measure(t, &(glyph_measure_opts){.utf8 = s, .len = len, .style = style});
+}
+
 int main(void) {
     /* ---- Version surface: macros, accessors, packed number, string ---- */
     int major = -1, minor = -1, patch = -1;
@@ -48,7 +52,7 @@ int main(void) {
     glyph_compact(nullptr);
     glyph_release(nullptr);
 
-    glyph_metrics empty = glyph_measure(nullptr, "A", 1, nullptr);
+    glyph_metrics empty = measure(nullptr, "A", 1, nullptr);
     OT_EXPECT(empty.width == 0.0f && empty.height == 0.0f && empty.baseline == 0.0f);
 
     /* ---- Context lifecycle ---- */
@@ -83,20 +87,20 @@ int main(void) {
         .color = flux_color_rgba_premul(255, 255, 255, 255),
         .family = GLYPH_FAMILY_SANS,
     };
-    glyph_metrics measured = glyph_measure(text, "A", 1, &style);
+    glyph_metrics measured = measure(text, "A", 1, &style);
     OT_EXPECT(measured.width > 0.0f);
     OT_EXPECT(measured.height > 0.0f);
     OT_EXPECT(measured.baseline >= 0.0f && measured.baseline <= measured.height);
 
     /* Empty input is a value, not an error. */
-    glyph_metrics none = glyph_measure(text, "", 0, &style);
+    glyph_metrics none = measure(text, "", 0, &style);
     OT_EXPECT(none.width == 0.0f && none.height == 0.0f && none.baseline == 0.0f);
-    none = glyph_measure(text, nullptr, 3, &style);
+    none = measure(text, nullptr, 3, &style);
     OT_EXPECT(none.width == 0.0f);
 
     /* Compaction must not change the answer; it only releases scratch. */
     glyph_compact(text);
-    glyph_metrics after_compact = glyph_measure(text, "A", 1, &style);
+    glyph_metrics after_compact = measure(text, "A", 1, &style);
     OT_EXPECT_NEAR(after_compact.width, measured.width, 0.001f);
     OT_EXPECT_NEAR(after_compact.height, measured.height, 0.001f);
 
@@ -104,7 +108,7 @@ int main(void) {
     glyph_ctx *retained = glyph_retain(text);
     OT_EXPECT(retained == text);
     glyph_release(retained);
-    after_compact = glyph_measure(text, "A", 1, &style);
+    after_compact = measure(text, "A", 1, &style);
     OT_EXPECT(after_compact.width > 0.0f);
 
     glyph_release(text);

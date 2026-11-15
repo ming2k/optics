@@ -20,6 +20,7 @@
 #include <iris/cursor.h>
 #include <iris/dnd.h>
 #include <iris/theme.h>
+#include <iris/window.h>
 
 #include <flux/flux.h>
 #include <flux/vulkan.h>
@@ -750,7 +751,7 @@ static void ptr_axis_relative_direction(void *d, struct wl_pointer *p, uint32_t 
  * app's platform through this single static pointer. Set at the top of
  * iris_app_run_wayland, cleared at exit. Documented as thread-affine:
  * callers must drive it from the same thread that runs iris_app_run. */
-static wp_platform *g_active_pl = NULL;
+static wp_platform *g_active_pl = nullptr;
 
 void iris_request_animation_frame_wayland(void) {
     wp_platform *pl = g_active_pl;
@@ -902,7 +903,7 @@ IRIS_API void iris_window_unmaximize(void) {
 IRIS_API void iris_window_fullscreen(void) {
     wp_platform *pl = g_active_pl;
     if (pl && pl->toplevel)
-        xdg_toplevel_set_fullscreen(pl->toplevel, NULL);
+        xdg_toplevel_set_fullscreen(pl->toplevel, nullptr);
 }
 
 IRIS_API void iris_window_unfullscreen(void) {
@@ -939,22 +940,22 @@ IRIS_API void iris_window_start_move(void) {
     xdg_toplevel_move(pl->toplevel, pl->seat, pl->last_serial);
 }
 
-IRIS_API void iris_window_set_min_size(int32_t width, int32_t height) {
+IRIS_API void iris_window_set_min_size(const iris_window_set_min_size_opts *opts) {
     wp_platform *pl = g_active_pl;
-    if (!pl || !pl->toplevel)
+    if (!pl || !pl->toplevel || !opts)
         return;
-    pl->min_w = width;
-    pl->min_h = height;
-    xdg_toplevel_set_min_size(pl->toplevel, width, height);
+    pl->min_w = opts->width;
+    pl->min_h = opts->height;
+    xdg_toplevel_set_min_size(pl->toplevel, opts->width, opts->height);
 }
 
-IRIS_API void iris_window_set_max_size(int32_t width, int32_t height) {
+IRIS_API void iris_window_set_max_size(const iris_window_set_max_size_opts *opts) {
     wp_platform *pl = g_active_pl;
-    if (!pl || !pl->toplevel)
+    if (!pl || !pl->toplevel || !opts)
         return;
-    pl->max_w = width;
-    pl->max_h = height;
-    xdg_toplevel_set_max_size(pl->toplevel, width, height);
+    pl->max_w = opts->width;
+    pl->max_h = opts->height;
+    xdg_toplevel_set_max_size(pl->toplevel, opts->width, opts->height);
 }
 
 IRIS_API bool iris_window_get_geometry(int32_t *out_width, int32_t *out_height) {
@@ -988,11 +989,14 @@ static const struct xdg_activation_token_v1_listener activation_token_listener =
     .done = xdg_activation_token_done,
 };
 
-IRIS_API int iris_window_create_activation_token(const char *app_id, char *out_buf,
-                                                 size_t out_cap) {
+IRIS_API int
+iris_window_create_activation_token(const iris_window_create_activation_token_opts *opts) {
     wp_platform *pl = g_active_pl;
-    if (!pl || !pl->activation || !pl->surface || !out_buf || out_cap == 0)
+    if (!pl || !pl->activation || !pl->surface || !opts || !opts->out_buf || opts->out_cap == 0)
         return -1;
+    const char *app_id = opts->app_id;
+    char *out_buf = opts->out_buf;
+    size_t out_cap = opts->out_cap;
 
     struct wl_event_queue *queue = wl_display_create_queue(pl->display);
     if (!queue)
@@ -1006,7 +1010,7 @@ IRIS_API int iris_window_create_activation_token(const char *app_id, char *out_b
 
     wl_proxy_set_queue((struct wl_proxy *)token, queue);
 
-    struct iris_token_capture cap = {0};
+    struct iris_token_capture cap = {};
     xdg_activation_token_v1_add_listener(token, &activation_token_listener, &cap);
 
     if (pl->seat && pl->last_serial)
@@ -1168,8 +1172,8 @@ static void wp_repeat_cancel(wp_platform *pl) {
         return;
     pl->rep_active = false;
     if (pl->repeat_fd >= 0) {
-        const struct itimerspec disarm = {0};
-        (void)timerfd_settime(pl->repeat_fd, 0, &disarm, NULL);
+        const struct itimerspec disarm = {};
+        (void)timerfd_settime(pl->repeat_fd, 0, &disarm, nullptr);
     }
 }
 
@@ -1190,7 +1194,7 @@ static void wp_repeat_arm(wp_platform *pl) {
         .it_interval = {.tv_sec = interval_ns / 1000000000LL,
                         .tv_nsec = interval_ns % 1000000000LL},
     };
-    pl->rep_active = timerfd_settime(pl->repeat_fd, 0, &its, NULL) == 0;
+    pl->rep_active = timerfd_settime(pl->repeat_fd, 0, &its, nullptr) == 0;
 }
 
 /* The plain-text emission of a key press: boundary-aware append of the
@@ -1243,7 +1247,7 @@ static void im_deactivate(wp_platform *pl) {
     pl->im_active = false;
     im_clear_pending(pl);
     free(pl->im_surr);
-    pl->im_surr = NULL;
+    pl->im_surr = nullptr;
     pl->im_surr_len = 0;
     pl->im_surr_cursor = 0;
 }
@@ -1273,7 +1277,7 @@ static void kb_keymap(void *data, struct wl_keyboard *k, uint32_t format, int32_
         iris_fd_close_record(fd, "fd_keymap");
         return;
     }
-    char *map = mmap(NULL, size, PROT_READ, MAP_PRIVATE, fd, 0);
+    char *map = mmap(nullptr, size, PROT_READ, MAP_PRIVATE, fd, 0);
     if (map == MAP_FAILED) {
         iris_fd_close_record(fd, "fd_keymap");
         return;
@@ -1343,7 +1347,7 @@ static void ti_leave(void *data, struct zwp_text_input_v3 *ti, struct wl_surface
     wp_platform *pl = data;
     (void)ti;
     (void)surface;
-    pl->text_input_surface = NULL;
+    pl->text_input_surface = nullptr;
     /* The compositor's text-input focus left our surface: drop any pending
      * composition so an abandoned preedit never renders afterwards. */
     im_clear_pending(pl);
@@ -1470,7 +1474,7 @@ static void kb_key(void *data, struct wl_keyboard *k, uint32_t serial, uint32_t 
      * just as important — press and release always agree on the id even if
      * the modifier state changed in between. */
     xkb_layout_index_t layout = xkb_state_key_get_layout(pl->xkb_state, code);
-    const xkb_keysym_t *level0 = NULL;
+    const xkb_keysym_t *level0 = nullptr;
     int n_level0 = xkb_keymap_key_get_syms_by_level(pl->xkb_keymap, code, layout, 0, &level0);
     xkb_keysym_t sym = (n_level0 > 0) ? level0[0] : xkb_state_key_get_one_sym(pl->xkb_state, code);
 
@@ -1630,7 +1634,7 @@ static struct wp_offer_mimes *offer_mime_slot(wp_platform *pl, struct wl_data_of
         return &pl->selection_offer_mimes;
     if (pl->dnd_offer_mimes.offer == off)
         return &pl->dnd_offer_mimes;
-    return NULL;
+    return nullptr;
 }
 
 static void doffer_offer(void *data, struct wl_data_offer *off, const char *mime) {
@@ -1687,7 +1691,7 @@ static void ddev_selection(void *data, struct wl_data_device *dev, struct wl_dat
     pl->selection_offer_mimes = (struct wp_offer_mimes){.offer = offer};
     if (offer && pl->pending_offer_mimes.offer == offer) {
         pl->selection_offer_mimes = pl->pending_offer_mimes;
-        pl->pending_offer_mimes = (struct wp_offer_mimes){0};
+        pl->pending_offer_mimes = (struct wp_offer_mimes){};
     }
 }
 
@@ -1703,7 +1707,7 @@ static const char *offer_pick_mime(const struct wp_offer_mimes *m) {
         return "text/plain;charset=utf-8";
     if (m->text_plain)
         return "text/plain";
-    return NULL;
+    return nullptr;
 }
 
 /* Read a received offer fd with a hard overall deadline. Returns a malloc'd
@@ -1716,7 +1720,7 @@ static long long now_ns(void); /* defined with the frame-pacing helpers */
 
 static char *read_offer_fd(int fd, int timeout_ms, size_t *out_len) {
     *out_len = 0;
-    char *out = NULL;
+    char *out = nullptr;
     size_t total = 0;
     long long deadline = now_ns() + (long long)timeout_ms * 1000000LL;
     for (;;) {
@@ -1749,7 +1753,7 @@ static char *read_offer_fd(int fd, int timeout_ms, size_t *out_len) {
                 char *grown = realloc(out, WP_DROP_MAX);
                 if (!grown) {
                     free(out);
-                    return NULL;
+                    return nullptr;
                 }
                 out = grown;
                 memcpy(out + total, chunk, room);
@@ -1760,7 +1764,7 @@ static char *read_offer_fd(int fd, int timeout_ms, size_t *out_len) {
         char *grown = realloc(out, total + (size_t)r);
         if (!grown) {
             free(out);
-            return NULL;
+            return nullptr;
         }
         out = grown;
         memcpy(out + total, chunk, (size_t)r);
@@ -1808,11 +1812,13 @@ static void paste_deliver(void *user) {
     if (res->offer && res->pl->dnd_job_offer == res->offer) {
         wl_data_offer_finish(res->offer);
         wl_data_offer_destroy(res->offer);
-        res->pl->dnd_job_offer = NULL;
+        res->pl->dnd_job_offer = nullptr;
     }
     if (res->pl->ui && res->text && res->len) {
-        lens_paste(res->pl->ui, res->text, res->len);
-        lens_deliver_drop(res->pl->ui, res->text, res->len, res->pl->dnd_pos);
+        lens_paste(res->pl->ui, &(lens_paste_opts){.utf8 = res->text, .len = res->len});
+        lens_deliver_drop(res->pl->ui, &(lens_deliver_drop_opts){.payload = res->text,
+                                                                 .len = res->len,
+                                                                 .pos = res->pl->dnd_pos});
     }
     free(res->text);
     free(res);
@@ -1847,7 +1853,7 @@ static void *paste_reader_main(void *arg) {
         free(text);
     }
     free(job);
-    return NULL;
+    return nullptr;
 }
 
 /* Spawn the detached reader for an offer pipe's read end. Returns false on
@@ -1863,7 +1869,7 @@ static bool start_offer_read(wp_platform *pl, int fd, struct wl_data_offer *offe
     job->timeout_ms = timeout_ms;
     job->strip_crlf = strip_crlf;
     pthread_t th;
-    if (pthread_create(&th, NULL, paste_reader_main, job) != 0) {
+    if (pthread_create(&th, nullptr, paste_reader_main, job) != 0) {
         free(job);
         return false;
     }
@@ -1886,7 +1892,7 @@ static void ddev_enter(void *d, struct wl_data_device *dev, uint32_t s, struct w
         pl->dnd_offer_mimes = (struct wp_offer_mimes){.offer = o};
         if (o && pl->pending_offer_mimes.offer == o) {
             pl->dnd_offer_mimes = pl->pending_offer_mimes;
-            pl->pending_offer_mimes = (struct wp_offer_mimes){0};
+            pl->pending_offer_mimes = (struct wp_offer_mimes){};
         }
     }
     if (o) {
@@ -1908,8 +1914,8 @@ static void ddev_leave(void *d, struct wl_data_device *dev) {
     (void)wp_emit_dnd(pl, pl->dnd_pos.x, pl->dnd_pos.y, false);
     if (pl->dnd_offer) {
         wl_data_offer_destroy(pl->dnd_offer);
-        pl->dnd_offer = NULL;
-        pl->dnd_offer_mimes = (struct wp_offer_mimes){0};
+        pl->dnd_offer = nullptr;
+        pl->dnd_offer_mimes = (struct wp_offer_mimes){};
     }
 }
 static void ddev_motion(void *d, struct wl_data_device *dev, uint32_t t, wl_fixed_t x,
@@ -1950,8 +1956,8 @@ static void ddev_drop(void *d, struct wl_data_device *dev) {
             wl_data_offer_finish(pl->dnd_offer);
             wl_data_offer_destroy(pl->dnd_offer);
         }
-        pl->dnd_offer = NULL;
-        pl->dnd_offer_mimes = (struct wp_offer_mimes){0};
+        pl->dnd_offer = nullptr;
+        pl->dnd_offer_mimes = (struct wp_offer_mimes){};
     }
     pl->dnd_inside = false;
 }
@@ -1997,7 +2003,7 @@ static void dsource_cancelled(void *data, struct wl_data_source *src) {
     wp_platform *pl = data;
     wl_data_source_destroy(src);
     if (pl->copy_source == src)
-        pl->copy_source = NULL;
+        pl->copy_source = nullptr;
 }
 static void dsource_target(void *d, struct wl_data_source *s, const char *m) {
     (void)d;
@@ -2035,11 +2041,11 @@ static const struct wl_data_source_listener data_source_listener = {
 static void drag_source_cleanup(wp_platform *pl) {
     if (pl->drag_source) {
         wl_data_source_destroy(pl->drag_source);
-        pl->drag_source = NULL;
+        pl->drag_source = nullptr;
     }
     if (pl->drag_text_buf) {
         free(pl->drag_text_buf);
-        pl->drag_text_buf = NULL;
+        pl->drag_text_buf = nullptr;
         pl->drag_text_len = 0;
     }
     pl->drag_active = false;
@@ -2175,7 +2181,8 @@ IRIS_API int iris_dnd_start(const iris_dnd_source *source) {
         wl_data_source_set_actions(pl->drag_source, actions);
     }
 
-    wl_data_device_start_drag(pl->data_device, pl->drag_source, pl->surface, NULL, pl->last_serial);
+    wl_data_device_start_drag(pl->data_device, pl->drag_source, pl->surface, nullptr,
+                              pl->last_serial);
     return 0;
 }
 
@@ -2214,7 +2221,7 @@ static struct wp_offer_mimes *primsel_mime_slot(wp_platform *pl,
         return &pl->primsel_pending_mimes;
     if ((struct zwp_primary_selection_offer_v1 *)pl->primsel_offer_mimes.offer == off)
         return &pl->primsel_offer_mimes;
-    return NULL;
+    return nullptr;
 }
 
 static void poffer_offer(void *data, struct zwp_primary_selection_offer_v1 *off, const char *mime) {
@@ -2255,7 +2262,7 @@ static void pdev_selection(void *data, struct zwp_primary_selection_device_v1 *d
     if (offer &&
         (struct zwp_primary_selection_offer_v1 *)pl->primsel_pending_mimes.offer == offer) {
         pl->primsel_offer_mimes = pl->primsel_pending_mimes;
-        pl->primsel_pending_mimes = (struct wp_offer_mimes){0};
+        pl->primsel_pending_mimes = (struct wp_offer_mimes){};
     }
 }
 static const struct zwp_primary_selection_device_v1_listener primary_device_listener = {
@@ -2285,7 +2292,7 @@ static void psource_cancelled(void *data, struct zwp_primary_selection_source_v1
     wp_platform *pl = data;
     zwp_primary_selection_source_v1_destroy(src);
     if (pl->primsel_source == src)
-        pl->primsel_source = NULL;
+        pl->primsel_source = nullptr;
 }
 static const struct zwp_primary_selection_source_v1_listener primary_source_listener = {
     .send = psource_send,
@@ -2324,7 +2331,7 @@ static void primsel_paste(wp_platform *pl) {
     iris_fd_close_record(fds[1], "fd_pipe_write");
     wl_display_flush(pl->display);
 
-    if (!start_offer_read(pl, fds[0], NULL, WP_PASTE_TIMEOUT_MS, false))
+    if (!start_offer_read(pl, fds[0], nullptr, WP_PASTE_TIMEOUT_MS, false))
         iris_fd_close_record(fds[0], "fd_pipe_read");
 }
 
@@ -2402,7 +2409,7 @@ static void clip_request_text(void *user) {
     iris_fd_close_record(fds[1], "fd_pipe_write");
     wl_display_flush(pl->display);
 
-    if (!start_offer_read(pl, fds[0], NULL, WP_PASTE_TIMEOUT_MS, false))
+    if (!start_offer_read(pl, fds[0], nullptr, WP_PASTE_TIMEOUT_MS, false))
         iris_fd_close_record(fds[0], "fd_pipe_read");
 }
 
@@ -2488,7 +2495,7 @@ static iris_tablet_host tablet_host_bridge = {
      * so user must be populated before the first registry dispatch —
      * and .rodata (static const) is not writable, which is why this is
      * not const. */
-    .user = NULL,
+    .user = nullptr,
     .motion = tablet_motion,
     .button = tablet_button,
     .serial = tablet_serial,
@@ -2507,11 +2514,11 @@ static void seat_caps(void *data, struct wl_seat *seat, uint32_t caps) {
         /* The cursor-shape device is per-pointer: it dies with it. */
         if (pl->cursor_shape_device) {
             wp_cursor_shape_device_v1_destroy(pl->cursor_shape_device);
-            pl->cursor_shape_device = NULL;
+            pl->cursor_shape_device = nullptr;
         }
         pl->cursor_inside = false;
         wp_pointer_release(pl->pointer);
-        pl->pointer = NULL;
+        pl->pointer = nullptr;
     }
     if (has_kb && !pl->keyboard) {
         pl->keyboard = wl_seat_get_keyboard(seat);
@@ -2526,7 +2533,7 @@ static void seat_caps(void *data, struct wl_seat *seat, uint32_t caps) {
             im_clear_pending(pl);
         pl->kb_focused = false;
         wp_keyboard_release(pl->keyboard);
-        pl->keyboard = NULL;
+        pl->keyboard = nullptr;
     }
     if (has_touch && !pl->touch) {
         pl->touch = wl_seat_get_touch(seat);
@@ -2534,7 +2541,7 @@ static void seat_caps(void *data, struct wl_seat *seat, uint32_t caps) {
             wl_touch_add_listener(pl->touch, &touch_listener, pl);
     } else if (!has_touch && pl->touch) {
         wp_touch_release(pl->touch);
-        pl->touch = NULL;
+        pl->touch = nullptr;
         g_touch_active_id = -1;
     }
 
@@ -2558,70 +2565,70 @@ static void seat_teardown(wp_platform *pl) {
 
     if (pl->cursor_shape_device) {
         wp_cursor_shape_device_v1_destroy(pl->cursor_shape_device);
-        pl->cursor_shape_device = NULL;
+        pl->cursor_shape_device = nullptr;
     }
     pl->cursor_inside = false;
     if (pl->pointer) {
         wp_pointer_release(pl->pointer);
-        pl->pointer = NULL;
+        pl->pointer = nullptr;
     }
     if (pl->keyboard) {
         wp_keyboard_release(pl->keyboard);
-        pl->keyboard = NULL;
+        pl->keyboard = nullptr;
     }
     if (pl->touch) {
         wp_touch_release(pl->touch);
-        pl->touch = NULL;
+        pl->touch = nullptr;
         g_touch_active_id = -1;
     }
     if (pl->text_input) {
         zwp_text_input_v3_destroy(pl->text_input);
-        pl->text_input = NULL;
-        pl->text_input_surface = NULL;
+        pl->text_input = nullptr;
+        pl->text_input_surface = nullptr;
     }
     if (pl->selection_offer) {
         wl_data_offer_destroy(pl->selection_offer);
-        pl->selection_offer = NULL;
-        pl->selection_offer_mimes = (struct wp_offer_mimes){0};
+        pl->selection_offer = nullptr;
+        pl->selection_offer_mimes = (struct wp_offer_mimes){};
     }
     if (pl->dnd_offer) {
         wl_data_offer_destroy(pl->dnd_offer);
-        pl->dnd_offer = NULL;
-        pl->dnd_offer_mimes = (struct wp_offer_mimes){0};
+        pl->dnd_offer = nullptr;
+        pl->dnd_offer_mimes = (struct wp_offer_mimes){};
     }
     if (pl->pending_offer_mimes.offer) {
         wl_data_offer_destroy(pl->pending_offer_mimes.offer);
-        pl->pending_offer_mimes = (struct wp_offer_mimes){0};
+        pl->pending_offer_mimes = (struct wp_offer_mimes){};
     }
     if (pl->copy_source) {
         wl_data_source_destroy(pl->copy_source);
-        pl->copy_source = NULL;
+        pl->copy_source = nullptr;
     }
     if (pl->data_device) {
         wp_data_device_release(pl->data_device);
-        pl->data_device = NULL;
+        pl->data_device = nullptr;
     }
     if (pl->primsel_offer) {
         zwp_primary_selection_offer_v1_destroy(pl->primsel_offer);
-        pl->primsel_offer = NULL;
-        pl->primsel_offer_mimes = (struct wp_offer_mimes){0};
+        pl->primsel_offer = nullptr;
+        pl->primsel_offer_mimes = (struct wp_offer_mimes){};
     }
     if (pl->primsel_pending_mimes.offer) {
         zwp_primary_selection_offer_v1_destroy(
             (struct zwp_primary_selection_offer_v1 *)pl->primsel_pending_mimes.offer);
-        pl->primsel_pending_mimes = (struct wp_offer_mimes){0};
+        pl->primsel_pending_mimes = (struct wp_offer_mimes){};
     }
     if (pl->primsel_source) {
         zwp_primary_selection_source_v1_destroy(pl->primsel_source);
-        pl->primsel_source = NULL;
+        pl->primsel_source = nullptr;
     }
     if (pl->primsel_device) {
         zwp_primary_selection_device_v1_destroy(pl->primsel_device);
-        pl->primsel_device = NULL;
+        pl->primsel_device = nullptr;
     }
     if (pl->seat) {
         wp_seat_release(pl->seat);
-        pl->seat = NULL;
+        pl->seat = nullptr;
     }
     pl->seat_name = 0;
 }
@@ -2643,7 +2650,7 @@ static wp_output *find_output(wp_platform *pl, struct wl_output *wl) {
     for (int i = 0; i < pl->n_outputs; i++)
         if (pl->outputs[i].wl == wl)
             return &pl->outputs[i];
-    return NULL;
+    return nullptr;
 }
 
 static void out_geometry(void *d, struct wl_output *o, int32_t x, int32_t y, int32_t pw, int32_t ph,
@@ -2872,11 +2879,11 @@ static void reg_remove(void *d, struct wl_registry *r, uint32_t name) {
         seat_teardown(pl);
     if (pl->activation && name == pl->activation_name) {
         xdg_activation_v1_destroy(pl->activation);
-        pl->activation = NULL;
+        pl->activation = nullptr;
     }
     if (pl->subcompositor && name == pl->subcompositor_name) {
         wl_subcompositor_destroy(pl->subcompositor);
-        pl->subcompositor = NULL;
+        pl->subcompositor = nullptr;
     }
 }
 static const struct wl_registry_listener registry_listener = {
@@ -2951,13 +2958,13 @@ static const struct zxdg_exported_v2_listener foreign_exported_listener = {
  * dispatching our display or xdg_wm_base pings go unanswered and the
  * compositor marks the window unresponsive. NULL when no app is running. */
 struct wl_display *iris_wayland__display(void) {
-    return g_active_pl ? g_active_pl->display : NULL;
+    return g_active_pl ? g_active_pl->display : nullptr;
 }
 
 /* The exported xdg-foreign handle for the active window ("wayland:<handle>"
  * is composed by the caller), or NULL when unavailable. */
 const char *iris_wayland__foreign_handle(void) {
-    return (g_active_pl && g_active_pl->foreign_handle[0]) ? g_active_pl->foreign_handle : NULL;
+    return (g_active_pl && g_active_pl->foreign_handle[0]) ? g_active_pl->foreign_handle : nullptr;
 }
 
 /* ------------------------------------------------------------------ */
@@ -3151,7 +3158,7 @@ static void frame_cb_done(void *data, struct wl_callback *cb, uint32_t time) {
     pl->frame_cb_pending = false;
     pl->frame_cb_time_ns = (int64_t)time * 1000000LL;
     if (pl->frame_cb == cb)
-        pl->frame_cb = NULL;
+        pl->frame_cb = nullptr;
     wl_callback_destroy(cb);
 }
 static const struct wl_callback_listener frame_cb_listener = {.done = frame_cb_done};
@@ -3220,7 +3227,7 @@ static void wp_request_pulse(wp_platform *pl) {
 static void wp_cancel_pulse(wp_platform *pl) {
     if (pl->frame_cb) {
         wl_callback_destroy(pl->frame_cb);
-        pl->frame_cb = NULL;
+        pl->frame_cb = nullptr;
     }
     pl->frame_cb_pending = false;
 }
@@ -3263,7 +3270,7 @@ static VkSurfaceKHR wp_create_vk_surface(const flux_device *device, struct wl_di
         .surface = wl_surface,
     };
     VkSurfaceKHR vk_surface = VK_NULL_HANDLE;
-    if (vkCreateWaylandSurfaceKHR(flux_device_vk_instance(device), &wsci, NULL, &vk_surface) !=
+    if (vkCreateWaylandSurfaceKHR(flux_device_vk_instance(device), &wsci, nullptr, &vk_surface) !=
         VK_SUCCESS)
         return VK_NULL_HANDLE;
     return vk_surface;
@@ -3271,7 +3278,7 @@ static VkSurfaceKHR wp_create_vk_surface(const flux_device *device, struct wl_di
 
 static void wp_destroy_vk_surface(const flux_device *device, VkSurfaceKHR vk_surface) {
     if (vk_surface && device)
-        vkDestroySurfaceKHR(flux_device_vk_instance(device), vk_surface, NULL);
+        vkDestroySurfaceKHR(flux_device_vk_instance(device), vk_surface, nullptr);
 }
 
 static void wp_update_opaque_region(wp_platform *pl) {
@@ -3308,7 +3315,7 @@ static void im_frame_update(wp_platform *pl) {
         return;
 
     lens_text_context ctx = lens_text_context_get(pl->ui);
-    bool want = pl->kb_focused && ctx.utf8 != NULL;
+    bool want = pl->kb_focused && ctx.utf8 != nullptr;
     if (want != pl->im_active) {
         if (want) {
             zwp_text_input_v3_enable(pl->text_input);
@@ -3436,7 +3443,9 @@ static void *wp_presenter_thread_main(void *arg) {
                 bool drew = false;
                 if (flux_canvas_begin(target_canvas, &pass_desc) == FLUX_OK) {
                     if (pkt->host_list) {
-                        (void)flux_canvas_submit_display_list(target_canvas, pkt->host_list);
+                        (void)flux_canvas_submit_display_list(
+                            target_canvas,
+                            &(flux_canvas_submit_display_list_opts){.list = pkt->host_list});
                         drew = true;
                     }
                     if (pkt->snapshot) {
@@ -3483,11 +3492,11 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
     /* All resources declared up front and NULL/VK_NULL_HANDLE-initialized so
      * a single `fail:` cleanup block can run on every exit path (error or
      * success) without referencing out-of-scope or indeterminate pointers. */
-    flux_device *device = NULL;
+    flux_device *device = nullptr;
     VkSurfaceKHR vk_surface = VK_NULL_HANDLE;
-    flux_surface *surface = NULL;
-    flux_canvas *canvas = NULL;
-    lens *ui = NULL;
+    flux_surface *surface = nullptr;
+    flux_canvas *canvas = nullptr;
+    lens *ui = nullptr;
     bool host_started = false;
     int rc = 1; /* pessimistic; set to 0 only on success */
 
@@ -3518,7 +3527,7 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
     tablet_host_bridge.user = &pl;
 
     /* --- Wayland connection + globals ---------------------------- */
-    pl.display = wl_display_connect(NULL);
+    pl.display = wl_display_connect(nullptr);
     if (pl.display)
         iris_fd_open_record(wl_display_get_fd(pl.display), "fd_display");
     if (!pl.display) {
@@ -3526,8 +3535,8 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
         /* Unpublish before the stack frame dies: the globals must never
          * outlive `pl` (an iris_set_cursor after a failed start would
          * otherwise read freed stack). Same invariant as the fail path. */
-        g_active_pl = NULL;
-        tablet_host_bridge.user = NULL;
+        g_active_pl = nullptr;
+        tablet_host_bridge.user = nullptr;
         return 1;
     }
 
@@ -3556,7 +3565,7 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
     setlocale(LC_CTYPE, "");
     const char *locale = getenv("XKB_DEFAULT_LOCALE");
     if (!locale || !locale[0])
-        locale = setlocale(LC_CTYPE, NULL);
+        locale = setlocale(LC_CTYPE, nullptr);
     if (locale && locale[0]) {
         pl.compose_table =
             xkb_compose_table_new_from_locale(pl.xkb_ctx, locale, XKB_COMPOSE_COMPILE_NO_FLAGS);
@@ -3762,7 +3771,7 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
     /* Hosts with a canvas callback own opaque content: only they can say
      * whether it moved, so they never reach full quiescence (the pacer keeps
      * at least the low idle tick running cfg->build). Constant for the run. */
-    const bool has_host_content = (cfg->prepare != NULL || cfg->record != NULL);
+    const bool has_host_content = (cfg->prepare != nullptr || cfg->record != nullptr);
     /* Sticky until a frame containing the latest lens build is actually
      * presented. Layout/draw hashes compare consecutive builds; without this
      * host-side latch an acquire timeout could let the next identical build
@@ -4079,8 +4088,8 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
              * atomically */
 
             /* Single Surface Pass (for pure UI applications or fallback) */
-            flux_frame *frame = NULL;
-            flux_result r = flux_surface_begin_frame(surface, NULL, &frame);
+            flux_frame *frame = nullptr;
+            flux_result r = flux_surface_begin_frame(surface, nullptr, &frame);
             if (r == FLUX_ERROR_SURFACE_LOST) {
                 (void)flux_surface_resize(surface, (uint32_t)(pl.width * pl.buffer_scale),
                                           (uint32_t)(pl.height * pl.buffer_scale));
@@ -4110,7 +4119,7 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
              * lens's widget layer composites on top. */
             lens_theme th = lens_get_theme(ui);
             flux_color clear = th.color_bg;
-            flux_color *pass_clear = cfg->no_clear ? NULL : &clear;
+            flux_color *pass_clear = cfg->no_clear ? nullptr : &clear;
             bool drew = false;
             lens_scene_snapshot *snapshot = nullptr;
             flux_display_list *host_list = iris_record_host_canvas(cfg, (float)pl.buffer_scale);
@@ -4120,7 +4129,7 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
              * and the commit damages exactly those rectangles. A host with opaque
              * canvas content (or a forced repaint) asks for the full extent
              * instead, because its own content is not something lens can localise. */
-            iris_frame_damage dmg = {0};
+            iris_frame_damage dmg = {};
             const bool localize = !surface_forced && !has_host_content;
             if (localize) {
                 dmg = iris_frame_lens_damage(ui, (float)pl.buffer_scale, (int32_t)info.width,
@@ -4143,7 +4152,9 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
 
             if (flux_canvas_begin(canvas, &pass_desc) == FLUX_OK) {
                 if (host_list) {
-                    drew = flux_canvas_submit_display_list(canvas, host_list) == FLUX_OK;
+                    drew = flux_canvas_submit_display_list(canvas,
+                                                           &(flux_canvas_submit_display_list_opts){
+                                                               .list = host_list}) == FLUX_OK;
                 }
                 if (lens_snapshot_create(ui, &snapshot) == FLUX_OK) {
                     drew = (lens_snapshot_submit(snapshot, canvas) == FLUX_OK) || drew;
@@ -4242,8 +4253,8 @@ fail:
      * The tablet bridge borrows `pl` too; clearing both here (instead
      * of relying on the success path alone) keeps the stack address
      * from escaping every return path. */
-    g_active_pl = NULL;
-    tablet_host_bridge.user = NULL;
+    g_active_pl = nullptr;
+    tablet_host_bridge.user = nullptr;
 
     /* Stop decoupled presenter thread before teardown (ADR-0124, INV-THREAD-04) */
     if (pl.has_presenter_thread) {
@@ -4262,7 +4273,7 @@ fail:
         flux_device_wait_idle(device);
     if (ui)
         lens_release(ui);
-    pl.ui = NULL; /* after this, queued main-thread callbacks must not touch lens */
+    pl.ui = nullptr; /* after this, queued main-thread callbacks must not touch lens */
     if (pl.theme_watching)
         iris_theme__unwatch_backend();
     if (pl.a11y_prefs_watching)
@@ -4278,7 +4289,7 @@ fail:
      * whatever was legitimately queued (deliveries see pl.ui == NULL and
      * no-op), and close the eventfd. */
     if (pl.wakeup_fd >= 0) {
-        iris_platform_wakeup_set_kick(NULL, NULL);
+        iris_platform_wakeup_set_kick(nullptr, nullptr);
         iris_platform_wakeup_drain();
         iris_fd_close_record(pl.wakeup_fd, "fd_wakeup");
         pl.wakeup_fd = -1;
@@ -4315,7 +4326,7 @@ fail:
     if (pl.dnd_job_offer) {
         wl_data_offer_finish(pl.dnd_job_offer);
         wl_data_offer_destroy(pl.dnd_job_offer);
-        pl.dnd_job_offer = NULL;
+        pl.dnd_job_offer = nullptr;
     }
     if (pl.copy_source)
         wl_data_source_destroy(pl.copy_source);

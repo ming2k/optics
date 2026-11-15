@@ -52,7 +52,12 @@ static void draw_filler(flux_canvas *canvas, void *user) {
      * atlas cell, so the 94-glyph working set spans four 4096px pages and
      * a subpixel phase shift forces new entries for every glyph. */
     style.size_px = dc->size_px;
-    glyph_draw(dc->text, canvas, nullptr, dc->x, 4.0f, FILLER, strlen(FILLER), &style);
+    glyph_draw(dc->text, &(glyph_draw_opts){.canvas = canvas,
+                                            .x = dc->x,
+                                            .y = 4.0f,
+                                            .utf8 = FILLER,
+                                            .len = strlen(FILLER),
+                                            .style = &style});
 }
 
 /* An idle device has finished GPU work, but sampled images stay retained by

@@ -155,7 +155,7 @@ static lens_node *build_scroll(lens *ui, const lens_input *input, float offset) 
     }
     lens_scroll_end(ui);
     if (offset >= 0)
-        lens_scroll_to(ui, "scroll", 0, offset);
+        lens_scroll_to(ui, &(lens_scroll_to_opts){.id = "scroll", .x = 0, .y = offset});
     lens_end(ui);
     return lens_node_first_child(lens_root(ui));
 }

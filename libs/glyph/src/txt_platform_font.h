@@ -113,7 +113,7 @@ void txtp_charset_free(txtp_charset *cs);
  * strdup is POSIX, not ISO C, so MSVC does not provide it. */
 static inline char *txtp_strdup(const char *s) {
     if (!s)
-        return NULL;
+        return nullptr;
     size_t n = strlen(s) + 1;
     char *p = (char *)malloc(n);
     if (p)

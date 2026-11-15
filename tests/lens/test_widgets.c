@@ -6,8 +6,8 @@
 #include <lens/lens.h>
 
 static void test_scroll_thumb_drag(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     lens_input in = {.display_size = {200, 100}, .dt_seconds = 0.016f};
 
     /* frame 1: build */
@@ -79,8 +79,8 @@ static void test_scroll_thumb_drag(void) {
 }
 
 static void test_label_sizes(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     lens_input in = {.display_size = {400, 300}, .dt_seconds = 0.016f};
 
     lens_begin(ui, &in);
@@ -96,10 +96,10 @@ static void test_label_sizes(void) {
     lens_node *body = lens_node_next_sibling(heading);
     lens_node *large = lens_node_next_sibling(body);
 
-    OT_EXPECT(title != NULL);
-    OT_EXPECT(heading != NULL);
-    OT_EXPECT(body != NULL);
-    OT_EXPECT(large != NULL);
+    OT_EXPECT(title != nullptr);
+    OT_EXPECT(heading != nullptr);
+    OT_EXPECT(body != nullptr);
+    OT_EXPECT(large != nullptr);
 
     float t_h = lens_node_bounds(title).h;
     float h_h = lens_node_bounds(heading).h;
@@ -114,8 +114,8 @@ static void test_label_sizes(void) {
 }
 
 static void test_compact_outlined_label_preserves_intrinsic_metrics(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     lens_input in = {.display_size = {200, 80}, .dt_seconds = 0.016f};
 
     lens_style outline = lens_style_init();
@@ -124,7 +124,7 @@ static void test_compact_outlined_label_preserves_intrinsic_metrics(void) {
     outline.outline_width = 0.75f;
 
     lens_begin(ui, &in);
-    lens_row_begin(ui, NULL);
+    lens_row_begin(ui, nullptr);
     lens_push_id(ui, "plain");
     lens_label(ui, &(lens_label_opts){.text = "12:34", .size = 14.0f});
     lens_pop_id(ui);
@@ -145,11 +145,13 @@ static void test_compact_outlined_label_preserves_intrinsic_metrics(void) {
 }
 
 static void test_wrapped_label_respects_width_and_grows_height(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     lens_input in = {.display_size = {200, 200}, .dt_seconds = 0.016f};
     lens_theme theme = lens_get_theme(ui);
-    float single_line_h = lens_text_measure(ui, theme.font, "Ag", theme.font_size).height;
+    float single_line_h =
+        lens_text_measure(ui, &(lens_text_measure_opts){.utf8 = "Ag", .size_px = theme.font_size})
+            .height;
 
     lens_begin(ui, &in);
     lens_column_begin(ui, &(lens_layout_opts){.cross = LENS_START});
@@ -178,8 +180,8 @@ static void test_wrapped_label_respects_width_and_grows_height(void) {
 }
 
 static void test_label_zero_padding_by_default(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     lens_input in = {.display_size = {200, 100}, .dt_seconds = 0.016f};
     lens_theme theme = lens_get_theme(ui);
 
@@ -191,9 +193,10 @@ static void test_label_zero_padding_by_default(void) {
 
     lens_node *row = lens_node_first_child(lens_root(ui));
     lens_node *label = lens_node_first_child(row);
-    OT_EXPECT(label != NULL);
+    OT_EXPECT(label != nullptr);
     flux_rect r = lens_node_bounds(label);
-    lens_text_metrics m = lens_text_measure(ui, theme.font, "Tight Label", 14.0f);
+    lens_text_metrics m =
+        lens_text_measure(ui, &(lens_text_measure_opts){.utf8 = "Tight Label", .size_px = 14.0f});
     OT_EXPECT_NEAR(r.w, m.width, 0.5f);
     OT_EXPECT_NEAR(r.h, m.height, 0.5f);
 

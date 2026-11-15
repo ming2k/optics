@@ -49,7 +49,7 @@
 #include <unistd.h>
 
 /* Single watcher per process — sufficient for one running app. */
-static sd_bus *g_bus = NULL; /* owned/pumped by g_thread while running */
+static sd_bus *g_bus = nullptr; /* owned/pumped by g_thread while running */
 static pthread_t g_thread;
 static bool g_thread_running = false;
 static int g_stop_pipe[2] = {-1, -1}; /* written by unwatch, polled by g_thread */
@@ -59,10 +59,10 @@ static int g_stop_pipe[2] = {-1, -1}; /* written by unwatch, polled by g_thread 
  * (iris_theme__watch_backend) — see theme_watch_internal.h for why they
  * must not overwrite each other. Both are touched on the iris main thread
  * only (watch/unwatch/delivery shim), per the public threading contract. */
-static iris_color_scheme_changed_fn g_cb = NULL;
-static void *g_user = NULL;
-static iris_color_scheme_changed_fn g_backend_cb = NULL;
-static void *g_backend_user = NULL;
+static iris_color_scheme_changed_fn g_cb = nullptr;
+static void *g_user = nullptr;
+static iris_color_scheme_changed_fn g_backend_cb = nullptr;
+static void *g_backend_user = nullptr;
 
 /* Posted through the wakeup seam, freed by the delivery shim. */
 typedef struct theme_change {
@@ -72,10 +72,10 @@ typedef struct theme_change {
 /* The a11y-preference registrations share the same watcher thread; their
  * slots live here (not in a11y_prefs_portal.c) because the pump, the
  * match rule, and the delivery shim are one mechanism. */
-static iris_a11y_prefs_changed_fn g_a11y_cb = NULL;
-static void *g_a11y_user = NULL;
-static iris_a11y_prefs_changed_fn g_a11y_backend_cb = NULL;
-static void *g_a11y_backend_user = NULL;
+static iris_a11y_prefs_changed_fn g_a11y_cb = nullptr;
+static void *g_a11y_user = nullptr;
+static iris_a11y_prefs_changed_fn g_a11y_backend_cb = nullptr;
+static void *g_a11y_backend_user = nullptr;
 
 /* Runs on the iris main thread (via iris_platform_wakeup_drain). */
 static void deliver_change(void *user) {
@@ -105,8 +105,8 @@ static int on_setting_changed(sd_bus_message *m, void *userdata, sd_bus_error *r
     (void)userdata;
     (void)ret_error;
 
-    const char *ns = NULL;
-    const char *key = NULL;
+    const char *ns = nullptr;
+    const char *key = nullptr;
     if (sd_bus_message_read(m, "ss", &ns, &key) < 0)
         return 0;
 
@@ -156,9 +156,9 @@ static void *watch_thread_main(void *arg) {
     sd_bus *bus = arg;
     for (;;) {
         for (;;) {
-            int rc = sd_bus_process(bus, NULL);
+            int rc = sd_bus_process(bus, nullptr);
             if (rc < 0)
-                return NULL; /* connection lost; unwatch still joins us */
+                return nullptr; /* connection lost; unwatch still joins us */
             if (rc == 0)
                 break;
         }
@@ -166,7 +166,7 @@ static void *watch_thread_main(void *arg) {
         int fd = sd_bus_get_fd(bus);
         int events = sd_bus_get_events(bus);
         if (fd < 0)
-            return NULL;
+            return nullptr;
 
         uint64_t usec = UINT64_MAX;
         (void)sd_bus_get_timeout(bus, &usec);
@@ -177,9 +177,9 @@ static void *watch_thread_main(void *arg) {
             {.fd = g_stop_pipe[0], .events = POLLIN},
         };
         if (poll(pfds, 2, timeout_ms) < 0)
-            return NULL;
+            return nullptr;
         if (pfds[1].revents & POLLIN)
-            return NULL; /* stop requested */
+            return nullptr; /* stop requested */
     }
 }
 
@@ -191,21 +191,21 @@ static int watch_start(void) {
 
     int rc = sd_bus_open_user(&g_bus);
     if (rc < 0) {
-        g_bus = NULL;
+        g_bus = nullptr;
         return -1;
     }
 
     /* Match only the SettingChanged signal on the portal Settings iface.
      * The path is /org/freedesktop/portal/desktop; sender is the portal. */
-    rc = sd_bus_match_signal(g_bus, NULL, "org.freedesktop.portal.Desktop", /* sender            */
-                             "/org/freedesktop/portal/desktop",             /* object path       */
-                             "org.freedesktop.portal.Settings",             /* interface         */
-                             "SettingChanged",                              /* member            */
-                             on_setting_changed, NULL);
+    rc = sd_bus_match_signal(g_bus, nullptr, "org.freedesktop.portal.Desktop", /* sender */
+                             "/org/freedesktop/portal/desktop", /* object path       */
+                             "org.freedesktop.portal.Settings", /* interface         */
+                             "SettingChanged",                  /* member            */
+                             on_setting_changed, nullptr);
 
     if (rc < 0 || pipe(g_stop_pipe) != 0) {
         sd_bus_unref(g_bus);
-        g_bus = NULL;
+        g_bus = nullptr;
         return -1;
     }
     /* Process-scope descriptors (ADR-0129). This watcher's stop pipe is
@@ -215,12 +215,12 @@ static int watch_start(void) {
     iris_fd_open_record(g_stop_pipe[0], "fd_watch_pipe");
     iris_fd_open_record(g_stop_pipe[1], "fd_watch_pipe");
 
-    if (pthread_create(&g_thread, NULL, watch_thread_main, g_bus) != 0) {
+    if (pthread_create(&g_thread, nullptr, watch_thread_main, g_bus) != 0) {
         iris_fd_close_record(g_stop_pipe[0], "fd_watch_pipe");
         iris_fd_close_record(g_stop_pipe[1], "fd_watch_pipe");
         g_stop_pipe[0] = g_stop_pipe[1] = -1;
         sd_bus_unref(g_bus);
-        g_bus = NULL;
+        g_bus = nullptr;
         return -1;
     }
 
@@ -237,7 +237,7 @@ static void watch_stop(void) {
     /* Wake the pump thread out of poll and wait for it to exit before
      * releasing the bus it uses. */
     (void)!write(g_stop_pipe[1], "x", 1);
-    pthread_join(g_thread, NULL);
+    pthread_join(g_thread, nullptr);
     g_thread_running = false;
 
     iris_fd_close_record(g_stop_pipe[0], "fd_watch_pipe");
@@ -245,7 +245,7 @@ static void watch_stop(void) {
     g_stop_pipe[0] = g_stop_pipe[1] = -1;
 
     sd_bus_unref(g_bus);
-    g_bus = NULL;
+    g_bus = nullptr;
 }
 
 IRIS_API int iris_color_scheme_watch(iris_color_scheme_changed_fn cb, void *user) {
@@ -263,8 +263,8 @@ IRIS_API void iris_color_scheme_unwatch(void) {
      * wakeup queue is dropped by deliver_change instead of calling a dead
      * registration (drain and unwatch both run on the main thread, so this
      * is serialized with delivery). */
-    g_cb = NULL;
-    g_user = NULL;
+    g_cb = nullptr;
+    g_user = nullptr;
     /* The watcher thread keeps running while any other slot is live. */
     if (!g_backend_cb && !g_a11y_cb && !g_a11y_backend_cb)
         watch_stop();
@@ -281,8 +281,8 @@ int iris_theme__watch_backend(iris_color_scheme_changed_fn cb, void *user) {
 }
 
 void iris_theme__unwatch_backend(void) {
-    g_backend_cb = NULL;
-    g_backend_user = NULL;
+    g_backend_cb = nullptr;
+    g_backend_user = nullptr;
     if (!g_cb)
         watch_stop();
 }
@@ -300,8 +300,8 @@ IRIS_API int iris_a11y_prefs_watch(iris_a11y_prefs_changed_fn cb, void *user) {
 }
 
 IRIS_API void iris_a11y_prefs_unwatch(void) {
-    g_a11y_cb = NULL;
-    g_a11y_user = NULL;
+    g_a11y_cb = nullptr;
+    g_a11y_user = nullptr;
     if (!g_cb && !g_backend_cb && !g_a11y_backend_cb)
         watch_stop();
 }
@@ -317,8 +317,8 @@ int iris_a11y_prefs__watch_backend(iris_a11y_prefs_changed_fn cb, void *user) {
 }
 
 void iris_a11y_prefs__unwatch_backend(void) {
-    g_a11y_backend_cb = NULL;
-    g_a11y_backend_user = NULL;
+    g_a11y_backend_cb = nullptr;
+    g_a11y_backend_user = nullptr;
     if (!g_cb && !g_backend_cb && !g_a11y_cb)
         watch_stop();
 }

@@ -137,8 +137,14 @@ int main(void) {
             .depth = &depth_att,
         };
         flux_frame_begin_pass(frame, &pass);
-        flux_frame_set_viewport(frame, 0.0f, 0.0f, (float)SURF_W, (float)SURF_H, 0.0f, 1.0f);
-        flux_frame_set_scissor(frame, 0, 0, SURF_W, SURF_H);
+        flux_frame_set_viewport(frame, &(flux_frame_set_viewport_opts){.x = 0.0f,
+                                                                       .y = 0.0f,
+                                                                       .width = (float)SURF_W,
+                                                                       .height = (float)SURF_H,
+                                                                       .min_depth = 0.0f,
+                                                                       .max_depth = 1.0f});
+        flux_frame_set_scissor(frame, &(flux_frame_set_scissor_opts){
+                                          .x = 0, .y = 0, .width = SURF_W, .height = SURF_H});
 
         VkCommandBuffer cmd = flux_frame_vk_command_buffer(frame);
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,

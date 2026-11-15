@@ -65,13 +65,13 @@ static const flux_rect *damage_rects(const lens *ui, uint32_t *count) {
 }
 
 static void test_null_safety(void) {
-    OT_EXPECT(!lens_frame_needs_repaint(NULL));
+    OT_EXPECT(!lens_frame_needs_repaint(nullptr));
 }
 
 static void test_first_frames_repaint_then_settle(void) {
-    lens *ui = NULL;
-    flux_canvas *canvas = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    flux_canvas *canvas = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     OT_EXPECT(flux_canvas_create_cpu(400, 200, 1.0f, &canvas) == FLUX_OK);
 
     build_frame(ui, 0.5f);
@@ -88,9 +88,9 @@ static void test_first_frames_repaint_then_settle(void) {
 }
 
 static void test_leaf_change_repaints(void) {
-    lens *ui = NULL;
-    flux_canvas *canvas = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    flux_canvas *canvas = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     OT_EXPECT(flux_canvas_create_cpu(400, 200, 1.0f, &canvas) == FLUX_OK);
 
     build_frame(ui, 0.5f);
@@ -108,9 +108,9 @@ static void test_leaf_change_repaints(void) {
 }
 
 static void test_place_open_close_repaints(void) {
-    lens *ui = NULL;
-    flux_canvas *canvas = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    flux_canvas *canvas = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     OT_EXPECT(flux_canvas_create_cpu(400, 200, 1.0f, &canvas) == FLUX_OK);
 
     const lens_place_opts popup = {
@@ -172,14 +172,14 @@ static void test_place_open_close_repaints(void) {
 }
 
 static void test_damage_rect_bounds(void) {
-    lens *ui = NULL;
-    flux_canvas *canvas = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    flux_canvas *canvas = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     OT_EXPECT(flux_canvas_create_cpu(400, 200, 1.0f, &canvas) == FLUX_OK);
 
     /* Before anything is built there is nothing to describe. */
     uint32_t count = 0;
-    OT_EXPECT(damage_rects(ui, &count) == NULL || count == 0);
+    OT_EXPECT(damage_rects(ui, &count) == nullptr || count == 0);
     OT_EXPECT(lens_damage_rects(ui, &(lens_damage_opts){}) == 0);
 
     build_frame(ui, 0.5f);
@@ -213,9 +213,9 @@ static void test_damage_rect_bounds(void) {
 }
 
 static void test_placed_band_damage_rect_bounds(void) {
-    lens *ui = NULL;
-    flux_canvas *canvas = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    flux_canvas *canvas = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     OT_EXPECT(flux_canvas_create_cpu(1920, 1080, 1.0f, &canvas) == FLUX_OK);
 
     const lens_place_opts chrome = {
@@ -275,9 +275,9 @@ static void test_placed_band_damage_rect_bounds(void) {
  * bounding box is what makes a status tick and a dock spring re-composite the
  * whole output, so the list must stay disjoint (ADR-0123). */
 static void test_disjoint_bands_stay_disjoint(void) {
-    lens *ui = NULL;
-    flux_canvas *canvas = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    flux_canvas *canvas = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     OT_EXPECT(flux_canvas_create_cpu(400, 200, 1.0f, &canvas) == FLUX_OK);
 
     uint32_t count = 0;
@@ -331,9 +331,9 @@ static void test_disjoint_bands_stay_disjoint(void) {
  * collapsing inside the producer would destroy information no consumer could
  * recover. */
 static void test_the_list_is_strictly_more_informative_than_its_union(void) {
-    lens *ui = NULL;
-    flux_canvas *canvas = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    flux_canvas *canvas = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     OT_EXPECT(flux_canvas_create_cpu(400, 200, 1.0f, &canvas) == FLUX_OK);
 
     for (int i = 0; i < 4; i++) {
@@ -382,9 +382,9 @@ static void test_the_list_is_strictly_more_informative_than_its_union(void) {
  * column's rect is the whole display, and that is exactly the over-report that
  * turned one terminal cell into a full-output composite. */
 static void test_flow_leaf_reports_its_glyphs_not_its_column(void) {
-    lens *ui = NULL;
-    flux_canvas *canvas = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    flux_canvas *canvas = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     OT_EXPECT(flux_canvas_create_cpu(1920, 1080, 1.0f, &canvas) == FLUX_OK);
 
     static const lens_input BIG = {.display_size = {1920, 1080}, .dt_seconds = 0.016f};
@@ -426,9 +426,9 @@ static void test_flow_leaf_reports_its_glyphs_not_its_column(void) {
  * This is the regression test for exactly that: the first implementation ignored
  * the `rel.w < 0` centring sentinel and reported the run at x = 0. */
 static void test_centered_text_damage_follows_the_glyphs(void) {
-    lens *ui = NULL;
-    flux_canvas *canvas = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    flux_canvas *canvas = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     OT_EXPECT(flux_canvas_create_cpu(400, 200, 1.0f, &canvas) == FLUX_OK);
 
     const lens_label_opts centred = {
@@ -469,9 +469,9 @@ static void test_centered_text_damage_follows_the_glyphs(void) {
 /* A caller sizes its buffer from the count-only query, then fills it. Both
  * answers come from the same walk and must agree. */
 static void test_count_only_query_matches_the_written_list(void) {
-    lens *ui = NULL;
-    flux_canvas *canvas = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    flux_canvas *canvas = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     OT_EXPECT(flux_canvas_create_cpu(400, 200, 1.0f, &canvas) == FLUX_OK);
 
     build_frame(ui, 0.5f);
@@ -480,7 +480,8 @@ static void test_count_only_query_matches_the_written_list(void) {
     render_frame(ui, canvas);
     build_frame(ui, 0.75f);
 
-    const uint32_t asked = lens_damage_rects(ui, &(lens_damage_opts){.rects = NULL, .capacity = 0});
+    const uint32_t asked =
+        lens_damage_rects(ui, &(lens_damage_opts){.rects = nullptr, .capacity = 0});
     OT_EXPECT(asked > 0);
     flux_rect buffer[LENS_DAMAGE_RECTS_CAPACITY];
     const uint32_t written = lens_damage_rects(ui, &(lens_damage_opts){
@@ -511,9 +512,9 @@ static void test_count_only_query_matches_the_written_list(void) {
  * the accumulator counted rectangles it could not store and the normalizer was
  * handed that larger count, so it read uninitialized stack memory. */
 static void test_overflow_collapses_to_one_bounding_box(void) {
-    lens *ui = NULL;
-    flux_canvas *canvas = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    flux_canvas *canvas = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     /* Wide enough for more than LENS_DAMAGE_RECTS_CAPACITY disjoint leaves. */
     const uint32_t columns = LENS_DAMAGE_RECTS_CAPACITY + 16;
     OT_EXPECT(flux_canvas_create_cpu((float)columns * 8.0f, 200.0f, 1.0f, &canvas) == FLUX_OK);
@@ -594,11 +595,11 @@ static void test_overflow_collapses_to_one_bounding_box(void) {
 }
 
 static void test_damage_rects_null_safety(void) {
-    OT_EXPECT(lens_damage_rects(NULL, NULL) == 0);
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    OT_EXPECT(lens_damage_rects(nullptr, nullptr) == 0);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     /* No frame built yet: no damage, and a null opts must not dereference. */
-    OT_EXPECT(lens_damage_rects(ui, NULL) == 0);
+    OT_EXPECT(lens_damage_rects(ui, nullptr) == 0);
     lens_release(ui);
 }
 
@@ -609,13 +610,13 @@ static void test_damage_rects_null_safety(void) {
  * reach it. Only a store sweep finds it. Regression for the region that stayed
  * frozen until some unrelated full repaint happened to cover it. */
 static void test_removed_child_repaints_its_vacated_band(void) {
-    lens *ui = NULL;
-    flux_canvas *canvas = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    flux_canvas *canvas = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     OT_EXPECT(flux_canvas_create_cpu(400, 200, 1.0f, &canvas) == FLUX_OK);
 
     char tick[32];
-    flux_rect row_c = {0};
+    flux_rect row_c = {};
 
     /* Settle a three-row list and capture the row's real bounds. The exact
      * glyph advance depends on the host's font build, so a hard-coded rect
@@ -672,9 +673,9 @@ static void test_removed_child_repaints_its_vacated_band(void) {
 /* A removed subtree is erased through its children: the departed container
  * paints nothing itself, so its own bounds are not where the pixels are. */
 static void test_removed_container_repaints_its_children(void) {
-    lens *ui = NULL;
-    flux_canvas *canvas = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    flux_canvas *canvas = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     OT_EXPECT(flux_canvas_create_cpu(400, 200, 1.0f, &canvas) == FLUX_OK);
 
     for (int i = 0; i < 4; i++) {
@@ -717,15 +718,15 @@ static void test_removed_container_repaints_its_children(void) {
  * the amount of unrelated content differs.
  */
 static void test_departed_damage_is_independent_of_unrelated_content(void) {
-    flux_rect expect = {0};
+    flux_rect expect = {};
     bool have_expect = false;
     for (int fillers = 0; fillers <= 40; fillers = fillers ? fillers * 8 : 1) {
-        lens *ui = NULL;
-        flux_canvas *canvas = NULL;
-        OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+        lens *ui = nullptr;
+        flux_canvas *canvas = nullptr;
+        OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
         OT_EXPECT(flux_canvas_create_cpu(900, 400, 1.0f, &canvas) == FLUX_OK);
 
-        flux_rect row_c = {0};
+        flux_rect row_c = {};
         for (int i = 0; i < 4; i++) {
             lens_begin(ui, &WIDE_IN);
             lens_label(ui, &(lens_label_opts){.text = "ticker", .box = {.id = "ticker"}});
@@ -756,7 +757,7 @@ static void test_departed_damage_is_independent_of_unrelated_content(void) {
 
         uint32_t count = 0;
         const flux_rect *rects = damage_rects(ui, &count);
-        flux_rect departed = {0};
+        flux_rect departed = {};
         for (uint32_t i = 0; i < count && departed.w == 0.0f; i++)
             if (rect_covers(rects[i], row_c))
                 departed = rects[i];
@@ -788,9 +789,9 @@ static void test_departed_damage_is_independent_of_unrelated_content(void) {
  * the tooltip disappears, some reported rect must reach into the band below the
  * anchor, because that is where the ghost of the dismissed tooltip still is. */
 static void test_tooltip_dismissal_damages_the_below_anchor_band(void) {
-    lens *ui = NULL;
-    flux_canvas *canvas = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    flux_canvas *canvas = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     OT_EXPECT(flux_canvas_create_cpu(400, 200, 1.0f, &canvas) == FLUX_OK);
 
     /* Settle the widget, then hover it so the box's `tooltip` string arms. The
@@ -839,9 +840,9 @@ static void test_tooltip_dismissal_damages_the_below_anchor_band(void) {
  * the fringe frozen when a theme or hover change moved the icon — visible as a
  * ghost outline that survived until an unrelated full repaint. */
 static void test_icon_damage_reaches_past_its_command_rect(void) {
-    lens *ui = NULL;
-    flux_canvas *canvas = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    flux_canvas *canvas = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     OT_EXPECT(flux_canvas_create_cpu(200, 200, 1.0f, &canvas) == FLUX_OK);
 
     for (int i = 0; i < 4; i++) {
@@ -932,9 +933,9 @@ static void focus_text_field(lens *ui, flux_canvas *canvas) {
 }
 
 static void test_caret_existence_is_not_damage(void) {
-    lens *ui = NULL;
-    flux_canvas *canvas = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    flux_canvas *canvas = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     OT_EXPECT(flux_canvas_create_cpu(400, 200, 1.0f, &canvas) == FLUX_OK);
 
     /* Focus the field so a caret exists (a press inside its box), then let
@@ -957,9 +958,9 @@ static void test_caret_existence_is_not_damage(void) {
 }
 
 static void test_caret_flip_is_damage_and_damages_only_its_rect(void) {
-    lens *ui = NULL;
-    flux_canvas *canvas = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    flux_canvas *canvas = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     OT_EXPECT(flux_canvas_create_cpu(400, 200, 1.0f, &canvas) == FLUX_OK);
 
     focus_text_field(ui, canvas);
@@ -999,8 +1000,8 @@ static void test_caret_flip_is_damage_and_damages_only_its_rect(void) {
 }
 
 static void test_caret_clock_live_tracks_focus_and_switch(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     build_text_frame(ui, 0.016f);
     OT_EXPECT(!lens_caret_clock_live(ui)); /* nothing focused: no clock owed */
@@ -1030,9 +1031,9 @@ static void test_caret_clock_live_tracks_focus_and_switch(void) {
 }
 
 static void test_host_owned_caret_reports_no_damage_or_clock(void) {
-    lens *ui = NULL;
-    flux_canvas *canvas = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    flux_canvas *canvas = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     OT_EXPECT(flux_canvas_create_cpu(400, 200, 1.0f, &canvas) == FLUX_OK);
 
     /* An app-owned editing surface (ADR-0151): the app paints its own caret
@@ -1071,8 +1072,8 @@ static void test_host_owned_caret_reports_no_damage_or_clock(void) {
 }
 
 static void test_host_caret_does_not_keep_an_unfocused_context_awake(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     /* No widget holds focus, so nothing in lens paints: a host-reported caret
      * rect alone must leave the context quiescent. */

@@ -9,6 +9,7 @@
 #include <flux/canvas.h>
 #include <flux/vulkan.h>
 #include <math.h>
+#include <stdint.h>
 
 void canvas_fail(flux_canvas *c, flux_result result, const char *message);
 bool canvas_finite_rect(flux_rect r);
@@ -22,7 +23,7 @@ bool canvas_valid_brush_slot(const flux_brush *b);
  *            line (linear.from -> linear.to), positions in pixel space
  *   RADIAL - colour interpolated between stops by distance from
  *            radial.center, normalized by radial.radius (pixel space) */
-typedef enum canvas_paint_kind {
+typedef enum canvas_paint_kind : uint32_t {
     CANVAS_PAINT_SOLID = 0,
     CANVAS_PAINT_LINEAR_GRADIENT = 1,
     CANVAS_PAINT_RADIAL_GRADIENT = 2,
@@ -125,7 +126,7 @@ typedef struct flux_canvas_vertex flux_canvas_vertex;
 /* Path verb stream. Kept above struct flux_canvas so the tessellation
  * cache can embed a copy of the stream in its entries. The full
  * struct flux_path stays in the Path section below. */
-typedef enum flux_path_op {
+typedef enum flux_path_op : uint32_t {
     FLUX_PATH_MOVE = 0,
     FLUX_PATH_LINE = 1,
     FLUX_PATH_QUAD = 2,
@@ -804,7 +805,7 @@ struct flux_path {
  * color pipelines; STENCIL_WRITE accumulates nonzero winding into the
  * stencil attachment (color writes off); COVER_* draw the paint where
  * stencil != 0 and reset it to 0 (ADR-0014). */
-typedef enum canvas_pipe_id {
+typedef enum canvas_pipe_id : uint32_t {
     CANVAS_PIPE_SOLID = 0,
     CANVAS_PIPE_GRADIENT,
     CANVAS_PIPE_IMAGE,

@@ -36,7 +36,7 @@ static test_glb make_glb(const char *json, const void *bin, size_t bin_size) {
     size_t total = 12u + 8u + json_padded + 8u + bin_padded;
     uint8_t *bytes = calloc(1, total);
     if (!bytes)
-        return (test_glb){0};
+        return (test_glb){};
     put_u32_le(bytes, 0x46546c67u);
     put_u32_le(bytes + 4u, 2u);
     put_u32_le(bytes + 8u, (uint32_t)total);
@@ -95,7 +95,7 @@ static double now_ms(void) {
 }
 
 int main(int argc, char **argv) {
-    uint32_t count = argc > 1 ? (uint32_t)strtoul(argv[1], NULL, 10) : 117u;
+    uint32_t count = argc > 1 ? (uint32_t)strtoul(argv[1], nullptr, 10) : 117u;
     int iters = argc > 2 ? atoi(argv[2]) : 2000;
 
     flux_device *device = bench_headless_device();
@@ -104,8 +104,9 @@ int main(int argc, char **argv) {
         return 0;
     }
     test_glb glb = make_chain(count);
-    vista_scene *scene = NULL;
-    flux_result r = vista_load_glb(device, glb.bytes, glb.size, &scene);
+    vista_scene *scene = nullptr;
+    flux_result r = vista_load_glb(
+        device, &(vista_load_glb_opts){.bytes = glb.bytes, .byte_count = glb.size, .out = &scene});
     if (r != FLUX_OK) {
         fprintf(stderr, "load failed: %s\n", flux_result_string(r));
         flux_device_release(device);

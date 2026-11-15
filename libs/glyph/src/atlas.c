@@ -43,9 +43,9 @@ static bool atlas_page_create(glyph_ctx *t, uint8_t page) {
         .width = ATLAS_W,
         .height = ATLAS_H,
         .format = FLUX_FORMAT_R8_UNORM,
-        .initial_data = (page == 0) ? t->atlas_pixels : NULL,
+        .initial_data = (page == 0) ? t->atlas_pixels : nullptr,
     };
-    flux_image *img = NULL;
+    flux_image *img = nullptr;
     if (flux_image_create(t->dev, &d, &img) != FLUX_OK || !img) {
         txt_logf(t, FLUX_LOG_ERROR, "atlas page %u create failed", (unsigned)page);
         return false;
@@ -81,13 +81,13 @@ void txt_atlas_destroy(glyph_ctx *t) {
     for (uint8_t p = 0; p < TXT_ATLAS_MAX_PAGES; p++) {
         if (t->atlas_pages[p]) {
             flux_image_release(t->atlas_pages[p]);
-            t->atlas_pages[p] = NULL;
+            t->atlas_pages[p] = nullptr;
         }
     }
     t->atlas_page_count = 0;
     t->atlas_page = 0;
     txt_free(t, t->atlas_pixels, "atlas");
-    t->atlas_pixels = NULL;
+    t->atlas_pixels = nullptr;
 }
 
 /* ------------------------------------------------------------------ */
@@ -149,7 +149,7 @@ static bool atlas_advance_page(glyph_ctx *t) {
 
 static void atlas_upload_rect(glyph_ctx *t, uint8_t page, uint32_t x, uint32_t y, uint32_t w,
                               uint32_t h) {
-    flux_image *img = (page < TXT_ATLAS_MAX_PAGES) ? t->atlas_pages[page] : NULL;
+    flux_image *img = (page < TXT_ATLAS_MAX_PAGES) ? t->atlas_pages[page] : nullptr;
     if (!img || !t->dev)
         return;
 
@@ -157,8 +157,14 @@ static void atlas_upload_rect(glyph_ctx *t, uint8_t page, uint32_t x, uint32_t y
     size_t upload_bytes = row_bytes * h;
 
     if (row_bytes == (size_t)ATLAS_W && x == 0) {
-        (void)flux_image_update_region(img, x, y, w, h, t->atlas_pixels + (size_t)y * ATLAS_W + x,
-                                       upload_bytes);
+        (void)flux_image_update_region(img, &(flux_image_update_region_opts){
+                                                .x = x,
+                                                .y = y,
+                                                .width = w,
+                                                .height = h,
+                                                .data = t->atlas_pixels + (size_t)y * ATLAS_W + x,
+                                                .bytes = upload_bytes,
+                                            });
     } else {
         /* Tight-row staging. This sits on the hottest text path (every
          * atlas flush whose dirty box is narrower than the full texture),
@@ -178,7 +184,14 @@ static void atlas_upload_rect(glyph_ctx *t, uint8_t page, uint32_t x, uint32_t y
             memcpy(tmp + row * row_bytes, t->atlas_pixels + (size_t)(y + row) * ATLAS_W + x,
                    row_bytes);
         }
-        (void)flux_image_update_region(img, x, y, w, h, tmp, upload_bytes);
+        (void)flux_image_update_region(img, &(flux_image_update_region_opts){
+                                                .x = x,
+                                                .y = y,
+                                                .width = w,
+                                                .height = h,
+                                                .data = tmp,
+                                                .bytes = upload_bytes,
+                                            });
     }
 }
 
@@ -261,7 +274,7 @@ static void atlas_clear(glyph_ctx *t) {
      * referencing batch has retired. */
     for (uint8_t p = 0; p < t->atlas_page_count && p < TXT_ATLAS_MAX_PAGES; p++) {
         flux_image *old = t->atlas_pages[p];
-        t->atlas_pages[p] = NULL;
+        t->atlas_pages[p] = nullptr;
         /* Page 0 included: its image is recreated below, so the old one is
          * just as retired as the auxiliary pages'. Guarding this release
          * with `p > 0` leaked the 16 MiB page-0 image on every clear —
@@ -271,7 +284,7 @@ static void atlas_clear(glyph_ctx *t) {
         if (old)
             flux_image_release(old);
     }
-    if (t->atlas_page_count > 0 && t->atlas_pages[0] == NULL && t->dev) {
+    if (t->atlas_page_count > 0 && t->atlas_pages[0] == nullptr && t->dev) {
         flux_image_desc d = {
             .type = FLUX_TYPE_IMAGE_DESC,
             .width = ATLAS_W,
@@ -282,7 +295,7 @@ static void atlas_clear(glyph_ctx *t) {
             /* Allocation failure: keep no atlas image and accept the
              * degraded (blank glyph) hazard rather than reusing stale
              * texels under rearranged UVs. */
-            t->atlas_pages[0] = NULL;
+            t->atlas_pages[0] = nullptr;
             txt_logf(t, FLUX_LOG_ERROR, "atlas image recreate failed; glyphs will re-rasterise");
         }
     }
@@ -352,9 +365,10 @@ bool glyph_has_pending_uploads(const glyph_ctx *t) {
     return false;
 }
 
-flux_result glyph_flush_atlas(glyph_ctx *t, flux_frame *f) {
-    if (!t)
+flux_result glyph_flush_atlas(glyph_ctx *t, const glyph_flush_atlas_opts *opts) {
+    if (!t || !opts)
         return FLUX_ERROR_INVALID_ARGUMENT;
+    flux_frame *f = opts->frame;
     if (f) {
         uint32_t slot = flux_frame_index(f);
         if (slot < FLUX_MAX_FRAMES_IN_FLIGHT) {
@@ -391,18 +405,18 @@ glyph_entry *txt_glyph_get(glyph_ctx *t, int face_id, uint32_t gid, uint32_t rpx
     int slot_idx = face_id >> 8;
     int face_idx = face_id & 0xFF;
     if (slot_idx < 0 || slot_idx >= FLUX_TEXT_NUM_FAMILIES * TXT_STYLE_SLOTS)
-        return NULL;
+        return nullptr;
     txt_face_slot *slot = &t->slots[slot_idx];
     if (face_idx < 0 || face_idx >= slot->count)
-        return NULL;
+        return nullptr;
     txt_face *f = &slot->faces[face_idx];
     if (!f->valid)
-        return NULL;
+        return nullptr;
 
     if (f->face_px != rpx && !txt_face_set_px(f, rpx))
-        return NULL;
+        return nullptr;
     if (!raster_glyph(f, gid, phase))
-        return NULL;
+        return nullptr;
 
     FT_GlyphSlot g = f->face->glyph;
     int gw = (int)g->bitmap.width;
@@ -410,7 +424,7 @@ glyph_entry *txt_glyph_get(glyph_ctx *t, int face_id, uint32_t gid, uint32_t rpx
 
     glyph_entry *e = glyph_cache_put(t->cache, face_id, gid, rpx, phase);
     if (!e)
-        return NULL;
+        return nullptr;
     e->w = gw;
     e->h = gh;
     e->left = g->bitmap_left;
@@ -437,14 +451,14 @@ glyph_entry *txt_glyph_get(glyph_ctx *t, int face_id, uint32_t gid, uint32_t rpx
             atlas_clear(t);
             e = glyph_cache_put(t->cache, face_id, gid, rpx, phase);
             if (!e)
-                return NULL;
+                return nullptr;
             e->w = gw;
             e->h = gh;
             e->left = g->bitmap_left;
             e->top = g->bitmap_top;
             e->atlas_page = t->atlas_page;
             if (!atlas_alloc(t, gw, gh, &ax, &ay))
-                return NULL; /* glyph larger than the entire atlas */
+                return nullptr; /* glyph larger than the entire atlas */
         }
     }
 

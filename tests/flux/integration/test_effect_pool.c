@@ -64,7 +64,8 @@ static void run_one_shot(flux_device *d, flux_image *src, flux_image **out, floa
     flux_effect_blur_desc desc = FLUX_EFFECT_BLUR_DESC_INIT;
     desc.input = src;
     desc.sigma = sigma;
-    flux_result r = flux_effect_blur(cmd, &desc, out);
+    flux_result r =
+        flux_effect_blur(&(flux_effect_blur_opts){.cmd = cmd, .desc = &desc, .out = out});
     OT_EXPECT(r == FLUX_OK);
 
     OT_EXPECT(vkEndCommandBuffer(cmd) == VK_SUCCESS);

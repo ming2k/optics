@@ -45,7 +45,7 @@ static void build(lens *ui, const lens_input *in, void *user) {
      * reset the frame mid-build and wipe the lens_input iris just filled in
      * (observed as `chrome_damaged` staying true forever, which made the
      * static declaration below unobservable). */
-    lens_column_begin(ui, NULL);
+    lens_column_begin(ui, nullptr);
     lens_label(ui, &(lens_label_opts){.text = "paint_static demo: watch stderr counters"});
     lens_label(ui,
                &(lens_label_opts){.text = "phase toggles every 2s; close the window to finish"});
@@ -103,7 +103,7 @@ int main(void) {
      * absolute clock never fires (the demo silently printed nothing). */
     d.last_report = 0.0;
 
-    iris_app_config cfg = {0};
+    iris_app_config cfg = {};
     cfg.title = "iris paint_static demo";
     cfg.app_id = "optics.paint_static_demo";
     cfg.width = 520;

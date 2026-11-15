@@ -37,7 +37,7 @@ extern "C" {
 /* ================================================================== */
 
 /* Operations supported during drag / requested upon drop. */
-typedef enum iris_dnd_action {
+typedef enum iris_dnd_action : uint32_t {
     IRIS_DND_ACTION_NONE = 0,
     IRIS_DND_ACTION_COPY = 1u << 0,
     IRIS_DND_ACTION_MOVE = 1u << 1,

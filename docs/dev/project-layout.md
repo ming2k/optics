@@ -36,7 +36,7 @@
 | `reticle` | `libs/reticle/include/reticle/` | `libs/reticle/src/` | `tests/reticle/` | `examples/reticle/` |
 | `lens` | `libs/lens/include/lens/` | `libs/lens/src/` | `tests/lens/` | `examples/lens/` |
 | `iris` | `libs/iris/include/iris/` | `libs/iris/src/` | `tests/iris/` | `examples/iris/` |
-| `optics` | `include/optics/optics.h` | Umbrella facade (`optics_dep`) | `tests/optics/` | — |
+| `optics` | `include/optics/optics.h` | Umbrella facade (`optics_dep`, ADR-0160/0164) | `tests/optics/` | — |
 
 Each library exposes a Meson dependency object to the next layer. Code in one
 library must not include another library's private `src/` headers.

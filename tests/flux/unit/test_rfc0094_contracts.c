@@ -147,7 +147,7 @@ static void test_text_lifecycle_and_atlas_sync(void) {
         bool pending = glyph_has_pending_uploads(text);
         OT_EXPECT(!pending);
 
-        flux_result fr = glyph_flush_atlas(text, nullptr);
+        flux_result fr = glyph_flush_atlas(text, &(glyph_flush_atlas_opts){});
         OT_EXPECT(fr == FLUX_OK);
 
         glyph_release(text);
@@ -180,10 +180,13 @@ static void test_adr0088_clean_break(void) {
     OT_EXPECT(enc != nullptr);
 
     flux_encoder_save(enc);
-    flux_encoder_translate(enc, 10.0f, 10.0f);
-    flux_encoder_draw_geometry(enc, &r_geom, &solid_b);
-    flux_encoder_draw_geometry(enc, &sq_geom, &solid_b);
-    flux_encoder_save_layer(enc, nullptr, 0.8f);
+    flux_encoder_translate(enc, &(flux_encoder_translate_opts){.x = 10.0f, .y = 10.0f});
+    flux_encoder_draw_geometry(
+        enc, &(flux_encoder_draw_geometry_opts){.geom = &r_geom, .brush = &solid_b});
+    flux_encoder_draw_geometry(
+        enc, &(flux_encoder_draw_geometry_opts){.geom = &sq_geom, .brush = &solid_b});
+    flux_encoder_save_layer(enc,
+                            &(flux_encoder_save_layer_opts){.bounds = nullptr, .opacity = 0.8f});
     flux_encoder_restore(enc);
     flux_encoder_restore(enc);
 
@@ -211,7 +214,8 @@ static void test_adr0088_clean_break(void) {
                                               .clear_color = &clear,
                                               .attachment = {.kind = FLUX_CANVAS_ATTACHMENT_TARGET,
                                                              .target = target}}) == FLUX_OK);
-    OT_EXPECT(flux_canvas_submit_display_list(c, dl) == FLUX_OK);
+    OT_EXPECT(flux_canvas_submit_display_list(
+                  c, &(flux_canvas_submit_display_list_opts){.list = dl}) == FLUX_OK);
     OT_EXPECT(flux_canvas_end(c) == FLUX_OK);
 
     flux_display_list_release(dl);
@@ -240,7 +244,8 @@ static void test_adr0090_display_list_immutable_capture(void) {
 
     flux_geometry p_geom = {.kind = FLUX_GEOM_PATH, .path = {.path = path}};
     flux_brush solid_b = flux_brush_solid(flux_color_rgba_premul(0, 255, 0, 255));
-    flux_encoder_draw_geometry(enc, &p_geom, &solid_b);
+    flux_encoder_draw_geometry(
+        enc, &(flux_encoder_draw_geometry_opts){.geom = &p_geom, .brush = &solid_b});
 
     /* Finish into display list */
     flux_display_list *dl = nullptr;
@@ -271,7 +276,8 @@ static void test_adr0090_display_list_immutable_capture(void) {
                                               .clear_color = &clear,
                                               .attachment = {.kind = FLUX_CANVAS_ATTACHMENT_TARGET,
                                                              .target = target}}) == FLUX_OK);
-    OT_EXPECT(flux_canvas_submit_display_list(c, dl) == FLUX_OK);
+    OT_EXPECT(flux_canvas_submit_display_list(
+                  c, &(flux_canvas_submit_display_list_opts){.list = dl}) == FLUX_OK);
     OT_EXPECT(flux_canvas_end(c) == FLUX_OK);
 
     /* Verify pixels at (30, 20) inside the triangle are rendered green */
@@ -308,7 +314,7 @@ static void test_adr0091_save_layer_opacity_group(void) {
      * Draw two overlapping fully-opaque red rectangles.
      * Rect 1: [8, 8, 24, 24]
      * Rect 2: [20, 8, 24, 24]  -> overlap is [20..32, 8..32] */
-    flux_canvas_save_layer(c, nullptr, 0.5f);
+    flux_canvas_save_layer(c, &(flux_canvas_save_layer_opts){.bounds = nullptr, .opacity = 0.5f});
     flux_color red = flux_color_rgba_premul(255, 0, 0, 255);
     flux_canvas_fill_rect_color(c, (flux_rect){8.0f, 8.0f, 24.0f, 24.0f}, red);
     flux_canvas_fill_rect_color(c, (flux_rect){20.0f, 8.0f, 24.0f, 24.0f}, red);
@@ -361,7 +367,7 @@ static void test_adr0091_squircle_distinct_geometry(void) {
                                                              .target = t_sq}}) == FLUX_OK);
     flux_geometry g_sq = flux_geom_squircle(box, 16.0f, 1.0f);
     flux_brush b = flux_brush_solid(white);
-    flux_canvas_draw_geometry(c, &g_sq, &b);
+    flux_canvas_draw_geometry(c, &(flux_canvas_draw_geometry_opts){.geom = &g_sq, .brush = &b});
     OT_EXPECT(flux_canvas_end(c) == FLUX_OK);
 
     /* Draw rrect */
@@ -371,7 +377,7 @@ static void test_adr0091_squircle_distinct_geometry(void) {
                                               .attachment = {.kind = FLUX_CANVAS_ATTACHMENT_TARGET,
                                                              .target = t_rr}}) == FLUX_OK);
     flux_geometry g_rr = flux_geom_rrect(box, 16.0f);
-    flux_canvas_draw_geometry(c, &g_rr, &b);
+    flux_canvas_draw_geometry(c, &(flux_canvas_draw_geometry_opts){.geom = &g_rr, .brush = &b});
     OT_EXPECT(flux_canvas_end(c) == FLUX_OK);
 
     uint32_t w = 0, h = 0, stride = 0;
@@ -403,7 +409,7 @@ static void test_adr0092_text_atlas_epoch_tracking(void) {
     OT_EXPECT(glyph_create(&desc, &text) == FLUX_OK);
 
     uint64_t epoch0 = glyph_get_atlas_epoch(text, nullptr);
-    OT_EXPECT(glyph_flush_atlas(text, nullptr) == FLUX_OK);
+    OT_EXPECT(glyph_flush_atlas(text, &(glyph_flush_atlas_opts){}) == FLUX_OK);
     uint64_t epoch1 = glyph_get_atlas_epoch(text, nullptr);
     OT_EXPECT(epoch1 > epoch0);
 

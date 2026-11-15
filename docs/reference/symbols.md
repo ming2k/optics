@@ -34,9 +34,7 @@ error model), see [API Reference](api.md); for blocking behavior per call, see
 | `flux_frame_finish_image_target` |  |
 | `flux_image_create_compute_writable` | Create a STORAGE \| SAMPLED image with undefined initial contents, in VK_IMAGE_LAYOUT_GENERAL, registered into both the sampled and the storage bindless slots (read them via flux_image_bindless_handle and flux_image_bindless_storage_handle in <flux/vulkan.h>). |
 | `flux_device_supports_image_usage` |  |
-| `flux_image_update_region` | Upload tightly packed pixels into an in-bounds sub-region. |
-| `flux_image_update_region_strided` | `flux_image_update_region` for source rows that are wider than the uploaded region: row `i` of `data` starts at `i * row_bytes`. |
-| `flux_image_update_region_premultiply` | `flux_image_update_region_strided` that takes straight (non-premultiplied) RGBA8 and premultiplies during the upload, so callers never replicate the canvas premultiplied-alpha convention themselves. |
+| `flux_image_update_region` | Upload pixels (packed, strided, or premultiplied RGBA8) into an in-bounds sub-region. |
 | `flux_device_log` | Emit a printf-style diagnostic through a device's logger (if any). |
 | `flux_device_create` |  |
 | `flux_device_enabled_features` | Semantic capabilities enabled on the logical device. |
@@ -263,7 +261,7 @@ error model), see [API Reference](api.md); for blocking behavior per call, see
 | `flux_encoder_fail` | Producers propagate capture failures into the recorder's sticky result. |
 | `flux_encoder_status` |  |
 | `flux_encoder_draw_geometry` |  |
-| `flux_encoder_draw_geometry_slot` | Record an image-brush geometry whose image is a dynamic input slot rather than a concrete image. |
+| `flux_encoder_draw_geometry` | Record a geometry + brush draw (or dynamic image slot when `use_slot` is set). |
 | `flux_encoder_draw_glyph_run` |  |
 | `flux_encoder_save` |  |
 | `flux_encoder_restore` |  |
@@ -280,8 +278,7 @@ error model), see [API Reference](api.md); for blocking behavior per call, see
 | `flux_display_list_command_count` |  |
 | `flux_display_list_retained_bytes` | Pinned image-content bytes retained by this list, including child lists. |
 | `flux_display_list_input_mask` | Bit set of dynamic image input slots this list (including children) uses. |
-| `flux_canvas_submit_display_list` | Submit an immutable display list to a canvas for batch execution. |
-| `flux_canvas_submit_display_list_bound` | Submit a list with every dynamic image slot bound exactly once. |
+| `flux_canvas_submit_display_list` | Submit an immutable display list (with optional dynamic image slot bindings) to a canvas for batch execution. |
 | `flux_display_list_serialize` | Serialize to a newly allocated byte stream. |
 | `flux_display_list_deserialize` | Load a serialized list. |
 | `flux_display_list_serialized_free` |  |
@@ -333,10 +330,7 @@ error model), see [API Reference](api.md); for blocking behavior per call, see
 | `flux_material_create` |  |
 | `flux_material_release` | Drop one owned reference. |
 | `flux_material_get_alpha_mode` |  |
-| `flux_scene_draw_mesh` | Records a single mesh+material draw into the frame's currently active pass. |
-| `flux_scene_draw_mesh_lit` | Same as flux_scene_draw_mesh with an explicit light. |
-| `flux_scene_draw_mesh_skinned` | GPU-skinned variants. |
-| `flux_scene_draw_mesh_skinned_lit` |  |
+| `flux_scene_draw_mesh` | Records a single mesh+material draw (unlit/lit, rigid/skinned) into the frame's currently active pass. |
 
 ### `flux/compute.h`
 
@@ -437,14 +431,13 @@ error model), see [API Reference](api.md); for blocking behavior per call, see
 | `glyph_set_default_family` |  |
 | `glyph_compact` |  |
 | `glyph_get_stats` |  |
-| `glyph_measure` | ================================================================== |
-| `glyph_draw` | ================================================================== |
-| `glyph_record` |  |
-| `glyph_draw_outlined` |  |
-| `glyph_x_for_byte` | ================================================================== |
-| `glyph_byte_for_x` |  |
-| `glyph_selection_rects` |  |
-| `glyph_visual_move` |  |
+| `glyph_measure` | Shape a UTF-8 run and return width, height and baseline. |
+| `glyph_draw` | Draw a run into a canvas, including optional outline dilation. |
+| `glyph_record` | Record a run into a display-list encoder. |
+| `glyph_x_for_byte` | Caret x for a logical byte offset (BiDi-correct). |
+| `glyph_byte_for_x` | Nearest logical byte for a local x coordinate. |
+| `glyph_selection_rects` | Visual rectangles covering a logical byte range. |
+| `glyph_visual_move` | Move one visual caret stop in a direction. |
 
 ## vista — 3D scene & skeletal animation engine
 
@@ -494,8 +487,7 @@ error model), see [API Reference](api.md); for blocking behavior per call, see
 | `lens_pop_style` |  |
 | `lens_set_text_family` |  |
 | `lens_get_text_family` |  |
-| `lens_text_measure` | The only text entry point layout (ADR-0028 pass 1) may call. |
-| `lens_text_measure_ex` |  |
+| `lens_text_measure` | Shape a run through the active text engine; the only measurement entry point layout (ADR-0028 pass 1) may call. |
 | `lens_text_compact` | Release the text engine's high-water scratch and shaping cache (the shared engine's `glyph_compact`). |
 | `lens_set_skin` | Replace the skin for a widget kind context-wide; NULL restores the built-in default. |
 | `lens_set_skin_userdata` | Same, with a closure pointer delivered to the skin on every emission. |

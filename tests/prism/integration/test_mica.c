@@ -33,8 +33,10 @@ static uint32_t render_mica_frame(flux_surface *surface, flux_canvas *canvas, fl
     OT_EXPECT(flux_surface_begin_frame(surface, nullptr, &frame) == FLUX_OK);
     uint32_t slot = flux_frame_index(frame);
 
-    prism_material_output mica_out = {0};
-    OT_EXPECT(prism_mica_filter_apply(mica_filter, frame, desc, &mica_out) == FLUX_OK);
+    prism_material_output mica_out = {};
+    OT_EXPECT(prism_mica_filter_apply(
+                  mica_filter, &(prism_mica_filter_apply_opts){
+                                   .frame = frame, .desc = desc, .out = &mica_out}) == FLUX_OK);
     OT_EXPECT(mica_out.image != nullptr);
 
     flux_color clear_col = flux_color_rgba(0, 0, 0, 0);

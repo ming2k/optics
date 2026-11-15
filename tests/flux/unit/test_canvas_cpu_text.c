@@ -17,6 +17,35 @@
 #define W 128
 #define H 64
 
+static glyph_metrics measure(glyph_ctx *t, const char *s, size_t len, const glyph_style *style) {
+    return glyph_measure(t, &(glyph_measure_opts){.utf8 = s, .len = len, .style = style});
+}
+
+static void draw(glyph_ctx *t, flux_canvas *canvas, flux_arena *arena, float x, float y,
+                 const char *s, size_t len, const glyph_style *style) {
+    glyph_draw(t, &(glyph_draw_opts){.canvas = canvas,
+                                     .arena = arena,
+                                     .x = x,
+                                     .y = y,
+                                     .utf8 = s,
+                                     .len = len,
+                                     .style = style});
+}
+
+static void draw_outlined(glyph_ctx *t, flux_canvas *canvas, flux_arena *arena, float x, float y,
+                          const char *s, size_t len, const glyph_style *style,
+                          flux_color outline_color, float outline_width) {
+    glyph_draw(t, &(glyph_draw_opts){.canvas = canvas,
+                                     .arena = arena,
+                                     .x = x,
+                                     .y = y,
+                                     .utf8 = s,
+                                     .len = len,
+                                     .style = style,
+                                     .outline_color = outline_color,
+                                     .outline_width = outline_width});
+}
+
 /* Render a 17px probe either cold or after interleaving a 33px layout. The
  * two images must be identical: measuring another size may change which
  * FT_Size is active, but never the bitmap stored under the 17px glyph-cache
@@ -29,13 +58,13 @@ static bool render_size_probe(bool interleaved, uint8_t out[W * H * 4]) {
 
     glyph_style small = {.size_px = 17.0f, .color = flux_color_rgba_premul(255, 255, 255, 255)};
     glyph_style large = {.size_px = 33.0f, .color = flux_color_rgba_premul(255, 255, 255, 255)};
-    if (glyph_measure(text, "sf", 2, &small).width <= 0.0f) {
+    if (measure(text, "sf", 2, &small).width <= 0.0f) {
         glyph_release(text);
         return false;
     }
     if (interleaved) {
-        (void)glyph_measure(text, "sf", 2, &large);
-        (void)glyph_measure(text, "sf", 2, &small);
+        (void)measure(text, "sf", 2, &large);
+        (void)measure(text, "sf", 2, &small);
     }
 
     flux_canvas *canvas = nullptr;
@@ -50,7 +79,7 @@ static bool render_size_probe(bool interleaved, uint8_t out[W * H * 4]) {
         glyph_release(text);
         return false;
     }
-    glyph_draw(text, canvas, nullptr, 4.0f, 4.0f, "sf", 2, &small);
+    draw(text, canvas, nullptr, 4.0f, 4.0f, "sf", 2, &small);
     OT_EXPECT(flux_canvas_end(canvas) == FLUX_OK);
 
     uint32_t w = 0, h = 0, stride = 0;
@@ -70,7 +99,7 @@ int main(void) {
 
     /* Gate on the backend being live: measure returns a width only when
      * FreeType/HarfBuzz are present. If not, skip (no ink to check). */
-    glyph_metrics m = glyph_measure(t, "A", 1, nullptr);
+    glyph_metrics m = measure(t, "A", 1, nullptr);
     if (m.width <= 0.0f) {
         glyph_release(t);
         OT_SKIP("no shaping backend");
@@ -85,12 +114,12 @@ int main(void) {
     OT_EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
                                                             .clear_color = &black}) == FLUX_OK);
 
-    glyph_style style = {0};
+    glyph_style style = {};
     style.size_px = 24.0f;
     style.color = white;
-    glyph_draw(t, c, nullptr, 8.0f, 8.0f, "Aa", 2, &style);
-    glyph_draw_outlined(t, c, nullptr, 72.0f, 8.0f, "Aa", 2, &style,
-                        flux_color_rgba_premul(255, 0, 0, 255), 2.0f);
+    draw(t, c, nullptr, 8.0f, 8.0f, "Aa", 2, &style);
+    draw_outlined(t, c, nullptr, 72.0f, 8.0f, "Aa", 2, &style,
+                  flux_color_rgba_premul(255, 0, 0, 255), 2.0f);
 
     OT_EXPECT(flux_canvas_end(c) == FLUX_OK);
 

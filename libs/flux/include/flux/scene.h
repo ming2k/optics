@@ -10,6 +10,7 @@
 
 #include <flux/core.h>
 #include <flux/math.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -84,7 +85,7 @@ FLUX_API void flux_mesh_release(flux_mesh *m);
 typedef struct flux_material flux_material;
 typedef struct flux_sampler flux_sampler;
 
-typedef enum flux_material_kind {
+typedef enum flux_material_kind : uint32_t {
     FLUX_MATERIAL_UNLIT = 0,
     /* Blinn-Phong with one directional light per draw. Light data is
      * supplied at draw time via flux_scene_draw_mesh_lit; draws made
@@ -97,7 +98,7 @@ typedef enum flux_material_kind {
      * never repurpose existing values. */
 } flux_material_kind;
 
-typedef enum flux_material_alpha_mode {
+typedef enum flux_material_alpha_mode : uint32_t {
     FLUX_MATERIAL_ALPHA_OPAQUE = 0,
     FLUX_MATERIAL_ALPHA_MASK = 1,
     FLUX_MATERIAL_ALPHA_BLEND = 2,
@@ -196,33 +197,21 @@ typedef struct flux_scene_light {
  * active pass. Must be called between flux_frame_begin_pass and
  * flux_frame_end_pass on the same frame, and the active pass's
  * attachments must match the material's color_format and depth_format
- * exactly. No-op if any argument is NULL. PHONG materials are lit
- * with FLUX_SCENE_LIGHT_DEFAULT. */
-FLUX_API void flux_scene_draw_mesh(flux_frame *f, const flux_camera *cam, flux_mat4 world,
-                                   flux_mesh *mesh, flux_material *material);
+ * exactly. No-op if required arguments are NULL. PHONG materials use
+ * `light` if non-NULL, or FLUX_SCENE_LIGHT_DEFAULT when NULL; UNLIT
+ * materials ignore it. When `joint_matrices` is non-NULL and
+ * `joint_count > 0` on a skinned mesh, GPU skinning is enabled. */
+typedef struct flux_scene_draw_mesh_opts {
+    const flux_camera *camera;
+    flux_mat4 world;
+    flux_mesh *mesh;
+    flux_material *material;
+    const flux_scene_light *light;
+    const flux_mat4 *joint_matrices;
+    uint32_t joint_count;
+} flux_scene_draw_mesh_opts;
 
-/* Same as flux_scene_draw_mesh with an explicit light. `light` may be
- * NULL for FLUX_SCENE_LIGHT_DEFAULT; UNLIT materials ignore it. The
- * light is consumed during the call — it does not need to outlive
- * the frame. */
-FLUX_API void flux_scene_draw_mesh_lit(flux_frame *f, const flux_camera *cam, flux_mat4 world,
-                                       flux_mesh *mesh, flux_material *material,
-                                       const flux_scene_light *light);
-
-/* GPU-skinned variants. `joint_matrices` transform bind-pose vertices in mesh
- * space and are borrowed only for this call: the matrices are copied into the
- * frame's transient ring before recording the draw. A mesh not created with a
- * flux_mesh_skin_desc, or an empty palette, is drawn through the static path. */
-FLUX_API void flux_scene_draw_mesh_skinned(flux_frame *f, const flux_camera *cam, flux_mat4 world,
-                                           flux_mesh *mesh, flux_material *material,
-                                           const flux_mat4 *joint_matrices, uint32_t joint_count);
-
-FLUX_API void flux_scene_draw_mesh_skinned_lit(flux_frame *f, const flux_camera *cam,
-                                               flux_mat4 world, flux_mesh *mesh,
-                                               flux_material *material,
-                                               const flux_scene_light *light,
-                                               const flux_mat4 *joint_matrices,
-                                               uint32_t joint_count);
+FLUX_API void flux_scene_draw_mesh(flux_frame *f, const flux_scene_draw_mesh_opts *opts);
 
 #ifdef __cplusplus
 }

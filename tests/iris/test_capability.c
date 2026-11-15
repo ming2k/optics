@@ -16,7 +16,7 @@
 
 int main(void) {
     const char *backend = iris_backend_name();
-    OT_EXPECT(backend != NULL);
+    OT_EXPECT(backend != nullptr);
     OT_EXPECT(strcmp(backend, "wayland") == 0 || strcmp(backend, "win32") == 0 ||
               strcmp(backend, "cocoa") == 0 || strcmp(backend, "none") == 0);
 

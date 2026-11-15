@@ -74,7 +74,9 @@ static bool bench_frame(bench *b) {
     bd.input = b->capture;
     bd.sigma = 14.0f;
     flux_image *blurred = nullptr;
-    if (flux_blur_filter_apply(b->blur, frame, &bd, &blurred) != FLUX_OK)
+    if (flux_blur_filter_apply(b->blur, &(flux_blur_filter_apply_opts){.frame = frame,
+                                                                       .desc = &bd,
+                                                                       .out = &blurred}) != FLUX_OK)
         return false;
 
     /* The glass samples a deferred blur output, so materialize it before the
@@ -90,7 +92,9 @@ static bool bench_frame(bench *b) {
     gd.groups = b->groups;
     gd.group_count = b->body_count;
     prism_material_output out = {};
-    if (prism_liquid_glass_filter_apply(b->glass, frame, &gd, &out) != FLUX_OK)
+    if (prism_liquid_glass_filter_apply(b->glass,
+                                        &(prism_liquid_glass_filter_apply_opts){
+                                            .frame = frame, .desc = &gd, .out = &out}) != FLUX_OK)
         return false;
 
     if (flux_frame_submit(frame) != FLUX_OK)
@@ -178,7 +182,7 @@ int main(int argc, char **argv) {
 
     bench b = {};
     if (!bench_init(&b, body_count)) {
-        flux_error_info info = {0};
+        flux_error_info info = {};
         flux_get_last_error(&info);
         fprintf(stderr, "bench_liquid_glass_gpu: setup failed: %s\n",
                 info.message ? info.message : "no detail");

@@ -44,7 +44,7 @@ bool iris_a11y__supports_value(lens_role r) {
 /* The single advertised action is "click" (ADR-0062): one activation verb
  * every actionable role shares; AT clients invoke it via DoAction(0). */
 const char *iris_a11y__action_name(lens_role r) {
-    return iris_a11y__supports_action(r) ? "click" : NULL;
+    return iris_a11y__supports_action(r) ? "click" : nullptr;
 }
 
 double iris_a11y__parse_value(const char *s) {
@@ -53,7 +53,7 @@ double iris_a11y__parse_value(const char *s) {
     /* strtod skips leading whitespace and parses as much as is valid; a
      * non-numeric readout (e.g. a label accidentally queried) yields 0.0
      * because end == s after the parse. */
-    char *end = NULL;
+    char *end = nullptr;
     double v = strtod(s, &end);
     if (end == s)
         return 0.0;
@@ -217,7 +217,7 @@ static const iris_a11y__node *find_by_id(const iris_a11y__node *nodes, size_t n,
     for (size_t i = 0; i < n; i++)
         if (nodes[i].id == id)
             return &nodes[i];
-    return NULL;
+    return nullptr;
 }
 
 /* Code points in a byte span of valid UTF-8 (same lead-byte counting as

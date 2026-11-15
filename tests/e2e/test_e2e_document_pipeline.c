@@ -75,7 +75,8 @@ static bool replay(const flux_display_list *list, uint8_t *out, size_t out_size,
         flux_canvas_begin(canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
                                                            .clear_color = &clear});
     if (result == FLUX_OK)
-        result = flux_canvas_submit_display_list(canvas, list);
+        result = flux_canvas_submit_display_list(
+            canvas, &(flux_canvas_submit_display_list_opts){.list = list});
     if (result == FLUX_OK)
         result = flux_canvas_end(canvas);
 
@@ -150,11 +151,18 @@ static void ui_to_pixels(void) {
 
     uint8_t *bytes = nullptr;
     size_t size = 0;
-    OT_REQUIRE(flux_display_list_serialize(list, nullptr, &bytes, &size) == FLUX_OK);
+    flux_display_list_serialize_opts sopts = FLUX_DISPLAY_LIST_SERIALIZE_OPTS_INIT;
+    sopts.out_data = &bytes;
+    sopts.out_size = &size;
+    OT_REQUIRE(flux_display_list_serialize(list, &sopts) == FLUX_OK);
     OT_EXPECT(bytes != nullptr && size > 0);
 
     flux_display_list *loaded = nullptr;
-    OT_REQUIRE(flux_display_list_deserialize(bytes, size, nullptr, &loaded) == FLUX_OK);
+    flux_display_list_deserialize_opts dopts = FLUX_DISPLAY_LIST_DESERIALIZE_OPTS_INIT;
+    dopts.data = bytes;
+    dopts.size = size;
+    dopts.out_list = &loaded;
+    OT_REQUIRE(flux_display_list_deserialize(&dopts) == FLUX_OK);
     OT_EXPECT(loaded != nullptr);
     OT_EXPECT(flux_display_list_command_count(loaded) > 0);
 

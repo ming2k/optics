@@ -9,7 +9,7 @@
 int main(void) {
     /* --- perspective + look_at: eye at (0,0,5) maps to origin in view space --- */
     {
-        flux_camera cam = {0};
+        flux_camera cam = {};
         flux_camera_perspective(&cam, 0.78539816339f, 1.0f, 0.1f, 100.0f);
         flux_camera_look_at(&cam, (flux_vec3){0.0f, 0.0f, 5.0f}, (flux_vec3){0.0f, 0.0f, 0.0f},
                             (flux_vec3){0.0f, 1.0f, 0.0f});
@@ -35,7 +35,7 @@ int main(void) {
 
     /* --- camera struct: view-projection composition --- */
     {
-        flux_camera cam = {0};
+        flux_camera cam = {};
         flux_camera_perspective(&cam, 0.78539816339f, 1.0f, 0.1f, 100.0f);
         flux_camera_look_at(&cam, (flux_vec3){0.0f, 0.0f, 5.0f}, (flux_vec3){0.0f, 0.0f, 0.0f},
                             (flux_vec3){0.0f, 1.0f, 0.0f});

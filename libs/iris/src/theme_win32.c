@@ -47,10 +47,10 @@
  * WndProc on the same thread). Two independent slots: the host's public one
  * and the platform backend's internal one (theme_watch_internal.h) — the
  * backend must not consume or overwrite the host's registration. */
-static iris_color_scheme_changed_fn g_cb = NULL;
-static void *g_user = NULL;
-static iris_color_scheme_changed_fn g_backend_cb = NULL;
-static void *g_backend_user = NULL;
+static iris_color_scheme_changed_fn g_cb = nullptr;
+static void *g_user = nullptr;
+static iris_color_scheme_changed_fn g_backend_cb = nullptr;
+static void *g_backend_user = nullptr;
 static iris_color_scheme g_last = IRIS_COLOR_SCHEME_PREFER_DARK;
 
 IRIS_API iris_color_scheme iris_query_system_color_scheme(void) {
@@ -59,7 +59,8 @@ IRIS_API iris_color_scheme iris_query_system_color_scheme(void) {
                       L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize", 0,
                       KEY_READ, &hkey) == ERROR_SUCCESS) {
         DWORD value = 1, cb = sizeof value;
-        LSTATUS st = RegQueryValueExW(hkey, L"AppsUseLightTheme", NULL, NULL, (LPBYTE)&value, &cb);
+        LSTATUS st =
+            RegQueryValueExW(hkey, L"AppsUseLightTheme", nullptr, nullptr, (LPBYTE)&value, &cb);
         RegCloseKey(hkey);
         if (st == ERROR_SUCCESS)
             return value == 0 ? IRIS_COLOR_SCHEME_PREFER_DARK : IRIS_COLOR_SCHEME_PREFER_LIGHT;
@@ -87,8 +88,8 @@ IRIS_API int iris_color_scheme_watch(iris_color_scheme_changed_fn cb, void *user
 IRIS_API void iris_color_scheme_unwatch(void) {
     /* No thread to join, no handle to close — just drop the registration.
      * A change detected after this is silently discarded. */
-    g_cb = NULL;
-    g_user = NULL;
+    g_cb = nullptr;
+    g_user = nullptr;
 }
 
 int iris_theme__watch_backend(iris_color_scheme_changed_fn cb, void *user) {
@@ -101,8 +102,8 @@ int iris_theme__watch_backend(iris_color_scheme_changed_fn cb, void *user) {
 }
 
 void iris_theme__unwatch_backend(void) {
-    g_backend_cb = NULL;
-    g_backend_user = NULL;
+    g_backend_cb = nullptr;
+    g_backend_user = nullptr;
 }
 
 /* Internal seam (not in any public header): called by app_win32.c's WndProc

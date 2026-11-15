@@ -41,11 +41,9 @@ bool flux_dmabuf_sync_supported(const flux_device *d) {
     return false;
 }
 
-flux_result flux_dmabuf_format_modifiers(flux_device *d, flux_format format,
-                                         uint64_t *out_modifiers, uint32_t *inout_count) {
-    (void)format;
-    (void)out_modifiers;
-    if (!d || !inout_count)
+flux_result flux_dmabuf_format_modifiers(flux_device *d,
+                                         const flux_dmabuf_format_modifiers_opts *opts) {
+    if (!d || !opts || !opts->inout_count)
         return FLUX_ERROR_INVALID_ARGUMENT;
     FLUX_FAIL(FLUX_ERROR_UNSUPPORTED, "dma-buf is only available on Linux");
     return FLUX_ERROR_UNSUPPORTED;

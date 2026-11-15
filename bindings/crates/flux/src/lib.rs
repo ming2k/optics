@@ -1811,15 +1811,13 @@ impl Surface {
         }; sys::FLUX_DAMAGE_CAPACITY as usize];
         let mut count = 0u32;
         let mut full = false;
-        Error::check(unsafe {
-            sys::flux_surface_scanout_damage(
-                self.raw,
-                raw.as_mut_ptr(),
-                raw.len() as u32,
-                &mut count,
-                &mut full,
-            )
-        })?;
+        let opts = sys::flux_surface_scanout_damage_opts {
+            out_rects: raw.as_mut_ptr(),
+            capacity: raw.len() as u32,
+            out_count: &mut count,
+            out_full: &mut full,
+        };
+        Error::check(unsafe { sys::flux_surface_scanout_damage(self.raw, &opts) })?;
         Ok(Damage::from_raw(&raw, count, full))
     }
 
@@ -1913,15 +1911,13 @@ impl<'surface> Frame<'surface> {
         }; sys::FLUX_DAMAGE_CAPACITY as usize];
         let mut count = 0u32;
         let mut full = false;
-        Error::check(unsafe {
-            sys::flux_frame_repaint_scope(
-                self.raw,
-                raw.as_mut_ptr(),
-                raw.len() as u32,
-                &mut count,
-                &mut full,
-            )
-        })?;
+        let opts = sys::flux_frame_repaint_scope_opts {
+            out_rects: raw.as_mut_ptr(),
+            capacity: raw.len() as u32,
+            out_count: &mut count,
+            out_full: &mut full,
+        };
+        Error::check(unsafe { sys::flux_frame_repaint_scope(self.raw, &opts) })?;
         Ok(Damage::from_raw(&raw, count, full))
     }
 
@@ -2016,11 +2012,25 @@ impl<'surface> Frame<'surface> {
             height,
             ..Default::default()
         };
+        let vp = sys::flux_frame_set_viewport_opts {
+            x: 0.0,
+            y: 0.0,
+            width: width as f32,
+            height: height as f32,
+            min_depth: 0.0,
+            max_depth: 1.0,
+        };
+        let sc = sys::flux_frame_set_scissor_opts {
+            x: 0,
+            y: 0,
+            width,
+            height,
+        };
         unsafe {
             sys::flux_frame_prepare_target(self.raw, depth.raw);
             sys::flux_frame_begin_pass(self.raw, &pass);
-            sys::flux_frame_set_viewport(self.raw, 0.0, 0.0, width as f32, height as f32, 0.0, 1.0);
-            sys::flux_frame_set_scissor(self.raw, 0, 0, width, height);
+            sys::flux_frame_set_viewport(self.raw, &vp);
+            sys::flux_frame_set_scissor(self.raw, &sc);
         }
         Ok(ScenePass {
             frame: self,
@@ -2832,7 +2842,13 @@ impl Encoder {
                 },
             },
         };
-        unsafe { sys::flux_encoder_draw_geometry_slot(self.raw, &geom, &brush, slot) };
+        let opts = sys::flux_encoder_draw_geometry_opts {
+            geom: &geom,
+            brush: &brush,
+            slot,
+            use_slot: true,
+        };
+        unsafe { sys::flux_encoder_draw_geometry(self.raw, &opts) };
     }
 
     /// Push canvas state (transform and scissor).
@@ -2863,17 +2879,23 @@ impl Encoder {
             .as_ref()
             .map(|r| r as *const _)
             .unwrap_or(std::ptr::null());
-        unsafe { sys::flux_encoder_save_layer(self.raw, b_ptr, opacity) };
+        let opts = sys::flux_encoder_save_layer_opts {
+            bounds: b_ptr,
+            opacity,
+        };
+        unsafe { sys::flux_encoder_save_layer(self.raw, &opts) };
     }
 
     /// Apply an affine translation.
     pub fn translate(&mut self, x: f32, y: f32) {
-        unsafe { sys::flux_encoder_translate(self.raw, x, y) };
+        let opts = sys::flux_encoder_translate_opts { x, y };
+        unsafe { sys::flux_encoder_translate(self.raw, &opts) };
     }
 
     /// Apply an affine scale.
     pub fn scale(&mut self, sx: f32, sy: f32) {
-        unsafe { sys::flux_encoder_scale(self.raw, sx, sy) };
+        let opts = sys::flux_encoder_scale_opts { sx, sy };
+        unsafe { sys::flux_encoder_scale(self.raw, &opts) };
     }
 
     /// Apply a rotation in radians.
@@ -4062,17 +4084,17 @@ impl Image {
     /// compositors that track per-commit damage and want to avoid
     /// re-uploading the whole texture on small updates.
     pub fn update_region(&self, x: u32, y: u32, w: u32, h: u32, data: &[u8]) -> Result<(), Error> {
-        Error::check(unsafe {
-            sys::flux_image_update_region(
-                self.raw,
-                x,
-                y,
-                w,
-                h,
-                data.as_ptr() as *const _,
-                data.len(),
-            )
-        })
+        let opts = sys::flux_image_update_region_opts {
+            x,
+            y,
+            width: w,
+            height: h,
+            data: data.as_ptr() as *const _,
+            row_bytes: 0,
+            bytes: data.len(),
+            premultiply: false,
+        };
+        Error::check(unsafe { sys::flux_image_update_region(self.raw, &opts) })
     }
 
     /// [`Image::update_region`] for source rows wider than the region:
@@ -4090,18 +4112,17 @@ impl Image {
         row_bytes: usize,
         data: &[u8],
     ) -> Result<(), Error> {
-        Error::check(unsafe {
-            sys::flux_image_update_region_strided(
-                self.raw,
-                x,
-                y,
-                w,
-                h,
-                data.as_ptr() as *const _,
-                row_bytes,
-                data.len(),
-            )
-        })
+        let opts = sys::flux_image_update_region_opts {
+            x,
+            y,
+            width: w,
+            height: h,
+            data: data.as_ptr() as *const _,
+            row_bytes,
+            bytes: data.len(),
+            premultiply: false,
+        };
+        Error::check(unsafe { sys::flux_image_update_region(self.raw, &opts) })
     }
 
     /// Upload straight (non-premultiplied) RGBA8 pixels, premultiplying
@@ -4125,18 +4146,17 @@ impl Image {
         row_bytes: usize,
         data: &[u8],
     ) -> Result<(), Error> {
-        Error::check(unsafe {
-            sys::flux_image_update_region_premultiply(
-                self.raw,
-                x,
-                y,
-                w,
-                h,
-                data.as_ptr() as *const _,
-                row_bytes,
-                data.len(),
-            )
-        })
+        let opts = sys::flux_image_update_region_opts {
+            x,
+            y,
+            width: w,
+            height: h,
+            data: data.as_ptr() as *const _,
+            row_bytes,
+            bytes: data.len(),
+            premultiply: true,
+        };
+        Error::check(unsafe { sys::flux_image_update_region(self.raw, &opts) })
     }
 }
 
@@ -4233,7 +4253,12 @@ impl BlurFilter {
             ..Default::default()
         };
         let mut raw = std::ptr::null_mut();
-        Error::check(unsafe { sys::flux_blur_filter_apply(self.raw, frame.raw, &desc, &mut raw) })?;
+        let opts = sys::flux_blur_filter_apply_opts {
+            frame: frame.raw,
+            desc: &desc,
+            out: &mut raw,
+        };
+        Error::check(unsafe { sys::flux_blur_filter_apply(self.raw, &opts) })?;
         Ok(BlurredImage {
             raw,
             _filter: PhantomData,
@@ -4251,7 +4276,11 @@ impl BlurFilter {
         frame: &Frame<'_>,
     ) -> Result<BlurredImage<'filter>, Error> {
         let mut raw = std::ptr::null_mut();
-        Error::check(unsafe { sys::flux_blur_filter_current(self.raw, frame.raw, &mut raw) })?;
+        let opts = sys::flux_blur_filter_current_opts {
+            frame: frame.raw,
+            out: &mut raw,
+        };
+        Error::check(unsafe { sys::flux_blur_filter_current(self.raw, &opts) })?;
         Ok(BlurredImage {
             raw,
             _filter: PhantomData,
@@ -4384,9 +4413,14 @@ pub unsafe fn effect_shadow(
 ) -> Result<EffectImage, Error> {
     let desc = params.into_desc(input);
     let mut raw: *mut sys::flux_image = std::ptr::null_mut();
+    let opts = sys::flux_effect_shadow_opts {
+        cmd,
+        desc: &desc,
+        out: &mut raw,
+    };
     // SAFETY: caller guarantees `cmd` is a valid recording command buffer on
     // input's device and effect calls are serialized per device.
-    Error::check(unsafe { sys::flux_effect_shadow(cmd, &desc, &mut raw) })?;
+    Error::check(unsafe { sys::flux_effect_shadow(&opts) })?;
     Ok(EffectImage { raw })
 }
 
@@ -4479,11 +4513,14 @@ impl ShadowFilter {
     ) -> Result<ShadowedImage<'filter>, Error> {
         let desc = params.into_desc(input);
         let mut raw: *mut sys::flux_image = std::ptr::null_mut();
+        let opts = sys::flux_shadow_filter_apply_opts {
+            frame: frame.raw,
+            desc: &desc,
+            out: &mut raw,
+        };
         // SAFETY: the filter, frame, and input all belong to one device (the
         // C side verifies); the frame is at a pass boundary and recording.
-        Error::check(unsafe {
-            sys::flux_shadow_filter_apply(self.raw, frame.raw, &desc, &mut raw)
-        })?;
+        Error::check(unsafe { sys::flux_shadow_filter_apply(self.raw, &opts) })?;
         Ok(ShadowedImage {
             raw,
             _filter: PhantomData,
@@ -4571,14 +4608,12 @@ pub fn dmabuf_sync_supported(device: &Device) -> bool {
 pub fn dmabuf_format_modifiers(device: &Device, format: Format) -> Vec<u64> {
     // Two-pass: probe the required length with count 0, then allocate and fill.
     let mut count: u32 = 0;
-    let rc = unsafe {
-        sys::flux_dmabuf_format_modifiers(
-            device.raw,
-            format.raw(),
-            std::ptr::null_mut(),
-            &mut count,
-        )
+    let probe_opts = sys::flux_dmabuf_format_modifiers_opts {
+        format: format.raw(),
+        out_modifiers: std::ptr::null_mut(),
+        inout_count: &mut count,
     };
+    let rc = unsafe { sys::flux_dmabuf_format_modifiers(device.raw, &probe_opts) };
     // FLUX_OK with count 0 (no qualifiers, or device lacks dma-buf) is the
     // common "nothing to advertise" path. An unsupported format is also mapped
     // to empty here so the caller's format loop is uniform.
@@ -4589,9 +4624,12 @@ pub fn dmabuf_format_modifiers(device: &Device, format: Format) -> Vec<u64> {
         return Vec::new();
     }
     let mut mods = vec![0u64; count as usize];
-    let rc = unsafe {
-        sys::flux_dmabuf_format_modifiers(device.raw, format.raw(), mods.as_mut_ptr(), &mut count)
+    let fill_opts = sys::flux_dmabuf_format_modifiers_opts {
+        format: format.raw(),
+        out_modifiers: mods.as_mut_ptr(),
+        inout_count: &mut count,
     };
+    let rc = unsafe { sys::flux_dmabuf_format_modifiers(device.raw, &fill_opts) };
     if rc != sys::flux_result::FLUX_OK {
         return Vec::new();
     }
@@ -5140,7 +5178,12 @@ mod tests {
 impl CanvasCommands<'_> {
     /// Submit a compiled DisplayList for hardware execution (ADR-0088 / ADR-0090).
     pub fn submit_display_list(&self, list: &DisplayList) -> Result<(), Error> {
-        Error::check(unsafe { sys::flux_canvas_submit_display_list(self.raw, list.as_raw()) })
+        let opts = sys::flux_canvas_submit_display_list_opts {
+            list: list.as_raw(),
+            bindings: std::ptr::null(),
+            binding_count: 0,
+        };
+        Error::check(unsafe { sys::flux_canvas_submit_display_list(self.raw, &opts) })
     }
 
     /// Submit a DisplayList after binding every dynamic image input slot.
@@ -5160,14 +5203,12 @@ impl CanvasCommands<'_> {
                     .unwrap_or(std::ptr::null_mut()),
             })
             .collect();
-        Error::check(unsafe {
-            sys::flux_canvas_submit_display_list_bound(
-                self.raw,
-                list.as_raw(),
-                raw.as_ptr(),
-                raw.len() as u32,
-            )
-        })
+        let opts = sys::flux_canvas_submit_display_list_opts {
+            list: list.as_raw(),
+            bindings: raw.as_ptr(),
+            binding_count: raw.len() as u32,
+        };
+        Error::check(unsafe { sys::flux_canvas_submit_display_list(self.raw, &opts) })
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -5225,7 +5266,11 @@ impl CanvasCommands<'_> {
                 },
             },
         };
-        unsafe { sys::flux_canvas_draw_geometry(self.raw, &geom, &brush) };
+        let opts = sys::flux_canvas_draw_geometry_opts {
+            geom: &geom,
+            brush: &brush,
+        };
+        unsafe { sys::flux_canvas_draw_geometry(self.raw, &opts) };
     }
 
     /// Save the current transform/clip state onto the stack.
@@ -5240,14 +5285,16 @@ impl CanvasCommands<'_> {
 
     /// Translate the coordinate system by `(x, y)`.
     pub fn translate(&self, x: f32, y: f32) {
-        unsafe { sys::flux_canvas_translate(self.raw, x, y) };
+        let opts = sys::flux_canvas_translate_opts { x, y };
+        unsafe { sys::flux_canvas_translate(self.raw, &opts) };
     }
 
     /// Scale the coordinate system by `(sx, sy)`. Used to map a logical
     /// (DPI-independent) coordinate space onto the physical framebuffer: pair
     /// `scale(s, s)` with `glyph`'s device scale `s` for crisp HiDPI text.
     pub fn scale(&self, sx: f32, sy: f32) {
-        unsafe { sys::flux_canvas_scale(self.raw, sx, sy) };
+        let opts = sys::flux_canvas_scale_opts { sx, sy };
+        unsafe { sys::flux_canvas_scale(self.raw, &opts) };
     }
 
     /// Rotate subsequent drawing by `radians` around the current origin.
@@ -5284,7 +5331,11 @@ impl CanvasCommands<'_> {
                 solid: sys::flux_brush_solid_data { color },
             },
         };
-        unsafe { sys::flux_canvas_draw_geometry(self.raw, &geom, &brush) };
+        let opts = sys::flux_canvas_draw_geometry_opts {
+            geom: &geom,
+            brush: &brush,
+        };
+        unsafe { sys::flux_canvas_draw_geometry(self.raw, &opts) };
     }
 
     /// Fill a rounded rectangle with a packed solid color (analytic-AA SDF).
@@ -5312,7 +5363,11 @@ impl CanvasCommands<'_> {
                 solid: sys::flux_brush_solid_data { color },
             },
         };
-        unsafe { sys::flux_canvas_draw_geometry(self.raw, &geom, &brush) };
+        let opts = sys::flux_canvas_draw_geometry_opts {
+            geom: &geom,
+            brush: &brush,
+        };
+        unsafe { sys::flux_canvas_draw_geometry(self.raw, &opts) };
     }
 
     /// Stroke an analytic rounded rectangle with a premultiplied colour.
@@ -5349,7 +5404,11 @@ impl CanvasCommands<'_> {
                 solid: sys::flux_brush_solid_data { color },
             },
         };
-        unsafe { sys::flux_canvas_draw_geometry(self.raw, &geom, &brush) };
+        let opts = sys::flux_canvas_draw_geometry_opts {
+            geom: &geom,
+            brush: &brush,
+        };
+        unsafe { sys::flux_canvas_draw_geometry(self.raw, &opts) };
     }
 
     /// Fill `path` with `paint` (the paint's fill rule applies).
@@ -5369,7 +5428,11 @@ impl CanvasCommands<'_> {
             },
         };
         let brush = brush.raw;
-        unsafe { sys::flux_canvas_draw_geometry(self.raw, &geom, &brush) };
+        let opts = sys::flux_canvas_draw_geometry_opts {
+            geom: &geom,
+            brush: &brush,
+        };
+        unsafe { sys::flux_canvas_draw_geometry(self.raw, &opts) };
     }
 
     /// Stroke `path` with `paint` (width, cap, and join apply).
@@ -5386,7 +5449,11 @@ impl CanvasCommands<'_> {
             },
         };
         let brush = brush.raw;
-        unsafe { sys::flux_canvas_draw_geometry(self.raw, &geom, &brush) };
+        let opts = sys::flux_canvas_draw_geometry_opts {
+            geom: &geom,
+            brush: &brush,
+        };
+        unsafe { sys::flux_canvas_draw_geometry(self.raw, &opts) };
     }
 
     /// Fill a rectangle with a linear gradient in canvas pixel space.
@@ -5440,7 +5507,11 @@ impl CanvasCommands<'_> {
                 },
             },
         };
-        unsafe { sys::flux_canvas_draw_geometry(self.raw, &geom, &brush) };
+        let opts = sys::flux_canvas_draw_geometry_opts {
+            geom: &geom,
+            brush: &brush,
+        };
+        unsafe { sys::flux_canvas_draw_geometry(self.raw, &opts) };
     }
 
     /// Fill a rectangle with a radial gradient in canvas pixel space.
@@ -5494,7 +5565,11 @@ impl CanvasCommands<'_> {
                 },
             },
         };
-        unsafe { sys::flux_canvas_draw_geometry(self.raw, &geom, &brush) };
+        let opts = sys::flux_canvas_draw_geometry_opts {
+            geom: &geom,
+            brush: &brush,
+        };
+        unsafe { sys::flux_canvas_draw_geometry(self.raw, &opts) };
     }
 
     /// Draw an image into the destination rectangle (pixel space).
@@ -5822,9 +5897,11 @@ impl CanvasCommands<'_> {
     /// closes it on error. The wait is submitted to the GPU and does not
     /// block the caller.
     pub fn wait_dmabuf_acquire(&self, image: &Image, acquire_fence: OwnedFd) -> Result<(), Error> {
-        let result = unsafe {
-            sys::flux_canvas_wait_dmabuf_acquire(self.raw, image.raw, acquire_fence.as_raw_fd())
+        let opts = sys::flux_canvas_wait_dmabuf_acquire_opts {
+            image: image.raw,
+            acquire_sync_fd: acquire_fence.as_raw_fd(),
         };
+        let result = unsafe { sys::flux_canvas_wait_dmabuf_acquire(self.raw, &opts) };
         Error::check(result)?;
         std::mem::forget(acquire_fence);
         Ok(())

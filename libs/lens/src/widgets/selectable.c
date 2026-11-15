@@ -3,7 +3,7 @@
 #include "../internal.h"
 
 lens_response lens_selectable(lens *ui, const lens_selectable_opts *opts) {
-    lens_selectable_opts default_opts = {0};
+    lens_selectable_opts default_opts = {};
     if (!opts)
         opts = &default_opts;
 
@@ -21,7 +21,7 @@ lens_response lens_selectable(lens *ui, const lens_selectable_opts *opts) {
         opts->box.id ? lensi_gen_widget_id(ui, opts->box.id) : lensi_gen_widget_id(ui, label);
     lens_node *n = lensi_store_touch(ui, id);
     if (!n)
-        return (lens_response){0};
+        return (lens_response){};
 
     lensi_link_child(ui, n);
     lensi_node_box(ui, n, &opts->box);
@@ -47,7 +47,7 @@ lens_response lens_selectable(lens *ui, const lens_selectable_opts *opts) {
 
     uint32_t sem_flags = (r.focused ? LENS_A11Y_FOCUSED : 0) | (disabled ? LENS_A11Y_DISABLED : 0) |
                          (opts->selected ? LENS_A11Y_CHECKED : 0);
-    lensi_node_semantics(ui, n, LENS_ROLE_BUTTON, label, NULL, sem_flags);
+    lensi_node_semantics(ui, n, LENS_ROLE_BUTTON, label, nullptr, sem_flags);
 
     if (!disabled) {
         n->hover_t = r.hovered ? 1.0f : 0.0f;

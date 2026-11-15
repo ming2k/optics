@@ -24,6 +24,16 @@
 #include "optics_test.h"
 #include <vista/vista.h>
 
+static flux_result parse_glb(const void *bytes, size_t byte_count, vista_scene_data **out) {
+    return vista_parse_glb(
+        &(vista_parse_glb_opts){.bytes = bytes, .byte_count = byte_count, .out = out});
+}
+
+static bool data_bounds(const vista_scene_data *data, flux_vec3 *out_min, flux_vec3 *out_max) {
+    return vista_scene_data_bounds(
+        data, &(vista_scene_data_bounds_opts){.out_min = out_min, .out_max = out_max});
+}
+
 #include <stdlib.h>
 #include <string.h>
 
@@ -81,24 +91,25 @@ static uint8_t buf[CAP];
 int main(void) {
     /* --- valid minimal GLB: exact geometry round-trips ---------------- */
     float verts[9] = {0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f};
-    size_t glb_len = make_glb(buf, CAP, MINIMAL_JSON, (const uint8_t *)verts, sizeof verts, NULL);
+    size_t glb_len =
+        make_glb(buf, CAP, MINIMAL_JSON, (const uint8_t *)verts, sizeof verts, nullptr);
     OT_EXPECT(glb_len > 0);
 
-    vista_scene_data *d1 = NULL, *d2 = NULL;
-    OT_EXPECT(vista_parse_glb(buf, glb_len, &d1) == FLUX_OK);
-    OT_EXPECT(d1 != NULL);
+    vista_scene_data *d1 = nullptr, *d2 = nullptr;
+    OT_EXPECT(parse_glb(buf, glb_len, &d1) == FLUX_OK);
+    OT_EXPECT(d1 != nullptr);
     OT_EXPECT(vista_scene_data_primitive_count(d1) == 1);
 
-    flux_vec3 mn = {0}, mx = {0};
-    OT_EXPECT(vista_scene_data_bounds(d1, &mn, &mx));
+    flux_vec3 mn = {}, mx = {};
+    OT_EXPECT(data_bounds(d1, &mn, &mx));
     OT_EXPECT(mn.x == 0.0f && mn.y == 0.0f && mn.z == 0.0f);
     OT_EXPECT(mx.x == 1.0f && mx.y == 1.0f && mx.z == 0.0f);
 
     /* Determinism: a second parse produces the same shape. */
-    OT_EXPECT(vista_parse_glb(buf, glb_len, &d2) == FLUX_OK);
+    OT_EXPECT(parse_glb(buf, glb_len, &d2) == FLUX_OK);
     OT_EXPECT(vista_scene_data_primitive_count(d2) == 1);
-    flux_vec3 mn2 = {0}, mx2 = {0};
-    OT_EXPECT(vista_scene_data_bounds(d2, &mn2, &mx2));
+    flux_vec3 mn2 = {}, mx2 = {};
+    OT_EXPECT(data_bounds(d2, &mn2, &mx2));
     OT_EXPECT(memcmp(&mn, &mn2, sizeof mn) == 0 && memcmp(&mx, &mx2, sizeof mx) == 0);
     vista_scene_data_free(d1);
     vista_scene_data_free(d2);
@@ -107,36 +118,36 @@ int main(void) {
     for (size_t cut = 0; cut < glb_len; cut++) {
         vista_scene_data *d =
             (vista_scene_data *)(uintptr_t)0x1; /* sentinel: must be set to NULL */
-        flux_result r = vista_parse_glb(buf, cut, &d);
+        flux_result r = parse_glb(buf, cut, &d);
         OT_EXPECT(r != FLUX_OK);
-        OT_EXPECT(d == NULL); /* documented contract: NULL out on failure */
+        OT_EXPECT(d == nullptr); /* documented contract: NULL out on failure */
         /* ASan verifies nothing was retained on the error path. */
     }
 
     /* --- hostile container headers ------------------------------------ */
-    vista_scene_data *d = NULL;
+    vista_scene_data *d = nullptr;
     size_t json_off = 0;
     (void)make_glb(buf, CAP, MINIMAL_JSON, (const uint8_t *)verts, sizeof verts, &json_off);
 
     /* total=0: the unsigned-underflow crash found by fuzz_glb_parse. */
     wr_u32(buf + 8, 0);
-    OT_EXPECT(vista_parse_glb(buf, glb_len, &d) != FLUX_OK && d == NULL);
+    OT_EXPECT(parse_glb(buf, glb_len, &d) != FLUX_OK && d == nullptr);
 
     /* total beyond the buffer. */
     wr_u32(buf + 8, (uint32_t)glb_len + 1);
-    OT_EXPECT(vista_parse_glb(buf, glb_len, &d) != FLUX_OK && d == NULL);
+    OT_EXPECT(parse_glb(buf, glb_len, &d) != FLUX_OK && d == nullptr);
 
     /* total below the header minimum. */
     wr_u32(buf + 8, 8);
-    OT_EXPECT(vista_parse_glb(buf, glb_len, &d) != FLUX_OK && d == NULL);
+    OT_EXPECT(parse_glb(buf, glb_len, &d) != FLUX_OK && d == nullptr);
 
     /* bad magic / bad version. */
     wr_u32(buf + 8, (uint32_t)glb_len);
     buf[0] = 'X';
-    OT_EXPECT(vista_parse_glb(buf, glb_len, &d) != FLUX_OK && d == NULL);
+    OT_EXPECT(parse_glb(buf, glb_len, &d) != FLUX_OK && d == nullptr);
     buf[0] = 'g';
     wr_u32(buf + 4, 3);
-    OT_EXPECT(vista_parse_glb(buf, glb_len, &d) != FLUX_OK && d == NULL);
+    OT_EXPECT(parse_glb(buf, glb_len, &d) != FLUX_OK && d == nullptr);
     wr_u32(buf + 4, 2);
 
     /* --- hostile JSON bodies (parse must fail or degrade safely) ------ */
@@ -169,17 +180,17 @@ int main(void) {
         "\"buffers\":[{\"byteLength\":36}]}",
     };
     for (size_t i = 0; i < sizeof hostile / sizeof hostile[0]; i++) {
-        size_t n = make_glb(buf, CAP, hostile[i], (const uint8_t *)verts, sizeof verts, NULL);
+        size_t n = make_glb(buf, CAP, hostile[i], (const uint8_t *)verts, sizeof verts, nullptr);
         OT_EXPECT(n > 0);
         /* Acceptance here is value-based (some hostile content parses to
          * a valid-but-degenerate scene); the hard requirements are: no
          * crash, no hang, no leak, and the out-handle contract. */
-        flux_result r = vista_parse_glb(buf, n, &d);
+        flux_result r = parse_glb(buf, n, &d);
         if (r == FLUX_OK) {
-            OT_EXPECT(d != NULL);
+            OT_EXPECT(d != nullptr);
             vista_scene_data_free(d);
         } else {
-            OT_EXPECT(d == NULL);
+            OT_EXPECT(d == nullptr);
         }
     }
 
@@ -192,21 +203,21 @@ int main(void) {
             x ^= x << 5;
             wr_u32(buf + i, x);
         }
-        d = NULL;
-        flux_result r = vista_parse_glb(buf, 512, &d);
+        d = nullptr;
+        flux_result r = parse_glb(buf, 512, &d);
         if (r == FLUX_OK)
             vista_scene_data_free(d);
         else
-            OT_EXPECT(d == NULL);
+            OT_EXPECT(d == nullptr);
     }
 
     /* --- null-argument guards ----------------------------------------- */
     d = (vista_scene_data *)(uintptr_t)0x1;
-    OT_EXPECT(vista_parse_glb(NULL, 10, &d) == FLUX_ERROR_INVALID_ARGUMENT);
-    OT_EXPECT(vista_parse_glb(buf, 10, NULL) == FLUX_ERROR_INVALID_ARGUMENT);
-    OT_EXPECT(vista_scene_data_primitive_count(NULL) == 0);
-    OT_EXPECT(!vista_scene_data_bounds(NULL, &mn, &mx));
-    vista_scene_data_free(NULL); /* no-op by contract */
+    OT_EXPECT(parse_glb(nullptr, 10, &d) == FLUX_ERROR_INVALID_ARGUMENT);
+    OT_EXPECT(parse_glb(buf, 10, nullptr) == FLUX_ERROR_INVALID_ARGUMENT);
+    OT_EXPECT(vista_scene_data_primitive_count(nullptr) == 0);
+    OT_EXPECT(!data_bounds(nullptr, &mn, &mx));
+    vista_scene_data_free(nullptr); /* no-op by contract */
 
     return OT_REPORT();
 }

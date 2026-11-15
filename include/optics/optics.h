@@ -1,12 +1,18 @@
 /*
  * optics/optics.h — canonical umbrella header for the Optics C23 stack.
  *
- * Provides a single unified entry point across all engine layers (ADR-0160):
+ * Provides a single unified entry point across all engine layers (ADR-0160,
+ * ADR-0164):
  *   - Layer 0: Vulkan 1.3 RHI & 2D Vector Canvas (flux)
  *   - Layer 1: HarfBuzz Text Shaping & Typography (glyph)
  *   - Layer 2: Visual Capabilities, Material Optics (prism), Motion (transit), 3D (vista)
  *   - Document: SVG Static Art Compiler (reticle)
  *   - Layer 3: UI State Engine (lens) & Native Window Shell (iris)
+ *
+ * Optional layers are exposed only when the distribution's compile flags say
+ * they are part of the installed stack (`OPTICS_HAVE_<MODULE>` from optics.pc).
+ * Do not probe the host include path: a stale system install must not leak into
+ * a build that deliberately omitted that module.
  */
 
 #ifndef OPTICS_H
@@ -30,34 +36,34 @@
 #include <flux/flux.h>
 
 /* Layer 1: Typography & Text Shaping */
-#if defined(__has_include)
-#if __has_include(<glyph/glyph.h>)
+#if defined(OPTICS_HAVE_GLYPH)
 #include <glyph/glyph.h>
-#endif
 #endif
 
 /* Layer 2: Visual Capabilities & Material Optics */
-#if defined(__has_include)
-#if __has_include(<prism/prism.h>)
+#if defined(OPTICS_HAVE_PRISM)
 #include <prism/prism.h>
 #endif
-#if __has_include(<vista/vista.h>)
+#if defined(OPTICS_HAVE_VISTA)
 #include <vista/vista.h>
-#endif
 #endif
 
 /* Layer 2: Motion Vocabulary (Header-Only, ADR-0158) */
+#if defined(OPTICS_HAVE_TRANSIT)
 #include <transit/transit.h>
+#endif
 
 /* Document Layer: Vector Art & Static Graphics Compiler (Reticle, ADR-0161) */
-#if defined(__has_include)
-#if __has_include(<reticle/reticle.h>)
+#if defined(OPTICS_HAVE_RETICLE)
 #include <reticle/reticle.h>
-#endif
 #endif
 
 /* Layer 3: UI State & Platform Shell */
-#include <iris/iris.h>
+#if defined(OPTICS_HAVE_LENS)
 #include <lens/lens.h>
+#endif
+#if defined(OPTICS_HAVE_IRIS)
+#include <iris/iris.h>
+#endif
 
 #endif /* OPTICS_H */

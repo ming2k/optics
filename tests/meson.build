@@ -23,7 +23,9 @@ subdir('vista')
 if get_option('reticle')
   subdir('reticle')
 endif
-subdir('lens')
-subdir('iris')
+if opt_lens
+  subdir('lens')
+  subdir('iris')
+endif
 subdir('optics')
 subdir('e2e')

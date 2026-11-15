@@ -33,6 +33,19 @@
 #define W 64u
 #define H 64u
 #define BYTES (W * H * 4u)
+
+static flux_result apply_layer(prism_backdrop_layer_filter *filter, flux_frame *frame,
+                               const prism_backdrop_layer_desc *desc, prism_material_output *out) {
+    return prism_backdrop_layer_filter_apply(filter, &(prism_backdrop_layer_filter_apply_opts){
+                                                         .frame = frame, .desc = desc, .out = out});
+}
+
+static flux_result stats_layer(prism_backdrop_layer_filter *filter, flux_frame *frame,
+                               prism_backdrop_stat *out, uint32_t max_groups, uint32_t *out_count) {
+    return prism_backdrop_layer_filter_stats(
+        filter, &(prism_backdrop_layer_filter_stats_opts){
+                    .frame = frame, .out = out, .max_groups = max_groups, .out_count = out_count});
+}
 #define TEST_FRAME_SLOTS 3u /* mirrors FLUX_MAX_FRAMES_IN_FLIGHT */
 
 int main(void) {
@@ -90,7 +103,9 @@ int main(void) {
         bd.input = target;
         bd.sigma = 8.0f;
         flux_image *blurred = nullptr;
-        OT_EXPECT(flux_blur_filter_apply(blur_filter, frame, &bd, &blurred) == FLUX_OK);
+        OT_EXPECT(flux_blur_filter_apply(
+                      blur_filter, &(flux_blur_filter_apply_opts){
+                                       .frame = frame, .desc = &bd, .out = &blurred}) == FLUX_OK);
 
         /* Full-image frost sheet + a glass body straddling the capture's
          * hard edge, with no refraction. The discriminator: every pixel of
@@ -117,8 +132,8 @@ int main(void) {
         ld.group_count = 1u;
         ld.refraction = 0.0f;
         ld.frost_strength = 0.0f;
-        prism_material_output layer = {0};
-        OT_EXPECT(prism_backdrop_layer_filter_apply(layer_filter, frame, &ld, &layer) == FLUX_OK);
+        prism_material_output layer = {};
+        OT_EXPECT(apply_layer(layer_filter, frame, &ld, &layer) == FLUX_OK);
         OT_EXPECT(layer.image != nullptr);
 
         /* Draw over a *black* base so unfrosted/un-glassed pixels read black
@@ -191,7 +206,10 @@ int main(void) {
             bd.input = target;
             bd.sigma = 2.0f;
             flux_image *blurred = nullptr;
-            OT_EXPECT(flux_blur_filter_apply(blur_filter, frame, &bd, &blurred) == FLUX_OK);
+            OT_EXPECT(flux_blur_filter_apply(blur_filter,
+                                             &(flux_blur_filter_apply_opts){
+                                                 .frame = frame, .desc = &bd, .out = &blurred}) ==
+                      FLUX_OK);
 
             prism_backdrop_layer_desc ld = PRISM_BACKDROP_LAYER_DESC_INIT;
             ld.input = target;
@@ -201,9 +219,8 @@ int main(void) {
             ld.groups = &body;
             ld.group_count = 1u;
             ld.refraction = 0.0f;
-            prism_material_output layer = {0};
-            OT_EXPECT(prism_backdrop_layer_filter_apply(layer_filter, frame, &ld, &layer) ==
-                      FLUX_OK);
+            prism_material_output layer = {};
+            OT_EXPECT(apply_layer(layer_filter, frame, &ld, &layer) == FLUX_OK);
 
             OT_EXPECT(flux_canvas_begin(
                           canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
@@ -248,7 +265,10 @@ int main(void) {
             bd.input = target;
             bd.sigma = 2.0f;
             flux_image *blurred = nullptr;
-            OT_EXPECT(flux_blur_filter_apply(blur_filter, frame, &bd, &blurred) == FLUX_OK);
+            OT_EXPECT(flux_blur_filter_apply(blur_filter,
+                                             &(flux_blur_filter_apply_opts){
+                                                 .frame = frame, .desc = &bd, .out = &blurred}) ==
+                      FLUX_OK);
 
             prism_backdrop_layer_desc ld = PRISM_BACKDROP_LAYER_DESC_INIT;
             ld.input = target;
@@ -258,9 +278,8 @@ int main(void) {
             ld.groups = &body;
             ld.group_count = 1u;
             ld.refraction = 0.0f;
-            prism_material_output layer = {0};
-            OT_EXPECT(prism_backdrop_layer_filter_apply(layer_filter, frame, &ld, &layer) ==
-                      FLUX_OK);
+            prism_material_output layer = {};
+            OT_EXPECT(apply_layer(layer_filter, frame, &ld, &layer) == FLUX_OK);
 
             OT_EXPECT(flux_canvas_begin(
                           canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
@@ -305,7 +324,9 @@ int main(void) {
         bd.input = target;
         bd.sigma = 8.0f;
         flux_image *blurred = nullptr;
-        OT_EXPECT(flux_blur_filter_apply(blur_filter, frame, &bd, &blurred) == FLUX_OK);
+        OT_EXPECT(flux_blur_filter_apply(
+                      blur_filter, &(flux_blur_filter_apply_opts){
+                                       .frame = frame, .desc = &bd, .out = &blurred}) == FLUX_OK);
 
         /* Half-frost over a bright capture: opacity 0.5 must blend
          * frosted-vs-SHARP (a mid grey over the bright base), never
@@ -329,8 +350,8 @@ int main(void) {
         ld.base_materials = frost;
         ld.base_material_count = 3u;
         ld.group_count = 0u;
-        prism_material_output layer = {0};
-        OT_EXPECT(prism_backdrop_layer_filter_apply(layer_filter, frame, &ld, &layer) == FLUX_OK);
+        prism_material_output layer = {};
+        OT_EXPECT(apply_layer(layer_filter, frame, &ld, &layer) == FLUX_OK);
 
         OT_EXPECT(
             flux_canvas_begin(canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
@@ -395,7 +416,9 @@ int main(void) {
         bd.input = target;
         bd.sigma = 8.0f;
         flux_image *blurred = nullptr;
-        OT_EXPECT(flux_blur_filter_apply(blur_filter, frame, &bd, &blurred) == FLUX_OK);
+        OT_EXPECT(flux_blur_filter_apply(
+                      blur_filter, &(flux_blur_filter_apply_opts){
+                                       .frame = frame, .desc = &bd, .out = &blurred}) == FLUX_OK);
 
         /* A half-opacity frost over the LEFT half only; a no-refraction
          * glass body centred on the frost edge, well inside the bright
@@ -422,8 +445,8 @@ int main(void) {
         ld.group_count = 1u;
         ld.refraction = 0.0f;
         ld.frost_strength = 0.0f;
-        prism_material_output layer = {0};
-        OT_EXPECT(prism_backdrop_layer_filter_apply(layer_filter, frame, &ld, &layer) == FLUX_OK);
+        prism_material_output layer = {};
+        OT_EXPECT(apply_layer(layer_filter, frame, &ld, &layer) == FLUX_OK);
 
         OT_EXPECT(
             flux_canvas_begin(canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
@@ -476,7 +499,9 @@ int main(void) {
         bd.input = target;
         bd.sigma = 8.0f;
         flux_image *blurred = nullptr;
-        OT_EXPECT(flux_blur_filter_apply(blur_filter, frame, &bd, &blurred) == FLUX_OK);
+        OT_EXPECT(flux_blur_filter_apply(
+                      blur_filter, &(flux_blur_filter_apply_opts){
+                                       .frame = frame, .desc = &bd, .out = &blurred}) == FLUX_OK);
 
         /* Glass only: no frost rects at all. The layer pass must still
          * write the sharp capture as the opaque base under the body, or
@@ -495,8 +520,8 @@ int main(void) {
         ld.group_count = 1u;
         ld.refraction = 0.0f;
         ld.frost_strength = 0.0f;
-        prism_material_output layer = {0};
-        OT_EXPECT(prism_backdrop_layer_filter_apply(layer_filter, frame, &ld, &layer) == FLUX_OK);
+        prism_material_output layer = {};
+        OT_EXPECT(apply_layer(layer_filter, frame, &ld, &layer) == FLUX_OK);
 
         OT_EXPECT(
             flux_canvas_begin(canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
@@ -542,7 +567,9 @@ int main(void) {
         bd.input = target;
         bd.sigma = 6.0f;
         flux_image *blurred = nullptr;
-        OT_EXPECT(flux_blur_filter_apply(blur_filter, frame, &bd, &blurred) == FLUX_OK);
+        OT_EXPECT(flux_blur_filter_apply(
+                      blur_filter, &(flux_blur_filter_apply_opts){
+                                       .frame = frame, .desc = &bd, .out = &blurred}) == FLUX_OK);
 
         prism_base_material plates[2] = {PRISM_BASE_MATERIAL_INIT, PRISM_BASE_MATERIAL_INIT};
         plates[0].bounds = (flux_rect){8.0f, 8.0f, 32.0f, 32.0f}; /* A: x 8..40 */
@@ -560,8 +587,8 @@ int main(void) {
         ld.base_materials = plates;
         ld.base_material_count = 2u;
         ld.group_count = 0u;
-        prism_material_output layer = {0};
-        OT_EXPECT(prism_backdrop_layer_filter_apply(layer_filter, frame, &ld, &layer) == FLUX_OK);
+        prism_material_output layer = {};
+        OT_EXPECT(apply_layer(layer_filter, frame, &ld, &layer) == FLUX_OK);
 
         OT_EXPECT(
             flux_canvas_begin(canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
@@ -608,7 +635,9 @@ int main(void) {
         bd.input = target;
         bd.sigma = 4.0f;
         flux_image *blurred = nullptr;
-        OT_EXPECT(flux_blur_filter_apply(blur_filter, frame, &bd, &blurred) == FLUX_OK);
+        OT_EXPECT(flux_blur_filter_apply(
+                      blur_filter, &(flux_blur_filter_apply_opts){
+                                       .frame = frame, .desc = &bd, .out = &blurred}) == FLUX_OK);
 
         prism_liquid_glass_group bodies[3] = {PRISM_LIQUID_GLASS_GROUP_INIT,
                                               PRISM_LIQUID_GLASS_GROUP_INIT,
@@ -631,8 +660,8 @@ int main(void) {
         ld.group_count = 3u;
         ld.refraction = 4.0f;
         ld.edge_width = 8.0f;
-        prism_material_output layer = {0};
-        OT_EXPECT(prism_backdrop_layer_filter_apply(layer_filter, frame, &ld, &layer) == FLUX_OK);
+        prism_material_output layer = {};
+        OT_EXPECT(apply_layer(layer_filter, frame, &ld, &layer) == FLUX_OK);
 
         OT_EXPECT(
             flux_canvas_begin(canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
@@ -667,8 +696,7 @@ int main(void) {
         /* First submission on this slot's cadence: stats may legitimately be
          * UNSUPPORTED_STATE on a fresh slot; the contract is that a slot
          * with a prior glass submission reports the group count. */
-        OT_EXPECT(prism_backdrop_layer_filter_stats(layer_filter, frame, stats, 8u, &count) ==
-                  FLUX_OK);
+        OT_EXPECT(stats_layer(layer_filter, frame, stats, 8u, &count) == FLUX_OK);
         OT_EXPECT(flux_frame_submit(frame) == FLUX_OK);
         OT_EXPECT(flux_frame_present(frame) == FLUX_OK);
     }
@@ -688,7 +716,9 @@ int main(void) {
         bd.input = target;
         bd.sigma = 4.0f;
         flux_image *blurred = nullptr;
-        OT_EXPECT(flux_blur_filter_apply(blur_filter, frame, &bd, &blurred) == FLUX_OK);
+        OT_EXPECT(flux_blur_filter_apply(
+                      blur_filter, &(flux_blur_filter_apply_opts){
+                                       .frame = frame, .desc = &bd, .out = &blurred}) == FLUX_OK);
 
         prism_backdrop_layer_desc ld = PRISM_BACKDROP_LAYER_DESC_INIT;
         ld.input = target;
@@ -700,15 +730,15 @@ int main(void) {
         rev.revision = 42u;
         ld.next = &rev;
 
-        prism_material_output out1 = {0};
-        OT_EXPECT(prism_backdrop_layer_filter_apply(layer_filter, frame, &ld, &out1) == FLUX_OK);
+        prism_material_output out1 = {};
+        OT_EXPECT(apply_layer(layer_filter, frame, &ld, &out1) == FLUX_OK);
         OT_EXPECT(out1.image != nullptr);
 
         /* Second application with the same revision on the same slot: hits the
          * cache and returns the exact same persistent image without any
          * dispatch. */
-        prism_material_output out2 = {0};
-        OT_EXPECT(prism_backdrop_layer_filter_apply(layer_filter, frame, &ld, &out2) == FLUX_OK);
+        prism_material_output out2 = {};
+        OT_EXPECT(apply_layer(layer_filter, frame, &ld, &out2) == FLUX_OK);
         OT_EXPECT(out2.image == out1.image);
 
         /* A new revision must invalidate, even though both images and the whole
@@ -716,16 +746,16 @@ int main(void) {
          * could not express: a repainted capture target and a pooled blur
          * output keep their handles, so content changes were invisible. */
         rev.revision = 43u;
-        prism_material_output out3 = {0};
-        OT_EXPECT(prism_backdrop_layer_filter_apply(layer_filter, frame, &ld, &out3) == FLUX_OK);
+        prism_material_output out3 = {};
+        OT_EXPECT(apply_layer(layer_filter, frame, &ld, &out3) == FLUX_OK);
         OT_EXPECT(out3.image == out1.image); /* same persistent image ... */
         /* ... re-rendered: the stats for this slot describe this submission,
          * which only happens on a cache miss. */
 
         /* With the cache disabled (revision 0) every call re-renders. */
         ld.next = nullptr;
-        prism_material_output out4 = {0};
-        OT_EXPECT(prism_backdrop_layer_filter_apply(layer_filter, frame, &ld, &out4) == FLUX_OK);
+        prism_material_output out4 = {};
+        OT_EXPECT(apply_layer(layer_filter, frame, &ld, &out4) == FLUX_OK);
         OT_EXPECT(out4.image == out1.image);
 
         /* An extension tag prism does not define is rejected instead of being
@@ -734,9 +764,8 @@ int main(void) {
         prism_backdrop_layer_revision bogus = PRISM_BACKDROP_LAYER_REVISION_INIT;
         bogus.type = (prism_struct_type)999;
         ld.next = &bogus;
-        prism_material_output out5 = {0};
-        OT_EXPECT(prism_backdrop_layer_filter_apply(layer_filter, frame, &ld, &out5) ==
-                  FLUX_ERROR_INVALID_ARGUMENT);
+        prism_material_output out5 = {};
+        OT_EXPECT(apply_layer(layer_filter, frame, &ld, &out5) == FLUX_ERROR_INVALID_ARGUMENT);
         OT_EXPECT(out5.image == nullptr);
 
         OT_EXPECT(flux_frame_submit(frame) == FLUX_OK);
@@ -758,7 +787,7 @@ int main(void) {
         body.shape_count = 1;
 
         prism_backdrop_layer_revision rev = PRISM_BACKDROP_LAYER_REVISION_INIT;
-        uint8_t levels[4] = {0};
+        uint8_t levels[4] = {};
         for (uint32_t step = 0; step < 2; ++step) {
             uint8_t bg = step == 0 ? 16u : 240u;
             flux_frame *frame = nullptr;
@@ -778,7 +807,10 @@ int main(void) {
             bd.input = target;
             bd.sigma = 6.0f;
             flux_image *blurred = nullptr;
-            OT_EXPECT(flux_blur_filter_apply(blur_filter, frame, &bd, &blurred) == FLUX_OK);
+            OT_EXPECT(flux_blur_filter_apply(blur_filter,
+                                             &(flux_blur_filter_apply_opts){
+                                                 .frame = frame, .desc = &bd, .out = &blurred}) ==
+                      FLUX_OK);
 
             prism_base_material frost = PRISM_BASE_MATERIAL_INIT;
             frost.bounds = (flux_rect){0.0f, 0.0f, (float)W, (float)H};
@@ -796,9 +828,8 @@ int main(void) {
             ld.tint_strength = 0.0f;
             ld.next = &rev;
 
-            prism_material_output layer = {0};
-            OT_EXPECT(prism_backdrop_layer_filter_apply(layer_filter, frame, &ld, &layer) ==
-                      FLUX_OK);
+            prism_material_output layer = {};
+            OT_EXPECT(apply_layer(layer_filter, frame, &ld, &layer) == FLUX_OK);
 
             OT_EXPECT(flux_canvas_begin(
                           canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,

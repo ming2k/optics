@@ -82,7 +82,9 @@ int main(void) {
 
     fd = open("/dev/null", O_RDONLY | O_CLOEXEC);
     if (fd >= 0) {
-        OT_EXPECT(flux_canvas_wait_dmabuf_acquire(nullptr, nullptr, fd) ==
+        OT_EXPECT(flux_canvas_wait_dmabuf_acquire(
+                      nullptr, &(flux_canvas_wait_dmabuf_acquire_opts){.image = nullptr,
+                                                                       .acquire_sync_fd = fd}) ==
                   FLUX_ERROR_INVALID_ARGUMENT);
         OT_EXPECT(fd_is_open(fd));
         close(fd);
@@ -118,8 +120,11 @@ int main(void) {
 
         uint64_t supported_modifiers[512];
         uint32_t supported_modifier_count = 512;
-        OT_EXPECT(flux_dmabuf_format_modifiers(dd, FLUX_FORMAT_BGRA8_UNORM, supported_modifiers,
-                                               &supported_modifier_count) == FLUX_OK);
+        OT_EXPECT(flux_dmabuf_format_modifiers(
+                      dd, &(flux_dmabuf_format_modifiers_opts){
+                              .format = FLUX_FORMAT_BGRA8_UNORM,
+                              .out_modifiers = supported_modifiers,
+                              .inout_count = &supported_modifier_count}) == FLUX_OK);
         flux_surface_dmabuf_desc exportable = FLUX_SURFACE_DMABUF_DESC_INIT;
         if (supported_modifier_count > 0) {
             exportable.modifiers = supported_modifiers;
@@ -242,7 +247,11 @@ int main(void) {
                                                               .clear_color = &clear}) == FLUX_OK);
                                     if (reuse_sync_fd >= 0) {
                                         OT_EXPECT(flux_canvas_wait_dmabuf_acquire(
-                                                      canvas, sampled, reuse_sync_fd) == FLUX_OK);
+                                                      canvas,
+                                                      &(flux_canvas_wait_dmabuf_acquire_opts){
+                                                          .image = sampled,
+                                                          .acquire_sync_fd = reuse_sync_fd}) ==
+                                                  FLUX_OK);
                                         OT_EXPECT(!fd_is_open(reuse_sync_fd));
                                     }
                                     flux_canvas_draw_image(canvas, sampled,

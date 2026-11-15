@@ -8,22 +8,22 @@
 static const lens_input IN0 = {.display_size = {400, 200}, .dt_seconds = 0.016f};
 
 static void test_reduced_motion_getter_roundtrip(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     OT_EXPECT(!lens_reduced_motion(ui));
     lens_set_reduced_motion(ui, true);
     OT_EXPECT(lens_reduced_motion(ui));
     lens_set_reduced_motion(ui, false);
     OT_EXPECT(!lens_reduced_motion(ui));
     /* NULL-safety, matching the other accessors. */
-    OT_EXPECT(!lens_reduced_motion(NULL));
-    lens_set_reduced_motion(NULL, true);
+    OT_EXPECT(!lens_reduced_motion(nullptr));
+    lens_set_reduced_motion(nullptr, true);
     lens_release(ui);
 }
 
 static void test_reduced_motion_approach_snaps_to_target(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     float eased = lensi_approach(ui, 0.0f, 1.0f, 0.016f, 12.0f);
     OT_EXPECT(eased < 1.0f);
@@ -51,8 +51,8 @@ static void test_reduced_motion_approach_snaps_to_target(void) {
  * So the property is not "gets close"; it is "becomes exactly equal, and stops
  * reporting motion". */
 static void test_approach_terminates_instead_of_converging(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     /* Drive the ease for longer than any real animation lasts at 60 Hz. */
     float value = 0.0f;
@@ -85,8 +85,8 @@ static void test_approach_terminates_instead_of_converging(void) {
 }
 
 static void test_reduced_motion_hover_stays_settled(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     lens_set_reduced_motion(ui, true);
     float value = 0.5f;
 

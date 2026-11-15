@@ -8,20 +8,20 @@
 static const lens_input IN0 = {.display_size = {400, 200}, .dt_seconds = 0.016f};
 
 static void test_link_click_and_intrinsic_size(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     lens_begin(ui, &IN0);
-    lens_row_begin(ui, NULL);
+    lens_row_begin(ui, nullptr);
     OT_EXPECT(
         !lens_button(ui, &(lens_button_opts){.label = "Playlists", .variant = LENS_BUTTON_LINK})
              .clicked);
     lens_close(ui);
     lens_test_end(ui);
     lens_node *row = lens_node_first_child(lens_root(ui));
-    OT_EXPECT(row != NULL);
+    OT_EXPECT(row != nullptr);
     lens_node *link = lens_node_first_child(row);
-    OT_EXPECT(link != NULL);
+    OT_EXPECT(link != nullptr);
     flux_rect bounds = lens_node_bounds(link);
     OT_EXPECT(bounds.w > 0.0f && bounds.w < 100.0f);
     OT_EXPECT(bounds.h > 0.0f && bounds.h < 40.0f);
@@ -30,7 +30,7 @@ static void test_link_click_and_intrinsic_size(void) {
     in.cursor = (flux_point){10.0f, 8.0f};
     in.mouse_pressed[LENS_MOUSE_LEFT] = true;
     lens_begin(ui, &in);
-    lens_row_begin(ui, NULL);
+    lens_row_begin(ui, nullptr);
     OT_EXPECT(
         !lens_button(ui, &(lens_button_opts){.label = "Playlists", .variant = LENS_BUTTON_LINK})
              .clicked);
@@ -42,7 +42,7 @@ static void test_link_click_and_intrinsic_size(void) {
     in.cursor = (flux_point){10.0f, 8.0f};
     in.mouse_released[LENS_MOUSE_LEFT] = true;
     lens_begin(ui, &in);
-    lens_row_begin(ui, NULL);
+    lens_row_begin(ui, nullptr);
     OT_EXPECT(
         lens_button(ui, &(lens_button_opts){.label = "Playlists", .variant = LENS_BUTTON_LINK})
             .clicked);
@@ -53,8 +53,8 @@ static void test_link_click_and_intrinsic_size(void) {
 }
 
 static void test_button_click(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     /* Frame 1: establish prev_rect */
     lens_begin(ui, &IN0);
@@ -84,8 +84,8 @@ static void test_button_click(void) {
 }
 
 static void test_button_no_click_when_disabled(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     /* Warm-up frame */
     lens_begin(ui, &IN0);
@@ -107,8 +107,8 @@ static void test_button_no_click_when_disabled(void) {
 
 static size_t rendered_icon_pixels_with_outline(lens_icon_id icon, bool *center_lit,
                                                 bool with_outline, size_t *outline_pixels) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     lens_theme theme = lens_theme_dark();
     theme.color_fg = flux_color_rgba_premul(255, 255, 255, 255);
     lens_set_theme(ui, theme);
@@ -128,7 +128,7 @@ static size_t rendered_icon_pixels_with_outline(lens_icon_id icon, bool *center_
     }
     lens_test_end(ui);
 
-    flux_canvas *canvas = NULL;
+    flux_canvas *canvas = nullptr;
     OT_EXPECT(flux_canvas_create_cpu(24, 24, 1.0f, &canvas) == FLUX_OK);
     flux_color black = flux_color_rgba_premul(0, 0, 0, 255);
     OT_EXPECT(flux_canvas_begin(canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
@@ -139,7 +139,7 @@ static size_t rendered_icon_pixels_with_outline(lens_icon_id icon, bool *center_
 
     uint32_t width = 0, height = 0, stride = 0;
     const uint8_t *fb = flux_canvas_cpu_pixels(canvas, &width, &height, &stride);
-    OT_EXPECT(fb != NULL && width == 24 && height == 24);
+    OT_EXPECT(fb != nullptr && width == 24 && height == 24);
     const uint8_t *center = fb + (size_t)12 * stride + (size_t)12 * 4;
     *center_lit = center[0] > 16 || center[1] > 16 || center[2] > 16;
     size_t lit = 0;
@@ -162,7 +162,7 @@ static size_t rendered_icon_pixels_with_outline(lens_icon_id icon, bool *center_
 }
 
 static size_t rendered_icon_pixels(lens_icon_id icon, bool *center_lit) {
-    return rendered_icon_pixels_with_outline(icon, center_lit, false, NULL);
+    return rendered_icon_pixels_with_outline(icon, center_lit, false, nullptr);
 }
 
 static void test_material_rounded_star_pair_uses_filled_svg_paths(void) {
@@ -177,8 +177,8 @@ static void test_material_rounded_star_pair_uses_filled_svg_paths(void) {
 }
 
 static void test_icon_outline_adds_a_contour_without_changing_intrinsic_size(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     lens_style outline = lens_style_init();
     outline.fields = LENS_STYLE_OUTLINE_COLOR | LENS_STYLE_OUTLINE_WIDTH;
@@ -186,7 +186,7 @@ static void test_icon_outline_adds_a_contour_without_changing_intrinsic_size(voi
     outline.outline_width = 2.0f;
 
     lens_begin(ui, &IN0);
-    lens_row_begin(ui, NULL);
+    lens_row_begin(ui, nullptr);
     lens_push_id(ui, "plain");
     lens_icon(ui, &(lens_icon_opts){.id = LENS_ICON_GLOBE, .size = 24.0f});
     lens_pop_id(ui);
@@ -212,8 +212,8 @@ static void test_icon_outline_adds_a_contour_without_changing_intrinsic_size(voi
 }
 
 static void test_icon_button_requests_pointer_cursor(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     lens_begin(ui, &IN0);
     lens_button(ui, &(lens_button_opts){.icon = LENS_ICON_PLAY});
@@ -237,8 +237,8 @@ static void test_icon_button_requests_pointer_cursor(void) {
 }
 
 static void test_button_mouse_secondary(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     /* Establish geometry. */
     lens_begin(ui, &IN0);

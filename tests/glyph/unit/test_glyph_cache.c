@@ -22,11 +22,11 @@
 /* Insert keys (1, 0, 0, 0)..(1, N-1, 0, 0) and look them back up. */
 static void test_basic_insert_lookup(void) {
     glyph_cache *c = glyph_cache_new(nullptr, 16, 256);
-    OT_EXPECT(c != NULL);
+    OT_EXPECT(c != nullptr);
 
     for (uint32_t i = 0; i < 32; i++) {
         glyph_entry *e = glyph_cache_put(c, 1, i, 0, 0);
-        OT_EXPECT(e != NULL);
+        OT_EXPECT(e != nullptr);
         OT_EXPECT(e->gid == i);
     }
 
@@ -40,14 +40,14 @@ static void test_basic_insert_lookup(void) {
     /* All 32 must be present; lookup bumps hit counter. */
     for (uint32_t i = 0; i < 32; i++) {
         glyph_entry *e = glyph_cache_lookup(c, 1, i, 0, 0);
-        OT_EXPECT(e != NULL);
+        OT_EXPECT(e != nullptr);
         OT_EXPECT(e->gid == i);
     }
     glyph_cache_get_stats(c, &s);
     OT_EXPECT(s.hits == 32);
 
     /* A miss returns NULL and bumps the miss counter. */
-    OT_EXPECT(glyph_cache_lookup(c, 1, 9999, 0, 0) == NULL);
+    OT_EXPECT(glyph_cache_lookup(c, 1, 9999, 0, 0) == nullptr);
     glyph_cache_get_stats(c, &s);
     OT_EXPECT(s.misses == 1);
 
@@ -64,11 +64,11 @@ static void test_basic_insert_lookup(void) {
 static void test_eviction_at_cap(void) {
     const uint32_t cap = 64; /* init_cap == max_cap */
     glyph_cache *c = glyph_cache_new(nullptr, cap, cap);
-    OT_EXPECT(c != NULL);
+    OT_EXPECT(c != nullptr);
 
     /* Fill to the 50 % load trigger. No eviction yet. */
     for (uint32_t i = 0; i < cap / 2; i++) {
-        OT_EXPECT(glyph_cache_put(c, 1, i, 0, 0) != NULL);
+        OT_EXPECT(glyph_cache_put(c, 1, i, 0, 0) != nullptr);
     }
     glyph_cache_stats s;
     glyph_cache_get_stats(c, &s);
@@ -77,26 +77,26 @@ static void test_eviction_at_cap(void) {
 
     /* Putting one more evicts the LRU (gid 0, never looked up). */
     glyph_entry *e = glyph_cache_put(c, 1, 10000, 0, 0);
-    OT_EXPECT(e != NULL);
+    OT_EXPECT(e != nullptr);
     OT_EXPECT(e->gid == 10000);
     glyph_cache_get_stats(c, &s);
     OT_EXPECT(s.count == cap / 2);
     OT_EXPECT(s.evictions == 1);
 
     /* gid 0 was the LRU victim — it must be gone. */
-    OT_EXPECT(glyph_cache_lookup(c, 1, 0, 0, 0) == NULL);
+    OT_EXPECT(glyph_cache_lookup(c, 1, 0, 0, 0) == nullptr);
 
     /* gid 1..cap/2-1 and gid 10000 must all still be present. */
     for (uint32_t i = 1; i < cap / 2; i++) {
         glyph_entry *g = glyph_cache_lookup(c, 1, i, 0, 0);
-        OT_EXPECT(g != NULL);
+        OT_EXPECT(g != nullptr);
         OT_EXPECT(g->gid == i);
     }
-    OT_EXPECT(glyph_cache_lookup(c, 1, 10000, 0, 0) != NULL);
+    OT_EXPECT(glyph_cache_lookup(c, 1, 10000, 0, 0) != nullptr);
 
     /* Inserting many more never fails; count stays bounded at cap/2. */
     for (uint32_t i = 10001; i < 10000u + cap * 4; i++) {
-        OT_EXPECT(glyph_cache_put(c, 1, i, 0, 0) != NULL);
+        OT_EXPECT(glyph_cache_put(c, 1, i, 0, 0) != nullptr);
     }
     glyph_cache_get_stats(c, &s);
     OT_EXPECT(s.count == cap / 2);
@@ -109,22 +109,22 @@ static void test_eviction_at_cap(void) {
 static void test_lru_recency_on_lookup(void) {
     const uint32_t cap = 16; /* init_cap == max_cap; fills to cap/2 = 8 */
     glyph_cache *c = glyph_cache_new(nullptr, cap, cap);
-    OT_EXPECT(c != NULL);
+    OT_EXPECT(c != nullptr);
 
     /* Fill to the 50 % load trigger. */
     for (uint32_t i = 0; i < cap / 2; i++) {
-        OT_EXPECT(glyph_cache_put(c, 1, i, 0, 0) != NULL);
+        OT_EXPECT(glyph_cache_put(c, 1, i, 0, 0) != nullptr);
     }
 
     /* Touch gid 0 so it is now the MRU. */
-    OT_EXPECT(glyph_cache_lookup(c, 1, 0, 0, 0) != NULL);
+    OT_EXPECT(glyph_cache_lookup(c, 1, 0, 0, 0) != nullptr);
 
     /* Inserting one more evicts the LRU — which should now be gid 1,
      * not gid 0. */
-    OT_EXPECT(glyph_cache_put(c, 1, cap, 0, 0) != NULL);
+    OT_EXPECT(glyph_cache_put(c, 1, cap, 0, 0) != nullptr);
 
-    OT_EXPECT(glyph_cache_lookup(c, 1, 0, 0, 0) != NULL); /* still alive */
-    OT_EXPECT(glyph_cache_lookup(c, 1, 1, 0, 0) == NULL); /* evicted */
+    OT_EXPECT(glyph_cache_lookup(c, 1, 0, 0, 0) != nullptr); /* still alive */
+    OT_EXPECT(glyph_cache_lookup(c, 1, 1, 0, 0) == nullptr); /* evicted */
 
     glyph_cache_destroy(c);
 }
@@ -140,18 +140,18 @@ static void test_invalidate_decrements_count(void) {
      * a known count and then exercise invalidate explicitly. */
     const uint32_t max = 64;
     glyph_cache *c = glyph_cache_new(nullptr, 16, max);
-    OT_EXPECT(c != NULL);
+    OT_EXPECT(c != nullptr);
 
     /* Insert 16 entries (fits comfortably under max_cap/2 = 32). */
     for (uint32_t i = 0; i < 16; i++) {
-        OT_EXPECT(glyph_cache_put(c, 1, i, 0, 0) != NULL);
+        OT_EXPECT(glyph_cache_put(c, 1, i, 0, 0) != nullptr);
     }
 
     /* Invalidate half of them directly. */
     uint32_t invalidated = 0;
     for (uint32_t i = 0; i < 16; i += 2) {
         glyph_entry *e = glyph_cache_lookup(c, 1, i, 0, 0);
-        OT_EXPECT(e != NULL);
+        OT_EXPECT(e != nullptr);
         glyph_cache_invalidate(c, e);
         invalidated++;
     }
@@ -166,7 +166,7 @@ static void test_invalidate_decrements_count(void) {
     uint64_t evictions_before = s.evictions;
     for (uint32_t i = 0; i < invalidated; i++) {
         glyph_entry *e = glyph_cache_put(c, 1, 1000 + i, 0, 0);
-        OT_EXPECT(e != NULL);
+        OT_EXPECT(e != nullptr);
         OT_EXPECT(e->gid == 1000 + i);
     }
     glyph_cache_get_stats(c, &s);
@@ -182,10 +182,10 @@ static void test_clear_resets_count(void) {
     /* init_cap < max_cap so a grow has happened by the time we clear;
      * verifies clear() does not depend on table size. */
     glyph_cache *c = glyph_cache_new(nullptr, 16, 256);
-    OT_EXPECT(c != NULL);
+    OT_EXPECT(c != nullptr);
 
     for (uint32_t i = 0; i < 24; i++) {
-        OT_EXPECT(glyph_cache_put(c, 1, i, 0, 0) != NULL);
+        OT_EXPECT(glyph_cache_put(c, 1, i, 0, 0) != nullptr);
     }
     glyph_cache_clear(c);
 
@@ -195,8 +195,8 @@ static void test_clear_resets_count(void) {
     OT_EXPECT(s.invalidations == 24);
 
     /* Cache must be usable again immediately. */
-    OT_EXPECT(glyph_cache_put(c, 2, 5, 0, 0) != NULL);
-    OT_EXPECT(glyph_cache_lookup(c, 2, 5, 0, 0) != NULL);
+    OT_EXPECT(glyph_cache_put(c, 2, 5, 0, 0) != nullptr);
+    OT_EXPECT(glyph_cache_lookup(c, 2, 5, 0, 0) != nullptr);
 
     glyph_cache_destroy(c);
 }
@@ -224,13 +224,13 @@ static void test_visit_with_invalidate_even(void) {
     /* Use a wide max_cap so the table never saturates during this test
      * — we are checking iteration + invalidate, not eviction. */
     glyph_cache *c = glyph_cache_new(nullptr, 16, 256);
-    OT_EXPECT(c != NULL);
+    OT_EXPECT(c != nullptr);
     for (uint32_t i = 0; i < 16; i++) {
-        OT_EXPECT(glyph_cache_put(c, 1, i, 0, 0) != NULL);
+        OT_EXPECT(glyph_cache_put(c, 1, i, 0, 0) != nullptr);
     }
 
     g_visit_ctx = (visit_ctx){c, 0, 0};
-    glyph_cache_visit(c, invalidate_even, NULL);
+    glyph_cache_visit(c, invalidate_even, nullptr);
     OT_EXPECT(g_visit_ctx.visited == 16);
     OT_EXPECT(g_visit_ctx.invalidated == 8);
 
@@ -242,9 +242,9 @@ static void test_visit_with_invalidate_even(void) {
     for (uint32_t i = 0; i < 16; i++) {
         glyph_entry *e = glyph_cache_lookup(c, 1, i, 0, 0);
         if (i & 1u)
-            OT_EXPECT(e != NULL);
+            OT_EXPECT(e != nullptr);
         else
-            OT_EXPECT(e == NULL);
+            OT_EXPECT(e == nullptr);
     }
 
     glyph_cache_destroy(c);
@@ -252,24 +252,24 @@ static void test_visit_with_invalidate_even(void) {
 
 /* Invalid args are null-safe, never crash. */
 static void test_null_safety(void) {
-    OT_EXPECT(glyph_cache_new(nullptr, 0, 0) == NULL);   /* zero max_cap */
-    OT_EXPECT(glyph_cache_new(nullptr, 16, 24) == NULL); /* non-power-of-two max */
-    OT_EXPECT(glyph_cache_new(nullptr, 16, 0) == NULL);
+    OT_EXPECT(glyph_cache_new(nullptr, 0, 0) == nullptr);   /* zero max_cap */
+    OT_EXPECT(glyph_cache_new(nullptr, 16, 24) == nullptr); /* non-power-of-two max */
+    OT_EXPECT(glyph_cache_new(nullptr, 16, 0) == nullptr);
 
-    glyph_cache_destroy(NULL);
-    glyph_cache_clear(NULL);
-    glyph_cache_invalidate(NULL, NULL);
+    glyph_cache_destroy(nullptr);
+    glyph_cache_clear(nullptr);
+    glyph_cache_invalidate(nullptr, nullptr);
 
     glyph_cache_stats s;
-    glyph_cache_get_stats(NULL, &s);
+    glyph_cache_get_stats(nullptr, &s);
     OT_EXPECT(s.cap == 0 && s.count == 0);
 
-    OT_EXPECT(glyph_cache_lookup(NULL, 0, 0, 0, 0) == NULL);
-    OT_EXPECT(glyph_cache_put(NULL, 0, 0, 0, 0) == NULL);
+    OT_EXPECT(glyph_cache_lookup(nullptr, 0, 0, 0, 0) == nullptr);
+    OT_EXPECT(glyph_cache_put(nullptr, 0, 0, 0, 0) == nullptr);
 
     /* Negative init_cap clamps to MIN_CAP, then succeeds. */
     glyph_cache *c = glyph_cache_new(nullptr, 2, 16);
-    OT_EXPECT(c != NULL);
+    OT_EXPECT(c != nullptr);
     glyph_cache_destroy(c);
 }
 
@@ -320,14 +320,14 @@ static bool ring_consistent(const glyph_cache *c) {
 static void test_production_scale_saturation(void) {
     const uint32_t init_cap = 256, max_cap = 16384;
     glyph_cache *c = glyph_cache_new(nullptr, init_cap, max_cap);
-    OT_EXPECT(c != NULL);
+    OT_EXPECT(c != nullptr);
 
     /* Fill past saturation: 4x the live ceiling in distinct keys. */
     const uint32_t churn = max_cap * 2;
     for (uint32_t i = 0; i < churn; i++) {
         glyph_entry *e = glyph_cache_put(c, 1, i, 16, 0);
         if (!e) {
-            OT_EXPECT(e != NULL);
+            OT_EXPECT(e != nullptr);
             break;
         }
         if ((i & 511u) == 511u)
@@ -342,10 +342,10 @@ static void test_production_scale_saturation(void) {
     /* The survivors must be exactly the most recent max_cap/2 keys. */
     uint32_t missing_recent = 0, present_ancient = 0;
     for (uint32_t i = 0; i < max_cap / 2; i++)
-        if (glyph_cache_lookup(c, 1, churn - 1 - i, 16, 0) == NULL)
+        if (glyph_cache_lookup(c, 1, churn - 1 - i, 16, 0) == nullptr)
             missing_recent++;
     for (uint32_t i = 0; i < 64; i++)
-        if (glyph_cache_lookup(c, 1, i, 16, 0) != NULL)
+        if (glyph_cache_lookup(c, 1, i, 16, 0) != nullptr)
             present_ancient++;
     OT_EXPECT(missing_recent == 0);
     OT_EXPECT(present_ancient == 0);
@@ -363,10 +363,10 @@ static void test_production_scale_saturation(void) {
 static void test_saturation_tombstones_stay_bounded(void) {
     const uint32_t cap = 256; /* init == max */
     glyph_cache *c = glyph_cache_new(nullptr, cap, cap);
-    OT_EXPECT(c != NULL);
+    OT_EXPECT(c != nullptr);
 
     for (uint32_t i = 0; i < cap * 8; i++)
-        OT_EXPECT(glyph_cache_put(c, 1, i, 16, 0) != NULL);
+        OT_EXPECT(glyph_cache_put(c, 1, i, 16, 0) != nullptr);
 
     glyph_cache_stats s;
     glyph_cache_get_stats(c, &s);
@@ -403,13 +403,13 @@ static void test_saturation_tombstones_stay_bounded(void) {
  * must not reference any stale indices. */
 static void test_clear_resets_ring(void) {
     glyph_cache *c = glyph_cache_new(nullptr, 16, 64);
-    OT_EXPECT(c != NULL);
+    OT_EXPECT(c != nullptr);
     for (uint32_t i = 0; i < 24; i++)
-        OT_EXPECT(glyph_cache_put(c, 1, i, 0, 0) != NULL);
+        OT_EXPECT(glyph_cache_put(c, 1, i, 0, 0) != nullptr);
     OT_EXPECT(ring_consistent(c));
     glyph_cache_clear(c);
     OT_EXPECT(ring_consistent(c)); /* empty ring is consistent */
-    OT_EXPECT(glyph_cache_put(c, 2, 7, 0, 0) != NULL);
+    OT_EXPECT(glyph_cache_put(c, 2, 7, 0, 0) != nullptr);
     OT_EXPECT(ring_consistent(c));
     /* The lone entry is both head and tail. */
     OT_EXPECT(c->lru_head == c->lru_tail);

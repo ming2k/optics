@@ -104,7 +104,13 @@ int main(void) {
 
     /* A second upload to the same image is a second writer: it must order
      * itself after the first, not silently overwrite it. */
-    OT_EXPECT(flux_image_update_region(img, 0, 0, 16, 16, pixels, sizeof(pixels)) == FLUX_OK);
+    OT_EXPECT(flux_image_update_region(
+                  img, &(flux_image_update_region_opts){.x = 0,
+                                                        .y = 0,
+                                                        .width = 16,
+                                                        .height = 16,
+                                                        .data = pixels,
+                                                        .bytes = sizeof(pixels)}) == FLUX_OK);
     OT_EXPECT(count_kind(&frame->render_plan, FLUX_RENDER_NODE_UPLOAD) == 2);
     int second_upload = -1;
     for (uint32_t i = 0; i < frame->render_plan.node_count; ++i)
@@ -129,7 +135,13 @@ int main(void) {
      * submitted before the frame command buffer, so the Canvas that already
      * sampled this image must be ordered after it rather than reject the
      * write as an unordered overwrite. */
-    OT_EXPECT(flux_image_update_region(img, 0, 0, 16, 16, pixels, sizeof(pixels)) == FLUX_OK);
+    OT_EXPECT(flux_image_update_region(
+                  img, &(flux_image_update_region_opts){.x = 0,
+                                                        .y = 0,
+                                                        .width = 16,
+                                                        .height = 16,
+                                                        .data = pixels,
+                                                        .bytes = sizeof(pixels)}) == FLUX_OK);
     OT_EXPECT(count_kind(&frame->render_plan, FLUX_RENDER_NODE_UPLOAD) == 3);
     int third_upload = -1;
     for (uint32_t i = 0; i < frame->render_plan.node_count; ++i)

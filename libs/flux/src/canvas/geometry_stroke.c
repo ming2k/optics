@@ -20,7 +20,7 @@
 /* Per-vertex offset frame derived from incoming + outgoing tangents. */
 stroke_frame compute_frame(flux_point prev, flux_point pt, flux_point next, float half,
                            float miter_limit, bool has_prev, bool has_next) {
-    stroke_frame f = {0};
+    stroke_frame f = {};
     flux_point d_in = has_prev ? pt_sub(pt, prev) : (flux_point){0, 0};
     flux_point d_out = has_next ? pt_sub(next, pt) : (flux_point){0, 0};
     float l_in = sqrtf(d_in.x * d_in.x + d_in.y * d_in.y);

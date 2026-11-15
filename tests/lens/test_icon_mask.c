@@ -80,7 +80,7 @@ static int icon_partial_levels(lens_icon_id id, float size) {
         lens_release(ui);
         return -1;
     }
-    flux_color clear = {0};
+    flux_color clear = {};
     if (flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
                                                       .clear_color = &clear}) == FLUX_OK) {
         lens_scene_snapshot *s = nullptr;
@@ -92,7 +92,7 @@ static int icon_partial_levels(lens_icon_id id, float size) {
     }
     uint32_t pw = 0, ph = 0, st = 0;
     const uint8_t *px = flux_canvas_cpu_pixels(c, &pw, &ph, &st);
-    int seen[256] = {0};
+    int seen[256] = {};
     if (px) {
         for (uint32_t y = 0; y < ph; ++y)
             for (uint32_t x = 0; x < pw; ++x)
@@ -125,7 +125,7 @@ static bool icon_centroid(lens_icon_id id, float size, float scale, uint32_t box
         lens_release(ui);
         return false;
     }
-    flux_color clear = {0};
+    flux_color clear = {};
     if (flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
                                                       .clear_color = &clear}) == FLUX_OK) {
         lens_scene_snapshot *s = nullptr;
@@ -281,7 +281,7 @@ int main(void) {
      * meson.build for why that must not compile a second icon registry). */
     {
         static const lens_icon_cmd cmds[] = {
-            {0, {1, 1}},      {1, {2, 2}},   {4, {0}},     /* "ring"   */
+            {0, {1, 1}},      {1, {2, 2}},   {4, {}},      /* "ring"   */
             {5, {12, 12, 3}},                              /* "hub"    */
             {0, {8, 12}},     {1, {11, 15}}, {1, {16, 8}}, /* "tick" */
         };

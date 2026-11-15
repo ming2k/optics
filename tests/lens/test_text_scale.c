@@ -25,8 +25,8 @@ static const lens_input IN0 = {.display_size = {400, 300}, .dt_seconds = 0.016f}
 /* ---- getter / setter / clamp ----------------------------------------- */
 
 static void test_getter_setter_and_clamp(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     /* Default is 1.0 */
     OT_EXPECT_NEAR(lens_text_scale(ui), 1.0f, 0.001f);
@@ -48,8 +48,8 @@ static void test_getter_setter_and_clamp(void) {
     OT_EXPECT_NEAR(lens_text_scale(ui), 2.0f, 0.001f);
 
     /* NULL context is safe */
-    lens_set_text_scale(NULL, 1.5f);
-    OT_EXPECT_NEAR(lens_text_scale(NULL), 1.0f, 0.001f);
+    lens_set_text_scale(nullptr, 1.5f);
+    OT_EXPECT_NEAR(lens_text_scale(nullptr), 1.0f, 0.001f);
 
     lens_release(ui);
 }
@@ -58,19 +58,19 @@ static void test_getter_setter_and_clamp(void) {
 
 /* Resolved font_size scales by text_scale; non-text metrics do not. */
 static void test_resolver_scales_font_only(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     lens_theme t = lens_theme_dark();
 
     /* Baseline at 1.0 */
-    lens_style_resolved r1 = lensi_style_resolve(ui, NULL, &t, 0);
+    lens_style_resolved r1 = lensi_style_resolve(ui, nullptr, &t, 0);
     OT_EXPECT_NEAR(r1.font_size, t.font_size, 0.001f);
     OT_EXPECT_NEAR(r1.padding, t.padding, 0.001f);
     OT_EXPECT_NEAR(r1.border_width, t.border_width, 0.001f);
 
     /* At 1.5x: font_size grows, padding/border untouched */
     lens_set_text_scale(ui, 1.5f);
-    lens_style_resolved r15 = lensi_style_resolve(ui, NULL, &t, 0);
+    lens_style_resolved r15 = lensi_style_resolve(ui, nullptr, &t, 0);
     OT_EXPECT_NEAR(r15.font_size, t.font_size * 1.5f, 0.001f);
     OT_EXPECT_NEAR(r15.padding, t.padding, 0.001f);
     OT_EXPECT_NEAR(r15.border_width, t.border_width, 0.001f);
@@ -89,8 +89,8 @@ static void test_resolver_scales_font_only(void) {
 
 /* A button laid out at 2.0x text scale measures taller than at 1.0x. */
 static void test_widget_intrinsic_height_scales(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     float h1 = 0.0f;
     lens_begin(ui, &IN0);
@@ -98,7 +98,7 @@ static void test_widget_intrinsic_height_scales(void) {
     lens_id id = lens_current_id(ui, "OK");
     lens_test_end(ui);
     lens_node *n1 = lens_find(ui, id);
-    OT_EXPECT(n1 != NULL);
+    OT_EXPECT(n1 != nullptr);
     h1 = lens_node_bounds(n1).h;
 
     lens_set_text_scale(ui, 2.0f);
@@ -106,7 +106,7 @@ static void test_widget_intrinsic_height_scales(void) {
     lens_button(ui, &(lens_button_opts){.label = "OK"});
     lens_test_end(ui);
     n1 = lens_find(ui, id);
-    OT_EXPECT(n1 != NULL);
+    OT_EXPECT(n1 != nullptr);
     float h2 = lens_node_bounds(n1).h;
 
     OT_EXPECT(h2 > h1 * 1.3f);
@@ -116,8 +116,8 @@ static void test_widget_intrinsic_height_scales(void) {
 
 /* The text draw command's size scales: measurement and paint agree. */
 static void test_text_command_size_scales(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     lens_set_text_scale(ui, 1.5f);
     lens_begin(ui, &IN0);
@@ -126,7 +126,7 @@ static void test_text_command_size_scales(void) {
     lens_test_end(ui);
 
     const lens_node *n = lens_find(ui, id);
-    OT_EXPECT(n != NULL);
+    OT_EXPECT(n != nullptr);
     OT_EXPECT(lens_node_bounds(n).h > 14.0f * 1.5f);
 
     lens_release(ui);
@@ -134,8 +134,8 @@ static void test_text_command_size_scales(void) {
 
 /* Explicit point sizes scale too. */
 static void test_explicit_label_size_scales(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     lens_set_text_scale(ui, 2.0f);
     lens_begin(ui, &IN0);
@@ -164,8 +164,8 @@ static void test_explicit_label_size_scales(void) {
 
 /* Headings scale proportionally. */
 static void test_heading_size_scales(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     lens_theme t = lens_theme_dark();
 
     lens_set_text_scale(ui, 1.5f);
@@ -177,10 +177,10 @@ static void test_heading_size_scales(void) {
     lens_test_end(ui);
 
     const lens_node *title = lens_find(ui, title_id);
-    OT_EXPECT(title != NULL);
+    OT_EXPECT(title != nullptr);
     OT_EXPECT(lens_node_bounds(title).h > t.font_size_title * 1.4f);
     const lens_node *h1 = lens_find(ui, h1_id);
-    OT_EXPECT(h1 != NULL);
+    OT_EXPECT(h1 != nullptr);
     OT_EXPECT(lens_node_bounds(h1).h > t.font_size_h1 * 1.4f);
 
     lens_release(ui);
@@ -188,13 +188,13 @@ static void test_heading_size_scales(void) {
 
 /* A factor switch must re-key cached canvas records. */
 static void test_text_scale_switch_invalidates(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     lens_theme t = lens_theme_dark();
-    lens_style_resolved r1 = lensi_style_resolve(ui, NULL, &t, 0);
+    lens_style_resolved r1 = lensi_style_resolve(ui, nullptr, &t, 0);
     lens_set_text_scale(ui, 1.25f);
-    lens_style_resolved r2 = lensi_style_resolve(ui, NULL, &t, 0);
+    lens_style_resolved r2 = lensi_style_resolve(ui, nullptr, &t, 0);
     OT_EXPECT(r1.font_size != r2.font_size);
 
     lens_release(ui);

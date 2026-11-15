@@ -69,10 +69,10 @@ void txtp_charset_free(txtp_charset *cs) {
  * face.c treats unknown coverage as "covers nothing". */
 static txtp_charset *txtp_charset_from_font(CTFontRef font) {
     if (!font)
-        return NULL;
+        return nullptr;
     txtp_charset *cs = (txtp_charset *)calloc(1, sizeof *cs);
     if (!cs)
-        return NULL;
+        return nullptr;
     cs->font = (CTFontRef)CFRetain(font);
     cs->chars = CTFontCopyCharacterSet(font); /* may be NULL */
     return cs;
@@ -86,9 +86,9 @@ void txtp_font_match_clear(txtp_font_match *m) {
     if (!m)
         return;
     free(m->path);
-    m->path = NULL;
+    m->path = nullptr;
     txtp_charset_free(m->charset);
-    m->charset = NULL;
+    m->charset = nullptr;
     m->index = 0;
 }
 
@@ -141,15 +141,15 @@ static CTFontDescriptorRef make_descriptor(const char *family_name, float weight
     CFStringRef name =
         CFStringCreateWithCString(kCFAllocatorDefault, family_name, kCFStringEncodingUTF8);
     if (!name)
-        return NULL;
+        return nullptr;
 
     CGFloat w = css_to_ct_weight(weight);
     CFNumberRef wnum = CFNumberCreate(kCFAllocatorDefault, kCFNumberCGFloatType, &w);
     SInt32 symbolic = italic ? (SInt32)kCTFontItalicTrait : 0;
     CFNumberRef snum = CFNumberCreate(kCFAllocatorDefault, kCFNumberSInt32Type, &symbolic);
 
-    CTFontDescriptorRef desc = NULL;
-    CFDictionaryRef traits = NULL;
+    CTFontDescriptorRef desc = nullptr;
+    CFDictionaryRef traits = nullptr;
     if (wnum && snum) {
         CFStringRef tkeys[] = {kCTFontWeightTrait, kCTFontSymbolicTrait};
         CFTypeRef tvals[] = {wnum, snum};
@@ -182,12 +182,12 @@ static CTFontDescriptorRef make_descriptor(const char *family_name, float weight
 static char *path_from_descriptor(CTFontDescriptorRef desc) {
     CFURLRef url = (CFURLRef)CTFontDescriptorCopyAttribute(desc, kCTFontURLAttribute);
     if (!url)
-        return NULL;
+        return nullptr;
     UInt8 buf[4096];
     Boolean ok = CFURLGetFileSystemRepresentation(url, true, buf, (CFIndex)sizeof(buf));
     CFRelease(url);
     if (!ok)
-        return NULL;
+        return nullptr;
     return txtp_strdup((const char *)buf);
 }
 
@@ -213,28 +213,28 @@ static bool font_to_match(CTFontRef font, txtp_font_match *out) {
 txtp_font_list *txt_platform_font_query_family(const char *family_name, float weight, bool italic,
                                                int max_results) {
     if (!family_name || max_results <= 0)
-        return NULL;
+        return nullptr;
 
     CTFontDescriptorRef desc = make_descriptor(map_generic_family(family_name), weight, italic);
     if (!desc)
-        return NULL;
+        return nullptr;
 
     /* No mandatory keys: rank all installed fonts by match quality. */
-    CFArrayRef matches = CTFontDescriptorCreateMatchingFontDescriptors(desc, NULL);
+    CFArrayRef matches = CTFontDescriptorCreateMatchingFontDescriptors(desc, nullptr);
     CFRelease(desc);
     if (!matches)
-        return NULL;
+        return nullptr;
 
     txtp_font_list *list = (txtp_font_list *)calloc(1, sizeof *list);
     if (!list) {
         CFRelease(matches);
-        return NULL;
+        return nullptr;
     }
     list->matches = (txtp_font_match *)calloc((size_t)max_results, sizeof *list->matches);
     if (!list->matches) {
         free(list);
         CFRelease(matches);
-        return NULL;
+        return nullptr;
     }
 
     CFIndex n = CFArrayGetCount(matches);
@@ -245,7 +245,7 @@ txtp_font_list *txt_platform_font_query_family(const char *family_name, float we
             continue;
         /* Instantiate so the coverage set and any later fallback anchor
          * on a real font, not just a descriptor. */
-        CTFontRef font = CTFontCreateWithFontDescriptor(d, 0.0, NULL);
+        CTFontRef font = CTFontCreateWithFontDescriptor(d, 0.0, nullptr);
         if (!font)
             continue;
         txtp_font_match *m = &list->matches[list->count];
@@ -270,14 +270,14 @@ bool txt_platform_font_query_codepoint(const char *family_name, float weight, bo
         return false;
 
     bool ok = false;
-    CTFontDescriptorRef desc = NULL;
-    CTFontRef base = NULL;
-    CTFontRef fb = NULL;
+    CTFontDescriptorRef desc = nullptr;
+    CTFontRef base = nullptr;
+    CTFontRef fb = nullptr;
 
     desc = make_descriptor(map_generic_family(family_name), weight, italic);
     if (!desc)
         goto done;
-    base = CTFontCreateWithFontDescriptor(desc, 0.0, NULL);
+    base = CTFontCreateWithFontDescriptor(desc, 0.0, nullptr);
     if (!base)
         goto done;
 

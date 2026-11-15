@@ -53,7 +53,7 @@ int iris_a11y__char_count_utf8(const char *s);
 
 /* Numeric values MUST match AtspiRole exactly — clients compare them
  * numerically, so a wrong value announces the wrong control type. */
-typedef enum iris_atspi_role {
+typedef enum iris_atspi_role : uint32_t {
     IRIS_ATSPI_ROLE_CHECK_BOX = 7,
     IRIS_ATSPI_ROLE_DIALOG = 16,
     IRIS_ATSPI_ROLE_FRAME = 23, /* the application root         */
@@ -77,7 +77,7 @@ typedef enum iris_atspi_role {
 
 /* AT-SPI State enum bit positions (AtspiStateType). State is two uint32
  * bitfields (64 bits) on the wire; bits 0-31 live in `lo`, 32-63 in `hi`. */
-typedef enum iris_atspi_state {
+typedef enum iris_atspi_state : uint32_t {
     IRIS_ATSPI_STATE_CHECKED = 4,
     IRIS_ATSPI_STATE_ENABLED = 8,
     IRIS_ATSPI_STATE_EXPANDED = 10,
@@ -152,7 +152,7 @@ bool iris_a11y__text_delta_of(const char *prev, const char *cur, iris_a11y__text
  * org.a11y.atspi.Event.Object signals (a11y_atspi.c). Focus is deliberately
  * NOT diffed here: it is tracked by pointer (the focused id) so removals of
  * the focused node still produce a focused-off event. */
-typedef enum iris_a11y__event_kind {
+typedef enum iris_a11y__event_kind : uint32_t {
     IRIS_A11Y__EV_ADD,       /* node appeared (id, parent, index set)      */
     IRIS_A11Y__EV_REMOVE,    /* node vanished (id, parent, index = old)    */
     IRIS_A11Y__EV_NAME,      /* accessible-name changed (name = new)       */

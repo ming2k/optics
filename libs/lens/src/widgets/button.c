@@ -3,7 +3,7 @@
 #include "../internal.h"
 
 lens_response lens_button(lens *ui, const lens_button_opts *opts) {
-    lens_button_opts default_opts = {0};
+    lens_button_opts default_opts = {};
     if (!opts)
         opts = &default_opts;
 
@@ -21,7 +21,7 @@ lens_response lens_button(lens *ui, const lens_button_opts *opts) {
         opts->box.id ? lensi_gen_widget_id(ui, opts->box.id) : lensi_gen_widget_id(ui, label);
     lens_node *n = lensi_store_touch(ui, id);
     if (!n)
-        return (lens_response){0};
+        return (lens_response){};
 
     lensi_link_child(ui, n);
     lensi_node_box(ui, n, &opts->box);
@@ -29,13 +29,13 @@ lens_response lens_button(lens *ui, const lens_button_opts *opts) {
 
     float font_size = lensi_style_font_size(ui, &eff, t);
     float padding = lensi_style_padding(&eff, t);
-    lens_text_metrics tm = {0};
+    lens_text_metrics tm = {};
     if (label[0])
         tm = lensi_text_measure_label(ui, label, font_size, 0.0f);
 
     float glyph_size = font_size;
     bool has_icon = opts->icon != LENS_ICON_INVALID && opts->icon != 0;
-    bool has_image = opts->image != NULL;
+    bool has_image = opts->image != nullptr;
     bool has_label = label[0] != '\0';
 
     float w = 0;
@@ -74,7 +74,7 @@ lens_response lens_button(lens *ui, const lens_button_opts *opts) {
 
     uint32_t sem_flags = (r.focused ? LENS_A11Y_FOCUSED : 0) | (disabled ? LENS_A11Y_DISABLED : 0);
     lens_role role = (opts->variant == LENS_BUTTON_LINK) ? LENS_ROLE_LINK : LENS_ROLE_BUTTON;
-    lensi_node_semantics(ui, n, role, label, NULL, sem_flags);
+    lensi_node_semantics(ui, n, role, label, nullptr, sem_flags);
 
     float dt = ui->input.dt_seconds;
     if (!disabled) {

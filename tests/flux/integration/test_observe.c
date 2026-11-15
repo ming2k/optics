@@ -46,20 +46,30 @@ static void test_counting_is_unconditional(flux_device *d) {
     const char *owner = "tests/observe";
 
     flux_observe_counters before = {};
-    flux_result r = flux_observe_read_counters(d, FLUX_SCOPE_CONTEXT, kind, owner, &before);
+    flux_result r = flux_observe_read_counters(
+        d, &(flux_observe_read_counters_opts){
+               .scope = FLUX_SCOPE_CONTEXT, .kind = kind, .owner = owner, .out = &before});
     OT_EXPECT(r == FLUX_ERROR_OUT_OF_RANGE); /* never interned yet */
 
     OT_EXPECT(FLUX_OBSERVE_ACQUIRE(d, FLUX_SCOPE_CONTEXT, FLUX_LIFETIME_CONTEXT, kind, owner, 128,
                                    FLUX_SITE_NONE));
     flux_observe_counters during = {};
-    OT_EXPECT(flux_observe_read_counters(d, FLUX_SCOPE_CONTEXT, kind, owner, &during) == FLUX_OK);
+    OT_EXPECT(flux_observe_read_counters(
+                  d,
+                  &(flux_observe_read_counters_opts){
+                      .scope = FLUX_SCOPE_CONTEXT, .kind = kind, .owner = owner, .out = &during}) ==
+              FLUX_OK);
     OT_EXPECT(during.live == 1);
     OT_EXPECT(during.acquire_total == 1);
     OT_EXPECT(during.bytes_live == 128);
 
     FLUX_OBSERVE_RELEASE(d, FLUX_SCOPE_CONTEXT, kind, owner, 128);
     flux_observe_counters after = {};
-    OT_EXPECT(flux_observe_read_counters(d, FLUX_SCOPE_CONTEXT, kind, owner, &after) == FLUX_OK);
+    OT_EXPECT(flux_observe_read_counters(
+                  d,
+                  &(flux_observe_read_counters_opts){
+                      .scope = FLUX_SCOPE_CONTEXT, .kind = kind, .owner = owner, .out = &after}) ==
+              FLUX_OK);
     OT_EXPECT(after.live == 0);
     OT_EXPECT(after.bytes_live == 0);
     /* The history survives the balanced pair: a pair that genuinely
@@ -79,7 +89,11 @@ static void test_peak_survives_drain(flux_device *d) {
         FLUX_OBSERVE_RELEASE(d, FLUX_SCOPE_CONTEXT, kind, owner, 0);
 
     flux_observe_counters c = {};
-    OT_EXPECT(flux_observe_read_counters(d, FLUX_SCOPE_CONTEXT, kind, owner, &c) == FLUX_OK);
+    OT_EXPECT(flux_observe_read_counters(
+                  d,
+                  &(flux_observe_read_counters_opts){
+                      .scope = FLUX_SCOPE_CONTEXT, .kind = kind, .owner = owner, .out = &c}) ==
+              FLUX_OK);
     OT_EXPECT(c.live == 0);
     /* Peak is the whole point: after everything is released, a high-water
      * regression is still visible. A leak and a spike must not look alike. */
@@ -96,7 +110,10 @@ static void test_unmatched_release_is_counted(flux_device *d) {
      * read as balanced forever) and must not underflow. */
     FLUX_OBSERVE_RELEASE(d, FLUX_SCOPE_CONTEXT, kind, owner, 0);
     flux_observe_counters c = {};
-    OT_EXPECT(flux_observe_read_counters(d, FLUX_SCOPE_CONTEXT, kind, owner, &c) ==
+    OT_EXPECT(flux_observe_read_counters(
+                  d,
+                  &(flux_observe_read_counters_opts){
+                      .scope = FLUX_SCOPE_CONTEXT, .kind = kind, .owner = owner, .out = &c}) ==
               FLUX_ERROR_OUT_OF_RANGE);
 
     /* One acquire, two releases: live returns to zero and stops there
@@ -105,7 +122,11 @@ static void test_unmatched_release_is_counted(flux_device *d) {
                                    FLUX_SITE_NONE));
     FLUX_OBSERVE_RELEASE(d, FLUX_SCOPE_CONTEXT, kind, owner, 0);
     FLUX_OBSERVE_RELEASE(d, FLUX_SCOPE_CONTEXT, kind, owner, 0);
-    OT_EXPECT(flux_observe_read_counters(d, FLUX_SCOPE_CONTEXT, kind, owner, &c) == FLUX_OK);
+    OT_EXPECT(flux_observe_read_counters(
+                  d,
+                  &(flux_observe_read_counters_opts){
+                      .scope = FLUX_SCOPE_CONTEXT, .kind = kind, .owner = owner, .out = &c}) ==
+              FLUX_OK);
     OT_EXPECT(c.live == 0);
     OT_EXPECT(c.release_total == 1); /* the second release was refused */
 }
@@ -156,8 +177,11 @@ static void test_report_shape(flux_device *d) {
              * non-attribution build free of site machinery. A kind that does
              * have a site slot must carry it. */
             flux_observe_counters probe = {};
-            OT_EXPECT(flux_observe_read_counters(d, FLUX_SCOPE_CONTEXT, kind, owner, &probe) ==
-                      FLUX_OK);
+            OT_EXPECT(flux_observe_read_counters(
+                          d, &(flux_observe_read_counters_opts){.scope = FLUX_SCOPE_CONTEXT,
+                                                                .kind = kind,
+                                                                .owner = owner,
+                                                                .out = &probe}) == FLUX_OK);
             OT_EXPECT(all[i].site == nullptr); /* probe uses FLUX_SITE_NONE */
         }
     }
@@ -180,8 +204,11 @@ static void test_invalid_arguments(flux_device *d) {
         flux_observe_report(d, &(flux_observe_report_opts){.type = FLUX_TYPE_OBSERVE_REPORT_OPTS});
     OT_EXPECT(no_buffer.result == FLUX_ERROR_INVALID_ARGUMENT);
 
-    OT_EXPECT(flux_observe_read_counters(d, FLUX_SCOPE_CONTEXT, nullptr, "x", nullptr) ==
-              FLUX_ERROR_INVALID_ARGUMENT);
+    OT_EXPECT(flux_observe_read_counters(d, &(flux_observe_read_counters_opts){
+                                                .scope = FLUX_SCOPE_CONTEXT,
+                                                .kind = nullptr,
+                                                .owner = "x",
+                                                .out = nullptr}) == FLUX_ERROR_INVALID_ARGUMENT);
 }
 
 /* Interning is bounded. The bound must be observable: once the row table is

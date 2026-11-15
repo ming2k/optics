@@ -366,7 +366,7 @@ flux_result flux_surface_sync_content(flux_surface *s, flux_frame *f) {
                 .region = region,
             },
         };
-        uint32_t dependencies[1] = {0};
+        uint32_t dependencies[1] = {};
         uint32_t dependency_count = 0;
         uint32_t producer = flux_render_plan_last_writer(&f->render_plan, (const void *)s);
         if (producer != UINT32_MAX)
@@ -969,7 +969,7 @@ acquired:
     };
     flux_render_plan_init(&s->frame_slot.render_plan, &render_target);
     {
-        const flux_damage damage = desc ? desc->damage : (flux_damage){0};
+        const flux_damage damage = desc ? desc->damage : (flux_damage){};
         const bool damage_full = desc ? desc->damage_full : true;
         frame_copy_damage_set(&s->frame_slot.damage, &s->frame_slot.damage_full, &damage,
                               damage_full);
@@ -1167,27 +1167,26 @@ void flux_frame_end_pass(flux_frame *f) {
     f->pass_active = false;
 }
 
-void flux_frame_set_viewport(flux_frame *f, float x, float y, float width, float height,
-                             float min_depth, float max_depth) {
-    if (!f || !f->surface || f->state != FLUX_FRAME_STATE_RECORDING)
+void flux_frame_set_viewport(flux_frame *f, const flux_frame_set_viewport_opts *opts) {
+    if (!f || !opts || !f->surface || f->state != FLUX_FRAME_STATE_RECORDING)
         return;
     flux_per_frame *pf = &f->surface->frames[f->slot];
     VkViewport viewport = {
-        .x = x,
-        .y = y,
-        .width = width,
-        .height = height,
-        .minDepth = min_depth,
-        .maxDepth = max_depth,
+        .x = opts->x,
+        .y = opts->y,
+        .width = opts->width,
+        .height = opts->height,
+        .minDepth = opts->min_depth,
+        .maxDepth = opts->max_depth,
     };
     vkCmdSetViewport(pf->cmd, 0, 1, &viewport);
 }
 
-void flux_frame_set_scissor(flux_frame *f, int32_t x, int32_t y, uint32_t width, uint32_t height) {
-    if (!f || !f->surface || f->state != FLUX_FRAME_STATE_RECORDING)
+void flux_frame_set_scissor(flux_frame *f, const flux_frame_set_scissor_opts *opts) {
+    if (!f || !opts || !f->surface || f->state != FLUX_FRAME_STATE_RECORDING)
         return;
     flux_per_frame *pf = &f->surface->frames[f->slot];
-    VkRect2D scissor = {.offset = {x, y}, .extent = {width, height}};
+    VkRect2D scissor = {.offset = {opts->x, opts->y}, .extent = {opts->width, opts->height}};
     vkCmdSetScissor(pf->cmd, 0, 1, &scissor);
 }
 
@@ -1364,7 +1363,7 @@ flux_result flux_frame_submit(flux_frame *f) {
         /* No window-system acquire semaphore exists. Reused imported
          * dma-bufs may still contribute per-frame acquire-fence waits. */
         uint32_t wait_count = foreign_images_build_waits(pf, 0);
-        VkCommandBufferSubmitInfo command_buffers[2] = {0};
+        VkCommandBufferSubmitInfo command_buffers[2] = {};
         uint32_t command_buffer_count = 0;
         if (foreign_acquire_recorded) {
             command_buffers[command_buffer_count++] = (VkCommandBufferSubmitInfo){
@@ -1435,7 +1434,7 @@ flux_result flux_frame_submit(flux_frame *f) {
         .semaphore = s->render_finished[s->current_image],
         .stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
     };
-    VkCommandBufferSubmitInfo command_buffers[2] = {0};
+    VkCommandBufferSubmitInfo command_buffers[2] = {};
     uint32_t command_buffer_count = 0;
     if (foreign_acquire_recorded) {
         command_buffers[command_buffer_count++] = (VkCommandBufferSubmitInfo){
@@ -1548,11 +1547,13 @@ void flux_frame_abandon(flux_frame *f) {
 /*  Frame transient + timestamps (Stage 2b.2 / 2b.3)                  */
 /* ------------------------------------------------------------------ */
 
-flux_result flux_frame_alloc_transient(flux_frame *f, size_t bytes, size_t alignment,
-                                       flux_transient *out) {
-    if (!f || !f->surface || !out || f->state != FLUX_FRAME_STATE_RECORDING)
+flux_result flux_frame_alloc_transient(flux_frame *f, const flux_frame_alloc_transient_opts *opts) {
+    if (!f || !opts || !f->surface || !opts->out || f->state != FLUX_FRAME_STATE_RECORDING)
         return FLUX_ERROR_INVALID_STATE;
-    *out = (flux_transient){0};
+    size_t bytes = opts->bytes;
+    size_t alignment = opts->alignment;
+    flux_transient *out = opts->out;
+    *out = (flux_transient){};
     if (alignment == 0)
         alignment = 16; /* sensible default */
     if (alignment > 256 || (alignment & (alignment - 1)) != 0) {
@@ -1638,10 +1639,14 @@ uint32_t flux_frame_image_index(const flux_frame *f) {
     return f->surface->current_image;
 }
 
-flux_result flux_frame_repaint_scope(const flux_frame *f, flux_rect *out_rects, uint32_t capacity,
-                                     uint32_t *out_count, bool *out_full) {
-    if (!f || !f->surface || !out_count || !out_full)
+flux_result flux_frame_repaint_scope(const flux_frame *f,
+                                     const flux_frame_repaint_scope_opts *opts) {
+    if (!f || !opts || !f->surface || !opts->out_count || !opts->out_full)
         return FLUX_ERROR_INVALID_ARGUMENT;
+    flux_rect *out_rects = opts->out_rects;
+    uint32_t capacity = opts->capacity;
+    uint32_t *out_count = opts->out_count;
+    bool *out_full = opts->out_full;
     *out_count = 0;
     *out_full = f->repaint_full;
     if (f->repaint_full)
@@ -1710,10 +1715,12 @@ void flux_frame_timestamp_end(flux_frame *f) {
                         pf->ts_scopes[scope_idx].end_query);
 }
 
-flux_result flux_frame_collect_timestamps(flux_frame *f, flux_timestamp_result *out,
-                                          uint32_t *inout_count) {
-    if (!f || !f->surface || !inout_count)
+flux_result flux_frame_collect_timestamps(flux_frame *f,
+                                          const flux_frame_collect_timestamps_opts *opts) {
+    if (!f || !opts || !f->surface || !opts->inout_count)
         return FLUX_ERROR_INVALID_ARGUMENT;
+    flux_timestamp_result *out = opts->out;
+    uint32_t *inout_count = opts->inout_count;
     flux_per_frame *pf = &f->surface->frames[f->slot];
     uint32_t cap = *inout_count;
     uint32_t n = pf->ts_result_count < cap ? pf->ts_result_count : cap;
@@ -1805,10 +1812,11 @@ static VkAccessFlags2 access_to_vk(flux_access_flags access) {
     return flags;
 }
 
-void flux_frame_pipeline_barrier(flux_frame *f, const flux_image_barrier *image_barriers,
-                                 uint32_t count) {
-    if (!f || !image_barriers || count == 0)
+void flux_frame_pipeline_barrier(flux_frame *f, const flux_frame_pipeline_barrier_opts *opts) {
+    if (!f || !opts || !opts->image_barriers || opts->count == 0)
         return;
+    const flux_image_barrier *image_barriers = opts->image_barriers;
+    uint32_t count = opts->count;
     VkCommandBuffer cmd = flux_frame_vk_command_buffer(f);
     if (!cmd)
         return;

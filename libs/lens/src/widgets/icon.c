@@ -3,12 +3,12 @@
 #include "../internal.h"
 
 lens_response lens_icon(lens *ui, const lens_icon_opts *opts) {
-    lens_icon_opts default_opts = {0};
+    lens_icon_opts default_opts = {};
     if (!opts)
         opts = &default_opts;
 
     if (!lensi_icon_valid((int32_t)opts->id) || opts->id == LENS_ICON_INVALID)
-        return (lens_response){0};
+        return (lens_response){};
 
     lensi_apply_box(ui, opts->box);
     const lens_theme *t = &ui->theme;
@@ -20,7 +20,7 @@ lens_response lens_icon(lens *ui, const lens_icon_opts *opts) {
         opts->box.id ? lensi_gen_widget_id(ui, opts->box.id) : lensi_gen_container_id(ui, "icon");
     lens_node *n = lensi_store_touch(ui, nid);
     if (!n)
-        return (lens_response){0};
+        return (lens_response){};
 
     lensi_link_child(ui, n);
     lensi_node_box(ui, n, &opts->box);

@@ -128,7 +128,7 @@ static void lensi_wrap_arrange(lens_node *n, flux_rect inner) {
         float line_h = 0.0f;
         uint32_t line_count = 0;
         lens_node *line_end = line_start;
-        lens_node *next_line_start = NULL;
+        lens_node *next_line_start = nullptr;
 
         for (lens_node *c = line_start; c; c = c->next_sibling) {
             if (c->place == LENS_PLACE_ABS)

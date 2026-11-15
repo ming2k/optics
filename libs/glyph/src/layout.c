@@ -26,7 +26,7 @@ static void shape_run(glyph_ctx *t, const text_run *run) {
         hb_buffer_set_script(t->hb_buf, run->script);
     hb_buffer_set_language(t->hb_buf, hb_language_get_default());
     txt_face *f = &t->slots[run->slot_idx].faces[run->face_idx];
-    hb_shape(f->hb_font, t->hb_buf, NULL, 0);
+    hb_shape(f->hb_font, t->hb_buf, nullptr, 0);
 }
 
 /* ------------------------------------------------------------------ */
@@ -193,7 +193,7 @@ static txt_layout_entry *layout_cache_lookup(glyph_ctx *t, uint32_t hash, const 
                                              size_t len, float size_px, float weight, bool italic,
                                              glyph_family family, float scale) {
     if (!t->layout_entries)
-        return NULL;
+        return nullptr;
     uint32_t mask = t->layout_entries_cap - 1u;
     uint32_t idx = hash & mask;
     for (uint32_t i = 0; i < t->layout_entries_cap; i++) {
@@ -201,7 +201,7 @@ static txt_layout_entry *layout_cache_lookup(glyph_ctx *t, uint32_t hash, const 
         /* Only a truly-empty slot terminates the chain; tombstones
          * (occupied && !live) are skipped. */
         if (!e->occupied)
-            return NULL;
+            return nullptr;
         if (e->live &&
             layout_entry_eq(e, hash, utf8, len, size_px, weight, italic, family, scale)) {
             e->last_used = t->layout_cache_tick;
@@ -209,7 +209,7 @@ static txt_layout_entry *layout_cache_lookup(glyph_ctx *t, uint32_t hash, const 
         }
         idx = (idx + 1u) & mask;
     }
-    return NULL;
+    return nullptr;
 }
 
 /* Free an entry's owned buffers and mark the slot dead. The key fields
@@ -217,9 +217,9 @@ static txt_layout_entry *layout_cache_lookup(glyph_ctx *t, uint32_t hash, const 
  * intact until the next rehash. */
 static void layout_entry_evict(glyph_ctx *t, txt_layout_entry *e) {
     txt_free(t, e->utf8, "layout_key");
-    e->utf8 = NULL;
+    e->utf8 = nullptr;
     txt_free(t, e->glyphs, "layout_glyphs");
-    e->glyphs = NULL;
+    e->glyphs = nullptr;
     e->live = false;
     t->layout_entries_live--;
     t->layout_entries_tomb++;
@@ -269,7 +269,7 @@ static void layout_cache_make_room(glyph_ctx *t) {
         (void)layout_cache_rehash(t, t->layout_entries_cap);
         return;
     }
-    txt_layout_entry *victim = NULL;
+    txt_layout_entry *victim = nullptr;
     uint32_t oldest = UINT32_MAX;
     for (uint32_t i = 0; i < t->layout_entries_cap; i++) {
         txt_layout_entry *e = &t->layout_entries[i];
@@ -295,7 +295,7 @@ static txt_layout_entry *layout_cache_insert(glyph_ctx *t, uint32_t hash, const 
         t->layout_entries =
             txt_alloc(t, (size_t)TXT_LAYOUT_CACHE_INIT * sizeof *t->layout_entries, "layout_cache");
         if (!t->layout_entries)
-            return NULL;
+            return nullptr;
         t->layout_entries_cap = TXT_LAYOUT_CACHE_INIT;
     }
 
@@ -324,7 +324,7 @@ static txt_layout_entry *layout_cache_insert(glyph_ctx *t, uint32_t hash, const 
         if (!utf8_copy || !glyphs_copy) {
             txt_free(t, utf8_copy, "layout_key");
             txt_free(t, glyphs_copy, "layout_glyphs");
-            return NULL;
+            return nullptr;
         }
         memcpy(utf8_copy, utf8, len);
         memcpy(glyphs_copy, layout->glyphs, (size_t)layout->count * sizeof *glyphs_copy);
@@ -351,7 +351,7 @@ static txt_layout_entry *layout_cache_insert(glyph_ctx *t, uint32_t hash, const 
             t->layout_entries_tomb--;
         return e;
     }
-    return NULL; /* unreachable: admission control always frees a slot */
+    return nullptr; /* unreachable: admission control always frees a slot */
 }
 
 void txt_layout_cache_reset(glyph_ctx *t) {
@@ -365,7 +365,7 @@ void txt_layout_cache_reset(glyph_ctx *t) {
         txt_free(t, e->glyphs, "layout_glyphs");
     }
     txt_free(t, t->layout_entries, "layout_cache");
-    t->layout_entries = NULL;
+    t->layout_entries = nullptr;
     t->layout_entries_cap = 0;
     t->layout_entries_live = 0;
     t->layout_entries_tomb = 0;
@@ -605,10 +605,13 @@ void glyph_set_default_family(glyph_ctx *t, glyph_family family) {
 /*  Measure                                                            */
 /* ------------------------------------------------------------------ */
 
-glyph_metrics glyph_measure(glyph_ctx *t, const char *utf8, size_t len, const glyph_style *style) {
-    glyph_metrics m = {0};
-    if (!t || !utf8 || len == 0)
+glyph_metrics glyph_measure(glyph_ctx *t, const glyph_measure_opts *opts) {
+    glyph_metrics m = {};
+    if (!t || !opts || !opts->utf8 || opts->len == 0)
         return m;
+    const char *utf8 = opts->utf8;
+    size_t len = opts->len;
+    const glyph_style *style = opts->style;
 
     float size_px, weight;
     bool italic;
@@ -676,7 +679,7 @@ static flux_result draw_layout_pass(glyph_ctx *t, flux_canvas *canvas, flux_enco
      * the clears-change flush would read freed memory. (Batches already
      * handed to the canvas hold their own retains via the frame's
      * foreign-image tracking; this covers the not-yet-recorded batch.) */
-    flux_image *batch_atlas = run.atlas ? flux_image_retain(run.atlas) : NULL;
+    flux_image *batch_atlas = run.atlas ? flux_image_retain(run.atlas) : nullptr;
     run.atlas = batch_atlas;
     if (!t->atlas_pages[t->atlas_page]) {
         /* Device-less CPU canvas (ADR-0019): feed the host R8 coverage buffer
@@ -901,31 +904,27 @@ static flux_result text_draw_impl(glyph_ctx *t, flux_canvas *canvas, flux_encode
     return ret;
 }
 
-void glyph_draw(glyph_ctx *t, flux_canvas *canvas, flux_arena *arena, float x, float y,
-                const char *utf8, size_t len, const glyph_style *style) {
-    text_draw_impl(t, canvas, nullptr, arena, x, y, utf8, len, style, 0, 0.0f);
+void glyph_draw(glyph_ctx *t, const glyph_draw_opts *opts) {
+    if (!opts)
+        return;
+    text_draw_impl(t, opts->canvas, nullptr, opts->arena, opts->x, opts->y, opts->utf8, opts->len,
+                   opts->style, opts->outline_color, opts->outline_width);
 }
 
-flux_result glyph_record(glyph_ctx *t, flux_encoder *encoder, const glyph_record_desc *desc) {
+flux_result glyph_record(glyph_ctx *t, const glyph_record_opts *opts) {
     flux_result result;
-    if (!t || !encoder || !desc || (!desc->utf8 && desc->len) || !isfinite(desc->x) ||
-        !isfinite(desc->y) || !isfinite(desc->outline_width) || desc->outline_width < 0) {
+    if (!t || !opts || !opts->encoder || (!opts->utf8 && opts->len) || !isfinite(opts->x) ||
+        !isfinite(opts->y) || !isfinite(opts->outline_width) || opts->outline_width < 0) {
         result = FLUX_ERROR_INVALID_ARGUMENT;
-    } else if (!desc->len) {
-        result = flux_encoder_status(encoder);
+    } else if (!opts->len) {
+        result = flux_encoder_status(opts->encoder);
     } else {
-        result = text_draw_impl(t, nullptr, encoder, nullptr, desc->x, desc->y, desc->utf8,
-                                desc->len, &desc->style, desc->outline_color, desc->outline_width);
+        result = text_draw_impl(t, nullptr, opts->encoder, nullptr, opts->x, opts->y, opts->utf8,
+                                opts->len, &opts->style, opts->outline_color, opts->outline_width);
     }
-    if (result != FLUX_OK)
-        flux_encoder_fail(encoder, result);
+    if (result != FLUX_OK && opts && opts->encoder)
+        flux_encoder_fail(opts->encoder, result);
     return result;
-}
-
-void glyph_draw_outlined(glyph_ctx *t, flux_canvas *canvas, flux_arena *arena, float x, float y,
-                         const char *utf8, size_t len, const glyph_style *style,
-                         flux_color outline_color, float outline_width) {
-    text_draw_impl(t, canvas, nullptr, arena, x, y, utf8, len, style, outline_color, outline_width);
 }
 
 /* ------------------------------------------------------------------ */
@@ -936,10 +935,13 @@ void glyph_draw_outlined(glyph_ctx *t, flux_canvas *canvas, flux_arena *arena, f
  * relative to the text origin. Uses each glyph's run direction so the caret
  * lands on the correct edge in RTL/mixed text; for pure LTR this reduces to
  * the summed advance of the preceding glyphs. */
-float glyph_x_for_byte(glyph_ctx *t, const char *utf8, size_t len, size_t byte,
-                       const glyph_style *style) {
-    if (!t || !t->has_backend || !utf8 || len == 0)
+float glyph_x_for_byte(glyph_ctx *t, const glyph_x_for_byte_opts *opts) {
+    if (!t || !t->has_backend || !opts || !opts->utf8 || opts->len == 0)
         return 0.0f;
+    const char *utf8 = opts->utf8;
+    size_t len = opts->len;
+    size_t byte = opts->byte;
+    const glyph_style *style = opts->style;
     float size_px, weight;
     bool italic;
     glyph_family family;
@@ -959,7 +961,7 @@ float glyph_x_for_byte(glyph_ctx *t, const char *utf8, size_t len, size_t byte,
 
     /* Otherwise (end of text, or inside a multi-byte cluster): trailing edge
      * of the nearest preceding glyph in logical order. */
-    const txt_placed_glyph *best = NULL;
+    const txt_placed_glyph *best = nullptr;
     for (int i = 0; i < L.count; i++) {
         const txt_placed_glyph *g = &L.glyphs[i];
         if ((size_t)g->cluster < byte && (!best || g->cluster > best->cluster))
@@ -974,10 +976,17 @@ float glyph_x_for_byte(glyph_ctx *t, const char *utf8, size_t len, size_t byte,
  * visual order with a monotonic pen, so contiguous selected glyphs merge into
  * one rect and a direction flip (an unselected glyph appearing between two
  * selected ones in visual order) naturally splits into separate rects. */
-int glyph_selection_rects(glyph_ctx *t, const char *utf8, size_t len, size_t lo, size_t hi,
-                          const glyph_style *style, glyph_xrange *out, int max) {
-    if (!t || !t->has_backend || !utf8 || len == 0 || lo >= hi || max <= 0)
+int glyph_selection_rects(glyph_ctx *t, const glyph_selection_rects_opts *opts) {
+    if (!t || !t->has_backend || !opts || !opts->utf8 || opts->len == 0 || opts->lo >= opts->hi ||
+        opts->max <= 0)
         return 0;
+    const char *utf8 = opts->utf8;
+    size_t len = opts->len;
+    size_t lo = opts->lo;
+    size_t hi = opts->hi;
+    const glyph_style *style = opts->style;
+    glyph_xrange *out = opts->out;
+    int max = opts->max;
     float size_px, weight;
     bool italic;
     glyph_family family;
@@ -1032,10 +1041,14 @@ int glyph_selection_rects(glyph_ctx *t, const char *utf8, size_t len, size_t lo,
 /* Caret "stops" are the leading edge of each glyph (BiDi-correct) plus the
  * trailing edge of the logically-last glyph. Visual movement walks these stops
  * ordered by x. */
-size_t glyph_visual_move(glyph_ctx *t, const char *utf8, size_t len, size_t byte, bool forward,
-                         const glyph_style *style) {
-    if (!t || !t->has_backend || !utf8 || len == 0)
-        return byte;
+size_t glyph_visual_move(glyph_ctx *t, const glyph_visual_move_opts *opts) {
+    if (!t || !t->has_backend || !opts || !opts->utf8 || opts->len == 0)
+        return opts ? opts->byte : 0;
+    const char *utf8 = opts->utf8;
+    size_t len = opts->len;
+    size_t byte = opts->byte;
+    bool forward = opts->forward;
+    const glyph_style *style = opts->style;
     float size_px, weight;
     bool italic;
     glyph_family family;
@@ -1047,7 +1060,8 @@ size_t glyph_visual_move(glyph_ctx *t, const char *utf8, size_t len, size_t byte
         return byte;
 
     /* Current caret x (leading edge of `byte`). */
-    float cur_x = glyph_x_for_byte(t, utf8, len, byte, style);
+    float cur_x = glyph_x_for_byte(
+        t, &(glyph_x_for_byte_opts){.utf8 = utf8, .len = len, .byte = byte, .style = style});
 
     /* Trailing stop: end of the logically-last char. */
     const txt_placed_glyph *last = &L.glyphs[0];
@@ -1091,10 +1105,13 @@ size_t glyph_visual_move(glyph_ctx *t, const char *utf8, size_t len, size_t byte
 }
 
 /* Source byte offset of the caret nearest local x (relative to text origin). */
-size_t glyph_byte_for_x(glyph_ctx *t, const char *utf8, size_t len, float local_x,
-                        const glyph_style *style) {
-    if (!t || !t->has_backend || !utf8 || len == 0)
+size_t glyph_byte_for_x(glyph_ctx *t, const glyph_byte_for_x_opts *opts) {
+    if (!t || !t->has_backend || !opts || !opts->utf8 || opts->len == 0)
         return 0;
+    const char *utf8 = opts->utf8;
+    size_t len = opts->len;
+    float local_x = opts->local_x;
+    const glyph_style *style = opts->style;
     float size_px, weight;
     bool italic;
     glyph_family family;
@@ -1129,12 +1146,12 @@ void glyph_compact(glyph_ctx *t) {
     if (!t)
         return;
     txt_free(t, t->layout_buf, "layout");
-    t->layout_buf = NULL;
+    t->layout_buf = nullptr;
     t->layout_cap = 0;
     txt_free(t, t->runs_buf, "run_buf");
-    t->runs_buf = NULL;
+    t->runs_buf = nullptr;
     txt_free(t, t->run_levels_buf, "run_levels_buf");
-    t->run_levels_buf = NULL;
+    t->run_levels_buf = nullptr;
     t->runs_cap = 0;
     txt_itemize_release_scratch(t);
     txt_layout_cache_reset(t);

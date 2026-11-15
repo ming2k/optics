@@ -103,7 +103,7 @@ static void a11y_visitor(const lens_semantics *s, flux_rect bounds, lens_id id, 
 }
 
 int main(void) {
-    lens *ui = NULL;
+    lens *ui = nullptr;
     if (lens_create(&(lens_desc){.theme = lens_theme_default()}, &ui) != FLUX_OK) {
         return 1;
     }
@@ -127,7 +127,7 @@ int main(void) {
     bool light_theme = false;
     bool dark_theme = true;
     lens_label(ui, &(lens_label_opts){.text = "Theme Selection:"});
-    lens_row_begin(ui, NULL);
+    lens_row_begin(ui, nullptr);
     lens_checkbox(ui, &(lens_checkbox_opts){.label = "Light",
                                             .value = &light_theme,
                                             .appearance = LENS_CHECKBOX_RADIO});

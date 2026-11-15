@@ -66,7 +66,8 @@ static const void *test_resource_resolve(void *user, flux_display_list_resource_
 
 static void draw_display_list(flux_canvas *canvas, void *user) {
     const display_list_case *c = user;
-    OT_EXPECT(flux_canvas_submit_display_list(canvas, c->list) == FLUX_OK);
+    OT_EXPECT(flux_canvas_submit_display_list(
+                  canvas, &(flux_canvas_submit_display_list_opts){.list = c->list}) == FLUX_OK);
 }
 
 static flux_result render_frame(flux_surface *s, flux_canvas *canvas, draw_fn draw, void *user) {
@@ -205,7 +206,7 @@ typedef struct image_record_case {
 static void draw_rotated_image(flux_canvas *canvas, void *user) {
     image_transform_case *tc = user;
     flux_canvas_save(canvas);
-    flux_canvas_translate(canvas, W / 2.0f, H / 2.0f);
+    flux_canvas_translate(canvas, &(flux_canvas_translate_opts){.x = W / 2.0f, .y = H / 2.0f});
     flux_canvas_rotate(canvas, 1.57079632679f);
     flux_canvas_draw_image_sampled(canvas, tc->image, tc->sampler,
                                    (flux_rect){-32.0f, -16.0f, 64.0f, 32.0f}, &tc->paint);
@@ -241,7 +242,7 @@ static void draw_combined_image(flux_canvas *canvas, void *user) {
                 .tint = 0xFFFFFFFF,
             },
     };
-    flux_canvas_draw_geometry(canvas, &g, &b);
+    flux_canvas_draw_geometry(canvas, &(flux_canvas_draw_geometry_opts){.geom = &g, .brush = &b});
 }
 
 static void draw_save_layer_opacity_group(flux_canvas *canvas, void *user) {
@@ -249,7 +250,8 @@ static void draw_save_layer_opacity_group(flux_canvas *canvas, void *user) {
     /* Isolated opacity group (ADR-0091) on GPU Vulkan backend:
      * Two overlapping fully-opaque red rectangles inside a 0.5 opacity layer.
      * Overlap must NOT produce double-blend artifact. */
-    flux_canvas_save_layer(canvas, nullptr, 0.5f);
+    flux_canvas_save_layer(canvas,
+                           &(flux_canvas_save_layer_opts){.bounds = nullptr, .opacity = 0.5f});
     flux_color red = flux_color_rgba_premul(255, 0, 0, 255);
     flux_canvas_fill_rect_color(canvas, (flux_rect){8.0f, 8.0f, 24.0f, 24.0f}, red);
     flux_canvas_fill_rect_color(canvas, (flux_rect){20.0f, 8.0f, 24.0f, 24.0f}, red);
@@ -289,7 +291,13 @@ static void draw_text_family(flux_canvas *canvas, void *user) {
         .color = flux_color_rgba(255, 255, 255, 255),
         .family = tc->family,
     };
-    glyph_draw(tc->text, canvas, tc->arena, 12.0f, tc->y, s, strlen(s), &style);
+    glyph_draw(tc->text, &(glyph_draw_opts){.canvas = canvas,
+                                            .arena = tc->arena,
+                                            .x = 12.0f,
+                                            .y = tc->y,
+                                            .utf8 = s,
+                                            .len = strlen(s),
+                                            .style = &style});
 }
 
 static bool region_has_ink(const uint8_t *px, uint32_t x0, uint32_t y0, uint32_t x1, uint32_t y1) {
@@ -567,7 +575,8 @@ int main(void) {
             .image = {.image = image, .tint = flux_color_rgba_premul(255, 255, 255, 255)},
         };
         flux_geometry image_geom = flux_geom_rect((flux_rect){0, 0, 2, 2});
-        flux_encoder_draw_geometry(enc, &image_geom, &image_brush);
+        flux_encoder_draw_geometry(
+            enc, &(flux_encoder_draw_geometry_opts){.geom = &image_geom, .brush = &image_brush});
         flux_display_list *image_list = nullptr;
         OT_EXPECT(flux_encoder_finish(enc, &image_list) == FLUX_OK);
         flux_encoder_destroy(enc);
@@ -576,7 +585,8 @@ int main(void) {
 
         OT_EXPECT(flux_encoder_create(&(flux_encoder_desc){.max_retained_bytes = 8u}, &enc) ==
                   FLUX_OK);
-        flux_encoder_draw_geometry(enc, &image_geom, &image_brush);
+        flux_encoder_draw_geometry(
+            enc, &(flux_encoder_draw_geometry_opts){.geom = &image_geom, .brush = &image_brush});
         OT_EXPECT(flux_encoder_status(enc) == FLUX_ERROR_OUT_OF_MEMORY);
         OT_EXPECT(flux_encoder_finish(enc, &image_list) == FLUX_ERROR_OUT_OF_MEMORY);
         OT_EXPECT(image_list == nullptr);
@@ -590,30 +600,40 @@ int main(void) {
         flux_encoder *snapshot_enc = nullptr;
         OT_EXPECT(flux_encoder_create(nullptr, &snapshot_enc) == FLUX_OK);
         flux_encoder_draw_geometry(
-            snapshot_enc, &image_geom,
-            &(flux_brush){
-                .kind = FLUX_BRUSH_IMAGE_PATTERN,
-                .blend = FLUX_BLEND_SRC_OVER,
-                .opacity = 1.0f,
-                .image = {.image = snapshot, .tint = flux_color_rgba_premul(255, 255, 255, 255)},
-            });
+            snapshot_enc, &(flux_encoder_draw_geometry_opts){
+                              .geom = &image_geom,
+                              .brush = &(flux_brush){
+                                  .kind = FLUX_BRUSH_IMAGE_PATTERN,
+                                  .blend = FLUX_BLEND_SRC_OVER,
+                                  .opacity = 1.0f,
+                                  .image = {.image = snapshot,
+                                            .tint = flux_color_rgba_premul(255, 255, 255, 255)},
+                              }});
         flux_display_list *old_list = nullptr;
         OT_EXPECT(flux_encoder_finish(snapshot_enc, &old_list) == FLUX_OK);
         flux_encoder_destroy(snapshot_enc);
 
         uint32_t blue_px[4] = {0xFFFF0000u, 0xFFFF0000u, 0xFFFF0000u, 0xFFFF0000u};
-        OT_EXPECT(flux_image_update_region(image, 0, 0, 2, 2, blue_px, sizeof blue_px) == FLUX_OK);
+        OT_EXPECT(flux_image_update_region(
+                      image, &(flux_image_update_region_opts){.x = 0,
+                                                              .y = 0,
+                                                              .width = 2,
+                                                              .height = 2,
+                                                              .data = blue_px,
+                                                              .bytes = sizeof blue_px}) == FLUX_OK);
 
         flux_encoder *new_enc = nullptr;
         OT_EXPECT(flux_encoder_create(nullptr, &new_enc) == FLUX_OK);
         flux_encoder_draw_geometry(
-            new_enc, &image_geom,
-            &(flux_brush){
-                .kind = FLUX_BRUSH_IMAGE_PATTERN,
-                .blend = FLUX_BLEND_SRC_OVER,
-                .opacity = 1.0f,
-                .image = {.image = image, .tint = flux_color_rgba_premul(255, 255, 255, 255)},
-            });
+            new_enc,
+            &(flux_encoder_draw_geometry_opts){
+                .geom = &image_geom,
+                .brush = &(flux_brush){
+                    .kind = FLUX_BRUSH_IMAGE_PATTERN,
+                    .blend = FLUX_BLEND_SRC_OVER,
+                    .opacity = 1.0f,
+                    .image = {.image = image, .tint = flux_color_rgba_premul(255, 255, 255, 255)},
+                }});
         flux_display_list *new_list = nullptr;
         OT_EXPECT(flux_encoder_finish(new_enc, &new_list) == FLUX_OK);
         flux_encoder_destroy(new_enc);
@@ -624,15 +644,18 @@ int main(void) {
         /* Scale the 2x2 source over the output so both colours are visible. */
         flux_encoder *scale_enc = nullptr;
         OT_EXPECT(flux_encoder_create(nullptr, &scale_enc) == FLUX_OK);
-        flux_encoder_scale(scale_enc, (float)W / 2.0f, (float)H / 2.0f);
+        flux_encoder_scale(
+            scale_enc, &(flux_encoder_scale_opts){.sx = (float)W / 2.0f, .sy = (float)H / 2.0f});
         flux_encoder_draw_geometry(
-            scale_enc, &image_geom,
-            &(flux_brush){
-                .kind = FLUX_BRUSH_IMAGE_PATTERN,
-                .blend = FLUX_BLEND_SRC_OVER,
-                .opacity = 1.0f,
-                .image = {.image = snapshot, .tint = flux_color_rgba_premul(255, 255, 255, 255)},
-            });
+            scale_enc, &(flux_encoder_draw_geometry_opts){
+                           .geom = &image_geom,
+                           .brush = &(flux_brush){
+                               .kind = FLUX_BRUSH_IMAGE_PATTERN,
+                               .blend = FLUX_BLEND_SRC_OVER,
+                               .opacity = 1.0f,
+                               .image = {.image = snapshot,
+                                         .tint = flux_color_rgba_premul(255, 255, 255, 255)},
+                           }});
         flux_display_list *scaled_old = nullptr;
         OT_EXPECT(flux_encoder_finish(scale_enc, &scaled_old) == FLUX_OK);
         flux_encoder_destroy(scale_enc);
@@ -644,15 +667,18 @@ int main(void) {
 
         flux_encoder *scale_new_enc = nullptr;
         OT_EXPECT(flux_encoder_create(nullptr, &scale_new_enc) == FLUX_OK);
-        flux_encoder_scale(scale_new_enc, (float)W / 2.0f, (float)H / 2.0f);
+        flux_encoder_scale(scale_new_enc, &(flux_encoder_scale_opts){.sx = (float)W / 2.0f,
+                                                                     .sy = (float)H / 2.0f});
         flux_encoder_draw_geometry(
-            scale_new_enc, &image_geom,
-            &(flux_brush){
-                .kind = FLUX_BRUSH_IMAGE_PATTERN,
-                .blend = FLUX_BLEND_SRC_OVER,
-                .opacity = 1.0f,
-                .image = {.image = image, .tint = flux_color_rgba_premul(255, 255, 255, 255)},
-            });
+            scale_new_enc,
+            &(flux_encoder_draw_geometry_opts){
+                .geom = &image_geom,
+                .brush = &(flux_brush){
+                    .kind = FLUX_BRUSH_IMAGE_PATTERN,
+                    .blend = FLUX_BLEND_SRC_OVER,
+                    .opacity = 1.0f,
+                    .image = {.image = image, .tint = flux_color_rgba_premul(255, 255, 255, 255)},
+                }});
         flux_display_list *scaled_new = nullptr;
         OT_EXPECT(flux_encoder_finish(scale_new_enc, &scaled_new) == FLUX_OK);
         flux_encoder_destroy(scale_new_enc);
@@ -669,8 +695,13 @@ int main(void) {
         flux_image_release(snapshot);
 
         /* Restore the quadrant fixture for the transform tests below. */
-        OT_EXPECT(flux_image_update_region(image, 0, 0, 2, 2, image_px, sizeof image_px) ==
-                  FLUX_OK);
+        OT_EXPECT(flux_image_update_region(image, &(flux_image_update_region_opts){
+                                                      .x = 0,
+                                                      .y = 0,
+                                                      .width = 2,
+                                                      .height = 2,
+                                                      .data = image_px,
+                                                      .bytes = sizeof image_px}) == FLUX_OK);
 
         /* Color-managed images share their immutable color state across a
          * snapshot/COW split instead of refusing the update. */
@@ -691,8 +722,13 @@ int main(void) {
         OT_EXPECT(flux_image_create(d, &color_image_desc, &color_image) == FLUX_OK);
         flux_image *color_snapshot = nullptr;
         OT_EXPECT(flux_image_snapshot(color_image, &color_snapshot) == FLUX_OK);
-        OT_EXPECT(flux_image_update_region(color_image, 0, 0, 2, 2, blue_px, sizeof blue_px) ==
-                  FLUX_OK);
+        OT_EXPECT(flux_image_update_region(color_image, &(flux_image_update_region_opts){
+                                                            .x = 0,
+                                                            .y = 0,
+                                                            .width = 2,
+                                                            .height = 2,
+                                                            .data = blue_px,
+                                                            .bytes = sizeof blue_px}) == FLUX_OK);
         flux_image_release(color_snapshot);
         flux_image_release(color_image);
 
@@ -701,8 +737,10 @@ int main(void) {
         flux_encoder *wire_enc = nullptr;
         OT_EXPECT(flux_encoder_create(nullptr, &wire_enc) == FLUX_OK);
         flux_encoder_draw_geometry(
-            wire_enc, &(flux_geometry){.kind = FLUX_GEOM_RECT, .rect = {.rect = {0, 0, 2, 2}}},
-            &image_brush);
+            wire_enc,
+            &(flux_encoder_draw_geometry_opts){
+                .geom = &(flux_geometry){.kind = FLUX_GEOM_RECT, .rect = {.rect = {0, 0, 2, 2}}},
+                .brush = &image_brush});
         flux_display_list *wire_list = nullptr;
         OT_EXPECT(flux_encoder_finish(wire_enc, &wire_list) == FLUX_OK);
         flux_encoder_destroy(wire_enc);
@@ -711,12 +749,17 @@ int main(void) {
         flux_display_list_serialize_opts sopts = FLUX_DISPLAY_LIST_SERIALIZE_OPTS_INIT;
         sopts.resource_id = test_resource_id;
         sopts.user = image;
-        OT_EXPECT(flux_display_list_serialize(wire_list, &sopts, &wire, &wire_size) == FLUX_OK);
+        sopts.out_data = &wire;
+        sopts.out_size = &wire_size;
+        OT_EXPECT(flux_display_list_serialize(wire_list, &sopts) == FLUX_OK);
+        flux_display_list *wire_loaded = nullptr;
         flux_display_list_deserialize_opts dopts = FLUX_DISPLAY_LIST_DESERIALIZE_OPTS_INIT;
+        dopts.data = wire;
+        dopts.size = wire_size;
         dopts.resolve = test_resource_resolve;
         dopts.user = image;
-        flux_display_list *wire_loaded = nullptr;
-        OT_EXPECT(flux_display_list_deserialize(wire, wire_size, &dopts, &wire_loaded) == FLUX_OK);
+        dopts.out_list = &wire_loaded;
+        OT_EXPECT(flux_display_list_deserialize(&dopts) == FLUX_OK);
         display_list_case wire_case = {.list = wire_loaded};
         OT_EXPECT(render_frame(s, canvas, draw_display_list, &wire_case) == FLUX_OK);
         OT_EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
@@ -923,7 +966,9 @@ int main(void) {
                 .color = flux_color_rgba(255, 255, 255, 255),
                 .family = cases[i].family,
             };
-            glyph_metrics m = glyph_measure(text, text_s, strlen(text_s), &style);
+            glyph_metrics m = glyph_measure(
+                text,
+                &(glyph_measure_opts){.utf8 = text_s, .len = strlen(text_s), .style = &style});
             OT_EXPECT(m.width > 0.0f);
             OT_EXPECT(m.height > 0.0f);
 
@@ -967,8 +1012,13 @@ int main(void) {
         OT_EXPECT(pthread_create(&thread, nullptr, snapshot_worker, &stress) == 0);
         for (uint32_t i = 0; i < 200; ++i) {
             source[0] = 0xFF000000u | i;
-            OT_EXPECT(flux_image_update_region(image, 0, 0, 2, 2, source, sizeof source) ==
-                      FLUX_OK);
+            OT_EXPECT(flux_image_update_region(image, &(flux_image_update_region_opts){
+                                                          .x = 0,
+                                                          .y = 0,
+                                                          .width = 2,
+                                                          .height = 2,
+                                                          .data = source,
+                                                          .bytes = sizeof source}) == FLUX_OK);
         }
         atomic_store_explicit(&stress.stop, true, memory_order_relaxed);
         pthread_join(thread, nullptr);

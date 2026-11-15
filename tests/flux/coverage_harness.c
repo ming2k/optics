@@ -298,7 +298,7 @@ flux_result cov_harness_supersample(flux_curve_cover cover, flux_curve_fill rule
 int cov_harness_levels(const cov_plane *plane) {
     if (!plane || !plane->px)
         return 0;
-    unsigned char seen[256] = {0};
+    unsigned char seen[256] = {};
     for (size_t k = 0; k < (size_t)plane->w * plane->h; ++k) {
         float c = plane->px[k];
         if (c < 0.0f)

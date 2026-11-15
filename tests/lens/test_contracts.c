@@ -130,7 +130,7 @@ int main(void) {
     flux_canvas_release(c);
 
     /* Presentation Handshake & Generation Progression (ADR-0094) */
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     uint64_t g0 = lens_generation(ui);
     lens_begin(ui, &in);
     lens_button(ui, &(lens_button_opts){.label = "Frame 1"});

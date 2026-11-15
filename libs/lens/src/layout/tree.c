@@ -3,7 +3,7 @@
 #include "../internal.h"
 
 lens_node *lensi_open_container(lens *ui) {
-    return ui->cont_top ? ui->cont_stack[ui->cont_top - 1] : NULL;
+    return ui->cont_top ? ui->cont_stack[ui->cont_top - 1] : nullptr;
 }
 
 void lensi_link_child(lens *ui, lens_node *n) {
@@ -20,7 +20,7 @@ void lensi_link_child(lens *ui, lens_node *n) {
         return;
     }
     n->parent = parent;
-    n->next_sibling = NULL;
+    n->next_sibling = nullptr;
     if (parent->last_child)
         parent->last_child->next_sibling = n;
     else
@@ -91,7 +91,7 @@ static lens_node *open_flex(lens *ui, lens_axis axis, lens_layout_opts opts) {
                      : lensi_gen_container_id(ui, axis == LENS_ROW ? "row" : "col");
     lens_node *n = lensi_store_touch(ui, id);
     if (!n)
-        return NULL;
+        return nullptr;
     lensi_link_child(ui, n); /* link into parent BEFORE pushing */
     lensi_node_box(ui, n, &opts.box);
     n->is_container = true;
@@ -160,7 +160,7 @@ static lens_node *open_stack(lens *ui, lens_layout_opts opts) {
                                                  : lensi_gen_container_id(ui, "stack");
     lens_node *n = lensi_store_touch(ui, id);
     if (!n)
-        return NULL;
+        return nullptr;
     lensi_link_child(ui, n);
     lensi_node_box(ui, n, &opts.box);
     n->is_container = true;
@@ -202,7 +202,7 @@ static lens_node *open_grid(lens *ui, lens_grid_opts opts) {
                                                  : lensi_gen_container_id(ui, "grid");
     lens_node *n = lensi_store_touch(ui, id);
     if (!n)
-        return NULL;
+        return nullptr;
     lensi_link_child(ui, n);
     lensi_node_box(ui, n, &opts.box);
     n->is_container = true;
@@ -253,11 +253,11 @@ void lens_close(lens *ui) {
 }
 
 lens_response lens_pressable_begin(lens *ui, const lens_pressable_opts *opts) {
-    lens_response empty = {0};
+    lens_response empty = {};
     if (!ui)
         return empty;
 
-    lens_pressable_opts default_opts = {0};
+    lens_pressable_opts default_opts = {};
     if (!opts)
         opts = &default_opts;
 
@@ -277,7 +277,8 @@ lens_response lens_pressable_begin(lens *ui, const lens_pressable_opts *opts) {
     else if (opts->mouse_button == LENS_MOUSE_MIDDLE)
         r.clicked = r.middle_clicked;
     uint32_t sem_flags = (r.focused ? LENS_A11Y_FOCUSED : 0) | (disabled ? LENS_A11Y_DISABLED : 0);
-    lensi_node_semantics(ui, n, LENS_ROLE_BUTTON, opts->label ? opts->label : "", NULL, sem_flags);
+    lensi_node_semantics(ui, n, LENS_ROLE_BUTTON, opts->label ? opts->label : "", nullptr,
+                         sem_flags);
 
     if (!disabled) {
         float dt = ui->input.dt_seconds;
@@ -405,13 +406,13 @@ void lensi_node_box(lens *ui, lens_node *n, const lens_box *box) {
 }
 
 void lens_space_between(lens *ui) {
-    lens_node *n = ui ? lensi_open_container(ui) : NULL;
+    lens_node *n = ui ? lensi_open_container(ui) : nullptr;
     if (n)
         n->space_between = true;
 }
 
 void lens_fit(lens *ui) {
-    lens_node *n = ui ? lensi_open_container(ui) : NULL;
+    lens_node *n = ui ? lensi_open_container(ui) : nullptr;
     if (n)
         n->fit = true;
 }

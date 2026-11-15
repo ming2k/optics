@@ -32,11 +32,11 @@
 int main(int argc, char **argv) {
     /* Violation mode: run from the parent as a fork child. */
     if (argc == 2 && strcmp(argv[1], "--violation") == 0) {
-        lens *ui = NULL;
-        if (lens_create(&(lens_desc){0}, &ui) != FLUX_OK)
+        lens *ui = nullptr;
+        if (lens_create(&(lens_desc){}, &ui) != FLUX_OK)
             return 2;
         char frame_buf[32];
-        lens_input input = {0};
+        lens_input input = {};
         lens_begin(ui, &input);
 
         /* Frame 1: register a stack pointer. */
@@ -53,13 +53,13 @@ int main(int argc, char **argv) {
     }
 
     /* --- legitimate patterns, in-process -------------------------------- */
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     static char persistent_label[] = "persistent-label"; /* static storage: always fine */
 
     for (uint32_t frame = 0; frame < 64; frame++) {
-        lens_input input = {0};
+        lens_input input = {};
         lens_begin(ui, &input);
 
         /* static storage: registered this frame, stable across frames */
@@ -92,7 +92,7 @@ int main(int argc, char **argv) {
     pid_t pid = fork();
     OT_EXPECT(pid >= 0);
     if (pid == 0) {
-        execl("/proc/self/exe", argv[0], "--violation", (char *)NULL);
+        execl("/proc/self/exe", argv[0], "--violation", (char *)nullptr);
         _exit(127);
     }
     int status = 0;

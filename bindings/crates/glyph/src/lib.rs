@@ -129,8 +129,12 @@ impl Text {
 
     pub fn measure(&self, text: &str, style: &Style) -> Metrics {
         let s = style.to_sys();
-        unsafe { glyph_sys::glyph_measure(self.raw, text.as_ptr() as *const i8, text.len(), &s) }
-            .into()
+        let opts = glyph_sys::glyph_measure_opts {
+            utf8: text.as_ptr() as *const i8,
+            len: text.len(),
+            style: &s,
+        };
+        unsafe { glyph_sys::glyph_measure(self.raw, &opts) }.into()
     }
 
     pub fn draw(
@@ -143,55 +147,55 @@ impl Text {
         style: &Style,
     ) {
         let s = style.to_sys();
-        unsafe {
-            glyph_sys::glyph_draw(
-                self.raw,
-                canvas.as_raw(),
-                arena.as_raw(),
-                x,
-                y,
-                text.as_ptr() as *const i8,
-                text.len(),
-                &s,
-            )
+        let opts = glyph_sys::glyph_draw_opts {
+            canvas: canvas.as_raw(),
+            arena: arena.as_raw(),
+            x,
+            y,
+            utf8: text.as_ptr() as *const i8,
+            len: text.len(),
+            style: &s,
+            outline_color: 0,
+            outline_width: 0.0,
         };
+        unsafe { glyph_sys::glyph_draw(self.raw, &opts) };
     }
 
     pub fn x_for_byte(&self, text: &str, byte: usize, style: &Style) -> f32 {
         let s = style.to_sys();
-        unsafe {
-            glyph_sys::glyph_x_for_byte(self.raw, text.as_ptr() as *const i8, text.len(), byte, &s)
-        }
+        let opts = glyph_sys::glyph_x_for_byte_opts {
+            utf8: text.as_ptr() as *const i8,
+            len: text.len(),
+            byte,
+            style: &s,
+        };
+        unsafe { glyph_sys::glyph_x_for_byte(self.raw, &opts) }
     }
 
     pub fn byte_for_x(&self, text: &str, local_x: f32, style: &Style) -> usize {
         let s = style.to_sys();
-        unsafe {
-            glyph_sys::glyph_byte_for_x(
-                self.raw,
-                text.as_ptr() as *const i8,
-                text.len(),
-                local_x,
-                &s,
-            )
-        }
+        let opts = glyph_sys::glyph_byte_for_x_opts {
+            utf8: text.as_ptr() as *const i8,
+            len: text.len(),
+            local_x,
+            style: &s,
+        };
+        unsafe { glyph_sys::glyph_byte_for_x(self.raw, &opts) }
     }
 
     pub fn selection_rects(&self, text: &str, lo: usize, hi: usize, style: &Style) -> Vec<XRange> {
         let s = style.to_sys();
         let mut buf = [glyph_sys::glyph_xrange { x0: 0.0, x1: 0.0 }; 16];
-        let n = unsafe {
-            glyph_sys::glyph_selection_rects(
-                self.raw,
-                text.as_ptr() as *const i8,
-                text.len(),
-                lo,
-                hi,
-                &s,
-                buf.as_mut_ptr(),
-                buf.len() as i32,
-            )
+        let opts = glyph_sys::glyph_selection_rects_opts {
+            utf8: text.as_ptr() as *const i8,
+            len: text.len(),
+            lo,
+            hi,
+            style: &s,
+            out: buf.as_mut_ptr(),
+            max: buf.len() as i32,
         };
+        let n = unsafe { glyph_sys::glyph_selection_rects(self.raw, &opts) };
         buf.iter()
             .take(n.max(0) as usize)
             .map(|r| XRange { x0: r.x0, x1: r.x1 })
@@ -200,16 +204,14 @@ impl Text {
 
     pub fn visual_move(&self, text: &str, byte: usize, forward: bool, style: &Style) -> usize {
         let s = style.to_sys();
-        unsafe {
-            glyph_sys::glyph_visual_move(
-                self.raw,
-                text.as_ptr() as *const i8,
-                text.len(),
-                byte,
-                forward,
-                &s,
-            )
-        }
+        let opts = glyph_sys::glyph_visual_move_opts {
+            utf8: text.as_ptr() as *const i8,
+            len: text.len(),
+            byte,
+            forward,
+            style: &s,
+        };
+        unsafe { glyph_sys::glyph_visual_move(self.raw, &opts) }
     }
 
     pub fn as_raw(&self) -> *mut glyph_sys::glyph_ctx {

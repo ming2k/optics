@@ -45,8 +45,8 @@ static bool frame_with_cmd(lens *ui, lens_draw_cmd cmd) {
 }
 
 int main(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     /* frame 1: first geometry — always changed */
     OT_EXPECT(frame_with_cmd(ui, base_cmd()) == true);

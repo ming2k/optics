@@ -252,7 +252,7 @@ static flux_result frosted_ensure_slot(prism_frosted_filter *filter, uint32_t in
         return FLUX_OK;
     if (slot->output)
         flux_image_release(slot->output);
-    *slot = (frosted_filter_slot){0};
+    *slot = (frosted_filter_slot){};
     flux_result r =
         flux_image_create_compute_writable(filter->device, width, height, format, &slot->output);
     if (r != FLUX_OK)
@@ -401,7 +401,14 @@ static void frosted_plan_record(void *raw, VkCommandBuffer cmd) {
             };
             uint32_t gx = (pc.region_width + PRISM_WG - 1u) / PRISM_WG;
             uint32_t gy = (pc.region_height + PRISM_WG - 1u) / PRISM_WG;
-            flux_compute_dispatch(cmd, filter->clear_pipelines[cls], &pc, sizeof(pc), gx, gy, 1);
+            flux_compute_dispatch(
+                &(flux_compute_dispatch_opts){.cmd = cmd,
+                                              .pipeline = filter->clear_pipelines[cls],
+                                              .push_constants = &pc,
+                                              .push_bytes = sizeof(pc),
+                                              .group_x = gx,
+                                              .group_y = gy,
+                                              .group_z = 1});
             barrier_compute_write_to_read_write(cmd, out_vk);
         }
     } else if (filter->clear_pipelines[cls]) {
@@ -417,7 +424,14 @@ static void frosted_plan_record(void *raw, VkCommandBuffer cmd) {
             };
             uint32_t gx = (pc.region_width + PRISM_WG - 1u) / PRISM_WG;
             uint32_t gy = (pc.region_height + PRISM_WG - 1u) / PRISM_WG;
-            flux_compute_dispatch(cmd, filter->clear_pipelines[cls], &pc, sizeof(pc), gx, gy, 1);
+            flux_compute_dispatch(
+                &(flux_compute_dispatch_opts){.cmd = cmd,
+                                              .pipeline = filter->clear_pipelines[cls],
+                                              .push_constants = &pc,
+                                              .push_bytes = sizeof(pc),
+                                              .group_x = gx,
+                                              .group_y = gy,
+                                              .group_z = 1});
         }
         for (uint32_t i = 0; i < p->current_count; ++i) {
             storage_clear_push pc = {
@@ -431,7 +445,14 @@ static void frosted_plan_record(void *raw, VkCommandBuffer cmd) {
             };
             uint32_t gx = (pc.region_width + PRISM_WG - 1u) / PRISM_WG;
             uint32_t gy = (pc.region_height + PRISM_WG - 1u) / PRISM_WG;
-            flux_compute_dispatch(cmd, filter->clear_pipelines[cls], &pc, sizeof(pc), gx, gy, 1);
+            flux_compute_dispatch(
+                &(flux_compute_dispatch_opts){.cmd = cmd,
+                                              .pipeline = filter->clear_pipelines[cls],
+                                              .push_constants = &pc,
+                                              .push_bytes = sizeof(pc),
+                                              .group_x = gx,
+                                              .group_y = gy,
+                                              .group_z = 1});
         }
         if (p->needs_output_barrier)
             barrier_compute_write_to_read_write(cmd, out_vk);
@@ -473,7 +494,14 @@ static void frosted_plan_record(void *raw, VkCommandBuffer cmd) {
             };
             uint32_t gx = (reg->width + PRISM_WG - 1) / PRISM_WG;
             uint32_t gy = (reg->height + PRISM_WG - 1) / PRISM_WG;
-            flux_compute_dispatch(cmd, filter->frosted_pipelines[cls], &pc, sizeof(pc), gx, gy, 1);
+            flux_compute_dispatch(
+                &(flux_compute_dispatch_opts){.cmd = cmd,
+                                              .pipeline = filter->frosted_pipelines[cls],
+                                              .push_constants = &pc,
+                                              .push_bytes = sizeof(pc),
+                                              .group_x = gx,
+                                              .group_y = gy,
+                                              .group_z = 1});
             if (i + 1 < p->current_count)
                 barrier_compute_write_to_read_write(cmd, out_vk);
         }
@@ -482,10 +510,13 @@ static void frosted_plan_record(void *raw, VkCommandBuffer cmd) {
     barrier_compute_write_to_read(cmd, out_vk);
 }
 
-flux_result prism_frosted_filter_apply(prism_frosted_filter *filter, flux_frame *frame,
-                                       const prism_frosted_desc *desc, prism_material_output *out) {
-    if (!filter || !frame || !desc || !out)
+flux_result prism_frosted_filter_apply(prism_frosted_filter *filter,
+                                       const prism_frosted_filter_apply_opts *opts) {
+    if (!filter || !opts || !opts->frame || !opts->desc || !opts->out)
         return FLUX_ERROR_INVALID_ARGUMENT;
+    flux_frame *frame = opts->frame;
+    const prism_frosted_desc *desc = opts->desc;
+    prism_material_output *out = opts->out;
     if (desc->type != PRISM_TYPE_FROSTED_DESC)
         return FLUX_ERROR_INVALID_ARGUMENT;
     if (!desc->input || !desc->blurred_input)
@@ -495,7 +526,7 @@ flux_result prism_frosted_filter_apply(prism_frosted_filter *filter, flux_frame 
     if (desc->group_count > 0 && !desc->groups)
         return FLUX_ERROR_INVALID_ARGUMENT;
 
-    *out = (prism_material_output){0};
+    *out = (prism_material_output){};
     if (flux_frame_get_state(frame) != FLUX_FRAME_STATE_RECORDING ||
         flux_frame_has_active_pass(frame))
         return FLUX_ERROR_INVALID_STATE;

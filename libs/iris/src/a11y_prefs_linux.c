@@ -32,7 +32,7 @@ static bool portal_read_setting(sd_bus *bus, const char *ns, const char *key, ch
     if (!bus)
         return false;
     sd_bus_error err = SD_BUS_ERROR_NULL;
-    sd_bus_message *reply = NULL;
+    sd_bus_message *reply = nullptr;
     int rc = sd_bus_call_method(
         bus, "org.freedesktop.portal.Desktop", "/org/freedesktop/portal/desktop",
         "org.freedesktop.portal.Settings", "ReadOne", &err, &reply, "ss", ns, key);
@@ -47,7 +47,7 @@ static bool portal_read_setting(sd_bus *bus, const char *ns, const char *key, ch
         return false;
     }
 
-    if (sd_bus_message_enter_container(reply, 'v', NULL) < 0) {
+    if (sd_bus_message_enter_container(reply, 'v', nullptr) < 0) {
         sd_bus_message_unref(reply);
         return false;
     }
@@ -85,7 +85,7 @@ IRIS_API iris_a11y_prefs iris_a11y_prefs_query(void) {
 
 #ifdef __linux__
 #ifdef IRIS_HAVE_PORTAL_WATCH
-    sd_bus *session = NULL;
+    sd_bus *session = nullptr;
     if (sd_bus_open_user(&session) >= 0) {
         (void)sd_bus_set_method_call_timeout(session, 50000); /* 50ms fail-fast */
 

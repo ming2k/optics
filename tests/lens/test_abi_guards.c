@@ -33,9 +33,9 @@ static void test_theme_older_caller_prefix_only(void) {
      * directly observable from outside; the observable contract is that
      * the copy succeeds, the stored theme is normalized, and the stored
      * size reports the library's layout. */
-    lens *ui = NULL;
+    lens *ui = nullptr;
     OT_EXPECT(lens_create(&(lens_desc){.theme = *small}, &ui) == FLUX_OK);
-    OT_EXPECT(ui != NULL);
+    OT_EXPECT(ui != nullptr);
 
     lens_theme got = lens_get_theme(ui);
     OT_EXPECT(got.size == sizeof(lens_theme));
@@ -54,7 +54,7 @@ static void test_theme_newer_caller_clamped(void) {
     lens_theme t = lens_theme_default();
     t.size = (uint32_t)(sizeof(lens_theme) * 2); /* hostile / newer */
 
-    lens *ui = NULL;
+    lens *ui = nullptr;
     OT_EXPECT(lens_create(&(lens_desc){.theme = t}, &ui) == FLUX_OK);
     lens_theme got = lens_get_theme(ui);
     OT_EXPECT(got.size == sizeof(lens_theme));
@@ -64,9 +64,9 @@ static void test_theme_newer_caller_clamped(void) {
 /* lens_desc guard: size 0 (every existing caller today) still works and
  * takes the legacy full-struct path; an explicit sizeof() also works. */
 static void test_desc_guard_both_spellings(void) {
-    lens *a = NULL, *b = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &a) == FLUX_OK); /* legacy */
-    OT_EXPECT(a != NULL);
+    lens *a = nullptr, *b = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &a) == FLUX_OK); /* legacy */
+    OT_EXPECT(a != nullptr);
     lens_release(a);
 
     lens_desc d = LENS_DESC_INIT;
@@ -80,8 +80,8 @@ static void test_desc_guard_both_spellings(void) {
 /* set_theme with a guarded (smaller) theme must clamp on the way in and
  * must not leave the context theme in a torn state. */
 static void test_set_theme_clamps(void) {
-    lens *ui = NULL;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &ui) == FLUX_OK);
+    lens *ui = nullptr;
+    OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
 
     lens_theme t = lens_theme_dark();
     t.size = 16; /* caller knows only 16 bytes */

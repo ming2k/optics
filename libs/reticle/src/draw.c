@@ -162,9 +162,11 @@ typedef struct reticle_sink {
 
 static void sink_draw(reticle_sink sink, const flux_geometry *geometry, const flux_brush *brush) {
     if (sink.canvas)
-        flux_canvas_draw_geometry(sink.canvas, geometry, brush);
+        flux_canvas_draw_geometry(
+            sink.canvas, &(flux_canvas_draw_geometry_opts){.geom = geometry, .brush = brush});
     else
-        flux_encoder_draw_geometry(sink.encoder, geometry, brush);
+        flux_encoder_draw_geometry(
+            sink.encoder, &(flux_encoder_draw_geometry_opts){.geom = geometry, .brush = brush});
 }
 
 static void sink_transform(reticle_sink sink, reticle_transform transform) {

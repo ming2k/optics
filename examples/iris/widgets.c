@@ -50,7 +50,7 @@ static void build(lens *ui, const lens_input *in, void *user) {
 
     lens_size(ui, 0, 34);
     lens_label(ui, &(lens_label_opts){.text = "iris widget reference", .size = 22.0f});
-    lens_separator(ui, NULL);
+    lens_separator(ui, nullptr);
 
     /* ── Buttons ─────────────────────────────────────────── */
     section(ui, "Buttons");

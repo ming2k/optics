@@ -224,9 +224,14 @@ PRISM_API void prism_liquid_glass_filter_release(prism_liquid_glass_filter *filt
  * The returned image is borrowed from the filter and remains valid until the
  * same slot is applied again, the filter is released, or the required slab
  * extent changes. Do not release it. */
-PRISM_NODISCARD PRISM_API flux_result
-prism_liquid_glass_filter_apply(prism_liquid_glass_filter *filter, flux_frame *frame,
-                                const prism_liquid_glass_desc *desc, prism_material_output *out);
+typedef struct prism_liquid_glass_filter_apply_opts {
+    flux_frame *frame;
+    const prism_liquid_glass_desc *desc;
+    prism_material_output *out;
+} prism_liquid_glass_filter_apply_opts;
+
+PRISM_NODISCARD PRISM_API flux_result prism_liquid_glass_filter_apply(
+    prism_liquid_glass_filter *filter, const prism_liquid_glass_filter_apply_opts *opts);
 
 /* Per-group backdrop statistics, reduced on the GPU by
  * prism_liquid_glass_filter_apply: the mean Rec.709 luminance of the
@@ -248,9 +253,15 @@ typedef struct prism_backdrop_stat {
  * (min of max_groups and the group count that submission carried). Returns
  * FLUX_ERROR_INVALID_STATE when the slot has never been applied with
  * stats. */
-PRISM_NODISCARD PRISM_API flux_result
-prism_liquid_glass_filter_stats(prism_liquid_glass_filter *filter, flux_frame *frame,
-                                prism_backdrop_stat *out, uint32_t max_groups, uint32_t *out_count);
+typedef struct prism_liquid_glass_filter_stats_opts {
+    flux_frame *frame;
+    prism_backdrop_stat *out;
+    uint32_t max_groups;
+    uint32_t *out_count;
+} prism_liquid_glass_filter_stats_opts;
+
+PRISM_NODISCARD PRISM_API flux_result prism_liquid_glass_filter_stats(
+    prism_liquid_glass_filter *filter, const prism_liquid_glass_filter_stats_opts *opts);
 
 #ifdef __cplusplus
 }

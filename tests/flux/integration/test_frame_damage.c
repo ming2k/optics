@@ -21,8 +21,11 @@ static void expect_scope(const flux_frame *f, const flux_rect *rects, uint32_t c
     flux_rect got[FLUX_DAMAGE_CAPACITY];
     uint32_t got_count = 0;
     bool got_full = !full;
-    OT_EXPECT(flux_frame_repaint_scope(f, got, FLUX_DAMAGE_CAPACITY, &got_count, &got_full) ==
-              FLUX_OK);
+    OT_EXPECT(flux_frame_repaint_scope(
+                  f, &(flux_frame_repaint_scope_opts){.out_rects = got,
+                                                      .capacity = FLUX_DAMAGE_CAPACITY,
+                                                      .out_count = &got_count,
+                                                      .out_full = &got_full}) == FLUX_OK);
     if (got_full != full || (!full && got_count != count)) {
         fprintf(stderr, "scope got full=%d count=%u; want full=%d count=%u\n", got_full, got_count,
                 full, count);
@@ -46,8 +49,11 @@ static void expect_scanout(const flux_surface *s, const flux_rect *rects, uint32
     flux_rect got[FLUX_DAMAGE_CAPACITY];
     uint32_t got_count = 0;
     bool got_full = !full;
-    OT_EXPECT(flux_surface_scanout_damage(s, got, FLUX_DAMAGE_CAPACITY, &got_count, &got_full) ==
-              FLUX_OK);
+    OT_EXPECT(flux_surface_scanout_damage(
+                  s, &(flux_surface_scanout_damage_opts){.out_rects = got,
+                                                         .capacity = FLUX_DAMAGE_CAPACITY,
+                                                         .out_count = &got_count,
+                                                         .out_full = &got_full}) == FLUX_OK);
     OT_EXPECT(got_full == full);
     if (full)
         return;

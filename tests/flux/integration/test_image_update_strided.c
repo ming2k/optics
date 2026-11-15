@@ -84,10 +84,24 @@ static flux_result blit_and_read(flux_surface *s, flux_canvas *canvas, blit_case
 
 int main(void) {
     /* --- NULL safety --- */
-    OT_EXPECT(flux_image_update_region_strided(nullptr, 0, 0, 1, 1, "x", 4, 4) ==
+    OT_EXPECT(flux_image_update_region(nullptr, &(flux_image_update_region_opts){.x = 0,
+                                                                                 .y = 0,
+                                                                                 .width = 1,
+                                                                                 .height = 1,
+                                                                                 .data = "x",
+                                                                                 .row_bytes = 4,
+                                                                                 .bytes = 4}) ==
               FLUX_ERROR_INVALID_ARGUMENT);
-    OT_EXPECT(flux_image_update_region_premultiply(nullptr, 0, 0, 1, 1, "x", 4, 4) ==
-              FLUX_ERROR_INVALID_ARGUMENT);
+    OT_EXPECT(
+        flux_image_update_region(nullptr, &(flux_image_update_region_opts){.x = 0,
+                                                                           .y = 0,
+                                                                           .width = 1,
+                                                                           .height = 1,
+                                                                           .data = "x",
+                                                                           .row_bytes = 4,
+                                                                           .bytes = 4,
+                                                                           .premultiply = true}) ==
+        FLUX_ERROR_INVALID_ARGUMENT);
 
     flux_device *d = flux_test_make_headless_device();
     if (!d) {
@@ -137,18 +151,43 @@ int main(void) {
     {
         uint32_t patch[16];
         /* row_bytes smaller than width * bpp */
-        OT_EXPECT(flux_image_update_region_strided(img, 0, 0, 8, 2, patch, 8, sizeof(patch)) ==
+        OT_EXPECT(flux_image_update_region(
+                      img, &(flux_image_update_region_opts){.x = 0,
+                                                            .y = 0,
+                                                            .width = 8,
+                                                            .height = 2,
+                                                            .data = patch,
+                                                            .row_bytes = 8,
+                                                            .bytes = sizeof(patch)}) ==
                   FLUX_ERROR_INVALID_ARGUMENT);
         /* bytes too small for (h-1)*stride + w*bpp */
-        OT_EXPECT(flux_image_update_region_strided(img, 0, 0, 8, 2, patch, 64, 63) ==
+        OT_EXPECT(flux_image_update_region(img, &(flux_image_update_region_opts){.x = 0,
+                                                                                 .y = 0,
+                                                                                 .width = 8,
+                                                                                 .height = 2,
+                                                                                 .data = patch,
+                                                                                 .row_bytes = 64,
+                                                                                 .bytes = 63}) ==
                   FLUX_ERROR_INVALID_ARGUMENT);
         /* the exact minimum is accepted */
         uint8_t exact[96];
         memset(exact, 0xAA, sizeof(exact));
-        OT_EXPECT(flux_image_update_region_strided(img, 0, 0, 8, 2, exact, 64, sizeof(exact)) ==
-                  FLUX_OK);
+        OT_EXPECT(flux_image_update_region(
+                      img, &(flux_image_update_region_opts){.x = 0,
+                                                            .y = 0,
+                                                            .width = 8,
+                                                            .height = 2,
+                                                            .data = exact,
+                                                            .row_bytes = 64,
+                                                            .bytes = sizeof(exact)}) == FLUX_OK);
         /* zero extent still rejected */
-        OT_EXPECT(flux_image_update_region_strided(img, 0, 0, 0, 1, patch, 4, 4) ==
+        OT_EXPECT(flux_image_update_region(img, &(flux_image_update_region_opts){.x = 0,
+                                                                                 .y = 0,
+                                                                                 .width = 0,
+                                                                                 .height = 1,
+                                                                                 .data = patch,
+                                                                                 .row_bytes = 4,
+                                                                                 .bytes = 4}) ==
                   FLUX_ERROR_INVALID_ARGUMENT);
     }
 
@@ -159,8 +198,14 @@ int main(void) {
         for (uint32_t row = 0; row < 3; ++row)
             for (uint32_t col = 0; col < 16; ++col)
                 src[row * 16 + col] = straight_rgba((uint8_t)row, (uint8_t)col, 7, 255);
-        OT_EXPECT(flux_image_update_region_strided(img, 2, 2, 4, 3, src, 64, sizeof(src)) ==
-                  FLUX_OK);
+        OT_EXPECT(flux_image_update_region(
+                      img, &(flux_image_update_region_opts){.x = 2,
+                                                            .y = 2,
+                                                            .width = 4,
+                                                            .height = 3,
+                                                            .data = src,
+                                                            .row_bytes = 64,
+                                                            .bytes = sizeof(src)}) == FLUX_OK);
         BLIT_AND_READ();
         for (uint32_t row = 0; row < 3; ++row)
             for (uint32_t col = 0; col < 4; ++col) {
@@ -184,8 +229,16 @@ int main(void) {
         d8.initial_data = r8;
         flux_image *grey = nullptr;
         OT_EXPECT(flux_image_create(d, &d8, &grey) == FLUX_OK);
-        OT_EXPECT(flux_image_update_region_premultiply(grey, 0, 0, 1, 1, "abcd", 4, 4) ==
-                  FLUX_ERROR_UNSUPPORTED);
+        OT_EXPECT(
+            flux_image_update_region(grey, &(flux_image_update_region_opts){.x = 0,
+                                                                            .y = 0,
+                                                                            .width = 1,
+                                                                            .height = 1,
+                                                                            .data = "abcd",
+                                                                            .row_bytes = 4,
+                                                                            .bytes = 4,
+                                                                            .premultiply = true}) ==
+            FLUX_ERROR_UNSUPPORTED);
         flux_image_release(grey);
     }
 
@@ -203,8 +256,15 @@ int main(void) {
                 src[row * 16 + col] = straight_rgba(r, g, b, a);
                 ++n;
             }
-        OT_EXPECT(flux_image_update_region_premultiply(img, 4, 4, 8, 6, src, 64, sizeof(src)) ==
-                  FLUX_OK);
+        OT_EXPECT(flux_image_update_region(
+                      img, &(flux_image_update_region_opts){.x = 4,
+                                                            .y = 4,
+                                                            .width = 8,
+                                                            .height = 6,
+                                                            .data = src,
+                                                            .row_bytes = 64,
+                                                            .bytes = sizeof(src),
+                                                            .premultiply = true}) == FLUX_OK);
         BLIT_AND_READ();
         /* The uploaded region reads source rows 0..5, cols 0..7 and lands
          * at image (4,4). Expectation walks the *source* coordinates. */
@@ -228,8 +288,15 @@ int main(void) {
         uint32_t src[4 * 2];
         for (uint32_t i = 0; i < 8; ++i)
             src[i] = straight_rgba(200, 100, 50, 128);
-        OT_EXPECT(flux_image_update_region_premultiply(img, 0, 0, 4, 2, src, 0, sizeof(src)) ==
-                  FLUX_OK);
+        OT_EXPECT(flux_image_update_region(
+                      img, &(flux_image_update_region_opts){.x = 0,
+                                                            .y = 0,
+                                                            .width = 4,
+                                                            .height = 2,
+                                                            .data = src,
+                                                            .row_bytes = 0,
+                                                            .bytes = sizeof(src),
+                                                            .premultiply = true}) == FLUX_OK);
         BLIT_AND_READ();
         /* straight RGBA(200,100,50,128) -> premul per flux_color_rgba_premul */
         uint32_t want = flux_color_rgba_premul(200, 100, 50, 128);

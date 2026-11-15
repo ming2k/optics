@@ -48,7 +48,7 @@ static void build_menubar(lens *ui, app *a) {
             printf("  MENU File > Open\n");
             lens_place_close(ui, "mb_file");
         }
-        lens_separator(ui, NULL);
+        lens_separator(ui, nullptr);
         if (lens_button(ui, &(lens_button_opts){.label = "Quit"}).clicked) {
             printf("  MENU File > Quit\n");
             iris_window_close();
@@ -165,7 +165,7 @@ static void build_ui(lens *ui, const lens_input *in, void *user) {
             lens_label(ui, &(lens_label_opts){.text = "About this demo", .size = 18.0f});
             lens_label(
                 ui, &(lens_label_opts){.text = "Clean minimal orthogonal components in action."});
-            lens_row_begin(ui, NULL);
+            lens_row_begin(ui, nullptr);
             lens_flex(ui, 1.0f);
             lens_spacer(ui, 0);
             lens_size(ui, 90, 30);

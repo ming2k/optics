@@ -140,7 +140,8 @@ typedef struct blur16_record_ctx {
 
 static void record_blur16_and_readback(VkCommandBuffer cmd, void *user) {
     blur16_record_ctx *ctx = user;
-    ctx->result = flux_effect_blur(cmd, ctx->bdesc, ctx->out);
+    ctx->result =
+        flux_effect_blur(&(flux_effect_blur_opts){.cmd = cmd, .desc = ctx->bdesc, .out = ctx->out});
     if (ctx->result != FLUX_OK)
         return;
 
@@ -192,7 +193,8 @@ static void record_blur16_and_readback(VkCommandBuffer cmd, void *user) {
 
 static void record_blur_and_readback(VkCommandBuffer cmd, void *user) {
     blur_record_ctx *ctx = user;
-    OT_EXPECT(flux_effect_blur(cmd, ctx->bdesc, ctx->out) == FLUX_OK);
+    OT_EXPECT(flux_effect_blur(&(flux_effect_blur_opts){
+                  .cmd = cmd, .desc = ctx->bdesc, .out = ctx->out}) == FLUX_OK);
     OT_EXPECT(*ctx->out != nullptr);
 
     /* Transition the output from GENERAL to TRANSFER_SRC_OPTIMAL so
@@ -250,7 +252,8 @@ int main(void) {
     {
         flux_image *out = nullptr;
         flux_effect_blur_desc d = FLUX_EFFECT_BLUR_DESC_INIT;
-        OT_EXPECT(flux_effect_blur(nullptr, &d, &out) == FLUX_ERROR_INVALID_ARGUMENT);
+        OT_EXPECT(flux_effect_blur(&(flux_effect_blur_opts){
+                      .cmd = nullptr, .desc = &d, .out = &out}) == FLUX_ERROR_INVALID_ARGUMENT);
         OT_EXPECT(out == nullptr);
     }
 
@@ -284,12 +287,14 @@ int main(void) {
         };
         vkAllocateCommandBuffers(vk, &cbai, &cmd);
 
-        OT_EXPECT(flux_effect_blur(cmd, &bdesc, &out) == FLUX_ERROR_INVALID_ARGUMENT);
+        OT_EXPECT(flux_effect_blur(&(flux_effect_blur_opts){
+                      .cmd = cmd, .desc = &bdesc, .out = &out}) == FLUX_ERROR_INVALID_ARGUMENT);
         OT_EXPECT(out == nullptr);
 
         bdesc.type = FLUX_TYPE_EFFECT_BLUR_DESC;
         bdesc.input = nullptr;
-        OT_EXPECT(flux_effect_blur(cmd, &bdesc, &out) == FLUX_ERROR_INVALID_ARGUMENT);
+        OT_EXPECT(flux_effect_blur(&(flux_effect_blur_opts){
+                      .cmd = cmd, .desc = &bdesc, .out = &out}) == FLUX_ERROR_INVALID_ARGUMENT);
 
         vkDestroyCommandPool(vk, pool, nullptr);
     }
@@ -411,8 +416,10 @@ int main(void) {
             .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
         };
         vkBeginCommandBuffer(cmd, &cbbi);
-        OT_EXPECT(flux_effect_blur(cmd, &bdesc, &a) == FLUX_OK);
-        OT_EXPECT(flux_effect_blur(cmd, &bdesc, &b) == FLUX_OK);
+        OT_EXPECT(flux_effect_blur(
+                      &(flux_effect_blur_opts){.cmd = cmd, .desc = &bdesc, .out = &a}) == FLUX_OK);
+        OT_EXPECT(flux_effect_blur(
+                      &(flux_effect_blur_opts){.cmd = cmd, .desc = &bdesc, .out = &b}) == FLUX_OK);
         OT_EXPECT(a != nullptr && b != nullptr && a != b);
         vkEndCommandBuffer(cmd);
 
@@ -466,7 +473,8 @@ int main(void) {
             .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
         };
         vkBeginCommandBuffer(cmd, &cbbi);
-        OT_EXPECT(flux_effect_blur(cmd, &bdesc, &transient) == FLUX_OK);
+        OT_EXPECT(flux_effect_blur(&(flux_effect_blur_opts){
+                      .cmd = cmd, .desc = &bdesc, .out = &transient}) == FLUX_OK);
         vkEndCommandBuffer(cmd);
 
         VkCommandBufferSubmitInfo cbsi = {

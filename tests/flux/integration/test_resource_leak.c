@@ -54,7 +54,9 @@ alignas(uint32_t) static const unsigned char frag_spv[] = {
 static flux_observe_counters row_of(flux_device *d, flux_scope scope, const char *kind,
                                     const char *owner) {
     flux_observe_counters c = {};
-    if (flux_observe_read_counters(d, scope, kind, owner, &c) != FLUX_OK) {
+    if (flux_observe_read_counters(
+            d, &(flux_observe_read_counters_opts){
+                   .scope = scope, .kind = kind, .owner = owner, .out = &c}) != FLUX_OK) {
         c = (flux_observe_counters){};
     }
     return c;
@@ -295,7 +297,7 @@ static void lane_frame_scope_drain(flux_device *d) {
  * registrations popped the same index and one resource was silently
  * re-pointed at the other. The heap must now refuse it and stay stable. */
 static void lane_bindless_double_release(flux_device *d) {
-    uint32_t px[4] = {0};
+    uint32_t px[4] = {};
     flux_image *imgs[3] = {nullptr, nullptr, nullptr};
     flux_bindless_handle handles[3] = {FLUX_BINDLESS_INVALID, FLUX_BINDLESS_INVALID,
                                        FLUX_BINDLESS_INVALID};
@@ -348,7 +350,7 @@ static void lane_bindless_double_release(flux_device *d) {
 /* A detector that cannot fire on a known leak is decoration. This lane
  * deliberately leaks one image and requires the report to name it. */
 static void lane_detects_a_real_leak(flux_device *d) {
-    uint32_t px[4] = {0};
+    uint32_t px[4] = {};
     flux_image_desc id = FLUX_IMAGE_DESC_INIT;
     id.width = 2;
     id.height = 2;

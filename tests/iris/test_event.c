@@ -49,7 +49,7 @@ static iris_event make_move(float x, float y) {
 
 int main(void) {
     /* ---- No seam: every event is delivered, zero interception ---- */
-    iris__event_seam_configure(NULL, NULL);
+    iris__event_seam_configure(nullptr, nullptr);
     reset_seam();
     iris_event a = make_move(1.0f, 2.0f);
     iris_event b = make_move(3.0f, 4.0f);
@@ -60,13 +60,13 @@ int main(void) {
     OT_EXPECT(g_calls == 0);
 
     /* Sequence resets when the seam is (re)configured for a new run. */
-    iris__event_seam_configure(NULL, NULL);
+    iris__event_seam_configure(nullptr, nullptr);
     iris_event c = make_move(0.0f, 0.0f);
     OT_EXPECT(iris__event_seam_emit(&c) == true);
     OT_EXPECT(c.sequence == 1);
 
     /* ---- PASS delivers; DROP discards ---- */
-    iris__event_seam_configure(seam_cb, NULL);
+    iris__event_seam_configure(seam_cb, nullptr);
     reset_seam();
     iris_event d = make_move(5.0f, 6.0f);
     OT_EXPECT(iris__event_seam_emit(&d) == true);

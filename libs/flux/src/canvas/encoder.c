@@ -361,14 +361,12 @@ static void encoder_draw_geometry_impl(flux_encoder *enc, const flux_geometry *g
     }
 }
 
-void flux_encoder_draw_geometry(flux_encoder *enc, const flux_geometry *geom,
-                                const flux_brush *brush) {
-    encoder_draw_geometry_impl(enc, geom, brush, false, 0u);
-}
-
-void flux_encoder_draw_geometry_slot(flux_encoder *enc, const flux_geometry *geom,
-                                     const flux_brush *brush, uint32_t slot) {
-    encoder_draw_geometry_impl(enc, geom, brush, true, slot);
+void flux_encoder_draw_geometry(flux_encoder *enc, const flux_encoder_draw_geometry_opts *opts) {
+    if (!opts) {
+        flux_encoder_fail(enc, FLUX_ERROR_INVALID_ARGUMENT);
+        return;
+    }
+    encoder_draw_geometry_impl(enc, opts->geom, opts->brush, opts->use_slot, opts->slot);
 }
 
 void flux_encoder_draw_glyph_run(flux_encoder *enc, const flux_glyph_run_desc *desc) {
@@ -502,9 +500,15 @@ void flux_encoder_clip_rect(flux_encoder *enc, flux_rect r) {
         cmd->rect = r;
 }
 
-void flux_encoder_save_layer(flux_encoder *enc, const flux_rect *bounds, float opacity) {
+void flux_encoder_save_layer(flux_encoder *enc, const flux_encoder_save_layer_opts *opts) {
     if (!encoder_ready(enc))
         return;
+    if (!opts) {
+        flux_encoder_fail(enc, FLUX_ERROR_INVALID_ARGUMENT);
+        return;
+    }
+    const flux_rect *bounds = opts->bounds;
+    float opacity = opts->opacity;
     if (!isfinite(opacity) || opacity < 0 || opacity > 1 ||
         (bounds && !canvas_finite_rect(*bounds))) {
         FLUX_FAILF(FLUX_ERROR_INVALID_ARGUMENT,
@@ -540,11 +544,19 @@ static void encoder_vec2(flux_encoder *enc, flux_cmd_kind kind, float x, float y
         cmd->y = y;
     }
 }
-void flux_encoder_translate(flux_encoder *enc, float x, float y) {
-    encoder_vec2(enc, FLUX_CMD_TRANSLATE, x, y);
+void flux_encoder_translate(flux_encoder *enc, const flux_encoder_translate_opts *opts) {
+    if (!opts) {
+        flux_encoder_fail(enc, FLUX_ERROR_INVALID_ARGUMENT);
+        return;
+    }
+    encoder_vec2(enc, FLUX_CMD_TRANSLATE, opts->x, opts->y);
 }
-void flux_encoder_scale(flux_encoder *enc, float x, float y) {
-    encoder_vec2(enc, FLUX_CMD_SCALE, x, y);
+void flux_encoder_scale(flux_encoder *enc, const flux_encoder_scale_opts *opts) {
+    if (!opts) {
+        flux_encoder_fail(enc, FLUX_ERROR_INVALID_ARGUMENT);
+        return;
+    }
+    encoder_vec2(enc, FLUX_CMD_SCALE, opts->sx, opts->sy);
 }
 void flux_encoder_rotate(flux_encoder *enc, float radians) {
     if (!isfinite(radians)) {
@@ -686,7 +698,8 @@ static void execute_commands(flux_canvas *c, const flux_display_list *list,
                 geom.path.path = &path;
             }
 
-            flux_canvas_draw_geometry(c, &geom, &brush);
+            flux_canvas_draw_geometry(
+                c, &(flux_canvas_draw_geometry_opts){.geom = &geom, .brush = &brush});
             break;
         }
         case FLUX_CMD_DRAW_GLYPH_RUN: {
@@ -718,17 +731,18 @@ static void execute_commands(flux_canvas *c, const flux_display_list *list,
         }
         case FLUX_CMD_SAVE_LAYER: {
             const flux_cmd_save_layer *cmd = (const flux_cmd_save_layer *)ptr;
-            flux_canvas_save_layer(c, &cmd->bounds, cmd->opacity);
+            flux_canvas_save_layer(
+                c, &(flux_canvas_save_layer_opts){.bounds = &cmd->bounds, .opacity = cmd->opacity});
             break;
         }
         case FLUX_CMD_TRANSLATE: {
             const flux_cmd_vec2 *cmd = (const flux_cmd_vec2 *)ptr;
-            flux_canvas_translate(c, cmd->x, cmd->y);
+            flux_canvas_translate(c, &(flux_canvas_translate_opts){.x = cmd->x, .y = cmd->y});
             break;
         }
         case FLUX_CMD_SCALE: {
             const flux_cmd_vec2 *cmd = (const flux_cmd_vec2 *)ptr;
-            flux_canvas_scale(c, cmd->x, cmd->y);
+            flux_canvas_scale(c, &(flux_canvas_scale_opts){.sx = cmd->x, .sy = cmd->y});
             break;
         }
         case FLUX_CMD_ROTATE: {
@@ -753,19 +767,15 @@ static void execute_commands(flux_canvas *c, const flux_display_list *list,
         flux_canvas_restore(c);
 }
 
-flux_result flux_canvas_submit_display_list(flux_canvas *c, const flux_display_list *list) {
-    if (!c || !list)
+flux_result flux_canvas_submit_display_list(flux_canvas *c,
+                                            const flux_canvas_submit_display_list_opts *opts) {
+    if (!c || !opts || !opts->list || (opts->binding_count && !opts->bindings))
         return FLUX_ERROR_INVALID_ARGUMENT;
-    if (list->input_mask)
+    const flux_display_list *list = opts->list;
+    const flux_display_list_binding *bindings = opts->bindings;
+    uint32_t binding_count = opts->binding_count;
+    if (binding_count == 0 && list->input_mask)
         return FLUX_ERROR_INVALID_STATE;
-    return flux_canvas_submit_display_list_bound(c, list, nullptr, 0);
-}
-
-flux_result flux_canvas_submit_display_list_bound(flux_canvas *c, const flux_display_list *list,
-                                                  const flux_display_list_binding *bindings,
-                                                  uint32_t binding_count) {
-    if (!c || !list || (binding_count && !bindings))
-        return FLUX_ERROR_INVALID_ARGUMENT;
     if (!c->recording || c->pass_error != FLUX_OK)
         return FLUX_ERROR_INVALID_STATE;
 
@@ -1195,15 +1205,15 @@ static bool dl_write_commands(dl_serializer *s, const flux_display_list *list) {
 }
 
 flux_result flux_display_list_serialize(const flux_display_list *list,
-                                        const flux_display_list_serialize_opts *opts,
-                                        uint8_t **out_data, size_t *out_size) {
-    if (!out_data || !out_size)
+                                        const flux_display_list_serialize_opts *opts) {
+    if (!opts || opts->type != FLUX_TYPE_DISPLAY_LIST_SERIALIZE_OPTS || !opts->out_data ||
+        !opts->out_size)
         return FLUX_ERROR_INVALID_ARGUMENT;
+    uint8_t **out_data = opts->out_data;
+    size_t *out_size = opts->out_size;
     *out_data = nullptr;
     *out_size = 0;
     if (!list)
-        return FLUX_ERROR_INVALID_ARGUMENT;
-    if (opts && opts->type != FLUX_TYPE_DISPLAY_LIST_SERIALIZE_OPTS)
         return FLUX_ERROR_INVALID_ARGUMENT;
     dl_serializer s = {.opts = opts};
     if (!dl_write_commands(&s, list)) {
@@ -1391,14 +1401,14 @@ static flux_result dl_read_brush(dl_reader *r, flux_brush *b, const dl_resolved 
     return r->bad ? FLUX_ERROR_INVALID_ARGUMENT : FLUX_OK;
 }
 
-flux_result flux_display_list_deserialize(const uint8_t *data, size_t size,
-                                          const flux_display_list_deserialize_opts *opts,
-                                          flux_display_list **out_list) {
-    if (!out_list)
+flux_result flux_display_list_deserialize(const flux_display_list_deserialize_opts *opts) {
+    if (!opts || opts->type != FLUX_TYPE_DISPLAY_LIST_DESERIALIZE_OPTS || !opts->out_list)
         return FLUX_ERROR_INVALID_ARGUMENT;
+    const uint8_t *data = opts->data;
+    size_t size = opts->size;
+    flux_display_list **out_list = opts->out_list;
     *out_list = nullptr;
-    if (!data || size < DL_HEADER_BYTES ||
-        (opts && opts->type != FLUX_TYPE_DISPLAY_LIST_DESERIALIZE_OPTS))
+    if (!data || size < DL_HEADER_BYTES)
         return FLUX_ERROR_INVALID_ARGUMENT;
     dl_reader r = {.data = data, .size = size};
     if (dl_read_u32(&r) != DL_MAGIC || dl_read_u16(&r) != DL_VERSION)
@@ -1474,19 +1484,20 @@ flux_result flux_display_list_deserialize(const uint8_t *data, size_t size,
         case FLUX_CMD_SAVE_LAYER: {
             flux_rect b = dl_read_rect(&r);
             float opacity = dl_read_f32(&r);
-            flux_encoder_save_layer(enc, &b, opacity);
+            flux_encoder_save_layer(
+                enc, &(flux_encoder_save_layer_opts){.bounds = &b, .opacity = opacity});
             break;
         }
         case FLUX_CMD_TRANSLATE: {
             float x = dl_read_f32(&r);
             float y = dl_read_f32(&r);
-            flux_encoder_translate(enc, x, y);
+            flux_encoder_translate(enc, &(flux_encoder_translate_opts){.x = x, .y = y});
             break;
         }
         case FLUX_CMD_SCALE: {
             float x = dl_read_f32(&r);
             float y = dl_read_f32(&r);
-            flux_encoder_scale(enc, x, y);
+            flux_encoder_scale(enc, &(flux_encoder_scale_opts){.sx = x, .sy = y});
             break;
         }
         case FLUX_CMD_ROTATE:
@@ -1500,7 +1511,7 @@ flux_result flux_display_list_deserialize(const uint8_t *data, size_t size,
             break;
         }
         case FLUX_CMD_DRAW_GEOM: {
-            flux_geometry g = {0};
+            flux_geometry g = {};
             g.kind = (flux_geom_kind)dl_read_u8(&r);
             dl_read_skip(&r, 3);
             g.stroke.width = dl_read_f32(&r);
@@ -1561,10 +1572,12 @@ flux_result flux_display_list_deserialize(const uint8_t *data, size_t size,
                     uint32_t slot = 0;
                     result = dl_read_brush(&r, &b, resources, resource_count, &has_slot, &slot);
                     if (result == FLUX_OK) {
-                        if (has_slot)
-                            flux_encoder_draw_geometry_slot(enc, &g, &b, slot);
-                        else
-                            flux_encoder_draw_geometry(enc, &g, &b);
+                        flux_encoder_draw_geometry(enc, &(flux_encoder_draw_geometry_opts){
+                                                            .geom = &g,
+                                                            .brush = &b,
+                                                            .slot = slot,
+                                                            .use_slot = has_slot,
+                                                        });
                         result = flux_encoder_status(enc);
                     }
                 } else {
@@ -1583,10 +1596,12 @@ flux_result flux_display_list_deserialize(const uint8_t *data, size_t size,
                 uint32_t slot = 0;
                 result = dl_read_brush(&r, &b, resources, resource_count, &has_slot, &slot);
                 if (result == FLUX_OK) {
-                    if (has_slot)
-                        flux_encoder_draw_geometry_slot(enc, &g, &b, slot);
-                    else
-                        flux_encoder_draw_geometry(enc, &g, &b);
+                    flux_encoder_draw_geometry(enc, &(flux_encoder_draw_geometry_opts){
+                                                        .geom = &g,
+                                                        .brush = &b,
+                                                        .slot = slot,
+                                                        .use_slot = has_slot,
+                                                    });
                     result = flux_encoder_status(enc);
                 }
             }

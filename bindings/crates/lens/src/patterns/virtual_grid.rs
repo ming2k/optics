@@ -21,17 +21,16 @@ pub fn virtual_grid_calc(
     target_gap: f32,
     overscan_rows: usize,
 ) -> VirtualGridPlan {
-    unsafe {
-        lens_sys::lens_virtual_grid_calc(
-            available_width,
-            viewport_height,
-            scroll_y,
-            total_items as u32,
-            min_col_width,
-            max_col_width,
-            item_height,
-            target_gap,
-            overscan_rows as u32,
-        )
-    }
+    let opts = lens_sys::lens_virtual_grid_calc_opts {
+        available_width,
+        viewport_height,
+        scroll_y,
+        total_items: total_items as u32,
+        min_col_width,
+        max_col_width,
+        item_height,
+        target_gap,
+        overscan_rows: overscan_rows as u32,
+    };
+    unsafe { lens_sys::lens_virtual_grid_calc(&opts) }
 }

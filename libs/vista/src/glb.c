@@ -114,49 +114,49 @@ const uint8_t *sg_accessor_data(const jv *root, int idx, const uint8_t *bin, siz
                                 int *comp, int *comps, size_t *count, size_t *stride,
                                 bool *normalized) {
     if (idx < 0)
-        return NULL;
+        return nullptr;
     const jv *accs = jv_obj_get(root, "accessors");
     const jv *bvws = jv_obj_get(root, "bufferViews");
     const jv *acc = jv_arr_at(accs, (size_t)idx);
     if (!acc)
-        return NULL;
+        return nullptr;
 
     size_t bv_idx;
     if (!json_size(jv_obj_get(acc, "bufferView"), SIZE_MAX, &bv_idx) || bv_idx == SIZE_MAX)
-        return NULL;
+        return nullptr;
     const jv *bv = jv_arr_at(bvws, bv_idx);
     if (!bv)
-        return NULL;
+        return nullptr;
 
     size_t buf_idx;
     if (!json_size(jv_obj_get(bv, "buffer"), 0, &buf_idx) || buf_idx > INT_MAX)
-        return NULL;
+        return nullptr;
     int buf = (int)buf_idx;
     size_t bv_off, bv_len, bv_stride, a_off;
     if (!json_size(jv_obj_get(bv, "byteOffset"), 0, &bv_off) ||
         !json_size(jv_obj_get(bv, "byteLength"), 0, &bv_len) ||
         !json_size(jv_obj_get(bv, "byteStride"), 0, &bv_stride) ||
         !json_size(jv_obj_get(acc, "byteOffset"), 0, &a_off))
-        return NULL;
+        return nullptr;
 
-    const uint8_t *seg = NULL;
+    const uint8_t *seg = nullptr;
     size_t seglen = 0;
     if (buf == 0 && bin) {
         seg = bin;
         seglen = bin_len;
     }
     if (!seg || bv_off > seglen || bv_len > seglen - bv_off || a_off > bv_len)
-        return NULL;
+        return nullptr;
 
     size_t comp_value;
     if (!json_size(jv_obj_get(acc, "componentType"), 0, &comp_value) || comp_value > INT_MAX)
-        return NULL;
+        return nullptr;
     *comp = (int)comp_value;
     size_t csize = comp_size(*comp);
     if (csize == 0 || !json_size(jv_obj_get(acc, "count"), 0, count) || *count == 0)
-        return NULL;
+        return nullptr;
 
-    const char *type = NULL;
+    const char *type = nullptr;
     const jv *tv = jv_obj_get(acc, "type");
     if (tv && tv->kind == J_STR)
         type = tv->str.data;
@@ -171,7 +171,7 @@ const uint8_t *sg_accessor_data(const jv *root, int idx, const uint8_t *bin, siz
     else if (type && strcmp(type, "MAT4") == 0)
         *comps = 16;
     else
-        return NULL;
+        return nullptr;
 
     if (normalized)
         *normalized = jv_bool(jv_obj_get(acc, "normalized"), false);
@@ -180,11 +180,11 @@ const uint8_t *sg_accessor_data(const jv *root, int idx, const uint8_t *bin, siz
     if (bv_stride == 0)
         bv_stride = element_size;
     if (bv_stride < element_size)
-        return NULL;
+        return nullptr;
 
     size_t available = bv_len - a_off;
     if (element_size > available || *count - 1 > (available - element_size) / bv_stride)
-        return NULL;
+        return nullptr;
 
     *stride = bv_stride;
     return seg + bv_off + a_off;
@@ -257,7 +257,7 @@ static bool parse_primitive(const jv *root, const jv *prim, const uint8_t *bin, 
     const uint8_t *pos_ptr = pos_acc >= 0
                                  ? sg_accessor_data(root, pos_acc, bin, bin_len, &pcomp, &pcomps,
                                                     &pcount, &pstride, &pnormalized)
-                                 : NULL;
+                                 : nullptr;
     if (!pos_ptr || pcomp != SG_CT_FLOAT || pcomps != 3 || pcount == 0)
         return false;
 
@@ -267,7 +267,7 @@ static bool parse_primitive(const jv *root, const jv *prim, const uint8_t *bin, 
     const uint8_t *nrm_ptr = nrm_acc >= 0
                                  ? sg_accessor_data(root, nrm_acc, bin, bin_len, &ncomp, &ncomps,
                                                     &ncount, &nstride, &nnormalized)
-                                 : NULL;
+                                 : nullptr;
     bool have_n = nrm_ptr && ncomp == SG_CT_FLOAT && ncomps == 3 && ncount == pcount;
 
     int ucomp = 0, ucomps = 0;
@@ -275,7 +275,7 @@ static bool parse_primitive(const jv *root, const jv *prim, const uint8_t *bin, 
     bool unormalized = false;
     const uint8_t *uv_ptr = uv_acc >= 0 ? sg_accessor_data(root, uv_acc, bin, bin_len, &ucomp,
                                                            &ucomps, &ucount, &ustride, &unormalized)
-                                        : NULL;
+                                        : nullptr;
     bool have_uv = uv_ptr && ucomp == SG_CT_FLOAT && ucomps == 2 && ucount == pcount;
 
     int jcomp = 0, jcomps = 0, wcomp = 0, wcomps = 0;
@@ -284,11 +284,11 @@ static bool parse_primitive(const jv *root, const jv *prim, const uint8_t *bin, 
     const uint8_t *joint_ptr = joint_acc >= 0
                                    ? sg_accessor_data(root, joint_acc, bin, bin_len, &jcomp,
                                                       &jcomps, &jcount, &jstride, &jnormalized)
-                                   : NULL;
+                                   : nullptr;
     const uint8_t *weight_ptr = weight_acc >= 0
                                     ? sg_accessor_data(root, weight_acc, bin, bin_len, &wcomp,
                                                        &wcomps, &wcount, &wstride, &wnormalized)
-                                    : NULL;
+                                    : nullptr;
     bool have_skin = joint_ptr && weight_ptr && jcomps == 4 && wcomps == 4 && jcount == pcount &&
                      wcount == pcount && (jcomp == SG_CT_UBYTE || jcomp == SG_CT_USHORT) &&
                      (wcomp == SG_CT_FLOAT || wcomp == SG_CT_UBYTE || wcomp == SG_CT_USHORT);
@@ -298,7 +298,7 @@ static bool parse_primitive(const jv *root, const jv *prim, const uint8_t *bin, 
     flux_vertex *verts = malloc(pcount * sizeof(flux_vertex));
     if (!verts)
         return false;
-    flux_skin_vertex *skin_verts = have_skin ? malloc(pcount * sizeof(*skin_verts)) : NULL;
+    flux_skin_vertex *skin_verts = have_skin ? malloc(pcount * sizeof(*skin_verts)) : nullptr;
     if (have_skin && !skin_verts) {
         free(verts);
         return false;
@@ -343,7 +343,7 @@ static bool parse_primitive(const jv *root, const jv *prim, const uint8_t *bin, 
             verts[i].uv[0] = verts[i].uv[1] = 0.0f;
         }
         if (have_skin) {
-            float joints[4] = {0}, weights[4] = {0};
+            float joints[4] = {}, weights[4] = {};
             sg_read_floats(joint_ptr + i * jstride, jcomp, 4, false, joints);
             sg_read_floats(weight_ptr + i * wstride, wcomp, 4, wnormalized, weights);
             float total = 0.0f;
@@ -370,14 +370,14 @@ static bool parse_primitive(const jv *root, const jv *prim, const uint8_t *bin, 
     }
 
     /* Indices (optional). Generated sequentially when absent. */
-    uint32_t *idx = NULL;
+    uint32_t *idx = nullptr;
     size_t idx_count = 0;
     int idx_acc = (int)jv_num(jv_obj_get(prim, "indices"), -1);
     if (idx_acc >= 0) {
         int icomp = 0, icomps = 0;
         size_t icount = 0, istride = 0;
-        const uint8_t *ip =
-            sg_accessor_data(root, idx_acc, bin, bin_len, &icomp, &icomps, &icount, &istride, NULL);
+        const uint8_t *ip = sg_accessor_data(root, idx_acc, bin, bin_len, &icomp, &icomps, &icount,
+                                             &istride, nullptr);
         if (!ip || icomps != 1 || icount == 0) {
             free(skin_verts);
             free(verts);
@@ -444,8 +444,8 @@ static bool parse_primitive(const jv *root, const jv *prim, const uint8_t *bin, 
     out_data->material_index = mat_idx;
     const jv *mats = jv_obj_get(root, "materials");
     const jv *mat = jv_arr_at(mats, (size_t)mat_idx);
-    const jv *pbr = mat ? jv_obj_get(mat, "pbrMetallicRoughness") : NULL;
-    const jv *bcf = pbr ? jv_obj_get(pbr, "baseColorFactor") : NULL;
+    const jv *pbr = mat ? jv_obj_get(mat, "pbrMetallicRoughness") : nullptr;
+    const jv *bcf = pbr ? jv_obj_get(pbr, "baseColorFactor") : nullptr;
     if (bcf && bcf->kind == J_ARR && bcf->arr.count >= 4) {
         out_data->base_color = flux_vec4_make(
             (float)jv_num(jv_arr_at(bcf, 0), 1.0), (float)jv_num(jv_arr_at(bcf, 1), 1.0),
@@ -557,15 +557,15 @@ flux_result sg_parse_glb(const void *bytes, size_t len, sg_scene_data *data) {
      * block at the bottom can release them from any exit (the repo's
      * standard single-exit discipline; see iris app init for the
      * large-scale version). */
-    int *roots = NULL;
+    int *roots = nullptr;
     uint32_t root_n = 0;
-    vista_node *narr = NULL;
-    vista_skin *skin_arr = NULL;
+    vista_node *narr = nullptr;
+    vista_skin *skin_arr = nullptr;
     uint32_t skin_count = 0;
     size_t prim_cap = 16, prim_n = 0;
-    sg_primitive_data *prims = NULL;
-    int *mesh_prim_start = NULL, *mesh_prim_count = NULL;
-    jv *root = NULL;
+    sg_primitive_data *prims = nullptr;
+    int *mesh_prim_start = nullptr, *mesh_prim_count = nullptr;
+    jv *root = nullptr;
 
     size_t err = 0;
     root = jv_parse((const char *)g.json, g.json_len, &err);
@@ -580,8 +580,8 @@ flux_result sg_parse_glb(const void *bytes, size_t len, sg_scene_data *data) {
     uint32_t node_count = (nodes && nodes->kind == J_ARR) ? (uint32_t)nodes->arr.count : 0;
 
     /* First pass: parse all primitives, record each mesh's primitive span. */
-    mesh_prim_start = mesh_count ? calloc(mesh_count + 1, sizeof(int)) : NULL;
-    mesh_prim_count = mesh_count ? calloc(mesh_count, sizeof(int)) : NULL;
+    mesh_prim_start = mesh_count ? calloc(mesh_count + 1, sizeof(int)) : nullptr;
+    mesh_prim_count = mesh_count ? calloc(mesh_count, sizeof(int)) : nullptr;
     if (mesh_count && (!mesh_prim_start || !mesh_prim_count)) {
         r = FLUX_ERROR_OUT_OF_MEMORY;
         goto fail;
@@ -719,10 +719,10 @@ flux_result sg_parse_glb(const void *bytes, size_t len, sg_scene_data *data) {
     int scene_idx = (int)jv_num(jv_obj_get(root, "scene"), -1);
     const jv *scenes = jv_obj_get(root, "scenes");
     const jv *scene = jv_arr_at(scenes, (size_t)scene_idx);
-    const jv *scene_nodes = scene ? jv_obj_get(scene, "nodes") : NULL;
+    const jv *scene_nodes = scene ? jv_obj_get(scene, "nodes") : nullptr;
     if (scene_nodes && scene_nodes->kind == J_ARR) {
         root_n = (uint32_t)scene_nodes->arr.count;
-        roots = root_n ? malloc(root_n * sizeof(int)) : NULL;
+        roots = root_n ? malloc(root_n * sizeof(int)) : nullptr;
         if (root_n && !roots) {
             r = FLUX_ERROR_OUT_OF_MEMORY;
             goto fail;

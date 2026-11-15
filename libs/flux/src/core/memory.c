@@ -32,7 +32,7 @@ flux_result flux_vk_alloc_buffer(flux_device *d, VkDeviceSize size, VkBufferUsag
                                  VkMemoryPropertyFlags props, bool wants_device_address,
                                  VkBuffer *out_buffer, flux_vk_alloc *out_alloc) {
     *out_buffer = VK_NULL_HANDLE;
-    *out_alloc = (flux_vk_alloc){0};
+    *out_alloc = (flux_vk_alloc){};
 
     VkBufferCreateInfo bci = {
         .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
@@ -88,7 +88,7 @@ flux_result flux_vk_alloc_image(flux_device *d, const VkImageCreateInfo *ici,
                                 VkMemoryPropertyFlags props, VkImage *out_image,
                                 flux_vk_alloc *out_alloc) {
     *out_image = VK_NULL_HANDLE;
-    *out_alloc = (flux_vk_alloc){0};
+    *out_alloc = (flux_vk_alloc){};
 
     VkResult vr = vkCreateImage(d->device, ici, nullptr, out_image);
     if (vr != VK_SUCCESS) {

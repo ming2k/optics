@@ -46,10 +46,10 @@
 /* Registered watchers, touched on the iris main thread only. Two
  * independent slots: the host's public one and the platform backend's
  * (a11y_prefs_internal.h). */
-static iris_a11y_prefs_changed_fn g_cb = NULL;
-static void *g_user = NULL;
-static iris_a11y_prefs_changed_fn g_backend_cb = NULL;
-static void *g_backend_user = NULL;
+static iris_a11y_prefs_changed_fn g_cb = nullptr;
+static void *g_user = nullptr;
+static iris_a11y_prefs_changed_fn g_backend_cb = nullptr;
+static void *g_backend_user = nullptr;
 static iris_a11y_prefs g_last;
 
 IRIS_API iris_a11y_prefs iris_a11y_prefs_query(void) {
@@ -91,8 +91,8 @@ IRIS_API int iris_a11y_prefs_watch(iris_a11y_prefs_changed_fn cb, void *user) {
 }
 
 IRIS_API void iris_a11y_prefs_unwatch(void) {
-    g_cb = NULL;
-    g_user = NULL;
+    g_cb = nullptr;
+    g_user = nullptr;
 }
 
 int iris_a11y_prefs__watch_backend(iris_a11y_prefs_changed_fn cb, void *user) {
@@ -105,8 +105,8 @@ int iris_a11y_prefs__watch_backend(iris_a11y_prefs_changed_fn cb, void *user) {
 }
 
 void iris_a11y_prefs__unwatch_backend(void) {
-    g_backend_cb = NULL;
-    g_backend_user = NULL;
+    g_backend_cb = nullptr;
+    g_backend_user = nullptr;
 }
 
 /* Internal seam (a11y_prefs_internal.h contract): called by app_win32.c's

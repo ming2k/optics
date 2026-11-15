@@ -5,7 +5,7 @@
 #define LENS_SCROLL_SPEED 40.0f
 
 bool lens_scroll_begin(lens *ui, const lens_scroll_opts *opts) {
-    lens_scroll_opts default_opts = {0};
+    lens_scroll_opts default_opts = {};
     if (!opts)
         opts = &default_opts;
 
@@ -42,7 +42,7 @@ bool lens_scroll_begin(lens *ui, const lens_scroll_opts *opts) {
 
     lens_scroll_state *ss = (lens_scroll_state *)lens_node_state(n, sizeof(lens_scroll_state));
     if (ss) {
-        lens_scroll_geometry presented = {0};
+        lens_scroll_geometry presented = {};
         bool have_bar = lensi_snapshot_scroll_geometry(n, &presented) && presented.thumb.h > 0;
         flux_rect thumb_rect = presented.thumb;
         flux_rect track_rect = presented.track;
@@ -84,7 +84,7 @@ bool lens_scroll_begin(lens *ui, const lens_scroll_opts *opts) {
         n->scroll_y = ss->offset_y;
     }
 
-    lensi_node_semantics(ui, n, LENS_ROLE_SCROLLAREA, NULL, NULL, 0);
+    lensi_node_semantics(ui, n, LENS_ROLE_SCROLLAREA, nullptr, nullptr, 0);
     lensi_open_container_push(ui, n);
     return true;
 }
@@ -108,35 +108,35 @@ void lens_scroll_end(lens *ui) {
     lensi_open_container_pop(ui);
 }
 
-bool lens_scroll_offset(const lens *ui, const char *id, float *x, float *y) {
-    if (!ui || !id)
+bool lens_scroll_offset(const lens *ui, const lens_scroll_offset_opts *opts) {
+    if (!ui || !opts || !opts->id)
         return false;
-    lens_id fid = lens_current_id(ui, id);
+    lens_id fid = lens_current_id(ui, opts->id);
     lens_node *n = lens_find((lens *)ui, fid);
     if (!n || !n->is_scroll)
         return false;
     lens_scroll_state *ss = (lens_scroll_state *)lens_node_state(n, sizeof(lens_scroll_state));
     if (!ss)
         return false;
-    if (x)
-        *x = ss->offset_x;
-    if (y)
-        *y = ss->offset_y;
+    if (opts->out_x)
+        *opts->out_x = ss->offset_x;
+    if (opts->out_y)
+        *opts->out_y = ss->offset_y;
     return true;
 }
 
-void lens_scroll_to(lens *ui, const char *id, float x, float y) {
-    if (!ui || !id)
+void lens_scroll_to(lens *ui, const lens_scroll_to_opts *opts) {
+    if (!ui || !opts || !opts->id)
         return;
-    lens_id fid = lens_current_id(ui, id);
+    lens_id fid = lens_current_id(ui, opts->id);
     lens_node *n = lens_find(ui, fid);
     if (!n || !n->is_scroll)
         return;
     lens_scroll_state *ss = (lens_scroll_state *)lens_node_state(n, sizeof(lens_scroll_state));
     if (ss) {
-        ss->offset_x = x;
-        ss->offset_y = y;
-        n->scroll_x = x;
-        n->scroll_y = y;
+        ss->offset_x = opts->x;
+        ss->offset_y = opts->y;
+        n->scroll_x = opts->x;
+        n->scroll_y = opts->y;
     }
 }

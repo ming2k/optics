@@ -18,7 +18,7 @@ typedef struct {
 } fixture;
 
 static void fixture_open(fixture *f) {
-    OT_EXPECT(lens_create(&(lens_desc){0}, &f->ui) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){}, &f->ui) == FLUX_OK);
     OT_EXPECT(flux_canvas_create_cpu(W, H, 1.0f, &f->canvas) == FLUX_OK);
 }
 
@@ -39,7 +39,7 @@ static void render_frame(fixture *f) {
 static void snapshot(fixture *f, uint8_t *out) {
     uint32_t pw = 0, ph = 0, stride = 0;
     const uint8_t *fb = flux_canvas_cpu_pixels(f->canvas, &pw, &ph, &stride);
-    OT_EXPECT(fb != NULL && pw == W && ph == H && stride == W * 4);
+    OT_EXPECT(fb != nullptr && pw == W && ph == H && stride == W * 4);
     memcpy(out, fb, (size_t)W * H * 4);
 }
 
@@ -172,7 +172,7 @@ static void test_scroll_offset_invalidates_descendant_records(void) {
 
 static void test_hidpi_scroll_clip_alignment(void) {
     fixture f;
-    OT_EXPECT(lens_create(&(lens_desc){0}, &f.ui) == FLUX_OK);
+    OT_EXPECT(lens_create(&(lens_desc){}, &f.ui) == FLUX_OK);
     OT_EXPECT(flux_canvas_create_cpu(W * 2, H * 2, 2.0f, &f.canvas) == FLUX_OK);
     lens_set_scale(f.ui, 2.0f);
 
@@ -194,7 +194,7 @@ static void test_hidpi_scroll_clip_alignment(void) {
 
     uint32_t pw = 0, ph = 0, stride = 0;
     const uint8_t *fb = flux_canvas_cpu_pixels(f.canvas, &pw, &ph, &stride);
-    OT_EXPECT(fb != NULL && pw == W * 2 && ph == H * 2);
+    OT_EXPECT(fb != nullptr && pw == W * 2 && ph == H * 2);
 
     bool found_non_zero = false;
     for (size_t i = 0; i < (size_t)ph * stride; i++) {

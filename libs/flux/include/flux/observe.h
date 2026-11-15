@@ -139,16 +139,29 @@ typedef struct flux_observe_opts {
  * incremented and a later report says so.
  *
  * `site` is the literal returned by flux_site_label(site_) or NULL. */
-FLUX_API bool flux_observe_acquire(flux_device *d, flux_scope scope, flux_observe_lifetime lifetime,
-                                   const char *kind, const char *owner, uint64_t bytes,
-                                   const char *site);
+typedef struct flux_observe_acquire_opts {
+    flux_scope scope;
+    flux_observe_lifetime lifetime;
+    const char *kind;
+    const char *owner;
+    uint64_t bytes;
+    const char *site;
+} flux_observe_acquire_opts;
+
+typedef struct flux_observe_release_opts {
+    flux_scope scope;
+    const char *kind;
+    const char *owner;
+    uint64_t bytes;
+} flux_observe_release_opts;
+
+FLUX_API bool flux_observe_acquire(flux_device *d, const flux_observe_acquire_opts *opts);
 
 /* Record one release. Same identity rules as acquire. A release with no
  * matching *live* acquisition is counted and logged (with the kind and
  * owner) instead of being dropped: an unbalanced release is a defect in
  * its own right and must not be able to masquerade as a balanced pair. */
-FLUX_API void flux_observe_release(flux_device *d, flux_scope scope, const char *kind,
-                                   const char *owner, uint64_t bytes);
+FLUX_API void flux_observe_release(flux_device *d, const flux_observe_release_opts *opts);
 
 /* Convenience wrappers. The only sanctioned way to count, so a call site
  * cannot forget the site argument.
@@ -157,10 +170,22 @@ FLUX_API void flux_observe_release(flux_device *d, flux_scope scope, const char 
  * format string would land one literal per counted site in the shipped object,
  * which is exactly the "site machinery" a non-attribution build promises not to
  * carry. Use FLUX_SITE_NONE when the kind has no fixed creation site. */
-#define FLUX_OBSERVE_ACQUIRE(d, scope, lifetime, kind, owner, bytes, site_)                        \
-    flux_observe_acquire((d), (scope), (lifetime), (kind), (owner), (bytes), flux_site_label(site_))
-#define FLUX_OBSERVE_RELEASE(d, scope, kind, owner, bytes)                                         \
-    flux_observe_release((d), (scope), (kind), (owner), (bytes))
+#define FLUX_OBSERVE_ACQUIRE(d, scope_, lifetime_, kind_, owner_, bytes_, site_)                   \
+    flux_observe_acquire((d), &(flux_observe_acquire_opts){                                        \
+                                  .scope = (scope_),                                               \
+                                  .lifetime = (lifetime_),                                         \
+                                  .kind = (kind_),                                                 \
+                                  .owner = (owner_),                                               \
+                                  .bytes = (bytes_),                                               \
+                                  .site = flux_site_label(site_),                                  \
+                              })
+#define FLUX_OBSERVE_RELEASE(d, scope_, kind_, owner_, bytes_)                                     \
+    flux_observe_release((d), &(flux_observe_release_opts){                                        \
+                                  .scope = (scope_),                                               \
+                                  .kind = (kind_),                                                 \
+                                  .owner = (owner_),                                               \
+                                  .bytes = (bytes_),                                               \
+                              })
 
 /* ================================================================== */
 /*  Reporting                                                         */
@@ -190,10 +215,15 @@ flux_observe_report(const flux_device *d, const flux_observe_report_opts *opts);
 /* Snapshot one (kind, owner) row. Used by leak lanes to assert an exact
  * delta around a create/release pair instead of a tolerance constant.
  * Returns FLUX_ERROR_OUT_OF_RANGE when the row was never interned. */
-FLUX_NODISCARD FLUX_API flux_result flux_observe_read_counters(const flux_device *d,
-                                                               flux_scope scope, const char *kind,
-                                                               const char *owner,
-                                                               flux_observe_counters *out);
+typedef struct flux_observe_read_counters_opts {
+    flux_scope scope;
+    const char *kind;
+    const char *owner;
+    flux_observe_counters *out;
+} flux_observe_read_counters_opts;
+
+FLUX_NODISCARD FLUX_API flux_result
+flux_observe_read_counters(const flux_device *d, const flux_observe_read_counters_opts *opts);
 
 /* Emit the drain report for `scope` through the configured logger. Called
  * by the library at the scope's drain point; also callable by a host that

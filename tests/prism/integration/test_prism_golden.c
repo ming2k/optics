@@ -159,7 +159,9 @@ static void render_golden_scene(flux_surface *s, flux_canvas *canvas, flux_image
     bd.input = target;
     bd.sigma = 2.0f;
     flux_image *blurred = nullptr;
-    OT_EXPECT(flux_blur_filter_apply(blur, frame, &bd, &blurred) == FLUX_OK);
+    OT_EXPECT(
+        flux_blur_filter_apply(blur, &(flux_blur_filter_apply_opts){
+                                         .frame = frame, .desc = &bd, .out = &blurred}) == FLUX_OK);
 
     /* Default recipe: PRISM_LIQUID_GLASS_DESC_INIT untouched, neutral
      * group (no shadow), refraction 0 so the plate reads the backdrop
@@ -176,8 +178,10 @@ static void render_golden_scene(flux_surface *s, flux_canvas *canvas, flux_image
     gd.groups = &body;
     gd.group_count = 1u;
     gd.refraction = 0.0f;
-    prism_material_output out = {0};
-    OT_EXPECT(prism_liquid_glass_filter_apply(glass, frame, &gd, &out) == FLUX_OK);
+    prism_material_output out = {};
+    OT_EXPECT(prism_liquid_glass_filter_apply(
+                  glass, &(prism_liquid_glass_filter_apply_opts){
+                             .frame = frame, .desc = &gd, .out = &out}) == FLUX_OK);
     OT_EXPECT(out.image != nullptr);
 
     flux_color black = flux_color_rgba(0, 0, 0, 255);

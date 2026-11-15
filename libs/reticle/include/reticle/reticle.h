@@ -100,8 +100,8 @@ typedef struct reticle_parse_opts {
 
 /* The only value of `reticle_parse_opts.length` meaning "measure this
  * NUL-terminated buffer". It is the maximum `size_t` so that it can never
- * collide with a real byte count; `RETICLE_MAX_INPUT_BYTES` rejects it as an
- * input length anyway. */
+ * collide with a real byte count; the parser's hard input ceiling rejects it
+ * as an input length anyway. */
 #define RETICLE_LENGTH_MEASURE ((size_t)-1)
 
 /* Parse `opts->text` into a document. Fails with FLUX_ERROR_INVALID_ARGUMENT on

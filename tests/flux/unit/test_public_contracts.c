@@ -63,11 +63,12 @@ int main(void) {
     flux_brush brush = flux_brush_solid(red);
     brush.opacity = NAN;
     OT_EXPECT(flux_canvas_begin(c, nullptr) == FLUX_OK);
-    flux_canvas_draw_geometry(c, &rect, &brush);
+    flux_canvas_draw_geometry(c, &(flux_canvas_draw_geometry_opts){.geom = &rect, .brush = &brush});
     OT_EXPECT(flux_canvas_end(c) == FLUX_ERROR_INVALID_ARGUMENT);
     flux_encoder *encoder = nullptr;
     OT_EXPECT(flux_encoder_create(nullptr, &encoder) == FLUX_OK);
-    flux_encoder_draw_geometry(encoder, &rect, &brush);
+    flux_encoder_draw_geometry(encoder,
+                               &(flux_encoder_draw_geometry_opts){.geom = &rect, .brush = &brush});
     flux_display_list *list = nullptr;
     OT_EXPECT(flux_encoder_finish(encoder, &list) == FLUX_ERROR_INVALID_ARGUMENT);
     OT_EXPECT(list == nullptr);
@@ -77,7 +78,7 @@ int main(void) {
     flux_canvas_restore(c);
     OT_EXPECT(flux_canvas_end(c) == FLUX_ERROR_INVALID_STATE);
     OT_EXPECT(flux_canvas_begin(c, nullptr) == FLUX_OK);
-    flux_canvas_save_layer(c, nullptr, 0.5f);
+    flux_canvas_save_layer(c, &(flux_canvas_save_layer_opts){.bounds = nullptr, .opacity = 0.5f});
     OT_EXPECT(flux_canvas_end(c) == FLUX_ERROR_INVALID_STATE);
     OT_EXPECT(flux_canvas_begin(c, nullptr) == FLUX_OK);
     OT_EXPECT(flux_canvas_end(c) == FLUX_OK);
@@ -89,13 +90,13 @@ int main(void) {
     brush = flux_brush_solid(0xffffffffu);
     flux_color clear = 0;
     OT_EXPECT(begin_target(c, b, &clear) == FLUX_OK);
-    flux_canvas_draw_geometry(c, &line, &brush);
+    flux_canvas_draw_geometry(c, &(flux_canvas_draw_geometry_opts){.geom = &line, .brush = &brush});
     OT_EXPECT(flux_canvas_end(c) == FLUX_OK);
     px = flux_target_cpu_pixels(b, nullptr, nullptr, &stride);
     OT_EXPECT(px[12 * stride + 6 * 4 + 3] == 0);
     line.stroke.cap = FLUX_CAP_SQUARE;
     OT_EXPECT(begin_target(c, b, &clear) == FLUX_OK);
-    flux_canvas_draw_geometry(c, &line, &brush);
+    flux_canvas_draw_geometry(c, &(flux_canvas_draw_geometry_opts){.geom = &line, .brush = &brush});
     OT_EXPECT(flux_canvas_end(c) == FLUX_OK);
     px = flux_target_cpu_pixels(b, nullptr, nullptr, &stride);
     OT_EXPECT(px[12 * stride + 6 * 4 + 3] == 255);
