@@ -2,11 +2,12 @@
  * hello_window.c — canonical starter for an iris windowed application.
  *
  * Demonstrates the minimal application setup:
- *   - Native window creation and lifecycle via iris_app_run;
+ *   - Native window creation and lifecycle via aperture_app_run;
  *   - Immediate-mode UI layout with lens widgets (column, label, button);
  *   - Event handling and graceful shutdown.
  */
 
+#include <aperture/aperture.h>
 #include <iris/app.h>
 #include <iris/window.h>
 #include <lens/lens.h>
@@ -35,7 +36,7 @@ static void build(lens *ui, const lens_input *in, void *user) {
 
 int main(void) {
     printf("iris hello_window — canonical starter application (Esc to quit)\n\n");
-    return iris_app_run(&(iris_app_config){
+    return aperture_app_run(&(aperture_app_opts){
         .title = "iris — hello_window",
         .width = 400,
         .height = 200,

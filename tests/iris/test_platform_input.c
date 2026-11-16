@@ -4,7 +4,7 @@
  * things every backend must agree on. Two policies live there today:
  *
  *   - pointer button mapping (native code → lens mouse index)
- *   - scroll-channel classification: which lens_input field a scroll
+ *   - scroll-channel classification: which iris_input field a scroll
  *     delta belongs on. A two-finger touchpad scroll and a notched wheel
  *     deliver byte-identical wl_pointer.axis events on Wayland — only
  *     the axis source distinguishes them — so the routing decision is
@@ -16,16 +16,16 @@
 
 #include "optics_test.h"
 
-#include <lens/lens.h>
+#include <iris/host.h>
 
 int main(void) {
     /* --- pointer button mapping -------------------------------------- */
 
-    OT_EXPECT(iris_pointer_button_to_lens(IRIS_POINTER_BUTTON_LEFT) == LENS_MOUSE_LEFT);
-    OT_EXPECT(iris_pointer_button_to_lens(IRIS_POINTER_BUTTON_RIGHT) == LENS_MOUSE_RIGHT);
-    OT_EXPECT(iris_pointer_button_to_lens(IRIS_POINTER_BUTTON_MIDDLE) == LENS_MOUSE_MIDDLE);
+    OT_EXPECT(iris_pointer_button_index(IRIS_POINTER_BUTTON_LEFT) == IRIS_BUTTON_LEFT);
+    OT_EXPECT(iris_pointer_button_index(IRIS_POINTER_BUTTON_RIGHT) == IRIS_BUTTON_RIGHT);
+    OT_EXPECT(iris_pointer_button_index(IRIS_POINTER_BUTTON_MIDDLE) == IRIS_BUTTON_MIDDLE);
     /* Unknown / native-only buttons have no lens slot; backends drop. */
-    OT_EXPECT(iris_pointer_button_to_lens(IRIS_POINTER_BUTTON_UNKNOWN) == -1);
+    OT_EXPECT(iris_pointer_button_index(IRIS_POINTER_BUTTON_UNKNOWN) == -1);
 
     /* --- scroll-channel classification ------------------------------- */
 
@@ -95,22 +95,22 @@ int main(void) {
     /* --- reify/apply split for the event seam (ADR-0107) ---------------
      *
      * The seam reifies a platform delta into lens space exactly once
-     * (iris_scroll_lens_delta), and the backend applies the surviving —
-     * possibly host-rewritten — delta with iris_scroll_accum_lens. The
+     * (iris_scroll_delta), and the backend applies the surviving —
+     * possibly host-rewritten — delta with iris_scroll_accum_delta. The
      * two must compose to the old iris_scroll_accum behaviour. */
     {
-        OT_EXPECT(iris_scroll_lens_delta(1.0) == -1.0);
-        OT_EXPECT(iris_scroll_lens_delta(-25.0) == 25.0);
+        OT_EXPECT(iris_scroll_delta(1.0) == -1.0);
+        OT_EXPECT(iris_scroll_delta(-25.0) == 25.0);
 
         double sy = 0, py = 0, sx = 0, px = 0;
-        iris_scroll_accum_lens(&sy, &py, &sx, &px, 0, -1.0, false);
+        iris_scroll_accum_delta(&sy, &py, &sx, &px, 0, -1.0, false);
         double sy2 = 0, py2 = 0, sx2 = 0, px2 = 0;
         iris_scroll_accum(&sy2, &py2, &sx2, &px2, 0, 1.0, false);
         OT_EXPECT(sy == sy2 && py == py2 && sy == -1.0);
 
         /* A host rewrite in lens space lands on the chosen channel. */
         double sy3 = 0, py3 = 0, sx3 = 0, px3 = 0;
-        iris_scroll_accum_lens(&sy3, &py3, &sx3, &px3, 1, -25.0, true);
+        iris_scroll_accum_delta(&sy3, &py3, &sx3, &px3, 1, -25.0, true);
         OT_EXPECT(sx3 == 0.0 && px3 == -25.0);
     }
 

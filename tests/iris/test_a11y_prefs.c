@@ -21,7 +21,7 @@
 
 #include "optics_test.h"
 #include <iris/a11y_prefs.h>
-#include <lens/lens.h>
+#include <iris/host.h>
 #include <stdlib.h>
 #include <sys/stat.h>
 #include <unistd.h>

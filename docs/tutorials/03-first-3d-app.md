@@ -21,8 +21,12 @@ You can substitute your own geometry by providing different
 ## Step 3 — read the camera setup
 
     flux_camera cam;
-    flux_camera_perspective(&cam, 1.0f,
-                            (float)width / (float)height, 0.1f, 100.0f);
+    flux_camera_perspective(&cam, &(flux_camera_perspective_opts){
+        .fov_y_rad = 1.0f,
+        .aspect = (float)width / (float)height,
+        .z_near = 0.1f,
+        .z_far = 100.0f,
+    });
     flux_camera_look_at(&cam,
         (flux_vec3){ 3, 2.5f, 4 },    /* eye */
         (flux_vec3){ 0, 0, 0 },       /* target */

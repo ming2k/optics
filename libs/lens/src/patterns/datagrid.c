@@ -14,10 +14,16 @@ typedef struct datagrid_drag {
     float start_w;
 } datagrid_drag;
 
-lens_datagrid_action lens_datagrid(lens *ui, const char *id_str, lens_datagrid_col *cols,
-                                   uint32_t col_count, const char *const *cell_texts,
-                                   uint32_t row_count, uint32_t *selected_row,
-                                   const lens_datagrid_opts *opts) {
+lens_datagrid_action lens_datagrid(lens *ui, const lens_datagrid_opts *opts) {
+    if (!opts)
+        return (lens_datagrid_action){};
+    const char *id_str = opts->id;
+    lens_datagrid_col *cols = opts->cols;
+    const uint32_t col_count = opts->col_count;
+    const char *const *cell_texts = opts->cell_texts;
+    const uint32_t row_count = opts->row_count;
+    uint32_t *selected_row = opts->selected_row;
+
     lens_datagrid_action action = {
         .kind = LENS_DATAGRID_ACTION_NONE,
         .row_index = 0,

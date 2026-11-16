@@ -38,6 +38,45 @@ static uint32_t flatten_circle(flux_arena *arena, float radius, float pixel_scal
     return r.point_count;
 }
 
+#include <stdlib.h>
+
+typedef struct dyn_buf {
+    flux_point *pts;
+    uint32_t pts_cap;
+    flux_canvas_contour *cons;
+    uint32_t cons_cap;
+} dyn_buf;
+
+static bool test_dyn_grow(void *ctx, uint32_t need_pts, uint32_t need_cons, flux_point **pts,
+                          uint32_t *pts_cap, flux_canvas_contour **cons, uint32_t *cons_cap) {
+    dyn_buf *b = ctx;
+    if (need_pts > b->pts_cap) {
+        uint32_t cap = b->pts_cap ? b->pts_cap * 2u : 64u;
+        while (cap < need_pts)
+            cap *= 2u;
+        flux_point *np = realloc(b->pts, (size_t)cap * sizeof(*np));
+        if (!np)
+            return false;
+        b->pts = np;
+        b->pts_cap = cap;
+    }
+    if (need_cons > b->cons_cap) {
+        uint32_t cap = b->cons_cap ? b->cons_cap * 2u : 16u;
+        while (cap < need_cons)
+            cap *= 2u;
+        flux_canvas_contour *nc = realloc(b->cons, (size_t)cap * sizeof(*nc));
+        if (!nc)
+            return false;
+        b->cons = nc;
+        b->cons_cap = cap;
+    }
+    *pts = b->pts;
+    *pts_cap = b->pts_cap;
+    *cons = b->cons;
+    *cons_cap = b->cons_cap;
+    return true;
+}
+
 int main(void) {
     flux_arena arena;
     OT_EXPECT(flux_arena_init(&arena, 65536, nullptr) == FLUX_OK);
@@ -107,6 +146,46 @@ int main(void) {
         flux_point tail = pts[cons[1].start + cons[1].count - 1];
         OT_EXPECT_NEAR(tail.x, 60.0f, 1e-4);
         OT_EXPECT_NEAR(tail.y, 40.0f, 1e-4);
+    }
+
+    /* --- dynamic growth beyond 2048 points and 64 contours ---------------
+     * Previously FLUX_CANVAS_PATH_SCRATCH_CAP (2048) and
+     * FLUX_CANVAS_MAX_CONTOURS (64) silently dropped trailing geometry.
+     * Dynamic flattening preserves every point and contour. */
+    flux_arena_reset(&arena);
+    {
+        flux_arena big_arena;
+        OT_EXPECT(flux_arena_init(&big_arena, 524288, nullptr) == FLUX_OK);
+        flux_path *p = nullptr;
+        OT_EXPECT(flux_path_create(&p, &big_arena) == FLUX_OK);
+        for (uint32_t c = 0; c < 80; ++c) {
+            float y = (float)c * 2.0f;
+            flux_path_move_to(p, 0.0f, y);
+            for (uint32_t s = 1; s <= 40; ++s)
+                flux_path_line_to(p, (float)s * 3.0f, y + ((s & 1u) ? 1.0f : 0.0f));
+            flux_path_close(p);
+        }
+        OT_EXPECT(flux_path_dropped_count(p) == 0);
+        dyn_buf db = {
+            .pts = malloc(128 * sizeof(flux_point)),
+            .pts_cap = 128,
+            .cons = malloc(16 * sizeof(flux_canvas_contour)),
+            .cons_cap = 16,
+        };
+        flatten_multi fm = flatten_path_to_contours_dyn(p, 1.0f, db.pts, db.pts_cap, db.cons,
+                                                        db.cons_cap, test_dyn_grow, &db);
+        OT_EXPECT(fm.contour_count == 80);
+        OT_EXPECT(fm.point_count > 3000);
+        OT_EXPECT(fm.point_count > FLUX_CANVAS_PATH_SCRATCH_CAP);
+        OT_EXPECT(fm.contour_count > FLUX_CANVAS_MAX_CONTOURS);
+        if (fm.contour_count == 80) {
+            flux_point last_tail = db.pts[db.cons[79].start + db.cons[79].count - 1];
+            OT_EXPECT_NEAR(last_tail.x, 0.0f, 1e-4);
+            OT_EXPECT_NEAR(last_tail.y, 158.0f, 1e-4);
+        }
+        free(db.pts);
+        free(db.cons);
+        flux_arena_deinit(&big_arena);
     }
 
     flux_arena_deinit(&arena);

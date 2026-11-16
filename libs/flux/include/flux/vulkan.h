@@ -169,7 +169,7 @@ FLUX_NODISCARD FLUX_API flux_result flux_oneshot_run(flux_device *d, flux_onesho
 FLUX_API flux_bindless_handle flux_image_bindless_handle(const flux_image *im);
 
 /* The storage bindless handle of the image, valid only for images created
- * with flux_image_create_compute_writable (FLUX_BINDLESS_INVALID otherwise).
+ * with flux_image_create (FLUX_IMAGE_USAGE_COMPUTE_WRITE) (FLUX_BINDLESS_INVALID otherwise).
  * Pass it to a compute shader that writes the image via a storage binding. */
 FLUX_API flux_bindless_handle flux_image_bindless_storage_handle(const flux_image *im);
 

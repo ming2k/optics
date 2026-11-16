@@ -11,7 +11,12 @@ static const uint8_t *pixel(flux_canvas *c, unsigned x, unsigned y) {
 
 int main(void) {
     flux_canvas *c = nullptr;
-    OT_EXPECT(flux_canvas_create_cpu(64, 64, 1, &c) == FLUX_OK);
+    OT_EXPECT(flux_canvas_create(&(flux_canvas_desc){.type = FLUX_TYPE_CANVAS_DESC,
+                                                     .backend = FLUX_CANVAS_BACKEND_CPU,
+                                                     .scale = 1,
+                                                     .width = 64,
+                                                     .height = 64},
+                                 &c) == FLUX_OK);
     flux_brush gradient = {
         .kind = FLUX_BRUSH_LINEAR_GRADIENT,
         .blend = FLUX_BLEND_SRC_OVER,

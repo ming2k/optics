@@ -29,10 +29,10 @@ error model), see [API Reference](api.md); for blocking behavior per call, see
 | `flux_image_width` |  |
 | `flux_image_height` |  |
 | `flux_image_format` |  |
-| `flux_image_create_render_target` | Create a COLOR_ATTACHMENT \| SAMPLED image with undefined initial contents. |
+| `flux_image_create (FLUX_IMAGE_USAGE_RENDER_TARGET)` | Create a COLOR_ATTACHMENT \| SAMPLED image with undefined initial contents. |
 | `flux_frame_prepare_image_target` |  |
 | `flux_frame_finish_image_target` |  |
-| `flux_image_create_compute_writable` | Create a STORAGE \| SAMPLED image with undefined initial contents, in VK_IMAGE_LAYOUT_GENERAL, registered into both the sampled and the storage bindless slots (read them via flux_image_bindless_handle and flux_image_bindless_storage_handle in <flux/vulkan.h>). |
+| `flux_image_create (FLUX_IMAGE_USAGE_COMPUTE_WRITE)` | Create a STORAGE \| SAMPLED image with undefined initial contents, in VK_IMAGE_LAYOUT_GENERAL, registered into both the sampled and the storage bindless slots (read them via flux_image_bindless_handle and flux_image_bindless_storage_handle in <flux/vulkan.h>). |
 | `flux_device_supports_image_usage` |  |
 | `flux_image_update_region` | Upload pixels (packed, strided, or premultiplied RGBA8) into an in-bounds sub-region. |
 | `flux_device_log` | Emit a printf-style diagnostic through a device's logger (if any). |
@@ -206,7 +206,7 @@ error model), see [API Reference](api.md); for blocking behavior per call, see
 | `flux_oneshot_submit_and_end` | Submit `cmd` on the device's graphics queue and WAIT for completion (fence with a finite timeout, queue-idle fallback), then recycle the buffer. |
 | `flux_oneshot_run` | Single-recording convenience: begin, call `record` (non-NULL), submit, wait, recycle. |
 | `flux_image_bindless_handle` | The sampled bindless handle the image was registered into at create time. |
-| `flux_image_bindless_storage_handle` | The storage bindless handle of the image, valid only for images created with flux_image_create_compute_writable (FLUX_BINDLESS_INVALID otherwise). |
+| `flux_image_bindless_storage_handle` | The storage bindless handle of the image, valid only for images created with flux_image_create (FLUX_IMAGE_USAGE_COMPUTE_WRITE) (FLUX_BINDLESS_INVALID otherwise). |
 | `flux_graphics_pipeline_create` |  |
 | `flux_graphics_pipeline_retain` |  |
 | `flux_graphics_pipeline_release` | Drop one owned reference. |
@@ -299,9 +299,8 @@ error model), see [API Reference](api.md); for blocking behavior per call, see
 
 | Symbol | Description |
 |--------|-------------|
-| `flux_canvas_create_cpu` | Create a headless CPU canvas with a `width`x`height` (physical pixels) framebuffer. |
-| `flux_canvas_create_cpu_aa` | flux_canvas_create_cpu with an explicit antialiasing request. |
-| `flux_canvas_create_cpu_ss` | flux_canvas_create_cpu with an explicit supersampling factor per axis (ss x ss samples per pixel). |
+| `flux_canvas_cpu_pixels` | Return the premultiplied-RGBA8 framebuffer of a CPU canvas. |
+| `flux_canvas_cpu_coverage` | Return the single-channel 1x alpha-coverage plane of a CPU canvas. |
 
 ### `flux/dmabuf.h`
 

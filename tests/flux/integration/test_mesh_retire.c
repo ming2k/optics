@@ -65,7 +65,11 @@ int main(void) {
     }
 
     flux_camera cam;
-    flux_camera_perspective(&cam, 1.0f, (float)SURF_W / (float)SURF_H, 0.1f, 100.0f);
+    flux_camera_perspective(&cam,
+                            &(flux_camera_perspective_opts){.fov_y_rad = 1.0f,
+                                                            .aspect = (float)SURF_W / (float)SURF_H,
+                                                            .z_near = 0.1f,
+                                                            .z_far = 100.0f});
     flux_camera_look_at(&cam, (flux_vec3){0, 0, 4}, (flux_vec3){0, 0, 0}, (flux_vec3){0, 1, 0});
 
     flux_material *material = nullptr;

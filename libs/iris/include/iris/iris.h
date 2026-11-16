@@ -34,6 +34,7 @@
 #include <iris/dnd.h>
 #include <iris/event.h>
 #include <iris/file_dialog.h>
+#include <iris/host.h>
 #include <iris/theme.h>
 #include <iris/window.h>
 

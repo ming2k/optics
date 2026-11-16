@@ -18,6 +18,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "aperture"
+version = "0.0.79"
+dependencies = [
+ "aperture-sys",
+ "flux",
+ "iris",
+ "lens",
+]
+
+[[package]]
+name = "aperture-sys"
+version = "0.0.79"
+dependencies = [
+ "bindgen",
+ "flux-sys",
+ "iris-sys",
+ "lens-sys",
+ "pkg-config",
+]
+
+[[package]]
 name = "autocfg"
 version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -227,10 +248,7 @@ checksum = "a257582fdcde896fd96463bf2d40eefea0580021c0712a0e2b028b60b47a837a"
 name = "iris"
 version = "0.0.79"
 dependencies = [
- "flux",
  "iris-sys",
- "lens",
- "lens-sys",
 ]
 
 [[package]]
@@ -239,7 +257,6 @@ version = "0.0.79"
 dependencies = [
  "bindgen",
  "flux-sys",
- "lens-sys",
  "pkg-config",
 ]
 
@@ -368,6 +385,7 @@ dependencies = [
 name = "optics"
 version = "0.0.79"
 dependencies = [
+ "aperture",
  "flux",
  "glyph",
  "iris",

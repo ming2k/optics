@@ -491,7 +491,13 @@ static flux_result acquire_intermediate(flux_device *d, effect_state *st, uint32
         return FLUX_ERROR_OUT_OF_MEMORY;
     }
     flux_image *img = nullptr;
-    flux_result r = flux_image_create_compute_writable(d, w, h, fmt, &img);
+    flux_result r = flux_image_create(d,
+                                      &(flux_image_desc){.type = FLUX_TYPE_IMAGE_DESC,
+                                                         .width = w,
+                                                         .height = h,
+                                                         .format = fmt,
+                                                         .usage = FLUX_IMAGE_USAGE_COMPUTE_WRITE},
+                                      &img);
     if (r != FLUX_OK)
         return r;
 
@@ -541,7 +547,13 @@ static flux_result acquire_output(flux_device *d, effect_state *st, uint32_t w, 
         return FLUX_ERROR_OUT_OF_MEMORY;
     }
     flux_image *img = nullptr;
-    flux_result r = flux_image_create_compute_writable(d, w, h, fmt, &img);
+    flux_result r = flux_image_create(d,
+                                      &(flux_image_desc){.type = FLUX_TYPE_IMAGE_DESC,
+                                                         .width = w,
+                                                         .height = h,
+                                                         .format = fmt,
+                                                         .usage = FLUX_IMAGE_USAGE_COMPUTE_WRITE},
+                                      &img);
     if (r != FLUX_OK)
         return r;
 
@@ -1119,12 +1131,22 @@ static flux_result blur_filter_ensure_scratch(flux_blur_filter *filter, uint32_t
     uint32_t half_height = (in_h + 1u) / 2u;
     uint32_t quarter_width = (half_width + 1u) / 2u;
     uint32_t quarter_height = (half_height + 1u) / 2u;
-    flux_result r = flux_image_create_compute_writable(filter->device, half_width, half_height,
-                                                       storage_format, &filter->half);
+    flux_result r = flux_image_create(filter->device,
+                                      &(flux_image_desc){.type = FLUX_TYPE_IMAGE_DESC,
+                                                         .width = half_width,
+                                                         .height = half_height,
+                                                         .format = storage_format,
+                                                         .usage = FLUX_IMAGE_USAGE_COMPUTE_WRITE},
+                                      &filter->half);
     if (r != FLUX_OK)
         return r;
-    r = flux_image_create_compute_writable(filter->device, quarter_width, quarter_height,
-                                           storage_format, &filter->quarter);
+    r = flux_image_create(filter->device,
+                          &(flux_image_desc){.type = FLUX_TYPE_IMAGE_DESC,
+                                             .width = quarter_width,
+                                             .height = quarter_height,
+                                             .format = storage_format,
+                                             .usage = FLUX_IMAGE_USAGE_COMPUTE_WRITE},
+                          &filter->quarter);
     if (r != FLUX_OK) {
         flux_image_release(filter->half);
         filter->half = nullptr;
@@ -1147,8 +1169,13 @@ static flux_result blur_filter_ensure_slot(flux_blur_filter *filter, uint32_t in
         flux_image_release(slot->output);
     *slot = (blur_filter_slot){};
 
-    flux_result r = flux_image_create_compute_writable(filter->device, input->width, input->height,
-                                                       storage_format, &slot->output);
+    flux_result r = flux_image_create(filter->device,
+                                      &(flux_image_desc){.type = FLUX_TYPE_IMAGE_DESC,
+                                                         .width = input->width,
+                                                         .height = input->height,
+                                                         .format = storage_format,
+                                                         .usage = FLUX_IMAGE_USAGE_COMPUTE_WRITE},
+                                      &slot->output);
     if (r != FLUX_OK)
         return r;
     slot->width = input->width;
@@ -1294,7 +1321,8 @@ flux_result flux_blur_filter_apply(flux_blur_filter *filter,
         FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "invalid reusable blur regions extension");
         return FLUX_ERROR_INVALID_ARGUMENT;
     }
-    if (!frame->surface || frame->state != FLUX_FRAME_STATE_RECORDING || frame->pass_active) {
+    if (!frame->surface || frame->state != FLUX_FRAME_STATE_RECORDING ||
+        flux_frame_has_active_pass(frame)) {
         FLUX_FAIL(FLUX_ERROR_INVALID_STATE,
                   "reusable blur requires a recording frame pass boundary");
         return FLUX_ERROR_INVALID_STATE;
@@ -1412,7 +1440,8 @@ flux_result flux_blur_filter_current(flux_blur_filter *filter,
     flux_frame *frame = opts->frame;
     flux_image **out = opts->out;
     *out = nullptr;
-    if (!frame->surface || frame->state != FLUX_FRAME_STATE_RECORDING || frame->pass_active) {
+    if (!frame->surface || frame->state != FLUX_FRAME_STATE_RECORDING ||
+        flux_frame_has_active_pass(frame)) {
         FLUX_FAIL(FLUX_ERROR_INVALID_STATE,
                   "reusable blur query requires a recording frame pass boundary");
         return FLUX_ERROR_INVALID_STATE;
@@ -1490,12 +1519,22 @@ static flux_result shadow_filter_ensure_scratch(flux_shadow_filter *filter, uint
     filter->ping = nullptr;
     filter->pong = nullptr;
 
-    flux_result r = flux_image_create_compute_writable(filter->device, in_w, in_h, storage_format,
-                                                       &filter->ping);
+    flux_result r = flux_image_create(filter->device,
+                                      &(flux_image_desc){.type = FLUX_TYPE_IMAGE_DESC,
+                                                         .width = in_w,
+                                                         .height = in_h,
+                                                         .format = storage_format,
+                                                         .usage = FLUX_IMAGE_USAGE_COMPUTE_WRITE},
+                                      &filter->ping);
     if (r != FLUX_OK)
         return r;
-    r = flux_image_create_compute_writable(filter->device, in_w, in_h, storage_format,
-                                           &filter->pong);
+    r = flux_image_create(filter->device,
+                          &(flux_image_desc){.type = FLUX_TYPE_IMAGE_DESC,
+                                             .width = in_w,
+                                             .height = in_h,
+                                             .format = storage_format,
+                                             .usage = FLUX_IMAGE_USAGE_COMPUTE_WRITE},
+                          &filter->pong);
     if (r != FLUX_OK) {
         flux_image_release(filter->ping);
         filter->ping = nullptr;
@@ -1518,8 +1557,13 @@ static flux_result shadow_filter_ensure_slot(flux_shadow_filter *filter, uint32_
         flux_image_release(slot->output);
     *slot = (shadow_filter_slot){};
 
-    flux_result r = flux_image_create_compute_writable(filter->device, input->width, input->height,
-                                                       storage_format, &slot->output);
+    flux_result r = flux_image_create(filter->device,
+                                      &(flux_image_desc){.type = FLUX_TYPE_IMAGE_DESC,
+                                                         .width = input->width,
+                                                         .height = input->height,
+                                                         .format = storage_format,
+                                                         .usage = FLUX_IMAGE_USAGE_COMPUTE_WRITE},
+                                      &slot->output);
     if (r != FLUX_OK)
         return r;
     slot->width = input->width;
@@ -1554,7 +1598,8 @@ flux_result flux_shadow_filter_apply(flux_shadow_filter *filter,
         FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "shadow parameters must be finite");
         return FLUX_ERROR_INVALID_ARGUMENT;
     }
-    if (!frame->surface || frame->state != FLUX_FRAME_STATE_RECORDING || frame->pass_active) {
+    if (!frame->surface || frame->state != FLUX_FRAME_STATE_RECORDING ||
+        flux_frame_has_active_pass(frame)) {
         FLUX_FAIL(FLUX_ERROR_INVALID_STATE,
                   "reusable shadow requires a recording frame pass boundary");
         return FLUX_ERROR_INVALID_STATE;

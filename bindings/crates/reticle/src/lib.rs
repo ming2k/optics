@@ -275,7 +275,6 @@ impl Document {
             document: self.raw,
             width: options.width,
             height: options.height,
-            supersample: options.supersample,
             format: options.format.raw(),
             paint: options.paint.raw(),
             color: options.paint.color(),
@@ -593,22 +592,18 @@ impl PixelFormat {
 pub struct RasterizeOptions {
     pub width: u32,
     pub height: u32,
-    /// Samples per axis for the software rasterizer: 0 selects the backend
-    /// default (2 → 4 samples/pixel), 1 is aliased, up to 8.
-    pub supersample: u32,
     pub format: PixelFormat,
     pub paint: PaintMode,
     pub stroke_width: f32,
 }
 
 impl RasterizeOptions {
-    /// A premultiplied-RGBA8 rasterization of `width`x`height` at the backend's
-    /// default antialiasing.
+    /// A premultiplied-RGBA8 rasterization of `width`x`height` at 1x analytic
+    /// coverage.
     pub fn new(width: u32, height: u32) -> Self {
         Self {
             width,
             height,
-            supersample: 0,
             format: PixelFormat::Rgba8Premul,
             paint: PaintMode::default(),
             stroke_width: 0.0,

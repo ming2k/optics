@@ -4,10 +4,6 @@
 # slots, and the bindless heap. flux owns rendering mechanism, prism owns
 # material identity, and the caller owns policy (ADR-0063).
 
-if not get_option('compute')
-  error('prism requires the flux compute module — pass -Dcompute=true with -Dprism=true')
-endif
-
 prism_inc = include_directories('include')
 
 slangc = find_program('slangc', required : true)

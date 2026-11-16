@@ -6,6 +6,7 @@
 #ifndef SCENARIOS_OVERLAYS_H
 #define SCENARIOS_OVERLAYS_H
 
+#include <aperture/aperture.h>
 #include <iris/app.h>
 #include <iris/window.h>
 #include <lens/lens.h>

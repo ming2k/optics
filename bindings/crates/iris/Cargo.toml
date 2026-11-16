@@ -1,6 +1,6 @@
 [package]
 name = "iris"
-description = "Safe Rust bindings to iris: L3 application toolkit for the flux/lens stack"
+description = "Safe Rust bindings to iris: the platform shell (window, events, frame cadence) over flux"
 publish = false
 version.workspace = true
 edition.workspace = true
@@ -11,9 +11,3 @@ links = "iris_rs"
 
 [dependencies]
 iris-sys = { path = "../iris-sys", version = "0.0.79" }
-lens = { path = "../lens", version = "0.0.79" }
-lens-sys = { path = "../lens-sys", version = "0.0.79" }
-flux = { path = "../flux", version = "0.0.79" }
-
-[[example]]
-name = "hello"

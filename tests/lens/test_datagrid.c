@@ -4,6 +4,22 @@
 #include "optics_test.h"
 #include <lens/patterns.h>
 
+/* The fixed arguments of every case in this file, merged into a copy of the
+ * case's options. */
+static lens_datagrid_action datagrid(lens *ui, const char *id, lens_datagrid_col *cols,
+                                     uint32_t col_count, const char *const *cell_texts,
+                                     uint32_t row_count, uint32_t *selected_row,
+                                     const lens_datagrid_opts *base) {
+    lens_datagrid_opts o = *base;
+    o.id = id;
+    o.cols = cols;
+    o.col_count = col_count;
+    o.cell_texts = cell_texts;
+    o.row_count = row_count;
+    o.selected_row = selected_row;
+    return lens_datagrid(ui, &o);
+}
+
 int main(void) {
     lens *ui = nullptr;
     OT_EXPECT(lens_create(nullptr, &ui) == FLUX_OK);
@@ -31,7 +47,7 @@ int main(void) {
 
     /* Frame 1: Neutral layout pass */
     lens_begin(ui, &in);
-    lens_datagrid_action a = lens_datagrid(ui, "my_grid", cols, 3, cells, 4, &selected, &opts);
+    lens_datagrid_action a = datagrid(ui, "my_grid", cols, 3, cells, 4, &selected, &opts);
     OT_EXPECT(a.kind == LENS_DATAGRID_ACTION_NONE);
     lens_test_end(ui);
 
@@ -40,7 +56,7 @@ int main(void) {
     in.mouse_down[LENS_MOUSE_LEFT] = true;
     in.mouse_pressed[LENS_MOUSE_LEFT] = true;
     lens_begin(ui, &in);
-    a = lens_datagrid(ui, "my_grid", cols, 3, cells, 4, &selected, &opts);
+    a = datagrid(ui, "my_grid", cols, 3, cells, 4, &selected, &opts);
     lens_test_end(ui);
 
     /* Release click on column 1 */
@@ -48,7 +64,7 @@ int main(void) {
     in.mouse_pressed[LENS_MOUSE_LEFT] = false;
     in.mouse_released[LENS_MOUSE_LEFT] = true;
     lens_begin(ui, &in);
-    a = lens_datagrid(ui, "my_grid", cols, 3, cells, 4, &selected, &opts);
+    a = datagrid(ui, "my_grid", cols, 3, cells, 4, &selected, &opts);
     OT_EXPECT(a.kind == LENS_DATAGRID_ACTION_SORT_CHANGED);
     OT_EXPECT(a.col_index == 1);
     OT_EXPECT(a.sort_dir == LENS_SORT_ASC);
@@ -59,14 +75,14 @@ int main(void) {
     in.mouse_pressed[LENS_MOUSE_LEFT] = true;
     in.mouse_released[LENS_MOUSE_LEFT] = false;
     lens_begin(ui, &in);
-    lens_datagrid(ui, "my_grid", cols, 3, cells, 4, &selected, &opts);
+    datagrid(ui, "my_grid", cols, 3, cells, 4, &selected, &opts);
     lens_test_end(ui);
 
     in.mouse_down[LENS_MOUSE_LEFT] = false;
     in.mouse_pressed[LENS_MOUSE_LEFT] = false;
     in.mouse_released[LENS_MOUSE_LEFT] = true;
     lens_begin(ui, &in);
-    a = lens_datagrid(ui, "my_grid", cols, 3, cells, 4, &selected, &opts);
+    a = datagrid(ui, "my_grid", cols, 3, cells, 4, &selected, &opts);
     OT_EXPECT(a.kind == LENS_DATAGRID_ACTION_SORT_CHANGED);
     OT_EXPECT(a.col_index == 1);
     OT_EXPECT(a.sort_dir == LENS_SORT_DESC);
@@ -78,14 +94,14 @@ int main(void) {
     in.mouse_pressed[LENS_MOUSE_LEFT] = true;
     in.mouse_released[LENS_MOUSE_LEFT] = false;
     lens_begin(ui, &in);
-    a = lens_datagrid(ui, "my_grid", cols, 3, cells, 4, &selected, &opts);
+    a = datagrid(ui, "my_grid", cols, 3, cells, 4, &selected, &opts);
     lens_test_end(ui);
 
     in.mouse_down[LENS_MOUSE_LEFT] = false;
     in.mouse_pressed[LENS_MOUSE_LEFT] = false;
     in.mouse_released[LENS_MOUSE_LEFT] = true;
     lens_begin(ui, &in);
-    a = lens_datagrid(ui, "my_grid", cols, 3, cells, 4, &selected, &opts);
+    a = datagrid(ui, "my_grid", cols, 3, cells, 4, &selected, &opts);
     OT_EXPECT(a.kind == LENS_DATAGRID_ACTION_ROW_CLICKED);
     OT_EXPECT(a.row_index == 2);
     OT_EXPECT(selected == 2);

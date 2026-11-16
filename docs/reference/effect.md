@@ -1,19 +1,8 @@
 # Effect Module Reference
 
 Image-domain effects: read one or more `flux_image` inputs, write a
-`flux_image` output, record into any `VkCommandBuffer`. Requires
-`-Dcanvas=true -Dcompute=true -Deffect=true`. Header:
-`<flux/effect.h>`. Design rationale: [ADR-0008](../adr/0008-image-effect-pipeline.md).
-
-## Build flag
-
-| Flag         | Default | Effect                                                |
-|--------------|---------|-------------------------------------------------------|
-| `-Deffect`   | `true`  | Compile the effect module. Errors out if `-Dcanvas=false` or `-Dcompute=false`. |
-
-When enabled, defines `FLUX_HAVE_EFFECT=1` on the public compile line
-and installs `<flux/effect.h>`. The umbrella `<flux/flux.h>` then pulls
-the effect header in automatically.
+`flux_image` output, record into any `VkCommandBuffer`. Header:
+`<flux/effect.h>`, always part of libflux and pulled in by `<flux/flux.h>`. Design rationale: [ADR-0008](../adr/0008-image-effect-pipeline.md).
 
 ## Output ownership
 

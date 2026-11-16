@@ -264,7 +264,13 @@ int main(void) {
                                                     FLUX_IMAGE_USAGE_COMPUTE_WRITE);
         flux_image *im16 = nullptr;
         flux_result r16 =
-            flux_image_create_compute_writable(d, 4, 4, FLUX_FORMAT_RGBA16_SFLOAT, &im16);
+            flux_image_create(d,
+                              &(flux_image_desc){.type = FLUX_TYPE_IMAGE_DESC,
+                                                 .width = 4,
+                                                 .height = 4,
+                                                 .format = FLUX_FORMAT_RGBA16_SFLOAT,
+                                                 .usage = FLUX_IMAGE_USAGE_COMPUTE_WRITE},
+                              &im16);
         OT_EXPECT((r16 == FLUX_OK) == q16);
         if (r16 == FLUX_OK)
             flux_image_release(im16);

@@ -471,7 +471,7 @@ flux_result flux_frame_register_pass(flux_frame *f, const flux_deferred_pass_des
     /* Compute cannot be recorded inside a render pass, and a pass body is
      * recorded outside one by construction. Rejecting here keeps the failure at
      * the caller's line rather than at vkCmdExecuteCommands time. */
-    if (f->pass_active) {
+    if (flux_frame_has_active_pass(f)) {
         FLUX_FAIL(FLUX_ERROR_INVALID_STATE,
                   "registering a pass requires a pass boundary; a canvas pass is active");
         return FLUX_ERROR_INVALID_STATE;

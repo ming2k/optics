@@ -37,7 +37,6 @@ int main(int argc, char **argv) {
             .document = document,
             .width = 256,
             .height = 256,
-            .supersample = 4,
             .format = RETICLE_PIXELS_RGBA8_PREMUL,
             .paint = RETICLE_PAINT_THEME,
             .color = flux_color_rgba(255, 255, 255, 255),

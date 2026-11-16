@@ -693,9 +693,13 @@ done:
  * a different function, a different cause, or nothing. That is worse than no
  * detail: a reader would chase the wrong code path. Recording here keeps the
  * slot describing the failure the caller just received. */
-#define LENSI_DIAG(code, msg)                                                                      \
+#define LENSI_DIAG(result_, message_)                                                              \
     do {                                                                                           \
-        flux_set_diagnostic((code), __func__, __FILE__, __LINE__, (msg));                          \
+        flux_set_diagnostic(&(flux_error_info){.code = (result_),                                  \
+                                               .function = __func__,                               \
+                                               .file = __FILE__,                                   \
+                                               .line = __LINE__,                                   \
+                                               .message = (message_)});                            \
     } while (0)
 
 flux_result lens_snapshot_create(lens *ui, lens_scene_snapshot **out_snapshot) {

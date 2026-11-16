@@ -123,6 +123,10 @@ impl TabStrip {
             .collect();
 
         let opts = lens_sys::lens_tab_strip_opts {
+            id: id_c.as_ptr(),
+            tabs: c_tabs.as_ptr(),
+            tab_count: c_tabs.len() as u32,
+            active_index: active_index as u32,
             height: self.height,
             min_tab_width: self.min_tab_width,
             max_tab_width: self.max_tab_width,
@@ -131,16 +135,7 @@ impl TabStrip {
             new_icon: self.new_icon,
         };
 
-        let raw_action = unsafe {
-            lens_sys::lens_tab_strip(
-                frame.as_raw(),
-                id_c.as_ptr(),
-                c_tabs.as_ptr(),
-                c_tabs.len() as u32,
-                active_index as u32,
-                &opts,
-            )
-        };
+        let raw_action = unsafe { lens_sys::lens_tab_strip(frame.as_raw(), &opts) };
 
         match raw_action.kind {
             lens_sys::lens_tab_action_kind::LENS_TAB_ACTION_SELECT => {

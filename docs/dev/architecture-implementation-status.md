@@ -7,6 +7,53 @@
 > gates. Treat the validation snapshots below as decision history, not a current
 > runbook.
 
+## 2D rasterizer: what is live (2026-11-16)
+
+This section is current and supersedes the per-ADR rows below wherever they
+disagree.
+
+**Device (Vulkan) path.** Every Canvas pass runs cleanly at single-sample 1x with
+no MSAA attachment and no stencil attachment (`VK_FORMAT_UNDEFINED`). Geometry
+reaches pixels by one of three routes:
+
+| Route | Used for | Edge quality |
+|---|---|---|
+| Tiled analytic coverage (`CANVAS_PIPE_VECTOR`, `vk_submit_cover`, `vk_submit_cover_triangles` + `canvas_tile_bin_*` / `canvas_tile_scan_*` compute pre-pass) | Path fills (nonzero and even-odd) and strokes across solid, linear/radial gradient, and image-pattern brushes (`FLUX_BRUSH_IMAGE_PATTERN`), rotated/skewed/fractional rectangles, and rounded clips, across all 4 blend modes | Exact per-pixel area + analytical `.SampleGrad` image UVs; 80–155 distinct levels measured by `tests/flux/integration/test_canvas_edge_quality.c` |
+| Distance fields (`canvas_sdf.frag.slang`) | Circles, rounded rects, squircles and their ring strokes under a similarity transform | Exact |
+| Axis-aligned integer fast path | Integer axis-aligned solid/gradient rectangles (batched via `submit_triangles`) and unclipped unrotated integer images (`CANVAS_PIPE_IMAGE`) | Pixel-aligned; preserves 2-draw rect batching |
+
+**CPU path.** `backend_cpu.c` runs at native 1x resolution across all 4 blend
+modes (`SRC_OVER`, `SRC`, `PLUS`, `MULTIPLY`) with `canvas_coverage_rasterize`
+for both path fills and stroked triangle meshes, `frag_sdf` for SDF primitives,
+and 1x `flux_canvas_cpu_coverage` readback. Image draws remain GPU-only.
+
+**Closed limits & retired legacy routes.**
+
+1. **Tiled GPU compute rasterizer landed** (`canvas_tile_common.slang`,
+   `canvas_tile_bin.comp.slang`, `canvas_tile_scan.comp.slang`, deferred pass
+   batching in `backend_vk.c` with exact per-pixel-row suffix backdrops): the
+   4096-segment and 64M-evaluation caps are deleted; `test_tile_b3_backdrop`
+   and `test_canvas_edge_quality` verify paths >5k segments and strokes >4k edges.
+2. **Dynamic flattening & stroking capacity landed**: `canvas_flatten_path` and
+   `geometry_stroke.c` grow scratch buffers dynamically instead of dropping
+   points past 2048 points / 64 contours.
+3. **Image-pattern & rotated/fractional rect AA landed**: `FLUX_BRUSH_IMAGE_PATTERN`
+   and non-pixel-aligned rectangles route through `CANVAS_PIPE_VECTOR` while
+   unclipped integer axis-aligned rects keep batched draws.
+4. **Deleted ("retired") legacy paths**: ear-clip tessellator (`geometry_tess.c`
+   and `tess_cache`), stencil-then-cover fallback (`CANVAS_PIPE_STENCIL_*`,
+   `CANVAS_PIPE_COVER_*`, `flux_canvas_no_stencil_desc`,
+   `FLUX_TYPE_CANVAS_NO_STENCIL_DESC` tag reserved as retired), MSAA option
+   (`flux_canvas_antialias`, `FLUX_CANVAS_ANTIALIAS_MSAA_4X`, Vulkan MSAA
+   attachment & pipeline sample axis), and CPU supersampling
+   (`FLUX_CANVAS_SUPERSAMPLE_MAX`, `.supersample`, sample buffer).
+5. **Unverified platform note**: Objective-C `libs/iris/src/app_cocoa.m` was
+   audited at source level for header compatibility (`flux_canvas_desc` /
+   `flux_canvas_pass_desc`), but Cocoa compilation and runtime behavior remain
+   unverified on this Linux host.
+
+---
+
 Updated 2026-11-10. This matrix tracks the requirements in ADR-0089 through
 ADR-0094 and the curve-rendering program ADR-0115 through ADR-0117. Acceptance
 of an ADR is a design decision, not implementation acceptance. The earlier
@@ -44,24 +91,26 @@ lifetime through frame completion, not arbitrary external mutation of underlying
 
 ## Curve-rendering program (ADR-0115 through ADR-0117)
 
-The geometry kernel (ADR-0115) has landed and is tested, and its **flattening
-consumer is migrated** (`geometry_flatten.c` is deleted; `curve_flatten.c`
-samples each curve at the kernel's Wang segment count). The tessellation and
-stroking consumers are not migrated, so `geometry_tess.c`, `geometry_stroke.c`, the pass-scoped MSAA path
-(ADR-0071), the icon coverage bake (ADR-0112), and the stencil fill fallback
-(ADR-0014) are still the live rendering code. ADR-0116 and ADR-0117 are
-design-only. The records below distinguish landed work from the replacement
-still owed.
+The analytic rasterization stack is **landed** on both Vulkan (`CANVAS_PIPE_VECTOR`
+with GPU compute 16x16 tile binning/scan) and CPU (1x `canvas_coverage_rasterize`
+across all blend modes and strokes). The legacy ear-clipping tessellator
+(`geometry_tess.c`, `tess_cache`), stencil fallback (`ADR-0014`,
+`FLUX_TYPE_CANVAS_NO_STENCIL_DESC`), pass-scoped MSAA (`ADR-0071`,
+`flux_canvas_antialias`), and CPU supersampling (`flux_canvas_desc::supersample`)
+are **retired** (deleted from headers and implementation). `geometry_stroke.c`
+is retained for outline expansion and feeds `submit_cover_triangles` at 1x
+analytic coverage. `lens` icon masks (`ADR-0112`) bake via 1x
+`flux_canvas_cpu_coverage`.
 
 | ADR | Status | Required work before completion |
 |---|---|---|
-| 0115 | Kernel + flattening landed; stroker retained by decision | **Landed:** `flux_curve` (`libs/flux/src/curve/curve.c`, `include/flux/curve.h`) — exact-bound cubic reduction with inflection/cusp splitting, Wang segment counts, analytic offset, closed-form retrograde interval, ray/winding coverage primitives, and the `flux_curve_cover` value, plus a supersampled `flux_curve_cover_coverage` used for cross-route validation; verified by `tests/flux/unit/test_curve.c` (191 assertions). **Landed:** the flattening consumer — `geometry_flatten.c` (recursive De Casteljau) is **deleted**; `curve_flatten.c` samples each curve at the kernel's Wang count, measurably faster with ~45% fewer points for the same 0.25 px screen tolerance. **Closed by decision, not deferred:** the segment-based stroker rewrite (`geometry_stroke.c` retained). Both improvements it was meant to deliver were measured — exact source curvature is *worse* (r=2 retrograde 0 → 28) and min-of-both reproduces the baseline exactly — so the polyline stroker is the correct stroker for a polyline rasterizer (ADR-0115 Options H and I). Revisit only when ADR-0116 makes the fill path stop emitting polylines. |
-| 0116 | S0–S3 landed; S4 in progress (MSAA default retired) | Sequenced by [ADR-0119](../adr/0119-coverage-seam-migration-staged-plan.md). **S0:** coverage harness + `test_cover_reference`. **S1:** `coverage_raster.c` sub-band exact integrator, `test_coverage_raster` (28,774 assertions, exact to ≤5e-7); `submit_cover` backend op implemented on both CPU and Vulkan backends. **S2:** the route is active with an entry scratch guard; even-odd no longer needs stencil for solid paint on a coverage backend. **S3 landed:** `TILE_COMPUTE` backend (`canvas_tile.c`, `canvas_tile_raster.comp.slang`) wired into `backend_vk.c::vk_submit_cover`. The device ceiling test (`test_canvas_coverage_ceiling`) inverted its assertion: measured **104 distinct levels** on the probe edge (exceeding INV-COV-02's >16 contract and retiring the legacy 10-level 4× MSAA ceiling). Even-odd fills succeed without a stencil attachment in strict no-stencil passes (`test_canvas_render`). **S4 underway:** default Vulkan canvas `AUTO` antialias policy retired its 4× MSAA attachment allocation, operating strictly in 1× sample rate; 202/202 tests green. Remaining: retire ear-clip tessellator for strokes once stroked retrograde covers land. |
+| 0115 | Kernel + flattening landed; stroker retained by decision | **Landed:** `flux_curve` (`libs/flux/src/curve/curve.c`, `include/flux/curve.h`) — exact-bound cubic reduction with inflection/cusp splitting, Wang segment counts, analytic offset, closed-form retrograde interval, ray/winding coverage primitives, and the `flux_curve_cover` value, plus a supersampled `flux_curve_cover_coverage` used for cross-route validation; verified by `tests/flux/unit/test_curve.c`. **Landed:** the flattening consumer — `geometry_flatten.c` (recursive De Casteljau) is **retired** (deleted); `curve_flatten.c` grows contours/points dynamically (`canvas_flatten_path`). **Closed by decision, not deferred:** the segment-based stroker rewrite (`geometry_stroke.c` retained, emitting into dynamically-grown scratch and rasterized via `submit_cover_triangles`). |
+| 0116 | Landed (MSAA option, stencil fallback & CPU supersample retired) | Sequenced by [ADR-0119](../adr/0119-coverage-seam-migration-staged-plan.md). **Landed:** 1x analytic coverage on both Vulkan and CPU backends across all 4 blend modes, fills, strokes, rotated/fractional rects, and image-pattern brushes (`test_canvas_edge_quality`, `test_canvas_coverage_ceiling`, `test_canvas_cpu`). **Retired:** `flux_canvas_antialias`, `MSAA_4X` attachment & sample variants, `stencil` attachment/pipelines (`FLUX_TYPE_CANVAS_NO_STENCIL_DESC`), ear-clip tessellator (`geometry_tess.c`), `tess_cache`, and CPU `supersample`. |
 | 0117 | Landed | **Landed:** `FLUX_MATERIAL_VECTOR` in `libs/flux/src/scene/` (`scene.h`, `scene.c`, `scene_vector.vert.slang`, `scene_vector.frag.slang`). Reconstructs exact analytic vector coverage in screen space under arbitrary 3D perspective transforms via screen-space Jacobian derivatives (`dFdx`/`dFdy`) without baking (INV-SCV-01), with object-space curve inputs (INV-SCV-02), proven projective-correctness (INV-SCV-03: measured **107 distinct coverage levels** in `test_scene_vector.c` under 3D perspective foreshortening and rotation), shared ray-cast semantics with `curve` (INV-SCV-04), and strict module isolation from `canvas` (INV-SCV-05). |
-| 0120 | Phases A, B0, B1–B5 landed, Phase C underway | GPU analytic coverage for arbitrary paths, planned in [ADR-0120](../adr/0120-gpu-analytic-coverage-tile-compute-plan.md). **Landed Phase A:** active edge table removes the quadratic rescan (1024-vertex star 26.3 ms → 5.8 ms, strictly linear); ASAN/UBSAN clean across 28,774 assertions; dedicated fuzz harness (`fuzz_coverage_raster.c`) and seeds; benchmark in `bench_coverage.c`. **Landed Phase B0:** real-driver CI hardware lane and anti-downgrade test (`test_device_hardware.c`, asserts non-CPU, non-llvmpipe on Intel ARL GPU). **Landed Phase B1:** segment SSBO storage buffer transport (`canvas_tile_upload_segments`, `test_tile_b1_upload.c`, 4351 assertions matching CPU flattener endpoints). **Landed Phase B2:** coarse raster half-open 16×16 tile binning (`canvas_tile_bin_segments`, `test_tile_b2_coarse.c`, 1321 assertions). **Landed Phase B3:** two-level prefix sum winding backdrop (`canvas_tile_compute_backdrop`, `test_tile_b3_backdrop.c`, 850 assertions matching `flux_curve_cover_winding`). **Landed Phase B4:** fine raster per-pixel area integration (`canvas_tile_rasterize`, `test_tile_b4_fine.c`, exact to ≤ 5×10⁻⁶, oblique edge 135 distinct levels > 16). **Landed Phase B5 & Primary Seam Integration:** wired `.submit_cover = vk_submit_cover` into `backend_vk.c`; pure Vulkan compute shader `canvas_tile_raster.comp.slang` with 64-bit BDA and Liang-Barsky integration verified on hardware (`test_tile_gpu_compute.c`); `test_canvas_coverage_ceiling` inverted on actual Vulkan surface readback (**104 distinct levels** vs CPU 117); even-odd no longer rejected in no-stencil passes (`test_canvas_render`). **Phase C:** retired default 4× MSAA allocation in `backend_vk.c::vk_begin_pass` (AUTO is now 1× analytic coverage). |
+| 0120 | Landed | GPU compute 16×16 tile binning, exclusive prefix offset scan, per-pixel-row suffix winding backdrop (`canvas_tile_common.slang`, `canvas_tile_bin.comp.slang`, `canvas_tile_scan.comp.slang`), and deferred pass recording in `backend_vk.c` with growable device-local tile scratch; **retired** `FLUX_COVER_MAX_SEGMENTS` (4096), `FLUX_COVER_TRIANGLE_BUDGET` (64M), ear-clip tessellator, stencil fallback, and MSAA option (`test_tile_b1_upload`..`test_tile_gpu_compute`, `test_canvas_edge_quality`). |
 | 0118 | Landed (shear fallback is by design) | **Landed:** the Slang fields are consolidated into `include/flux/shaders/flux_sdf.slang` — round-rect, ring and **squircle** — included by `canvas_sdf.frag.slang`, `canvas_image.frag.slang` and the five Prism materials (nine copies → one, snippet tracked as a build dependency); `flux_sdf_squircle` completes the C set and `liquid_glass.comp.slang` consumes it (Prism output unchanged). **INV-SDF-06 closed:** `flux_path_add_squircle` draws the field's corner arc as two cubics per corner from a Schneider fit (curvature 0 recovers the classic two-cubic circle constant 0.265216 to 5 decimals). **INV-SDF-03 landed:** `FLUX_GEOM_SQUIRCLE` (solid, SRC_OVER, similarity transform) evaluates the field instead of flatten + tessellate; `draw_sdf_rrect` became `draw_sdf_shape`, the field is evaluated in **shape space** through the inverse linear part so **rotation and uniform scale are exact**, and the extra state rides the free `image_src[2..3]` / `grad_from` / `grad_to` slots (no ABI or pipeline change). Verified by `test_canvas_squircle` (path↔field deviation ≤ 0.3 % of r; analytic vs tessellated agree with zero wrong-side pixels, including under rotation and rotation×scale, with a shear case as the negative control). **Remaining:** the coverage bake is not yet exposed as the explicit opt-in INV-SDF-04 requires; shear and anisotropic scale fall back to tessellation by design. |
 | 0121 | Landed | **Landed:** Algorithm Vault pattern formalized; unified 16-byte `flux_segment` hardware currency in `<flux/curve.h>` and `canvas_tile.h`; single Slang analytic vector evaluation kernel `include/flux/shaders/flux_vector_eval.slang` included and evaluated across both `canvas_vector.frag.slang` (2D) and `scene_vector.frag.slang` (3D perspective), eliminating mathematical divergence across rasterization stages (INV-VAULT-03). |
-| 0122 | Landed across Wayland, Win32, Cocoa | **Landed:** platform-neutral pacing core `libs/iris/src/display_pacer.{h,c}` (pure: no clock, platform headers or allocation; proven by `tests/iris/test_display_pacer.c`, 16.5k checks) owning the paint/skip/quiesce decision and the poll budget, with a hard `wait >= 1 ns` postcondition while non-quiescent (INV-PACE-03). Landed across all backends: Wayland paces from `wl_surface.frame` grants with `wp_presentation_feedback` + `wl_output.mode` refresh discovery; Win32 queries display refresh dynamically via `EnumDisplaySettings`; Cocoa queries refresh via CoreGraphics `CGDisplayModeGetRefreshRate`; all backends evaluate INV-PACE-04 simulation/presentation time; hardcoded `ACTIVE_PERIOD_NS` and `last_render_ns` are completely eradicated. **Verified live** on Wayland (3072x1920 @ 120.000 Hz panel): ~120 fps while animating, exactly one paint across an entire static phase, and media skip-render at 3.5% of one core (`examples/iris/frame_skip_demo.c`). |
+| 0122 | Landed across Wayland, Win32, Cocoa | **Landed:** platform-neutral pacing core `libs/iris/src/display_pacer.{h,c}` (pure: no clock, platform headers or allocation; proven by `tests/iris/test_display_pacer.c`, 16.5k checks) owning the paint/skip/quiesce decision and the poll budget, with a hard `wait >= 1 ns` postcondition while non-quiescent (INV-PACE-03). Landed across all backends: Wayland paces from `wl_surface.frame` grants with `wp_presentation_feedback` + `wl_output.mode` refresh discovery; Win32 queries display refresh dynamically via `EnumDisplaySettings`; Cocoa queries refresh via CoreGraphics `CGDisplayModeGetRefreshRate`; all backends evaluate INV-PACE-04 simulation/presentation time; hardcoded `ACTIVE_PERIOD_NS` and `last_render_ns` are completely eradicated. **Verified live** on Wayland (3072x1920 @ 120.000 Hz panel): ~120 fps while animating, exactly one paint across an entire static phase, and media skip-render at 3.5% of one core (`examples/aperture/frame_skip_demo.c`). |
 | 0123 | Landed on Wayland, Win32, Cocoa | **Landed:** `lens_damage_rect(ui)` computing tight visual damage bounding boxes across dirty nodes, tooltips, and carets, clipped to the layout viewport (`tests/lens/test_repaint.c`); incremental damage dynamic rendering pass clipping (`render_offset_x/y`, `render_width/height`) and `wl_surface_damage_buffer` across all three backends; hardware dual-plane subsurface composition (`wl_subcompositor` + `wl_subsurface` with premultiplied alpha) on Wayland, physically isolating Host Canvas (`cfg->paint`) from Lens UI chrome (`[INV-COMP-01]`, `[INV-COMP-03]`); and persistent Material Backdrop Boundary caching in `prism_backdrop_layer_filter` skipping compute passes on static scenes (`[INV-COMP-04]`, verified by `tests/prism/integration/test_backdrop_layer.c`). **Invalidation corrected by [ADR-0137](../adr/0137-caller-declared-backdrop-layer-revisions.md):** the cache key is now a caller-declared content revision (`prism_backdrop_layer_revision`) instead of descriptor bytes plus image handles, which were constant across repaints. **Verified live** on Wayland: media skip-render CPU reduced to 1.0% of a single core. |
 | 0124 | Landed on Wayland, Win32, and Cocoa | **Landed:** lockless triple-buffered snapshot handoff mailbox `libs/iris/src/frame_mailbox.{h,c}` (`iris_frame_mailbox`), proven by concurrent multithreaded producer-consumer stress tests (`tests/iris/test_frame_mailbox.c`) validating wait-free atomic snapshot exchange without hot-path locks (`[INV-THREAD-01]`, `[INV-THREAD-02]`); and active presentation worker thread dispatch (`wp_presenter_thread_main`) in all three backends, isolating Vulkan swapchain presentation and command submission from the UI event loop. The legacy `iris_paint_fn` live-canvas path is deleted; `iris_record_fn` is the only host-canvas path, and the no-presenter-thread fallback submits the same immutable display list through the canvas. |
 

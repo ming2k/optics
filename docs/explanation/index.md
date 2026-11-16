@@ -9,7 +9,7 @@ Discursive documentation explaining the design rationale, mathematical models, p
 | Article | Explains |
 | :--- | :--- |
 | **[Application Architecture](application-architecture.md)** | Subsystem relationships, layer boundaries, and execution models across `flux`, `lens`, and `iris`. |
-| **[Design Philosophy](design-philosophy.md)** | Core principles: Pure C23 baseline, Vulkan 1.3 first-class, micro-kernel orthogonality, zero baggage. |
+| **[Design Philosophy](design-philosophy.md)** | Core principles: Pure C23 baseline, Vulkan 1.3 first-class, one-way library graph, no compatibility shims. |
 | **[Value-Semantic Rendering (VSR)](rendering-model.md)** | Unification of immediate-mode and retained-mode graphics through pure value semantics and frame arena lifetimes. |
 | **[Liquid Glass Optics](liquid-glass-optics.md)** | Physical dielectric optics, refractive dispersion, contact ambient occlusion, and rim lighting in `prism`. |
 | **[Geometry & Coverage Algorithms](geometry-and-coverage.md)** | Map of 2D geometry representations: Bézier curves, analytic curve kernels, distance fields, and rasterization coverage. |

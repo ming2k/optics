@@ -1,9 +1,6 @@
 # tests/prism — material library suites. The integration suite composites
-# prism materials over flux canvas-target captures, so it additionally
-# needs the flux effect module (the reusable blur filter) enabled.
+# prism materials over flux canvas-target captures, using the flux effect module's blur filter.
 if get_option('prism')
   subdir('unit')
-  if get_option('effect')
-    subdir('integration')
-  endif
+  subdir('integration')
 endif

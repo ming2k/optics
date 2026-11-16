@@ -358,7 +358,7 @@ Build examples with `-Dexamples=true`, then run the smallest relevant program:
 ```bash
 ./build/examples/flux/canvas_hello
 ./build/examples/lens/headless_demo
-./build/examples/iris/hello_app
+./build/examples/aperture/hello_window
 ```
 
 Record the compositor, driver, and GPU when reporting a visual or

@@ -72,7 +72,12 @@ static void test_first_frames_repaint_then_settle(void) {
     lens *ui = nullptr;
     flux_canvas *canvas = nullptr;
     OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
-    OT_EXPECT(flux_canvas_create_cpu(400, 200, 1.0f, &canvas) == FLUX_OK);
+    OT_EXPECT(flux_canvas_create(&(flux_canvas_desc){.type = FLUX_TYPE_CANVAS_DESC,
+                                                     .backend = FLUX_CANVAS_BACKEND_CPU,
+                                                     .scale = 1.0f,
+                                                     .width = 400,
+                                                     .height = 200},
+                                 &canvas) == FLUX_OK);
 
     build_frame(ui, 0.5f);
     OT_EXPECT(lens_frame_needs_repaint(ui));
@@ -91,7 +96,12 @@ static void test_leaf_change_repaints(void) {
     lens *ui = nullptr;
     flux_canvas *canvas = nullptr;
     OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
-    OT_EXPECT(flux_canvas_create_cpu(400, 200, 1.0f, &canvas) == FLUX_OK);
+    OT_EXPECT(flux_canvas_create(&(flux_canvas_desc){.type = FLUX_TYPE_CANVAS_DESC,
+                                                     .backend = FLUX_CANVAS_BACKEND_CPU,
+                                                     .scale = 1.0f,
+                                                     .width = 400,
+                                                     .height = 200},
+                                 &canvas) == FLUX_OK);
 
     build_frame(ui, 0.5f);
     render_frame(ui, canvas);
@@ -111,7 +121,12 @@ static void test_place_open_close_repaints(void) {
     lens *ui = nullptr;
     flux_canvas *canvas = nullptr;
     OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
-    OT_EXPECT(flux_canvas_create_cpu(400, 200, 1.0f, &canvas) == FLUX_OK);
+    OT_EXPECT(flux_canvas_create(&(flux_canvas_desc){.type = FLUX_TYPE_CANVAS_DESC,
+                                                     .backend = FLUX_CANVAS_BACKEND_CPU,
+                                                     .scale = 1.0f,
+                                                     .width = 400,
+                                                     .height = 200},
+                                 &canvas) == FLUX_OK);
 
     const lens_place_opts popup = {
         .box = {.id = "menu"},
@@ -175,7 +190,12 @@ static void test_damage_rect_bounds(void) {
     lens *ui = nullptr;
     flux_canvas *canvas = nullptr;
     OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
-    OT_EXPECT(flux_canvas_create_cpu(400, 200, 1.0f, &canvas) == FLUX_OK);
+    OT_EXPECT(flux_canvas_create(&(flux_canvas_desc){.type = FLUX_TYPE_CANVAS_DESC,
+                                                     .backend = FLUX_CANVAS_BACKEND_CPU,
+                                                     .scale = 1.0f,
+                                                     .width = 400,
+                                                     .height = 200},
+                                 &canvas) == FLUX_OK);
 
     /* Before anything is built there is nothing to describe. */
     uint32_t count = 0;
@@ -216,7 +236,12 @@ static void test_placed_band_damage_rect_bounds(void) {
     lens *ui = nullptr;
     flux_canvas *canvas = nullptr;
     OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
-    OT_EXPECT(flux_canvas_create_cpu(1920, 1080, 1.0f, &canvas) == FLUX_OK);
+    OT_EXPECT(flux_canvas_create(&(flux_canvas_desc){.type = FLUX_TYPE_CANVAS_DESC,
+                                                     .backend = FLUX_CANVAS_BACKEND_CPU,
+                                                     .scale = 1.0f,
+                                                     .width = 1920,
+                                                     .height = 1080},
+                                 &canvas) == FLUX_OK);
 
     const lens_place_opts chrome = {
         .box = {.id = "dock"},
@@ -278,7 +303,12 @@ static void test_disjoint_bands_stay_disjoint(void) {
     lens *ui = nullptr;
     flux_canvas *canvas = nullptr;
     OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
-    OT_EXPECT(flux_canvas_create_cpu(400, 200, 1.0f, &canvas) == FLUX_OK);
+    OT_EXPECT(flux_canvas_create(&(flux_canvas_desc){.type = FLUX_TYPE_CANVAS_DESC,
+                                                     .backend = FLUX_CANVAS_BACKEND_CPU,
+                                                     .scale = 1.0f,
+                                                     .width = 400,
+                                                     .height = 200},
+                                 &canvas) == FLUX_OK);
 
     uint32_t count = 0;
 
@@ -334,7 +364,12 @@ static void test_the_list_is_strictly_more_informative_than_its_union(void) {
     lens *ui = nullptr;
     flux_canvas *canvas = nullptr;
     OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
-    OT_EXPECT(flux_canvas_create_cpu(400, 200, 1.0f, &canvas) == FLUX_OK);
+    OT_EXPECT(flux_canvas_create(&(flux_canvas_desc){.type = FLUX_TYPE_CANVAS_DESC,
+                                                     .backend = FLUX_CANVAS_BACKEND_CPU,
+                                                     .scale = 1.0f,
+                                                     .width = 400,
+                                                     .height = 200},
+                                 &canvas) == FLUX_OK);
 
     for (int i = 0; i < 4; i++) {
         lens_begin(ui, &IN0);
@@ -385,7 +420,12 @@ static void test_flow_leaf_reports_its_glyphs_not_its_column(void) {
     lens *ui = nullptr;
     flux_canvas *canvas = nullptr;
     OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
-    OT_EXPECT(flux_canvas_create_cpu(1920, 1080, 1.0f, &canvas) == FLUX_OK);
+    OT_EXPECT(flux_canvas_create(&(flux_canvas_desc){.type = FLUX_TYPE_CANVAS_DESC,
+                                                     .backend = FLUX_CANVAS_BACKEND_CPU,
+                                                     .scale = 1.0f,
+                                                     .width = 1920,
+                                                     .height = 1080},
+                                 &canvas) == FLUX_OK);
 
     static const lens_input BIG = {.display_size = {1920, 1080}, .dt_seconds = 0.016f};
     for (int i = 0; i < 4; i++) {
@@ -429,7 +469,12 @@ static void test_centered_text_damage_follows_the_glyphs(void) {
     lens *ui = nullptr;
     flux_canvas *canvas = nullptr;
     OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
-    OT_EXPECT(flux_canvas_create_cpu(400, 200, 1.0f, &canvas) == FLUX_OK);
+    OT_EXPECT(flux_canvas_create(&(flux_canvas_desc){.type = FLUX_TYPE_CANVAS_DESC,
+                                                     .backend = FLUX_CANVAS_BACKEND_CPU,
+                                                     .scale = 1.0f,
+                                                     .width = 400,
+                                                     .height = 200},
+                                 &canvas) == FLUX_OK);
 
     const lens_label_opts centred = {
         .text = "AB",
@@ -472,7 +517,12 @@ static void test_count_only_query_matches_the_written_list(void) {
     lens *ui = nullptr;
     flux_canvas *canvas = nullptr;
     OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
-    OT_EXPECT(flux_canvas_create_cpu(400, 200, 1.0f, &canvas) == FLUX_OK);
+    OT_EXPECT(flux_canvas_create(&(flux_canvas_desc){.type = FLUX_TYPE_CANVAS_DESC,
+                                                     .backend = FLUX_CANVAS_BACKEND_CPU,
+                                                     .scale = 1.0f,
+                                                     .width = 400,
+                                                     .height = 200},
+                                 &canvas) == FLUX_OK);
 
     build_frame(ui, 0.5f);
     render_frame(ui, canvas);
@@ -517,7 +567,12 @@ static void test_overflow_collapses_to_one_bounding_box(void) {
     OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
     /* Wide enough for more than LENS_DAMAGE_RECTS_CAPACITY disjoint leaves. */
     const uint32_t columns = LENS_DAMAGE_RECTS_CAPACITY + 16;
-    OT_EXPECT(flux_canvas_create_cpu((float)columns * 8.0f, 200.0f, 1.0f, &canvas) == FLUX_OK);
+    OT_EXPECT(flux_canvas_create(&(flux_canvas_desc){.type = FLUX_TYPE_CANVAS_DESC,
+                                                     .backend = FLUX_CANVAS_BACKEND_CPU,
+                                                     .scale = 1.0f,
+                                                     .width = (float)columns * 8.0f,
+                                                     .height = 200.0f},
+                                 &canvas) == FLUX_OK);
 
     static lens_input wide = {.display_size = {0, 200}, .dt_seconds = 0.016f};
     wide.display_size.x = (float)columns * 8.0f;
@@ -613,7 +668,12 @@ static void test_removed_child_repaints_its_vacated_band(void) {
     lens *ui = nullptr;
     flux_canvas *canvas = nullptr;
     OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
-    OT_EXPECT(flux_canvas_create_cpu(400, 200, 1.0f, &canvas) == FLUX_OK);
+    OT_EXPECT(flux_canvas_create(&(flux_canvas_desc){.type = FLUX_TYPE_CANVAS_DESC,
+                                                     .backend = FLUX_CANVAS_BACKEND_CPU,
+                                                     .scale = 1.0f,
+                                                     .width = 400,
+                                                     .height = 200},
+                                 &canvas) == FLUX_OK);
 
     char tick[32];
     flux_rect row_c = {};
@@ -676,7 +736,12 @@ static void test_removed_container_repaints_its_children(void) {
     lens *ui = nullptr;
     flux_canvas *canvas = nullptr;
     OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
-    OT_EXPECT(flux_canvas_create_cpu(400, 200, 1.0f, &canvas) == FLUX_OK);
+    OT_EXPECT(flux_canvas_create(&(flux_canvas_desc){.type = FLUX_TYPE_CANVAS_DESC,
+                                                     .backend = FLUX_CANVAS_BACKEND_CPU,
+                                                     .scale = 1.0f,
+                                                     .width = 400,
+                                                     .height = 200},
+                                 &canvas) == FLUX_OK);
 
     for (int i = 0; i < 4; i++) {
         lens_begin(ui, &IN0);
@@ -724,7 +789,12 @@ static void test_departed_damage_is_independent_of_unrelated_content(void) {
         lens *ui = nullptr;
         flux_canvas *canvas = nullptr;
         OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
-        OT_EXPECT(flux_canvas_create_cpu(900, 400, 1.0f, &canvas) == FLUX_OK);
+        OT_EXPECT(flux_canvas_create(&(flux_canvas_desc){.type = FLUX_TYPE_CANVAS_DESC,
+                                                         .backend = FLUX_CANVAS_BACKEND_CPU,
+                                                         .scale = 1.0f,
+                                                         .width = 900,
+                                                         .height = 400},
+                                     &canvas) == FLUX_OK);
 
         flux_rect row_c = {};
         for (int i = 0; i < 4; i++) {
@@ -792,7 +862,12 @@ static void test_tooltip_dismissal_damages_the_below_anchor_band(void) {
     lens *ui = nullptr;
     flux_canvas *canvas = nullptr;
     OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
-    OT_EXPECT(flux_canvas_create_cpu(400, 200, 1.0f, &canvas) == FLUX_OK);
+    OT_EXPECT(flux_canvas_create(&(flux_canvas_desc){.type = FLUX_TYPE_CANVAS_DESC,
+                                                     .backend = FLUX_CANVAS_BACKEND_CPU,
+                                                     .scale = 1.0f,
+                                                     .width = 400,
+                                                     .height = 200},
+                                 &canvas) == FLUX_OK);
 
     /* Settle the widget, then hover it so the box's `tooltip` string arms. The
      * pointer is inside the label's rect, which is at the display origin. */
@@ -843,7 +918,12 @@ static void test_icon_damage_reaches_past_its_command_rect(void) {
     lens *ui = nullptr;
     flux_canvas *canvas = nullptr;
     OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
-    OT_EXPECT(flux_canvas_create_cpu(200, 200, 1.0f, &canvas) == FLUX_OK);
+    OT_EXPECT(flux_canvas_create(&(flux_canvas_desc){.type = FLUX_TYPE_CANVAS_DESC,
+                                                     .backend = FLUX_CANVAS_BACKEND_CPU,
+                                                     .scale = 1.0f,
+                                                     .width = 200,
+                                                     .height = 200},
+                                 &canvas) == FLUX_OK);
 
     for (int i = 0; i < 4; i++) {
         lens_begin(ui, &IN0);
@@ -936,7 +1016,12 @@ static void test_caret_existence_is_not_damage(void) {
     lens *ui = nullptr;
     flux_canvas *canvas = nullptr;
     OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
-    OT_EXPECT(flux_canvas_create_cpu(400, 200, 1.0f, &canvas) == FLUX_OK);
+    OT_EXPECT(flux_canvas_create(&(flux_canvas_desc){.type = FLUX_TYPE_CANVAS_DESC,
+                                                     .backend = FLUX_CANVAS_BACKEND_CPU,
+                                                     .scale = 1.0f,
+                                                     .width = 400,
+                                                     .height = 200},
+                                 &canvas) == FLUX_OK);
 
     /* Focus the field so a caret exists (a press inside its box), then let
      * the first frames settle. */
@@ -961,7 +1046,12 @@ static void test_caret_flip_is_damage_and_damages_only_its_rect(void) {
     lens *ui = nullptr;
     flux_canvas *canvas = nullptr;
     OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
-    OT_EXPECT(flux_canvas_create_cpu(400, 200, 1.0f, &canvas) == FLUX_OK);
+    OT_EXPECT(flux_canvas_create(&(flux_canvas_desc){.type = FLUX_TYPE_CANVAS_DESC,
+                                                     .backend = FLUX_CANVAS_BACKEND_CPU,
+                                                     .scale = 1.0f,
+                                                     .width = 400,
+                                                     .height = 200},
+                                 &canvas) == FLUX_OK);
 
     focus_text_field(ui, canvas);
     const bool presented = lens_caret_visible(ui);
@@ -1034,7 +1124,12 @@ static void test_host_owned_caret_reports_no_damage_or_clock(void) {
     lens *ui = nullptr;
     flux_canvas *canvas = nullptr;
     OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
-    OT_EXPECT(flux_canvas_create_cpu(400, 200, 1.0f, &canvas) == FLUX_OK);
+    OT_EXPECT(flux_canvas_create(&(flux_canvas_desc){.type = FLUX_TYPE_CANVAS_DESC,
+                                                     .backend = FLUX_CANVAS_BACKEND_CPU,
+                                                     .scale = 1.0f,
+                                                     .width = 400,
+                                                     .height = 200},
+                                 &canvas) == FLUX_OK);
 
     /* An app-owned editing surface (ADR-0151): the app paints its own caret
      * with its own clock, and lens only records the geometry so the platform

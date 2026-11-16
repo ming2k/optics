@@ -68,7 +68,12 @@ static ink classify(const uint8_t *pixels, uint32_t width, uint32_t height, uint
 static bool replay(const flux_display_list *list, uint8_t *out, size_t out_size, uint32_t *width,
                    uint32_t *height, uint32_t *out_stride) {
     flux_canvas *canvas = nullptr;
-    if (flux_canvas_create_cpu(CANVAS_EXTENT, CANVAS_EXTENT, 1.0f, &canvas) != FLUX_OK)
+    if (flux_canvas_create(&(flux_canvas_desc){.type = FLUX_TYPE_CANVAS_DESC,
+                                               .backend = FLUX_CANVAS_BACKEND_CPU,
+                                               .scale = 1.0f,
+                                               .width = CANVAS_EXTENT,
+                                               .height = CANVAS_EXTENT},
+                           &canvas) != FLUX_OK)
         return false;
     flux_color clear = {};
     flux_result result =

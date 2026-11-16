@@ -7,6 +7,7 @@
 
 #include <flux/effect.h>
 #include <flux/flux.h>
+#include <aperture/aperture.h>
 #include <iris/app.h>
 #include <iris/cursor.h>
 #include <iris/iris.h>

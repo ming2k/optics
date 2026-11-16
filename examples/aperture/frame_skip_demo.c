@@ -22,6 +22,7 @@
  * Build & run from the optics worktree, or via `meson compile -C build`.
  */
 
+#include <aperture/aperture.h>
 #include <iris/iris.h>
 #include <stdio.h>
 #include <string.h>
@@ -103,7 +104,7 @@ int main(void) {
     /* Elapsed-seconds baseline: see paint_static_demo. */
     d.last_report = 0.0;
 
-    return iris_app_run(&(iris_app_config){
+    return aperture_app_run(&(aperture_app_opts){
         .title = "iris frame_skip demo",
         .app_id = "optics.frame_skip_demo",
         .width = 560,

@@ -219,7 +219,13 @@ int main(void) {
     OT_EXPECT(flux_canvas_create(&cd, &canvas) == FLUX_OK);
 
     flux_image *target = nullptr;
-    OT_EXPECT(flux_image_create_render_target(d, W, H, target_fmt, &target) == FLUX_OK);
+    OT_EXPECT(flux_image_create(d,
+                                &(flux_image_desc){.type = FLUX_TYPE_IMAGE_DESC,
+                                                   .width = W,
+                                                   .height = H,
+                                                   .format = target_fmt,
+                                                   .usage = FLUX_IMAGE_USAGE_RENDER_TARGET},
+                                &target) == FLUX_OK);
 
     flux_blur_filter *blur = nullptr;
     OT_EXPECT(flux_blur_filter_create(d, &blur) == FLUX_OK);

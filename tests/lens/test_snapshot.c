@@ -72,7 +72,12 @@ static void delayed_presentation_and_owned_metadata(void) {
     lens_release(foreign);
 
     flux_canvas *canvas = nullptr;
-    OT_EXPECT(flux_canvas_create_cpu(400, 240, 1, &canvas) == FLUX_OK);
+    OT_EXPECT(flux_canvas_create(&(flux_canvas_desc){.type = FLUX_TYPE_CANVAS_DESC,
+                                                     .backend = FLUX_CANVAS_BACKEND_CPU,
+                                                     .scale = 1,
+                                                     .width = 400,
+                                                     .height = 240},
+                                 &canvas) == FLUX_OK);
     flux_color clear = 0;
     OT_EXPECT(flux_canvas_begin(canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
                                                                  .clear_color = &clear}) ==

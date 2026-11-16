@@ -12,7 +12,7 @@ All engineering standards reside flatly in `docs/dev/standards/`:
 
 | Document | Purpose & Authority |
 | :--- | :--- |
-| **[`architecture.md`](architecture.md)** | **Monorepo Topology & Boundaries**: Defines the 7-library microkernel architecture, 5-gate review matrix, layer purity, and core system red-lines. |
+| **[`architecture.md`](architecture.md)** | **Monorepo Topology & Boundaries**: Defines the library graph, the architectural rules with the mechanism enforcing each, and the red-lines. |
 | **[`invariants.md`](invariants.md)** | **Invariant Standards & Admissibility**: Codifies true system invariants (mechanisms over exhortations), establishes the constraint classification matrix, and degazettes pseudo-tags. |
 | **[`api-design.md`](api-design.md)** | **API Conventions & C23 Contracts**: Enforces the Single Opts Descriptor paradigm, modern C23 language baseline (`nullptr`, `{}`), and zero-alloc frame loop contracts. |
 | **[`adr.md`](adr.md)** | **Architectural Decision Records**: The 3-Question Test for ADR qualification, in-place lifecycle (`draft`, `accepted`, `superseded`, `rejected`), frontmatter schema, and template. |

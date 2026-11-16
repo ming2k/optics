@@ -140,8 +140,18 @@ static void test_analytic_dispatch_matches_path(void) {
         float curv = curvatures[k];
         flux_canvas *analytic = nullptr;
         flux_canvas *tessellated = nullptr;
-        OT_EXPECT(flux_canvas_create_cpu(144, 112, 1.0f, &analytic) == FLUX_OK);
-        OT_EXPECT(flux_canvas_create_cpu(144, 112, 1.0f, &tessellated) == FLUX_OK);
+        OT_EXPECT(flux_canvas_create(&(flux_canvas_desc){.type = FLUX_TYPE_CANVAS_DESC,
+                                                         .backend = FLUX_CANVAS_BACKEND_CPU,
+                                                         .scale = 1.0f,
+                                                         .width = 144,
+                                                         .height = 112},
+                                     &analytic) == FLUX_OK);
+        OT_EXPECT(flux_canvas_create(&(flux_canvas_desc){.type = FLUX_TYPE_CANVAS_DESC,
+                                                         .backend = FLUX_CANVAS_BACKEND_CPU,
+                                                         .scale = 1.0f,
+                                                         .width = 144,
+                                                         .height = 112},
+                                     &tessellated) == FLUX_OK);
         if (!analytic || !tessellated)
             return;
 
@@ -231,8 +241,18 @@ static void run_dispatch_case(flux_mat3x2 tx, float curvature, bool expect_analy
 
     flux_canvas *analytic = nullptr;
     flux_canvas *tessellated = nullptr;
-    OT_EXPECT(flux_canvas_create_cpu(144, 112, 1.0f, &analytic) == FLUX_OK);
-    OT_EXPECT(flux_canvas_create_cpu(144, 112, 1.0f, &tessellated) == FLUX_OK);
+    OT_EXPECT(flux_canvas_create(&(flux_canvas_desc){.type = FLUX_TYPE_CANVAS_DESC,
+                                                     .backend = FLUX_CANVAS_BACKEND_CPU,
+                                                     .scale = 1.0f,
+                                                     .width = 144,
+                                                     .height = 112},
+                                 &analytic) == FLUX_OK);
+    OT_EXPECT(flux_canvas_create(&(flux_canvas_desc){.type = FLUX_TYPE_CANVAS_DESC,
+                                                     .backend = FLUX_CANVAS_BACKEND_CPU,
+                                                     .scale = 1.0f,
+                                                     .width = 144,
+                                                     .height = 112},
+                                 &tessellated) == FLUX_OK);
     if (!analytic || !tessellated)
         return;
 

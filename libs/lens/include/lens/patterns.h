@@ -29,16 +29,17 @@ typedef struct lens_segmented_item {
 } lens_segmented_item;
 
 typedef struct lens_segmented_opts {
-    float height;         /* 0.0 = resolved theme control height (e.g. 32-38px) */
-    float min_item_width; /* 0.0 = auto intrinsic size per item */
-    bool compact;         /* true = compact density */
+    const char *id;                   /* identity seed; nullptr = "segmented" */
+    const lens_segmented_item *items; /* required */
+    uint32_t item_count;
+    uint32_t *selected_index; /* required, in-out: the active item */
+    float height;             /* 0.0 = resolved theme control height (e.g. 32-38px) */
+    float min_item_width;     /* 0.0 = auto intrinsic size per item */
+    bool compact;             /* true = compact density */
 } lens_segmented_opts;
 
-/* Render a segmented control. Returns true if the active index changed this frame.
- * `selected_index` points to in-out active index. */
-LENS_API bool lens_segmented_control(lens *ui, const char *id_str, const lens_segmented_item *items,
-                                     uint32_t item_count, uint32_t *selected_index,
-                                     const lens_segmented_opts *opts);
+/* Render a segmented control. Returns true if the active index changed this frame. */
+LENS_API bool lens_segmented_control(lens *ui, const lens_segmented_opts *opts);
 
 /* ================================================================== */
 /*  Virtual Layout Computation (ADR-Pattern-002)                      */
@@ -101,6 +102,10 @@ typedef struct lens_tab_action {
 } lens_tab_action;
 
 typedef struct lens_tab_strip_opts {
+    const char *id;            /* identity seed; nullptr = "tab_strip" */
+    const lens_tab_item *tabs; /* required */
+    uint32_t tab_count;
+    uint32_t active_index;
     float height;            /* 0.0 = default ~36px */
     float min_tab_width;     /* e.g. 100.0 */
     float max_tab_width;     /* e.g. 220.0 */
@@ -109,9 +114,7 @@ typedef struct lens_tab_strip_opts {
     lens_icon_id new_icon;   /* optional new-tab icon asset */
 } lens_tab_strip_opts;
 
-LENS_API lens_tab_action lens_tab_strip(lens *ui, const char *id_str, const lens_tab_item *tabs,
-                                        uint32_t tab_count, uint32_t active_index,
-                                        const lens_tab_strip_opts *opts);
+LENS_API lens_tab_action lens_tab_strip(lens *ui, const lens_tab_strip_opts *opts);
 
 /* ================================================================== */
 /*  Split Pane Divider Pattern (ADR-Pattern-004)                      */
@@ -166,20 +169,21 @@ typedef struct lens_datagrid_action {
 } lens_datagrid_action;
 
 typedef struct lens_datagrid_opts {
-    float height;        /* Total container height (0.0 = auto/fill) */
-    float header_height; /* Header row height (0.0 = default 32.0f) */
-    float row_height;    /* Body row height (0.0 = default 28.0f) */
-    bool striped;        /* Alternating zebra background */
+    const char *id;          /* identity seed; nullptr = "datagrid" */
+    lens_datagrid_col *cols; /* required, in-out: drag-resizing writes `.width` */
+    uint32_t col_count;
+    const char *const *cell_texts; /* row-major: cell_texts[row * col_count + col] */
+    uint32_t row_count;
+    uint32_t *selected_row; /* optional, in-out: the active row */
+    float height;           /* Total container height (0.0 = auto/fill) */
+    float header_height;    /* Header row height (0.0 = default 32.0f) */
+    float row_height;       /* Body row height (0.0 = default 28.0f) */
+    bool striped;           /* Alternating zebra background */
 } lens_datagrid_opts;
 
 /* Render an interactive data grid with virtualized rows, column resizing,
- * and header sorting. `cols` is in-out: drag-resizing modifies `.width` in place.
- * `cell_texts` is a 2D flattened array (row-major: cell_texts[row * col_count + col]).
- * `selected_row` is in-out active row index. */
-LENS_API lens_datagrid_action lens_datagrid(lens *ui, const char *id_str, lens_datagrid_col *cols,
-                                            uint32_t col_count, const char *const *cell_texts,
-                                            uint32_t row_count, uint32_t *selected_row,
-                                            const lens_datagrid_opts *opts);
+ * and header sorting. */
+LENS_API lens_datagrid_action lens_datagrid(lens *ui, const lens_datagrid_opts *opts);
 
 /* ================================================================== */
 /*  Tree View Pattern (ADR-Pattern-006)                               */
@@ -208,13 +212,15 @@ typedef struct lens_tree_action {
 } lens_tree_action;
 
 typedef struct lens_tree_opts {
+    const char *id;        /* identity seed; nullptr = "tree_view" */
+    lens_tree_item *items; /* required, in-out: toggling writes expansion state */
+    uint32_t item_count;
     float height;           /* Container height (0.0 = auto/fill) */
     float row_height;       /* Row height (0.0 = default 26.0f) */
     float indent_per_level; /* Indent in pixels per depth (0.0 = default 16.0f) */
 } lens_tree_opts;
 
-LENS_API lens_tree_action lens_tree_view(lens *ui, const char *id_str, lens_tree_item *items,
-                                         uint32_t item_count, const lens_tree_opts *opts);
+LENS_API lens_tree_action lens_tree_view(lens *ui, const lens_tree_opts *opts);
 
 /* ================================================================== */
 /*  Cascading Menu & MenuBar Pattern (ADR-Pattern-007)                */
@@ -229,15 +235,17 @@ typedef struct lens_menu_item {
 } lens_menu_item;
 
 typedef struct lens_menu_opts {
+    const char *id;              /* required: the popup's identity */
+    flux_rect anchor;            /* rectangle the menu attaches to */
+    const lens_menu_item *items; /* required */
+    uint32_t item_count;
     float width;       /* Menu width (0.0 = default 180.0f) */
     float item_height; /* Menu item height (0.0 = default 28.0f) */
 } lens_menu_opts;
 
 /* Render an anchored popup menu in LENS_BAND_POPUP with auto-flip and transient dismissal.
  * Returns activated item index, or -1 if no item was activated this frame. */
-LENS_API int32_t lens_popup_menu(lens *ui, const char *menu_id, flux_rect anchor_rect,
-                                 const lens_menu_item *items, uint32_t item_count,
-                                 const lens_menu_opts *opts);
+LENS_API int32_t lens_popup_menu(lens *ui, const lens_menu_opts *opts);
 
 typedef struct lens_menubar_item {
     const char *title;

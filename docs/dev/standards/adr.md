@@ -18,6 +18,25 @@ To prevent ADR inflation and maintain a high-signal architectural registry, auth
 - **The Toothless Declaration**: Vague prose lacking enforceable constraints or clear behavioral boundaries.
 - **The Post-Hoc Justification**: Authoring an ADR after code is merged with zero genuine consideration of discarded alternatives.
 
+### Status Claims Must Be Checkable
+
+An ADR, and any status document derived from it, describes shipped behaviour in
+terms a reader can verify:
+
+- **"Landed" means reachable.** A capability is landed when a non-test caller
+  uses it. Code exercised only by its own tests is *scaffolding* and is
+  described as such, however complete its test suite.
+- **"Retired" means unreachable.** A mechanism is retired when no draw, call or
+  configuration can reach it, demonstrated by deleting it. Changing a default
+  does not retire what the old default was doing for other callers; measure
+  every class of caller before saying so.
+- **A measurement names its test.** A number in an ADR cites the test that
+  produces it, so the claim fails in CI when it stops being true.
+
+ADR-0119's S4 table is the cautionary case: it recorded the MSAA attachment as
+retired on the evidence of one draw class, while strokes had silently lost
+their antialiasing (see ADR-0166 and the implementation status).
+
 ---
 
 ## 2. In-Place Lifecycle & Frontmatter Schema

@@ -75,4 +75,83 @@ float flux_vector_eval_coverage_jacobian(int winding, float min_dist_sq, uint32_
     return flux_vector_eval_coverage(winding, min_dist_sq, fill_rule, pixel_scale);
 }
 
+/* ------------------------------------------------------------------ */
+/*  Exact area coverage (2D device space)                              */
+/* ------------------------------------------------------------------ */
+/* Coverage of a pixel is the integral of the winding number over the pixel's
+ * area. With winding counted by crossings to the +X side, one segment's share
+ * for the pixel [px, px+1) x [py, py+1) is
+ *
+ *     dy * mean( clamp(x(y) - px, 0, 1) )
+ *
+ * over the part of the segment inside the pixel's row: `dy` is the signed
+ * height of that part and the mean is the fraction of the pixel's width lying
+ * to the left of the segment. Summed over a closed contour this is the signed
+ * covered area — exact for straight segments, with no notion of "nearest
+ * edge". Consequences the distance model does not have:
+ *   - horizontal segments contribute nothing, correctly (dy == 0);
+ *   - an edge shared by two shapes of the same orientation cancels exactly,
+ *     so a triangle mesh fills without seams;
+ *   - a feature thinner than a pixel gets its true area, not a clamped ramp.
+ */
+
+/* Antiderivative of clamp(t, 0, 1). */
+float flux_vector_clamp01_integral(float u)
+{
+    return (u <= 0.0f) ? 0.0f : ((u >= 1.0f) ? u - 0.5f : 0.5f * u * u);
+}
+
+/* Add segment a->b's signed area share for the pixel whose top-left corner is
+ * `pixel` (integer device coordinates). */
+void flux_vector_area_segment(float2 pixel, float2 a, float2 b, inout float area)
+{
+    float y0 = a.y - pixel.y;
+    float y1 = b.y - pixel.y;
+    if (y0 == y1)
+        return;
+    // Clip to the pixel's row, y in [0, 1].
+    float t0 = clamp((0.0f - y0) / (y1 - y0), 0.0f, 1.0f);
+    float t1 = clamp((1.0f - y0) / (y1 - y0), 0.0f, 1.0f);
+    // Height of the part inside the row, signed by the segment's direction
+    // of travel: downward (+y) counts positive, upward negative.
+    float height = (t1 - t0) * (y1 - y0); // y(t1) - y(t0), never negative
+    if (height <= 0.0f)
+        return;
+    float dy = (y1 > y0) ? height : -height;
+    float x0 = a.x - pixel.x;
+    float x1 = b.x - pixel.x;
+    float u0 = lerp(x0, x1, t0);
+    float u1 = lerp(x0, x1, t1);
+    // Fraction of the pixel's width left of the segment, averaged over the
+    // part in this row. The two saturated cases are decided before any
+    // subtraction: far from the pixel `u` is large, and differencing the
+    // antiderivative there would cancel catastrophically in single precision.
+    float lo = min(u0, u1);
+    float hi = max(u0, u1);
+    float mean;
+    if (lo >= 1.0f) {
+        mean = 1.0f;
+    } else if (hi <= 0.0f) {
+        mean = 0.0f;
+    } else if (hi - lo < 1e-4f) {
+        mean = clamp(0.5f * (lo + hi), 0.0f, 1.0f);
+    } else {
+        mean = (flux_vector_clamp01_integral(hi) - flux_vector_clamp01_integral(lo)) / (hi - lo);
+    }
+    area += dy * mean;
+}
+
+/* Map the accumulated signed area to coverage under a fill rule
+ * (0 = NonZero, 1 = EvenOdd). */
+float flux_vector_area_coverage(float area, uint32_t fill_rule)
+{
+    float c = abs(area);
+    if (fill_rule == 1u) {
+        c = c - 2.0f * floor(c * 0.5f);
+        if (c > 1.0f)
+            c = 2.0f - c;
+    }
+    return clamp(c, 0.0f, 1.0f);
+}
+
 #endif /* FLUX_VECTOR_EVAL_SLANG */

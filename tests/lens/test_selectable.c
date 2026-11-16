@@ -89,7 +89,12 @@ static void test_selected_surface_uses_theme(void) {
     lens_test_end(ui);
 
     flux_canvas *canvas = nullptr;
-    OT_EXPECT(flux_canvas_create_cpu(100, 40, 1.0f, &canvas) == FLUX_OK);
+    OT_EXPECT(flux_canvas_create(&(flux_canvas_desc){.type = FLUX_TYPE_CANVAS_DESC,
+                                                     .backend = FLUX_CANVAS_BACKEND_CPU,
+                                                     .scale = 1.0f,
+                                                     .width = 100,
+                                                     .height = 40},
+                                 &canvas) == FLUX_OK);
     flux_color black = flux_color_rgba_premul(0, 0, 0, 255);
     OT_EXPECT(flux_canvas_begin(canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
                                                                  .clear_color = &black}) ==

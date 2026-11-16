@@ -17,7 +17,7 @@ IRIS_API int iris_a11y_init(void) {
 IRIS_API bool iris_a11y_is_active(void) {
     return false;
 }
-IRIS_API int iris_a11y_update(lens *ui) {
+IRIS_API int iris_a11y_update(const iris_ui_host *ui) {
     (void)ui;
     return -1;
 }

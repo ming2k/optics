@@ -101,20 +101,15 @@ pub fn popup_menu(
         .collect();
 
     let raw_opts = lens_sys::lens_menu_opts {
+        id: id_c.as_ptr(),
+        anchor: anchor.to_raw(),
+        items: raw_items.as_ptr(),
+        item_count: raw_items.len() as u32,
         width: 180.0,
         item_height: 28.0,
     };
 
-    let act = unsafe {
-        lens_sys::lens_popup_menu(
-            frame.as_raw(),
-            id_c.as_ptr(),
-            anchor.to_raw(),
-            raw_items.as_ptr(),
-            raw_items.len() as u32,
-            &raw_opts,
-        )
-    };
+    let act = unsafe { lens_sys::lens_popup_menu(frame.as_raw(), &raw_opts) };
 
     if act >= 0 { Some(act as usize) } else { None }
 }

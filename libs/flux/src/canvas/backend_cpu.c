@@ -1,19 +1,13 @@
 /*
  * CPU (software) implementation of the canvas rendering backend.
  *
- * Renders the same triangle-batch stream the Vulkan backend consumes, but
- * rasterizes on the host into a premultiplied-RGBA float framebuffer — no
- * GPU, device, or surface required. It reproduces the canvas fragment
- * shaders:
- *   - solid            (canvas_solid.frag):    interpolated vertex colour
- *   - linear/radial    (canvas_gradient.frag): per-pixel gradient lookup
- *   - rounded-rect SDF  (canvas_sdf.frag):      analytic distance-field coverage
- * Edge anti-aliasing comes from 4x supersampled triangle coverage (the GPU
- * path uses 4x MSAA); blending is premultiplied SRC_OVER, matching the Vulkan
- * pipeline's blend state. Stencil-then-cover fills (ADR-0014) are honoured
- * with a sample-resolution accumulation buffer: STENCIL_WRITE adds signed
- * winding, STENCIL_WRITE_EO toggles parity, COVER_* tests != 0 and resets —
- * so even-odd and self-intersecting fills match the GPU pixel-for-pixel.
+ * Rasterizes the same high-level draw stream the Vulkan backend consumes
+ * directly into a 1x premultiplied-RGBA float framebuffer — no GPU, device,
+ * surface, supersampling, or stencil buffer required:
+ *   - integer rect batches (canvas_solid/gradient): exact per-pixel coverage
+ *   - rounded-rect/circle SDF (canvas_sdf):          analytic distance field
+ *   - arbitrary paths & strokes (canvas_coverage):   1x analytic sub-band coverage
+ * All four separable blend modes (SRC_OVER, SRC, PLUS, MULTIPLY) match Vulkan.
  *
  * ADR-0069: the framebuffer holds premultiplied linear-light values in the
  * scRGB working space, exactly like the GPU's RGBA16F intermediate. Packed
@@ -28,7 +22,7 @@
  * ARE supported on a device-less canvas via a host-resident R8 coverage
  * atlas (ADR-0019): the caller sets flux_glyph_run_desc::host_coverage
  * instead of `atlas`, and the CPU rasteriser samples coverage directly
- * from it. Only image draws remain unsupported on CPU. */
+ * from it. */
 #include "backend.h"
 
 #include <flux/canvas.h>
@@ -37,17 +31,6 @@
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
-
-/* Default supersampling factor per axis (SS*SS samples/pixel; 4x ~= the
- * GPU's 4x MSAA). Rendering happens in a width*ss x height*ss sample buffer
- * and is box-filtered to the output on readback. Blending per sample (not
- * per-triangle averaging) is what keeps shared triangle edges seam-free.
- * A canvas created with FLUX_CANVAS_ANTIALIAS_NONE drops to ss=1: the
- * consistency oracle needs the 4x default to mirror GPU MSAA, but a caller
- * rendering tool imagery or fixtures that tolerates aliasing gets a 4x
- * memory and raster saving. The per-canvas value lives in
- * flux_cpu_canvas::ss. */
-#define FLUX_CPU_SS_DEFAULT 2
 
 #define FLUX_CPU_MAX_LAYERS 8
 
@@ -59,34 +42,21 @@ typedef struct flux_cpu_layer {
 typedef struct flux_cpu_canvas {
     struct flux_cpu_canvas *owner;
     struct flux_cpu_canvas *target_scratch;
-    uint32_t width, height; /* logical (output) size */
-    uint32_t sw, sh;        /* sample-buffer size = width*ss, height*ss */
-    /* Supersampling factor in effect for this canvas: 2 (4 samples/px,
-     * the oracle default) or 1 (aliased, 4x less memory and raster work)
-     * when the caller requested FLUX_CANVAS_ANTIALIAS_NONE at create time.
-     * Fixed for the canvas lifetime: the sample buffer, stencil, and the
-     * readback downsample are all sized from it. */
-    uint32_t ss;
+    uint32_t width, height; /* output pixel size (1x, no supersampling) */
     /* Cached single-channel coverage plane (flux_canvas_cpu_coverage):
-     * width*height bytes, the box-filtered mean alpha. Allocated on first
-     * read; invalidated implicitly by the next draw (recomputed on read). */
+     * width*height bytes, 1x analytic coverage alpha quantised to 8 bits. */
     uint8_t *coverage;
-    float *fb;      /* premultiplied RGBA, sw*sh*4, row-major (active layer or base) */
-    float *base_fb; /* root destination sample buffer */
-    uint8_t *rgba8; /* cached downsampled 8-bit view (width*height*4) */
-    /* Reusable coverage plane for the analytic fill (ADR-0119). Sized to the
-     * clip on demand and kept for the canvas's lifetime: a per-fill allocation
-     * would churn 8 MB at 1080p and 33 MB at 4K for every solid draw. */
+    float *fb;      /* premultiplied RGBA, width*height*4, row-major (active layer or base) */
+    float *base_fb; /* root destination framebuffer */
+    uint8_t *rgba8; /* cached 8-bit view (width*height*4) */
+    /* Reusable coverage plane for analytic fill (ADR-0119). Sized to the clip
+     * on demand and kept for the canvas's lifetime. */
     float *cover_scratch;
     size_t cover_scratch_n;
-    /* Stencil-then-cover accumulation (ADR-0014), one int8 per sample,
-     * lazily allocated on the first stencil submit. STENCIL_WRITE adds the
-     * triangle's signed winding, STENCIL_WRITE_EO toggles parity; COVER_*
-     * submits draw where the value is != 0 and the buffer resets to zero —
-     * the same contract the GPU pipeline implements with a real stencil
-     * attachment (INCR_WRAP/DECR_WRAP vs INVERT, cover resets). */
-    int8_t *stencil;
-    bool stencil_active;
+    flux_point *tri_pts_scratch;
+    uint32_t tri_pts_cap;
+    flux_canvas_contour *tri_cons_scratch;
+    uint32_t tri_cons_cap;
 
     /* Isolated layer compositing stack (ADR-0091 Opacity Groups) */
     flux_cpu_layer layers[FLUX_CPU_MAX_LAYERS];
@@ -196,99 +166,52 @@ static inline bool edge_is_top_left(float ax, float ay, float bx, float by) {
     return dy < 0.0f || (dy == 0.0f && dx > 0.0f);
 }
 
-/* Rasterize one triangle into the stencil accumulation buffer (no colour
- * writes, mirroring the GPU's stencil-only pass). EO mode toggles per-sample
- * parity (the GPU's INVERT); otherwise the triangle's signed winding is
- * accumulated (its INCR_WRAP/DECR_WRAP) — the original orientation supplies
- * the sign. Coverage uses the same top-left rule as raster_tri so stencil
- * and colour agree on shared edges. */
-static void raster_stencil_tri(flux_cpu_canvas *v, flux_recti clip, const flux_canvas_vertex *a,
-                               const flux_canvas_vertex *b, const flux_canvas_vertex *c, bool eo) {
-    const float ss = (float)v->ss;
-    float ax = a->pos[0] * ss, ay = a->pos[1] * ss;
-    float bx = b->pos[0] * ss, by = b->pos[1] * ss;
-    float cx = c->pos[0] * ss, cy = c->pos[1] * ss;
-    float area = edge(ax, ay, bx, by, cx, cy);
-    if (fabsf(area) < 1e-7f)
-        return;
-    int8_t sign = 1;
-    if (area < 0.0f) {
-        /* Swap to a positive-area walk for the coverage test; the winding
-         * contribution keeps the original orientation's sign. */
-        sign = -1;
-        float t = bx;
-        bx = cx;
-        cx = t;
-        t = by;
-        by = cy;
-        cy = t;
+/* Blend a premultiplied linear fragment into a framebuffer pixel. Matches the
+ * fixed-function VkBlendFactor presets used by the Vulkan pipelines. */
+static inline void cpu_blend_pixel(float *dst, vec4f frag, flux_blend_mode blend) {
+    switch (blend) {
+    case FLUX_BLEND_SRC:
+        dst[0] = frag.r;
+        dst[1] = frag.g;
+        dst[2] = frag.b;
+        dst[3] = frag.a;
+        break;
+    case FLUX_BLEND_PLUS:
+        dst[0] = frag.r + dst[0];
+        dst[1] = frag.g + dst[1];
+        dst[2] = frag.b + dst[2];
+        dst[3] = frag.a + dst[3];
+        break;
+    case FLUX_BLEND_MULTIPLY: {
+        float inva = 1.0f - frag.a;
+        dst[0] = frag.r * dst[0] + dst[0] * inva;
+        dst[1] = frag.g * dst[1] + dst[1] * inva;
+        dst[2] = frag.b * dst[2] + dst[2] * inva;
+        dst[3] = frag.a * dst[3] + dst[3] * inva;
+        break;
     }
-
-    bool edge0_inclusive = edge_is_top_left(bx, by, cx, cy);
-    bool edge1_inclusive = edge_is_top_left(cx, cy, ax, ay);
-    bool edge2_inclusive = edge_is_top_left(ax, ay, bx, by);
-
-    int cx0 = clip.x * (int)v->ss, cy0 = clip.y * (int)v->ss;
-    int cx1 = (clip.x + (int)clip.w) * (int)v->ss, cy1 = (clip.y + (int)clip.h) * (int)v->ss;
-
-    int minx = (int)floorf(fminf(ax, fminf(bx, cx)));
-    int maxx = (int)ceilf(fmaxf(ax, fmaxf(bx, cx)));
-    int miny = (int)floorf(fminf(ay, fminf(by, cy)));
-    int maxy = (int)ceilf(fmaxf(ay, fmaxf(by, cy)));
-    if (minx < cx0)
-        minx = cx0;
-    if (miny < cy0)
-        miny = cy0;
-    if (maxx > cx1)
-        maxx = cx1;
-    if (maxy > cy1)
-        maxy = cy1;
-    if (minx < 0)
-        minx = 0;
-    if (miny < 0)
-        miny = 0;
-    if (maxx > (int)v->sw)
-        maxx = (int)v->sw;
-    if (maxy > (int)v->sh)
-        maxy = (int)v->sh;
-
-    for (int sy = miny; sy < maxy; ++sy) {
-        for (int sx = minx; sx < maxx; ++sx) {
-            float fx = (float)sx + 0.5f;
-            float fy = (float)sy + 0.5f;
-            float e0 = edge(bx, by, cx, cy, fx, fy);
-            float e1 = edge(cx, cy, ax, ay, fx, fy);
-            float e2 = edge(ax, ay, bx, by, fx, fy);
-            if (e0 < 0.0f || (e0 == 0.0f && !edge0_inclusive) || e1 < 0.0f ||
-                (e1 == 0.0f && !edge1_inclusive) || e2 < 0.0f || (e2 == 0.0f && !edge2_inclusive))
-                continue;
-            int8_t *cell = &v->stencil[(size_t)sy * v->sw + sx];
-            if (eo) {
-                *cell ^= 1;
-            } else {
-                int w = (int)*cell + sign; /* clamp, winding is not expected to be deep */
-                *cell = (int8_t)(w > 127 ? 127 : (w < -128 ? -128 : w));
-            }
-        }
+    default: /* SRC_OVER */
+    {
+        float inv = 1.0f - frag.a;
+        dst[0] = frag.r + dst[0] * inv;
+        dst[1] = frag.g + dst[1] * inv;
+        dst[2] = frag.b + dst[2] * inv;
+        dst[3] = frag.a + dst[3] * inv;
+        break;
+    }
     }
 }
 
-/* Rasterize one triangle into the sample buffer, one blended sample per
- * hi-res texel. Vertex positions are in canvas (output) space; they are scaled
- * by SS here. Fragment shaders evaluate at the equivalent canvas coordinate.
- * `blend` selects the compositing mode (ADR: canvas blend modes); the GPU
- * backend implements the same set via fixed-function VkBlendFactor. */
 static void raster_tri(flux_cpu_canvas *v, flux_recti clip, canvas_pipe_id id,
                        const flux_canvas_push *pc, flux_blend_mode blend,
                        const flux_canvas_vertex *a, const flux_canvas_vertex *b,
                        const flux_canvas_vertex *c) {
-    const float ss = (float)v->ss;
     const flux_canvas_vertex *va = a;
     const flux_canvas_vertex *vb = b;
     const flux_canvas_vertex *vc = c;
-    float ax = va->pos[0] * ss, ay = va->pos[1] * ss;
-    float bx = vb->pos[0] * ss, by = vb->pos[1] * ss;
-    float cx = vc->pos[0] * ss, cy = vc->pos[1] * ss;
+    float ax = va->pos[0], ay = va->pos[1];
+    float bx = vb->pos[0], by = vb->pos[1];
+    float cx = vc->pos[0], cy = vc->pos[1];
     float area = edge(ax, ay, bx, by, cx, cy);
     if (fabsf(area) < 1e-7f)
         return;
@@ -305,10 +228,6 @@ static void raster_tri(flux_cpu_canvas *v, flux_recti clip, canvas_pipe_id id,
         area = -area;
     }
     float inv_area = 1.0f / area;
-    /* Cover passes draw only where the stencil accumulation is non-zero
-     * (ADR-0014); every other pipe ignores the buffer. */
-    const bool stencil_test =
-        v->stencil_active && (id == CANVAS_PIPE_COVER_SOLID || id == CANVAS_PIPE_COVER_GRADIENT);
     vec4f ca = unpack_premul(va->color), cb = unpack_premul(vb->color),
           cc = unpack_premul(vc->color);
 
@@ -316,9 +235,8 @@ static void raster_tri(flux_cpu_canvas *v, flux_recti clip, canvas_pipe_id id,
     bool edge1_inclusive = edge_is_top_left(cx, cy, ax, ay);
     bool edge2_inclusive = edge_is_top_left(ax, ay, bx, by);
 
-    /* Clip is in output pixels; scale to sample space. */
-    int cx0 = clip.x * (int)v->ss, cy0 = clip.y * (int)v->ss;
-    int cx1 = (clip.x + (int)clip.w) * (int)v->ss, cy1 = (clip.y + (int)clip.h) * (int)v->ss;
+    int cx0 = clip.x, cy0 = clip.y;
+    int cx1 = clip.x + (int)clip.w, cy1 = clip.y + (int)clip.h;
 
     int minx = (int)floorf(fminf(ax, fminf(bx, cx)));
     int maxx = (int)ceilf(fmaxf(ax, fmaxf(bx, cx)));
@@ -336,10 +254,10 @@ static void raster_tri(flux_cpu_canvas *v, flux_recti clip, canvas_pipe_id id,
         minx = 0;
     if (miny < 0)
         miny = 0;
-    if (maxx > (int)v->sw)
-        maxx = (int)v->sw;
-    if (maxy > (int)v->sh)
-        maxy = (int)v->sh;
+    if (maxx > (int)v->width)
+        maxx = (int)v->width;
+    if (maxy > (int)v->height)
+        maxy = (int)v->height;
 
     for (int sy = miny; sy < maxy; ++sy) {
         for (int sx = minx; sx < maxx; ++sx) {
@@ -351,75 +269,32 @@ static void raster_tri(flux_cpu_canvas *v, flux_recti clip, canvas_pipe_id id,
             if (e0 < 0.0f || (e0 == 0.0f && !edge0_inclusive) || e1 < 0.0f ||
                 (e1 == 0.0f && !edge1_inclusive) || e2 < 0.0f || (e2 == 0.0f && !edge2_inclusive))
                 continue;
-            if (stencil_test && v->stencil[(size_t)sy * v->sw + sx] == 0)
-                continue;
             float w0 = e0 * inv_area;
             float w1 = e1 * inv_area;
             float w2 = e2 * inv_area;
 
-            /* Fragment shaders operate in canvas (output) coordinates. */
-            float px = fx / ss, py = fy / ss;
             vec4f frag;
             switch (id) {
             case CANVAS_PIPE_GRADIENT:
-            case CANVAS_PIPE_COVER_GRADIENT:
-                frag = frag_gradient(pc, px, py);
+                frag = frag_gradient(pc, fx, fy);
                 break;
             case CANVAS_PIPE_SDF: {
                 vec4f vc = {w0 * ca.r + w1 * cb.r + w2 * cc.r, w0 * ca.g + w1 * cb.g + w2 * cc.g,
                             w0 * ca.b + w1 * cb.b + w2 * cc.b, w0 * ca.a + w1 * cb.a + w2 * cc.a};
-                frag = frag_sdf(pc, vc, px, py);
+                frag = frag_sdf(pc, vc, fx, fy);
                 break;
             }
-            case CANVAS_PIPE_STENCIL_WRITE:
-            case CANVAS_PIPE_STENCIL_WRITE_EO:
-                continue; /* colour-write masked off; CPU has no stencil buffer */
             case CANVAS_PIPE_IMAGE:
                 return; /* textured image: unsupported on CPU */
-            default:    /* SOLID / COVER_SOLID */
+            default:    /* CANVAS_PIPE_SOLID */
                 frag =
                     (vec4f){w0 * ca.r + w1 * cb.r + w2 * cc.r, w0 * ca.g + w1 * cb.g + w2 * cc.g,
                             w0 * ca.b + w1 * cb.b + w2 * cc.b, w0 * ca.a + w1 * cb.a + w2 * cc.a};
                 break;
             }
 
-            float *dst = &v->fb[((size_t)sy * v->sw + sx) * 4];
-            /* Premultiplied compositing. SRC_OVER is the default; the other
-             * three modes mirror the VkBlendFactor choices in renderer.c so
-             * CPU and GPU output stay pixel-equivalent for the canvas test
-             * suite. STENCIL_WRITE is colour-write-masked off above. */
-            switch (blend) {
-            case FLUX_BLEND_SRC:
-                dst[0] = frag.r;
-                dst[1] = frag.g;
-                dst[2] = frag.b;
-                dst[3] = frag.a;
-                break;
-            case FLUX_BLEND_PLUS:
-                dst[0] = frag.r + dst[0];
-                dst[1] = frag.g + dst[1];
-                dst[2] = frag.b + dst[2];
-                dst[3] = frag.a + dst[3];
-                break;
-            case FLUX_BLEND_MULTIPLY: {
-                /* dst' = src*dst + (1-src.a)*dst (premultiplied). */
-                float inva = 1.0f - frag.a;
-                dst[0] = frag.r * dst[0] + dst[0] * inva;
-                dst[1] = frag.g * dst[1] + dst[1] * inva;
-                dst[2] = frag.b * dst[2] + dst[2] * inva;
-                dst[3] = frag.a * dst[3] + dst[3] * inva;
-                break;
-            }
-            default: /* SRC_OVER */
-            {
-                float inv = 1.0f - frag.a;
-                dst[0] = frag.r + dst[0] * inv;
-                dst[1] = frag.g + dst[1] * inv;
-                dst[2] = frag.b + dst[2] * inv;
-                dst[3] = frag.a + dst[3] * inv;
-                break;
-            }
-            }
+            float *dst = &v->fb[((size_t)sy * v->width + sx) * 4];
+            cpu_blend_pixel(dst, frag, blend);
         }
     }
 }
@@ -461,7 +336,6 @@ static inline float sample_cov(const uint8_t *atlas, uint32_t aw, uint32_t ah, f
  * runs compose correctly — the same model raster_tri uses for fills. */
 static void raster_glyph_quad(flux_cpu_canvas *v, flux_recti clip, const flux_canvas_vertex *verts,
                               const uint8_t *atlas, uint32_t aw, uint32_t ah) {
-    const float ss = (float)v->ss;
     /* The quad's six vertices form an axis-aligned rect (draw_glyph_run
      * emits p0,p1,p2,p3 = TL,TR,BR,BL). Use min/max over all six for
      * robustness against winding. Positions are already in output pixels. */
@@ -479,13 +353,13 @@ static void raster_glyph_quad(flux_cpu_canvas *v, flux_recti clip, const flux_ca
             maxy = y;
     }
 
-    int cx0 = clip.x * (int)v->ss, cy0 = clip.y * (int)v->ss;
-    int cx1 = (clip.x + (int)clip.w) * (int)v->ss, cy1 = (clip.y + (int)clip.h) * (int)v->ss;
+    int cx0 = clip.x, cy0 = clip.y;
+    int cx1 = clip.x + (int)clip.w, cy1 = clip.y + (int)clip.h;
 
-    int sx0 = (int)floorf(minx * ss);
-    int sy0 = (int)floorf(miny * ss);
-    int sx1 = (int)ceilf(maxx * ss);
-    int sy1 = (int)ceilf(maxy * ss);
+    int sx0 = (int)floorf(minx);
+    int sy0 = (int)floorf(miny);
+    int sx1 = (int)ceilf(maxx);
+    int sy1 = (int)ceilf(maxy);
     if (sx0 < cx0)
         sx0 = cx0;
     if (sy0 < cy0)
@@ -498,22 +372,21 @@ static void raster_glyph_quad(flux_cpu_canvas *v, flux_recti clip, const flux_ca
         sx0 = 0;
     if (sy0 < 0)
         sy0 = 0;
-    if (sx1 > (int)v->sw)
-        sx1 = (int)v->sw;
-    if (sy1 > (int)v->sh)
-        sy1 = (int)v->sh;
+    if (sx1 > (int)v->width)
+        sx1 = (int)v->width;
+    if (sy1 > (int)v->height)
+        sy1 = (int)v->height;
 
     vec4f tint = unpack_premul(verts[0].color);
 
-    /* Triangle A = 0,1,2 ; Triangle B = 3,4,5. Precompute SS-space verts. */
     const flux_canvas_vertex *ta[3] = {&verts[0], &verts[1], &verts[2]};
     const flux_canvas_vertex *tb[3] = {&verts[3], &verts[4], &verts[5]};
     float tax[3], tay[3], tbx[3], tby[3];
     for (int i = 0; i < 3; i++) {
-        tax[i] = ta[i]->pos[0] * ss;
-        tay[i] = ta[i]->pos[1] * ss;
-        tbx[i] = tb[i]->pos[0] * ss;
-        tby[i] = tb[i]->pos[1] * ss;
+        tax[i] = ta[i]->pos[0];
+        tay[i] = ta[i]->pos[1];
+        tbx[i] = tb[i]->pos[0];
+        tby[i] = tb[i]->pos[1];
     }
     float area_a = edge(tax[0], tay[0], tax[1], tay[1], tax[2], tay[2]);
     float area_b = edge(tbx[0], tby[0], tbx[1], tby[1], tbx[2], tby[2]);
@@ -567,8 +440,8 @@ static void raster_glyph_quad(flux_cpu_canvas *v, flux_recti clip, const flux_ca
             if (cov <= 0.0f)
                 continue;
 
-            /* premultiplied tint × coverage, SRC_OVER (one sample). */
-            float *dst = &v->fb[((size_t)sy * v->sw + sx) * 4];
+            /* premultiplied tint × coverage, SRC_OVER. */
+            float *dst = &v->fb[((size_t)sy * v->width + sx) * 4];
             float pr = tint.r * cov;
             float pg = tint.g * cov;
             float pb = tint.b * cov;
@@ -588,25 +461,10 @@ static void raster_glyph_quad(flux_cpu_canvas *v, flux_recti clip, const flux_ca
 
 static flux_result cpu_canvas_init(const flux_canvas_backend *self, flux_canvas *c) {
     (void)self;
-    /* FLUX_CANVAS_ANTIALIAS_NONE drops supersampling: 1 sample per pixel
-     * (4x less sample-buffer memory and raster work) at the cost of
-     * aliased coverage edges. AUTO and MSAA_4X keep the oracle default
-     * (4 samples/pixel) that mirrors the GPU's 4x MSAA. The factor is
-     * fixed at create time: buffer sizing, clipping, and the readback
-     * downsample all derive from it. */
-    /* Supersampling factor: configured factor wins; 0 keeps the default (2 = 4
-     * samples/px) mirroring the GPU's 4x MSAA. */
-    uint32_t ss = (c->cpu_supersample > 0) ? c->cpu_supersample : FLUX_CPU_SS_DEFAULT;
-    if (ss > FLUX_CANVAS_SUPERSAMPLE_MAX)
-        ss = FLUX_CANVAS_SUPERSAMPLE_MAX;
-    if (c->fb_width == 0 || c->fb_height == 0 || c->fb_width > UINT32_MAX / ss ||
-        c->fb_height > UINT32_MAX / ss) {
-        FLUX_FAIL(FLUX_ERROR_OUT_OF_RANGE, "CPU canvas dimensions overflow sample buffer");
-        return FLUX_ERROR_OUT_OF_RANGE;
-    }
-    uint32_t sw = c->fb_width * ss;
-    uint32_t sh = c->fb_height * ss;
-    if ((size_t)sw > SIZE_MAX / (size_t)sh / 4u / sizeof(float)) {
+    if (c->fb_width == 0 || c->fb_height == 0 ||
+        (uint64_t)c->fb_width > (uint64_t)UINT32_MAX / (4u * sizeof(float)) ||
+        (uint64_t)c->fb_height >
+            (uint64_t)UINT32_MAX / (4u * sizeof(float)) / (uint64_t)c->fb_width) {
         FLUX_FAIL(FLUX_ERROR_OUT_OF_RANGE, "CPU canvas framebuffer size overflow");
         return FLUX_ERROR_OUT_OF_RANGE;
     }
@@ -616,10 +474,7 @@ static flux_result cpu_canvas_init(const flux_canvas_backend *self, flux_canvas 
         return FLUX_ERROR_OUT_OF_MEMORY;
     v->width = c->fb_width;
     v->height = c->fb_height;
-    v->ss = ss;
-    v->sw = sw;
-    v->sh = sh;
-    v->fb = calloc((size_t)v->sw * v->sh * 4, sizeof(float));
+    v->fb = calloc((size_t)v->width * v->height * 4, sizeof(float));
     if (!v->fb) {
         free(v);
         return FLUX_ERROR_OUT_OF_MEMORY;
@@ -646,8 +501,9 @@ static void cpu_canvas_destroy(const flux_canvas_backend *self, flux_canvas *c) 
     free(v->base_fb);
     free(v->rgba8);
     free(v->cover_scratch);
+    free(v->tri_pts_scratch);
+    free(v->tri_cons_scratch);
     free(v->coverage);
-    free(v->stencil);
     free(v);
     c->backend_data = nullptr;
 }
@@ -662,8 +518,8 @@ static flux_result cpu_save_layer(const flux_canvas_backend *self, flux_canvas *
     if (v->layer_top >= FLUX_CPU_MAX_LAYERS)
         return FLUX_ERROR_OUT_OF_RANGE;
 
-    size_t samples = (size_t)v->sw * v->sh;
-    float *layer_fb = calloc(samples * 4, sizeof(float));
+    size_t pixels = (size_t)v->width * v->height;
+    float *layer_fb = calloc(pixels * 4, sizeof(float));
     if (!layer_fb)
         return FLUX_ERROR_OUT_OF_MEMORY;
 
@@ -690,8 +546,8 @@ static void cpu_restore_layer(const flux_canvas_backend *self, flux_canvas *c) {
 
     float *parent_fb = (v->layer_top > 0) ? v->layers[v->layer_top - 1].fb : v->base_fb;
 
-    size_t samples = (size_t)v->sw * v->sh;
-    for (size_t i = 0; i < samples; ++i) {
+    size_t pixels = (size_t)v->width * v->height;
+    for (size_t i = 0; i < pixels; ++i) {
         float *l = &layer_fb[i * 4];
         float la = l[3] * opacity;
         if (la <= 0.0f)
@@ -723,14 +579,11 @@ static void cpu_load_target(flux_cpu_canvas *v, const flux_target *target) {
             const uint8_t *px = target->cpu_buffer + y * target->cpu_stride + x * 4;
             vec4f color = unpack_premul(((uint32_t)px[3] << 24) | ((uint32_t)px[0] << 16) |
                                         ((uint32_t)px[1] << 8) | px[2]);
-            for (uint32_t sy = 0; sy < v->ss; ++sy)
-                for (uint32_t sx = 0; sx < v->ss; ++sx) {
-                    float *dst = v->fb + ((size_t)(y * v->ss + sy) * v->sw + x * v->ss + sx) * 4;
-                    dst[0] = color.r;
-                    dst[1] = color.g;
-                    dst[2] = color.b;
-                    dst[3] = color.a;
-                }
+            float *dst = v->fb + ((size_t)y * v->width + x) * 4;
+            dst[0] = color.r;
+            dst[1] = color.g;
+            dst[2] = color.b;
+            dst[3] = color.a;
         }
     }
 }
@@ -739,7 +592,6 @@ static flux_result cpu_begin_pass(const flux_canvas_backend *self, flux_canvas *
                                   flux_image *target, const canvas_pass_config *config) {
     (void)self;
     (void)f;
-    (void)config->antialias;
     if (target) {
         FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "CPU canvas has no offscreen target (v1)");
         return FLUX_ERROR_INVALID_ARGUMENT;
@@ -760,9 +612,8 @@ static flux_result cpu_begin_pass(const flux_canvas_backend *self, flux_canvas *
     c->pass_damage = *config;
 
     if (host) {
-        uint32_t ss = config->antialias == FLUX_CANVAS_ANTIALIAS_NONE ? 1u : root->ss;
         v = root->target_scratch;
-        if (v && (v->width != width || v->height != height || v->ss != ss)) {
+        if (v && (v->width != width || v->height != height)) {
             c->backend_data = v;
             cpu_canvas_destroy(self, c);
             c->backend_data = root;
@@ -772,10 +623,7 @@ static flux_result cpu_begin_pass(const flux_canvas_backend *self, flux_canvas *
         if (!v) {
             c->fb_width = width;
             c->fb_height = height;
-            uint32_t saved_ss = c->cpu_supersample;
-            c->cpu_supersample = ss;
             flux_result result = cpu_canvas_init(self, c);
-            c->cpu_supersample = saved_ss;
             if (result != FLUX_OK) {
                 c->backend_data = root;
                 return result;
@@ -801,15 +649,14 @@ static flux_result cpu_begin_pass(const flux_canvas_backend *self, flux_canvas *
         flux_recti clears[FLUX_DAMAGE_CAPACITY];
         const uint32_t clear_count =
             canvas_pass_areas(config, width, height, clears, FLUX_DAMAGE_CAPACITY);
-        const uint32_t area_ss = v->ss;
         for (uint32_t a = 0; a < clear_count; a++) {
-            const uint32_t x0 = (uint32_t)clears[a].x * area_ss;
-            const uint32_t y0 = (uint32_t)clears[a].y * area_ss;
-            const uint32_t x1 = ((uint32_t)clears[a].x + clears[a].w) * area_ss;
-            const uint32_t y1 = ((uint32_t)clears[a].y + clears[a].h) * area_ss;
+            const uint32_t x0 = (uint32_t)clears[a].x;
+            const uint32_t y0 = (uint32_t)clears[a].y;
+            const uint32_t x1 = (uint32_t)clears[a].x + clears[a].w;
+            const uint32_t y1 = (uint32_t)clears[a].y + clears[a].h;
             for (uint32_t y = y0; y < y1; ++y) {
                 for (uint32_t x = x0; x < x1; ++x) {
-                    size_t i = (size_t)y * v->sw + x;
+                    size_t i = (size_t)y * v->width + x;
                     v->fb[i * 4 + 0] = cc.r;
                     v->fb[i * 4 + 1] = cc.g;
                     v->fb[i * 4 + 2] = cc.b;
@@ -822,15 +669,6 @@ static flux_result cpu_begin_pass(const flux_canvas_backend *self, flux_canvas *
     c->pass_active = true;
     c->target_pass = false;
     c->target = nullptr;
-    /* The CPU rasteriser implements stencil-then-cover with a host
-     * accumulation buffer (see cpu_submit), so fills take the same path as
-     * the GPU backend instead of the ear-clip fallback. */
-    c->stencil_available = true;
-    c->stencil_forbidden = config->skip_stencil;
-    if (v->stencil) {
-        memset(v->stencil, 0, (size_t)v->sw * v->sh);
-        v->stencil_active = false;
-    }
     c->fb_width = v->width;
     c->fb_height = v->height;
     c->states[0].scissor = area;
@@ -893,24 +731,6 @@ static void cpu_submit(const flux_canvas_backend *self, flux_canvas *c, canvas_p
         return;
     }
 
-    /* Stencil-only pass: accumulate winding / parity into the sample-rate
-     * buffer; no colour is written (the GPU masks colour off for these
-     * pipes). The matching COVER_* submit below consumes and resets it. */
-    if (id == CANVAS_PIPE_STENCIL_WRITE || id == CANVAS_PIPE_STENCIL_WRITE_EO) {
-        if (!v->stencil) {
-            if ((size_t)v->sw > SIZE_MAX / (size_t)v->sh / sizeof(int8_t))
-                return;
-            v->stencil = calloc((size_t)v->sw * v->sh, sizeof(int8_t));
-            if (!v->stencil)
-                return;
-        }
-        bool eo = id == CANVAS_PIPE_STENCIL_WRITE_EO;
-        for (uint32_t i = 0; i + 3 <= vertex_count; i += 3)
-            raster_stencil_tri(v, clip, &verts[i], &verts[i + 1], &verts[i + 2], eo);
-        v->stencil_active = true;
-        return;
-    }
-
     /* Glyph runs sample a host R8 atlas on the CPU backend (ADR-0019). Each
      * quad is six vertices (two tris); blit them directly. Image draws still
      * have no host source, so they stay unsupported. */
@@ -929,13 +749,6 @@ static void cpu_submit(const flux_canvas_backend *self, flux_canvas *c, canvas_p
 
     for (uint32_t i = 0; i + 3 <= vertex_count; i += 3)
         raster_tri(v, clip, id, push, c->pending_blend, &verts[i], &verts[i + 1], &verts[i + 2]);
-
-    /* A cover submit consumes the accumulation: reset to zero like the GPU's
-     * stencil attachment after its cover pass. */
-    if (v->stencil_active && (id == CANVAS_PIPE_COVER_SOLID || id == CANVAS_PIPE_COVER_GRADIENT)) {
-        memset(v->stencil, 0, (size_t)v->sw * v->sh);
-        v->stencil_active = false;
-    }
 }
 
 static const uint8_t *cpu_read_pixels(const flux_canvas_backend *self, flux_canvas *c,
@@ -949,30 +762,17 @@ static const uint8_t *cpu_read_pixels(const flux_canvas_backend *self, flux_canv
         if (!v->rgba8)
             return nullptr;
     }
-    /* Box-downsample the SS x SS sample block per output pixel (averaging
-     * premultiplied linear, like the GPU's MSAA resolve), then run the
-     * ADR-0069 output transform once: un-premultiply, sRGB-encode,
-     * re-premultiply, quantise. No dither — deterministic oracle. */
-    const uint32_t ss = v->ss;
-    const float norm = 1.0f / (float)(ss * ss);
+    /* ADR-0069 output transform at 1x pixel resolution: un-premultiply,
+     * sRGB-encode, re-premultiply, quantise. No dither — deterministic oracle. */
     for (uint32_t y = 0; y < v->height; ++y) {
         for (uint32_t x = 0; x < v->width; ++x) {
-            float acc[4] = {0, 0, 0, 0};
-            for (uint32_t sy = 0; sy < ss; ++sy) {
-                for (uint32_t sx = 0; sx < ss; ++sx) {
-                    const float *s = &v->fb[(((size_t)(y * ss + sy)) * v->sw + (x * ss + sx)) * 4];
-                    acc[0] += s[0];
-                    acc[1] += s[1];
-                    acc[2] += s[2];
-                    acc[3] += s[3];
-                }
-            }
+            const float *s = &v->fb[((size_t)y * v->width + x) * 4];
             uint8_t *o = &v->rgba8[((size_t)y * v->width + x) * 4];
-            float a = acc[3] * norm;
+            float a = s[3];
             float inv_a = a > 0.0f ? 1.0f / a : 0.0f;
             o[3] = (uint8_t)(clampf(a, 0.0f, 1.0f) * 255.0f + 0.5f);
             for (int k = 0; k < 3; ++k) {
-                float straight = acc[k] * norm * inv_a; /* a == 0 -> black */
+                float straight = s[k] * inv_a; /* a == 0 -> black */
                 float enc = flux_transfer_encode(FLUX_TRANSFER_SRGB, 0.0f, straight);
                 o[k] = (uint8_t)(clampf(enc * a, 0.0f, 1.0f) * 255.0f + 0.5f);
             }
@@ -987,9 +787,7 @@ static const uint8_t *cpu_read_pixels(const flux_canvas_backend *self, flux_canv
     return v->rgba8;
 }
 
-/* Single-channel coverage plane: the box-filtered mean of the supersampled
- * alpha channel, quantised to 8 bits. This is the mask a coverage cache bakes
- * from vector geometry (see flux_canvas_cpu_coverage in <flux/canvas_cpu.h>).
+/* Single-channel coverage plane: alpha quantised directly to 8 bits at 1x.
  * The resolve matches cpu_read_pixels' alpha channel exactly, so a mask read
  * here and a premultiplied pixel read there agree on coverage. */
 static const uint8_t *cpu_read_coverage(const flux_canvas_backend *self, flux_canvas *c,
@@ -1005,19 +803,11 @@ static const uint8_t *cpu_read_coverage(const flux_canvas_backend *self, flux_ca
         if (!v->coverage)
             return nullptr;
     }
-    const uint32_t ss = v->ss;
-    const float norm = 1.0f / (float)(ss * ss);
     for (uint32_t y = 0; y < v->height; ++y) {
         for (uint32_t x = 0; x < v->width; ++x) {
-            float acc = 0.0f;
-            for (uint32_t sy = 0; sy < ss; ++sy) {
-                for (uint32_t sx = 0; sx < ss; ++sx) {
-                    const float *s = &v->fb[(((size_t)(y * ss + sy)) * v->sw + (x * ss + sx)) * 4];
-                    acc += s[3];
-                }
-            }
+            float a = v->fb[((size_t)y * v->width + x) * 4 + 3];
             v->coverage[(size_t)y * v->width + x] =
-                (uint8_t)(clampf(acc * norm, 0.0f, 1.0f) * 255.0f + 0.5f);
+                (uint8_t)(clampf(a, 0.0f, 1.0f) * 255.0f + 0.5f);
         }
     }
     if (width)
@@ -1029,12 +819,8 @@ static const uint8_t *cpu_read_coverage(const flux_canvas_backend *self, flux_ca
     return v->coverage;
 }
 
-/* Analytic coverage fill (ADR-0119): rasterize the contours at pixel resolution
- * and composite the (already premultiplied) colour through the resulting
- * coverage, once per supersample. Every sample of a pixel receives the same
- * coverage value, so the existing downsample averages to exactly that coverage —
- * the plane is already anti-aliased, so supersampling the geometry as well would
- * be redundant work. */
+/* Analytic coverage fill (ADR-0119): rasterize the contours at 1x pixel
+ * resolution and composite the (already premultiplied) colour directly. */
 static flux_result cpu_submit_cover(const flux_canvas_backend *self, flux_canvas *c,
                                     const flux_point *pts, const flux_canvas_contour *cons,
                                     uint32_t ncons, flux_fill_rule rule, const canvas_paint *paint,
@@ -1043,19 +829,57 @@ static flux_result cpu_submit_cover(const flux_canvas_backend *self, flux_canvas
     flux_cpu_canvas *v = c ? c->backend_data : nullptr;
     if (!v || !v->fb || !pts || !cons)
         return FLUX_ERROR_INVALID_ARGUMENT;
-    if (clip.w <= 0 || clip.h <= 0)
+    if (clip.w <= 0 || clip.h <= 0 || ncons == 0)
         return FLUX_OK;
 
-    /* Evaluate the brush's kind BEFORE allocating or rasterizing: a refusal must
-     * cost nothing, and it happens per draw. */
     if (paint->kind != CANVAS_PAINT_SOLID && paint->kind != CANVAS_PAINT_LINEAR_GRADIENT &&
         paint->kind != CANVAS_PAINT_RADIAL_GRADIENT)
-        return FLUX_ERROR_UNSUPPORTED; /* caller falls back to tessellation */
+        return FLUX_ERROR_UNSUPPORTED;
 
-    uint32_t w = (uint32_t)clip.w, h = (uint32_t)clip.h;
+    /* Narrow the coverage sweep to the geometry bbox intersected with clip. */
+    float min_x = 1e30f, min_y = 1e30f, max_x = -1e30f, max_y = -1e30f;
+    bool have_pt = false;
+    for (uint32_t ci = 0; ci < ncons; ++ci) {
+        for (uint32_t k = 0; k < cons[ci].count; ++k) {
+            flux_point pt = pts[cons[ci].start + k];
+            if (!isfinite(pt.x) || !isfinite(pt.y))
+                continue;
+            if (!have_pt || pt.x < min_x)
+                min_x = pt.x;
+            if (!have_pt || pt.x > max_x)
+                max_x = pt.x;
+            if (!have_pt || pt.y < min_y)
+                min_y = pt.y;
+            if (!have_pt || pt.y > max_y)
+                max_y = pt.y;
+            have_pt = true;
+        }
+    }
+    if (!have_pt)
+        return FLUX_OK;
+    int x0 = (int)floorf(min_x), y0 = (int)floorf(min_y);
+    int x1 = (int)ceilf(max_x), y1 = (int)ceilf(max_y);
+    int cmin_x = clip.x > 0 ? clip.x : 0;
+    int cmin_y = clip.y > 0 ? clip.y : 0;
+    int cmax_x = clip.x + (int)clip.w;
+    int cmax_y = clip.y + (int)clip.h;
+    if (cmax_x > (int)v->width)
+        cmax_x = (int)v->width;
+    if (cmax_y > (int)v->height)
+        cmax_y = (int)v->height;
+    if (x0 < cmin_x)
+        x0 = cmin_x;
+    if (y0 < cmin_y)
+        y0 = cmin_y;
+    if (x1 > cmax_x)
+        x1 = cmax_x;
+    if (y1 > cmax_y)
+        y1 = cmax_y;
+    if (x1 <= x0 || y1 <= y0)
+        return FLUX_OK;
+
+    uint32_t w = (uint32_t)(x1 - x0), h = (uint32_t)(y1 - y0);
     size_t need = (size_t)w * h;
-    /* Reuse the canvas's plane: a per-fill allocation would churn 8 MB at 1080p
-     * and 33 MB at 4K for every draw. */
     if (need > v->cover_scratch_n) {
         float *grown = realloc(v->cover_scratch, need * sizeof(float));
         if (!grown)
@@ -1065,43 +889,96 @@ static flux_result cpu_submit_cover(const flux_canvas_backend *self, flux_canvas
     }
     float *cov = v->cover_scratch;
     flux_result rc =
-        canvas_coverage_rasterize(pts, cons, ncons, rule, (float)clip.x, (float)clip.y, w, h, cov);
+        canvas_coverage_rasterize(pts, cons, ncons, rule, (float)x0, (float)y0, w, h, cov);
     if (rc != FLUX_OK)
-        return rc; /* fail closed: the caller falls back to tessellation */
+        return rc;
 
-    /* Coverage answers WHERE a pixel is painted; the brush answers WHAT colour.
-     * So every paint kind this backend can evaluate is served here, not just
-     * solid — gradient fills get the same continuous coverage. */
     flux_canvas_push pc;
     build_push(c, paint, &pc);
+    vec4f solid_col = unpack_premul(paint->color);
 
     for (uint32_t y = 0; y < h; ++y) {
+        int py = y0 + (int)y;
         for (uint32_t x = 0; x < w; ++x) {
             float a = cov[(size_t)y * w + x];
             if (a <= 0.0f)
                 continue;
-            float px_c = (float)(clip.x + (int)x) + 0.5f;
-            float py_c = (float)(clip.y + (int)y) + 0.5f;
-            vec4f src = (paint->kind == CANVAS_PAINT_SOLID) ? unpack_premul(paint->color)
-                                                            : frag_gradient(&pc, px_c, py_c);
-            float sr = src.r * a, sg = src.g * a, sb = src.b * a, sa = src.a * a;
-            int px = clip.x + (int)x, py = clip.y + (int)y;
-            if (px < 0 || py < 0 || px >= (int)v->width || py >= (int)v->height)
-                continue;
-            for (uint32_t oy = 0; oy < v->ss; ++oy) {
-                for (uint32_t ox = 0; ox < v->ss; ++ox) {
-                    size_t sx = (size_t)px * v->ss + ox;
-                    size_t sy = (size_t)py * v->ss + oy;
-                    float *dst = &v->fb[(sy * v->sw + sx) * 4];
-                    dst[0] = sr + dst[0] * (1.0f - sa); /* premultiplied SRC_OVER */
-                    dst[1] = sg + dst[1] * (1.0f - sa);
-                    dst[2] = sb + dst[2] * (1.0f - sa);
-                    dst[3] = sa + dst[3] * (1.0f - sa);
-                }
-            }
+            int px = x0 + (int)x;
+            float px_c = (float)px + 0.5f;
+            float py_c = (float)py + 0.5f;
+            vec4f src =
+                (paint->kind == CANVAS_PAINT_SOLID) ? solid_col : frag_gradient(&pc, px_c, py_c);
+            vec4f frag = {src.r * a, src.g * a, src.b * a, src.a * a};
+            float *dst = &v->fb[((size_t)py * v->width + px) * 4];
+            cpu_blend_pixel(dst, frag, paint->blend);
         }
     }
     return FLUX_OK;
+}
+
+static flux_result cpu_submit_cover_triangles(const flux_canvas_backend *self, flux_canvas *c,
+                                              const flux_canvas_vertex *verts,
+                                              uint32_t vertex_count, const canvas_paint *paint,
+                                              flux_recti clip) {
+    flux_cpu_canvas *v = c ? c->backend_data : nullptr;
+    if (!v || !v->fb || !verts || !paint)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    if (clip.w <= 0 || clip.h <= 0 || vertex_count < 3)
+        return FLUX_OK;
+    if (paint->kind != CANVAS_PAINT_SOLID && paint->kind != CANVAS_PAINT_LINEAR_GRADIENT &&
+        paint->kind != CANVAS_PAINT_RADIAL_GRADIENT)
+        return FLUX_ERROR_UNSUPPORTED;
+
+    const uint32_t ntris = vertex_count / 3;
+    const uint32_t npts = ntris * 3;
+    for (uint32_t i = 0; i < npts; ++i) {
+        if (verts[i].color != verts[0].color)
+            return FLUX_ERROR_UNSUPPORTED;
+    }
+
+    if (npts > v->tri_pts_cap) {
+        flux_point *np = realloc(v->tri_pts_scratch, (size_t)npts * sizeof(*np));
+        if (!np)
+            return FLUX_ERROR_OUT_OF_MEMORY;
+        v->tri_pts_scratch = np;
+        v->tri_pts_cap = npts;
+    }
+    if (ntris > v->tri_cons_cap) {
+        flux_canvas_contour *nc = realloc(v->tri_cons_scratch, (size_t)ntris * sizeof(*nc));
+        if (!nc)
+            return FLUX_ERROR_OUT_OF_MEMORY;
+        v->tri_cons_scratch = nc;
+        v->tri_cons_cap = ntris;
+    }
+
+    uint32_t out_tri = 0;
+    for (uint32_t i = 0; i < ntris; ++i) {
+        flux_point a = {verts[i * 3].pos[0], verts[i * 3].pos[1]};
+        flux_point b = {verts[i * 3 + 1].pos[0], verts[i * 3 + 1].pos[1]};
+        flux_point e = {verts[i * 3 + 2].pos[0], verts[i * 3 + 2].pos[1]};
+        float area2 = (b.x - a.x) * (e.y - a.y) - (e.x - a.x) * (b.y - a.y);
+        if (area2 == 0.0f)
+            continue;
+        if (area2 < 0.0f) {
+            flux_point tmp = b;
+            b = e;
+            e = tmp;
+        }
+        uint32_t base = out_tri * 3;
+        v->tri_pts_scratch[base] = a;
+        v->tri_pts_scratch[base + 1] = b;
+        v->tri_pts_scratch[base + 2] = e;
+        v->tri_cons_scratch[out_tri] =
+            (flux_canvas_contour){.start = base, .count = 3, .closed = true};
+        out_tri++;
+    }
+    if (out_tri == 0)
+        return FLUX_OK;
+
+    canvas_paint local_paint = *paint;
+    local_paint.color = verts[0].color;
+    return cpu_submit_cover(self, c, v->tri_pts_scratch, v->tri_cons_scratch, out_tri,
+                            FLUX_FILL_NON_ZERO, &local_paint, clip);
 }
 
 static const flux_canvas_backend cpu_backend = {
@@ -1114,6 +991,7 @@ static const flux_canvas_backend cpu_backend = {
     .bind_program = cpu_bind_program,
     .submit = cpu_submit,
     .submit_cover = cpu_submit_cover,
+    .submit_cover_triangles = cpu_submit_cover_triangles,
     .read_pixels = cpu_read_pixels,
     .read_coverage = cpu_read_coverage,
     .save_layer = cpu_save_layer,
@@ -1128,33 +1006,11 @@ const flux_canvas_backend *flux_canvas_backend_cpu(void) {
 /*  Public headless-canvas API (flux/canvas_cpu.h)                    */
 /* ------------------------------------------------------------------ */
 
-flux_result flux_canvas_create_cpu(uint32_t width, uint32_t height, float scale,
+flux_result flux_canvas_cpu_create(uint32_t width, uint32_t height, float scale,
                                    flux_canvas **out) {
-    /* Default: 2x supersampling (4 samples/pixel), matching GPU 4x MSAA. */
-    return flux_canvas_create_cpu_ss(width, height, scale, 0, out);
-}
-
-flux_result flux_canvas_create_cpu_aa(uint32_t width, uint32_t height, float scale,
-                                      flux_canvas_antialias antialias, flux_canvas **out) {
-    if (antialias != FLUX_CANVAS_ANTIALIAS_AUTO && antialias != FLUX_CANVAS_ANTIALIAS_NONE &&
-        antialias != FLUX_CANVAS_ANTIALIAS_MSAA_4X) {
-        FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "unknown flux_canvas_antialias value");
-        return FLUX_ERROR_INVALID_ARGUMENT;
-    }
-    uint32_t ss = (antialias == FLUX_CANVAS_ANTIALIAS_NONE) ? 1u : 2u;
-    return flux_canvas_create_cpu_ss(width, height, scale, ss, out);
-}
-
-flux_result flux_canvas_create_cpu_ss(uint32_t width, uint32_t height, float scale,
-                                      uint32_t supersample, flux_canvas **out) {
     if (!out || width == 0 || height == 0) {
         FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "width/height must be non-zero");
         return FLUX_ERROR_INVALID_ARGUMENT;
-    }
-    if (supersample > FLUX_CANVAS_SUPERSAMPLE_MAX) {
-        FLUX_FAIL(FLUX_ERROR_OUT_OF_RANGE,
-                  "supersample factor exceeds FLUX_CANVAS_SUPERSAMPLE_MAX");
-        return FLUX_ERROR_OUT_OF_RANGE;
     }
     *out = nullptr;
 
@@ -1171,7 +1027,6 @@ flux_result flux_canvas_create_cpu_ss(uint32_t width, uint32_t height, float sca
     c->plan_node = UINT32_MAX;
     c->fb_width = width;
     c->fb_height = height;
-    c->cpu_supersample = supersample;
 
     flux_result r = c->backend->canvas_init(c->backend, c);
     if (r != FLUX_OK) {

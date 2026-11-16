@@ -42,8 +42,13 @@ static void run_sweep(flux_device *d, flux_surface *s, flux_canvas *canvas,
                       flux_format target_fmt) {
     for (size_t i = 0; i < SWEEP_LEN; ++i) {
         flux_image *target = nullptr;
-        OT_EXPECT(flux_image_create_render_target(d, sweep[i], 384, target_fmt, &target) ==
-                  FLUX_OK);
+        OT_EXPECT(flux_image_create(d,
+                                    &(flux_image_desc){.type = FLUX_TYPE_IMAGE_DESC,
+                                                       .width = sweep[i],
+                                                       .height = 384,
+                                                       .format = target_fmt,
+                                                       .usage = FLUX_IMAGE_USAGE_RENDER_TARGET},
+                                    &target) == FLUX_OK);
         for (uint32_t slot = 0; slot < SLOTS; ++slot) {
             flux_frame *frame = nullptr;
             OT_EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
@@ -98,12 +103,11 @@ int main(void) {
     flux_device_memory_stats(d, &after);
 
     uint32_t parked = after.live_allocations - baseline.live_allocations;
-    /* Bucketed: 2 buckets/slot x 3 slots, each parking a linear and a
-     * stencil image (msaa never engaged — clear + antialias default), plus
-     * the retired-but-not-drained sweep targets' own images: those are
-     * released per iteration and drained by the stats call, so the steady
-     * count is the attachment pool alone. Exact-dimension behavior parks
-     * 16/slot; the bucketed bound keeps an order of magnitude below that. */
+    /* Bucketed: 2 buckets/slot x 3 slots, each parking a single linear
+     * intermediate image, plus the retired-but-not-drained sweep targets'
+     * own images: those are released per iteration and drained by the stats
+     * call, so the steady count is the attachment pool alone. Exact-dimension
+     * behavior parks 16/slot; the bucketed bound stays well below that. */
     fprintf(stderr, "  attachment pool parked %u live allocations (baseline %u, after %u)\n",
             parked, baseline.live_allocations, after.live_allocations);
     OT_EXPECT(parked < 2u * SLOTS * 4u);

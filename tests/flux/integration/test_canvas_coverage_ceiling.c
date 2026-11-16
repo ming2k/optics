@@ -68,7 +68,12 @@ int main(void) {
     int cpu_levels = 0;
     {
         flux_canvas *cpu = nullptr;
-        OT_EXPECT(flux_canvas_create_cpu(W, H, 1.0f, &cpu) == FLUX_OK);
+        OT_EXPECT(flux_canvas_create(&(flux_canvas_desc){.type = FLUX_TYPE_CANVAS_DESC,
+                                                         .backend = FLUX_CANVAS_BACKEND_CPU,
+                                                         .scale = 1.0f,
+                                                         .width = W,
+                                                         .height = H},
+                                     &cpu) == FLUX_OK);
         flux_color clear = flux_color_rgba(0, 0, 0, 255);
         OT_EXPECT(
             flux_canvas_begin(cpu, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
@@ -92,7 +97,12 @@ int main(void) {
     int grad_levels = 0;
     {
         flux_canvas *cpu = nullptr;
-        OT_EXPECT(flux_canvas_create_cpu(W, H, 1.0f, &cpu) == FLUX_OK);
+        OT_EXPECT(flux_canvas_create(&(flux_canvas_desc){.type = FLUX_TYPE_CANVAS_DESC,
+                                                         .backend = FLUX_CANVAS_BACKEND_CPU,
+                                                         .scale = 1.0f,
+                                                         .width = W,
+                                                         .height = H},
+                                     &cpu) == FLUX_OK);
         flux_color clear = flux_color_rgba(0, 0, 0, 255);
         OT_EXPECT(
             flux_canvas_begin(cpu, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,

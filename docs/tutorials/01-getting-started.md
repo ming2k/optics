@@ -81,7 +81,7 @@ example instead:
 ./build/examples/flux/canvas_hello
 ./build/examples/flux/scene_cube
 ./build/examples/lens/headless_demo
-./build/examples/iris/widgets
+./build/examples/aperture/widgets
 ```
 
 The `flux` examples show direct rendering, the `lens` example exercises the

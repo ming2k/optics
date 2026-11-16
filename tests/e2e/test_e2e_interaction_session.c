@@ -162,8 +162,12 @@ int main(void) {
     OT_EXPECT(saw_text);
 
     flux_canvas *canvas = nullptr;
-    OT_REQUIRE(flux_canvas_create_cpu((uint32_t)DISPLAY_W, (uint32_t)DISPLAY_H, 1.0f, &canvas) ==
-               FLUX_OK);
+    OT_REQUIRE(flux_canvas_create(&(flux_canvas_desc){.type = FLUX_TYPE_CANVAS_DESC,
+                                                      .backend = FLUX_CANVAS_BACKEND_CPU,
+                                                      .scale = 1.0f,
+                                                      .width = (uint32_t)DISPLAY_W,
+                                                      .height = (uint32_t)DISPLAY_H},
+                                  &canvas) == FLUX_OK);
     flux_color clear = flux_color_rgba_premul(0, 0, 0, 255);
     OT_REQUIRE(
         flux_canvas_begin(canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,

@@ -5,9 +5,14 @@
 
 #include <stdio.h>
 
-bool lens_segmented_control(lens *ui, const char *id_str, const lens_segmented_item *items,
-                            uint32_t item_count, uint32_t *selected_index,
-                            const lens_segmented_opts *opts) {
+bool lens_segmented_control(lens *ui, const lens_segmented_opts *opts) {
+    if (!opts)
+        return false;
+    const char *id_str = opts->id;
+    const lens_segmented_item *items = opts->items;
+    const uint32_t item_count = opts->item_count;
+    uint32_t *selected_index = opts->selected_index;
+
     if (!ui || !items || item_count == 0 || !selected_index)
         return false;
 

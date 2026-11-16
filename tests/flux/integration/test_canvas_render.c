@@ -93,8 +93,8 @@ static flux_result render_frame(flux_surface *s, flux_canvas *canvas, draw_fn dr
     return flux_frame_present(frame);
 }
 
-static flux_result render_frame_no_stencil(flux_surface *s, flux_canvas *canvas, draw_fn draw,
-                                           void *user) {
+static flux_result render_frame_unknown_ext(flux_surface *s, flux_canvas *canvas, draw_fn draw,
+                                            void *user) {
     flux_frame *frame = nullptr;
     flux_result r = flux_surface_begin_frame(s, nullptr, &frame);
     if (r != FLUX_OK)
@@ -103,16 +103,11 @@ static flux_result render_frame_no_stencil(flux_surface *s, flux_canvas *canvas,
     flux_color clear = flux_color_rgba(0, 0, 0, 255);
     flux_canvas_pass_desc pass = FLUX_CANVAS_PASS_DESC_INIT;
     pass.clear_color = &clear;
-    pass.antialias = FLUX_CANVAS_ANTIALIAS_NONE;
-    flux_canvas_no_stencil_desc no_stencil = FLUX_CANVAS_NO_STENCIL_DESC_INIT;
-    no_stencil.enabled = true;
-    /* Unknown pNext entries are skipped for forward compatibility. Putting
-     * one before the known extension exercises real chained parsing rather
-     * than only the one-node happy path. */
+    /* Unknown pNext entries are skipped for forward compatibility. */
     const struct {
         flux_struct_type type;
         const void *next;
-    } future_extension = {FLUX_TYPE_UNKNOWN, &no_stencil};
+    } future_extension = {FLUX_TYPE_UNKNOWN, nullptr};
     pass.next = &future_extension;
     pass.frame = frame;
     r = flux_canvas_begin(canvas, &pass);
@@ -373,11 +368,10 @@ int main(void) {
         OT_EXPECT(px_at(px, 4, H - 4)[1] > 150); /* i=240 green: centre(4,124)*/
     }
 
-    /* --- true no-stencil pass: normal solid pipelines remain valid while
-     * dynamic rendering binds no stencil attachment. This also exercises the
-     * independent VK_FORMAT_UNDEFINED pipeline variant under validation. --- */
+    /* --- unknown pNext pass extension is ignored cleanly, and even-odd path
+     * fills operate natively without any stencil attachment --- */
     {
-        OT_EXPECT(render_frame_no_stencil(s, canvas, draw_batchable_rects, nullptr) == FLUX_OK);
+        OT_EXPECT(render_frame_unknown_ext(s, canvas, draw_batchable_rects, nullptr) == FLUX_OK);
         memset(px, 0xCD, BYTES);
         OT_EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
         OT_EXPECT(px_at(px, 4, 4)[2] > 180);
@@ -385,13 +379,11 @@ int main(void) {
         OT_EXPECT(px_at(px, W - 2, H - 2)[0] < 20);
     }
 
-    /* With device analytic coverage backend (ADR-0120), even-odd fills no longer
-     * require a stencil attachment and succeed in a no-stencil pass (INV-COV-02). */
     {
         flux_path *p = nullptr;
         OT_EXPECT(flux_path_create(&p, &arena) == FLUX_OK);
         flux_path_add_rect(p, (flux_rect){16, 16, 64, 64});
-        OT_EXPECT(render_frame_no_stencil(s, canvas, draw_even_odd_path, p) == FLUX_OK);
+        OT_EXPECT(render_frame_unknown_ext(s, canvas, draw_even_odd_path, p) == FLUX_OK);
         memset(px, 0xCD, BYTES);
         OT_EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
         OT_EXPECT(px_at(px, 32, 32)[0] > 200);
@@ -495,11 +487,7 @@ int main(void) {
         OT_EXPECT(px_at(px, 2, 2)[0] < 20);
     }
 
-    /* --- self-intersecting pentagram: stencil-then-cover (ADR-0014).
-     * A 5-point star drawn edge-to-every-second-vertex self-intersects;
-     * the ear clip stalls and previously produced an empty fill. Under
-     * the nonzero winding rule the whole star — points AND the inner
-     * pentagon (winding 2) — must fill. --- */
+    /* --- self-intersecting pentagram: nonzero analytic coverage --- */
     {
         const float cx = W / 2.0f, cy = H / 2.0f, R = 52.0f;
         flux_point v[5];
@@ -533,8 +521,7 @@ int main(void) {
         /* Far corner: background. */
         OT_EXPECT(px_at(px, 2, 2)[0] < 20);
 
-        /* The cover pass must zero the stencil it used: a SECOND fill
-         * in a later frame must not be corrupted by leftover counts. */
+        /* Repeating across frames must remain clean without accumulated state. */
         OT_EXPECT(render_frame(s, canvas, draw_donut, p) == FLUX_OK);
         memset(px, 0xCD, BYTES);
         OT_EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
@@ -851,7 +838,7 @@ int main(void) {
         idesc.initial_data = xrgb_px;
         flux_image *image = nullptr;
         OT_EXPECT(flux_image_create(d, &idesc, &image) == FLUX_OK);
-        OT_EXPECT(render_frame_no_stencil(s, canvas, draw_opaque_image, image) == FLUX_OK);
+        OT_EXPECT(render_frame_unknown_ext(s, canvas, draw_opaque_image, image) == FLUX_OK);
         memset(px, 0xCD, BYTES);
         OT_EXPECT(flux_surface_read_pixels(s, px, BYTES) == FLUX_OK);
         const uint8_t *centre = px_at(px, W / 2, H / 2);

@@ -358,8 +358,13 @@ static flux_result liquid_glass_ensure_slot(prism_liquid_glass_filter *filter, u
     if (slot->stats)
         flux_buffer_release(slot->stats);
     *slot = (liquid_glass_filter_slot){};
-    flux_result r =
-        flux_image_create_compute_writable(filter->device, width, height, format, &slot->output);
+    flux_result r = flux_image_create(filter->device,
+                                      &(flux_image_desc){.type = FLUX_TYPE_IMAGE_DESC,
+                                                         .width = width,
+                                                         .height = height,
+                                                         .format = format,
+                                                         .usage = FLUX_IMAGE_USAGE_COMPUTE_WRITE},
+                                      &slot->output);
     if (r != FLUX_OK)
         return r;
     slot->width = width;

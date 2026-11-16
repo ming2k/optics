@@ -204,7 +204,9 @@ static void test_adr0088_clean_break(void) {
     flux_target *target = nullptr;
     OT_EXPECT(flux_target_create_cpu(&t_desc, &target) == FLUX_OK);
 
-    flux_canvas_desc c_desc = FLUX_INIT(CANVAS_DESC, .backend = FLUX_CANVAS_BACKEND_CPU);
+    /* Draws only into explicit targets; its own framebuffer is unused. */
+    flux_canvas_desc c_desc =
+        FLUX_INIT(CANVAS_DESC, .backend = FLUX_CANVAS_BACKEND_CPU, .width = 1, .height = 1);
     flux_canvas *c = nullptr;
     OT_EXPECT(flux_canvas_create(&c_desc, &c) == FLUX_OK);
 
@@ -266,7 +268,9 @@ static void test_adr0090_display_list_immutable_capture(void) {
     flux_target *target = nullptr;
     OT_EXPECT(flux_target_create_cpu(&t_desc, &target) == FLUX_OK);
 
-    flux_canvas_desc c_desc = FLUX_INIT(CANVAS_DESC, .backend = FLUX_CANVAS_BACKEND_CPU);
+    /* Draws only into explicit targets; its own framebuffer is unused. */
+    flux_canvas_desc c_desc =
+        FLUX_INIT(CANVAS_DESC, .backend = FLUX_CANVAS_BACKEND_CPU, .width = 1, .height = 1);
     flux_canvas *c = nullptr;
     OT_EXPECT(flux_canvas_create(&c_desc, &c) == FLUX_OK);
 
@@ -299,7 +303,9 @@ static void test_adr0091_save_layer_opacity_group(void) {
     flux_target *target = nullptr;
     OT_EXPECT(flux_target_create_cpu(&t_desc, &target) == FLUX_OK);
 
-    flux_canvas_desc c_desc = FLUX_INIT(CANVAS_DESC, .backend = FLUX_CANVAS_BACKEND_CPU);
+    /* Draws only into explicit targets; its own framebuffer is unused. */
+    flux_canvas_desc c_desc =
+        FLUX_INIT(CANVAS_DESC, .backend = FLUX_CANVAS_BACKEND_CPU, .width = 1, .height = 1);
     flux_canvas *c = nullptr;
     OT_EXPECT(flux_canvas_create(&c_desc, &c) == FLUX_OK);
 
@@ -351,7 +357,9 @@ static void test_adr0091_squircle_distinct_geometry(void) {
     flux_target *t_rr = nullptr;
     OT_EXPECT(flux_target_create_cpu(&t_desc, &t_rr) == FLUX_OK);
 
-    flux_canvas_desc c_desc = FLUX_INIT(CANVAS_DESC, .backend = FLUX_CANVAS_BACKEND_CPU);
+    /* Draws only into explicit targets; its own framebuffer is unused. */
+    flux_canvas_desc c_desc =
+        FLUX_INIT(CANVAS_DESC, .backend = FLUX_CANVAS_BACKEND_CPU, .width = 1, .height = 1);
     flux_canvas *c = nullptr;
     OT_EXPECT(flux_canvas_create(&c_desc, &c) == FLUX_OK);
 

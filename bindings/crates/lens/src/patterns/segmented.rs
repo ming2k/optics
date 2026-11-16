@@ -100,23 +100,18 @@ impl SegmentedControl {
             })
             .collect();
 
+        let mut raw_sel = *selected_index as u32;
         let opts = lens_sys::lens_segmented_opts {
+            id: id_c.as_ptr(),
+            items: c_items.as_ptr(),
+            item_count: c_items.len() as u32,
+            selected_index: &mut raw_sel,
             height: self.height,
             min_item_width: self.min_item_width,
             compact: self.compact,
         };
 
-        let mut raw_sel = *selected_index as u32;
-        let changed = unsafe {
-            lens_sys::lens_segmented_control(
-                frame.as_raw(),
-                id_c.as_ptr(),
-                c_items.as_ptr(),
-                c_items.len() as u32,
-                &mut raw_sel,
-                &opts,
-            )
-        };
+        let changed = unsafe { lens_sys::lens_segmented_control(frame.as_raw(), &opts) };
 
         if changed {
             *selected_index = raw_sel as usize;

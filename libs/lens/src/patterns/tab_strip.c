@@ -23,9 +23,14 @@ typedef struct tab_strip_drag {
     uint32_t close_index; /* index of the tab whose close button is pressed */
 } tab_strip_drag;
 
-lens_tab_action lens_tab_strip(lens *ui, const char *id_str, const lens_tab_item *tabs,
-                               uint32_t tab_count, uint32_t active_index,
-                               const lens_tab_strip_opts *opts) {
+lens_tab_action lens_tab_strip(lens *ui, const lens_tab_strip_opts *opts) {
+    if (!opts)
+        return (lens_tab_action){};
+    const char *id_str = opts->id;
+    const lens_tab_item *tabs = opts->tabs;
+    const uint32_t tab_count = opts->tab_count;
+    const uint32_t active_index = opts->active_index;
+
     lens_tab_action action = {.kind = LENS_TAB_ACTION_NONE, .index = 0, .to = 0};
     if (!ui || !tabs || tab_count == 0)
         return action;

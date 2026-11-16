@@ -109,17 +109,17 @@ int main(void) {
     iris__event_seam_clear();
 
     /* ---- Public wiring compiles and stores the callback ---- */
-    iris_app_config cfg = {.on_event = seam_cb};
+    iris_app_opts cfg = {.on_event = seam_cb};
     OT_EXPECT(cfg.on_event == seam_cb);
 
     /* ---- Vocabulary sanity (lens values reused, not redefined) ---- */
     iris_event k = {.type = IRIS_EVENT_KEY,
-                    .keyboard = {.key = LENS_KEY_F5, .pressed = true, .mods = LENS_MOD_CTRL}};
+                    .keyboard = {.key = IRIS_KEY_F5, .pressed = true, .mods = IRIS_MOD_CTRL}};
     OT_EXPECT(k.keyboard.key == 284);
-    OT_EXPECT(k.keyboard.mods == LENS_MOD_CTRL);
+    OT_EXPECT(k.keyboard.mods == IRIS_MOD_CTRL);
 
-    iris_event m = {.type = IRIS_EVENT_MODIFIERS, .modifiers = {.mods = LENS_MOD_ALT}};
-    OT_EXPECT(m.modifiers.mods == LENS_MOD_ALT);
+    iris_event m = {.type = IRIS_EVENT_MODIFIERS, .modifiers = {.mods = IRIS_MOD_ALT}};
+    OT_EXPECT(m.modifiers.mods == IRIS_MOD_ALT);
 
     return OT_REPORT();
 }

@@ -10,7 +10,7 @@ negative_knowledge: true
 
 # ADR-0120: GPU analytic coverage — tile-compute plan for a modern 2D rasterizer
 
-- Status: Accepted as a plan. **No implementation is claimed by this record.**
+- Status: Accepted as a plan. **Landed** (GPU compute 16×16 tile binning, per-pixel-row suffix backdrop, and `canvas_vector.frag.slang` evaluation wired into `backend_vk.c`; ear-clip tessellator, stencil fallback, MSAA option, CPU supersampling, and segment/triangle caps **retired**).
 - Date: 2026-10-25
 - Scope: `libs/flux/src/canvas/` (a device coverage backend), `tests/flux/`
   (the acceptance corpus), CI (a real-driver lane).

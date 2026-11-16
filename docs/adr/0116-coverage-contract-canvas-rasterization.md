@@ -10,7 +10,7 @@ negative_knowledge: true
 
 # ADR-0116: Coverage-contract canvas rasterization — analytic coverage backends, MSAA retired
 
-- Status: Accepted
+- Status: Accepted (**landed** — GPU tiled compute rasterizer and 1x CPU analytic coverage live; MSAA option, stencil fallback, ear-clip tessellator, and CPU supersampling **retired**)
 - Date: 2026-10-25
 - Scope: `libs/flux/src/canvas/` (front end, `backend.h`, `backend_vk.c`,
   `backend_cpu.c`, `renderer.c`, the fill/stroke entry points),

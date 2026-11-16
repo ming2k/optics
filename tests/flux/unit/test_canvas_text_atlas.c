@@ -75,7 +75,12 @@ int main(void) {
     }
 
     flux_canvas *c = nullptr;
-    OT_EXPECT(flux_canvas_create_cpu(W, H, SCALE, &c) == FLUX_OK);
+    OT_EXPECT(flux_canvas_create(&(flux_canvas_desc){.type = FLUX_TYPE_CANVAS_DESC,
+                                                     .backend = FLUX_CANVAS_BACKEND_CPU,
+                                                     .scale = SCALE,
+                                                     .width = W,
+                                                     .height = H},
+                                 &c) == FLUX_OK);
 
     glyph_style style = {};
     style.size_px = 64.0f;

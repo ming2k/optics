@@ -14,33 +14,33 @@
 
 int main(void) {
     /* --- Action support --- */
-    OT_EXPECT(iris_a11y__supports_action(LENS_ROLE_BUTTON));
-    OT_EXPECT(iris_a11y__supports_action(LENS_ROLE_CHECKBOX));
-    OT_EXPECT(iris_a11y__supports_action(LENS_ROLE_RADIO));
-    OT_EXPECT(iris_a11y__supports_action(LENS_ROLE_DISCLOSURE));
-    OT_EXPECT(!iris_a11y__supports_action(LENS_ROLE_LABEL));
-    OT_EXPECT(!iris_a11y__supports_action(LENS_ROLE_SLIDER));
-    OT_EXPECT(!iris_a11y__supports_action(LENS_ROLE_TEXTFIELD));
-    OT_EXPECT(!iris_a11y__supports_action(LENS_ROLE_NONE));
+    OT_EXPECT(iris_a11y__supports_action(IRIS_ROLE_BUTTON));
+    OT_EXPECT(iris_a11y__supports_action(IRIS_ROLE_CHECKBOX));
+    OT_EXPECT(iris_a11y__supports_action(IRIS_ROLE_RADIO));
+    OT_EXPECT(iris_a11y__supports_action(IRIS_ROLE_DISCLOSURE));
+    OT_EXPECT(!iris_a11y__supports_action(IRIS_ROLE_LABEL));
+    OT_EXPECT(!iris_a11y__supports_action(IRIS_ROLE_SLIDER));
+    OT_EXPECT(!iris_a11y__supports_action(IRIS_ROLE_TEXTFIELD));
+    OT_EXPECT(!iris_a11y__supports_action(IRIS_ROLE_NONE));
 
     /* --- Text support --- */
-    OT_EXPECT(iris_a11y__supports_text(LENS_ROLE_TEXTFIELD));
-    OT_EXPECT(iris_a11y__supports_text(LENS_ROLE_TEXTAREA));
-    OT_EXPECT(!iris_a11y__supports_text(LENS_ROLE_BUTTON));
-    OT_EXPECT(!iris_a11y__supports_text(LENS_ROLE_LABEL));
+    OT_EXPECT(iris_a11y__supports_text(IRIS_ROLE_TEXTFIELD));
+    OT_EXPECT(iris_a11y__supports_text(IRIS_ROLE_TEXTAREA));
+    OT_EXPECT(!iris_a11y__supports_text(IRIS_ROLE_BUTTON));
+    OT_EXPECT(!iris_a11y__supports_text(IRIS_ROLE_LABEL));
 
     /* --- Value support --- */
-    OT_EXPECT(iris_a11y__supports_value(LENS_ROLE_SLIDER));
-    OT_EXPECT(!iris_a11y__supports_value(LENS_ROLE_BUTTON));
-    OT_EXPECT(!iris_a11y__supports_value(LENS_ROLE_CHECKBOX));
+    OT_EXPECT(iris_a11y__supports_value(IRIS_ROLE_SLIDER));
+    OT_EXPECT(!iris_a11y__supports_value(IRIS_ROLE_BUTTON));
+    OT_EXPECT(!iris_a11y__supports_value(IRIS_ROLE_CHECKBOX));
 
     /* --- Action names --- */
-    OT_EXPECT_STR_EQ(iris_a11y__action_name(LENS_ROLE_BUTTON), "click");
-    OT_EXPECT_STR_EQ(iris_a11y__action_name(LENS_ROLE_MENU), "click");
-    OT_EXPECT_STR_EQ(iris_a11y__action_name(LENS_ROLE_CHECKBOX), "click");
-    OT_EXPECT_STR_EQ(iris_a11y__action_name(LENS_ROLE_RADIO), "click");
-    OT_EXPECT_STR_EQ(iris_a11y__action_name(LENS_ROLE_DISCLOSURE), "click");
-    OT_EXPECT(iris_a11y__action_name(LENS_ROLE_LABEL) == nullptr);
+    OT_EXPECT_STR_EQ(iris_a11y__action_name(IRIS_ROLE_BUTTON), "click");
+    OT_EXPECT_STR_EQ(iris_a11y__action_name(IRIS_ROLE_MENU), "click");
+    OT_EXPECT_STR_EQ(iris_a11y__action_name(IRIS_ROLE_CHECKBOX), "click");
+    OT_EXPECT_STR_EQ(iris_a11y__action_name(IRIS_ROLE_RADIO), "click");
+    OT_EXPECT_STR_EQ(iris_a11y__action_name(IRIS_ROLE_DISCLOSURE), "click");
+    OT_EXPECT(iris_a11y__action_name(IRIS_ROLE_LABEL) == nullptr);
 
     /* --- Value parser --- */
     OT_EXPECT(iris_a11y__parse_value("1.5") == 1.5);
@@ -61,37 +61,37 @@ int main(void) {
     OT_EXPECT(iris_a11y__char_count_utf8("\xe6\x97\xa5\xe6\x9c\xac") == 2);
 
     /* --- New roles (ADR-0035 extension) land in the interface map --- */
-    OT_EXPECT(iris_a11y__supports_action(LENS_ROLE_MENUITEM));
-    OT_EXPECT(iris_a11y__supports_action(LENS_ROLE_LINK));
-    OT_EXPECT(!iris_a11y__supports_action(LENS_ROLE_PROGRESS));
-    OT_EXPECT(!iris_a11y__supports_action(LENS_ROLE_TABLE));
-    OT_EXPECT(!iris_a11y__supports_action(LENS_ROLE_ROW));
-    OT_EXPECT(iris_a11y__supports_value(LENS_ROLE_PROGRESS));
-    OT_EXPECT(!iris_a11y__supports_value(LENS_ROLE_ROW));
-    OT_EXPECT_STR_EQ(iris_a11y__action_name(LENS_ROLE_MENUITEM), "click");
-    OT_EXPECT_STR_EQ(iris_a11y__action_name(LENS_ROLE_LINK), "click");
+    OT_EXPECT(iris_a11y__supports_action(IRIS_ROLE_MENUITEM));
+    OT_EXPECT(iris_a11y__supports_action(IRIS_ROLE_LINK));
+    OT_EXPECT(!iris_a11y__supports_action(IRIS_ROLE_PROGRESS));
+    OT_EXPECT(!iris_a11y__supports_action(IRIS_ROLE_TABLE));
+    OT_EXPECT(!iris_a11y__supports_action(IRIS_ROLE_ROW));
+    OT_EXPECT(iris_a11y__supports_value(IRIS_ROLE_PROGRESS));
+    OT_EXPECT(!iris_a11y__supports_value(IRIS_ROLE_ROW));
+    OT_EXPECT_STR_EQ(iris_a11y__action_name(IRIS_ROLE_MENUITEM), "click");
+    OT_EXPECT_STR_EQ(iris_a11y__action_name(IRIS_ROLE_LINK), "click");
 
     /* --- Role mapping: exact AT-SPI wire values (atspi-constants.h).
      * Regression cover for the audit finding that these numbers drifted
      * from the protocol (clients compare them numerically). --- */
-    OT_EXPECT(iris_a11y__map_role(LENS_ROLE_BUTTON) == 43);     /* PUSH_BUTTON   */
-    OT_EXPECT(iris_a11y__map_role(LENS_ROLE_CHECKBOX) == 7);    /* CHECK_BOX     */
-    OT_EXPECT(iris_a11y__map_role(LENS_ROLE_RADIO) == 44);      /* RADIO_BUTTON  */
-    OT_EXPECT(iris_a11y__map_role(LENS_ROLE_SLIDER) == 51);     /* SLIDER        */
-    OT_EXPECT(iris_a11y__map_role(LENS_ROLE_LABEL) == 29);      /* LABEL         */
-    OT_EXPECT(iris_a11y__map_role(LENS_ROLE_GROUP) == 39);      /* PANEL         */
-    OT_EXPECT(iris_a11y__map_role(LENS_ROLE_SCROLLAREA) == 49); /* SCROLL_PANE */
-    OT_EXPECT(iris_a11y__map_role(LENS_ROLE_TEXTFIELD) == 79);  /* ENTRY       */
-    OT_EXPECT(iris_a11y__map_role(LENS_ROLE_TEXTAREA) == 61);   /* TEXT        */
-    OT_EXPECT(iris_a11y__map_role(LENS_ROLE_DISCLOSURE) == 62); /* TOGGLE_BUTTON */
-    OT_EXPECT(iris_a11y__map_role(LENS_ROLE_MENU) == 33);       /* MENU          */
-    OT_EXPECT(iris_a11y__map_role(LENS_ROLE_DIALOG) == 16);     /* DIALOG        */
-    OT_EXPECT(iris_a11y__map_role(LENS_ROLE_PROGRESS) == 42);   /* PROGRESS_BAR  */
-    OT_EXPECT(iris_a11y__map_role(LENS_ROLE_TABLE) == 55);      /* TABLE         */
-    OT_EXPECT(iris_a11y__map_role(LENS_ROLE_ROW) == 90);        /* TABLE_ROW     */
-    OT_EXPECT(iris_a11y__map_role(LENS_ROLE_MENUITEM) == 35);   /* MENU_ITEM     */
-    OT_EXPECT(iris_a11y__map_role(LENS_ROLE_LINK) == 88);       /* LINK          */
-    OT_EXPECT(iris_a11y__map_role(LENS_ROLE_NONE) == 67);       /* UNKNOWN       */
+    OT_EXPECT(iris_a11y__map_role(IRIS_ROLE_BUTTON) == 43);     /* PUSH_BUTTON   */
+    OT_EXPECT(iris_a11y__map_role(IRIS_ROLE_CHECKBOX) == 7);    /* CHECK_BOX     */
+    OT_EXPECT(iris_a11y__map_role(IRIS_ROLE_RADIO) == 44);      /* RADIO_BUTTON  */
+    OT_EXPECT(iris_a11y__map_role(IRIS_ROLE_SLIDER) == 51);     /* SLIDER        */
+    OT_EXPECT(iris_a11y__map_role(IRIS_ROLE_LABEL) == 29);      /* LABEL         */
+    OT_EXPECT(iris_a11y__map_role(IRIS_ROLE_GROUP) == 39);      /* PANEL         */
+    OT_EXPECT(iris_a11y__map_role(IRIS_ROLE_SCROLLAREA) == 49); /* SCROLL_PANE */
+    OT_EXPECT(iris_a11y__map_role(IRIS_ROLE_TEXTFIELD) == 79);  /* ENTRY       */
+    OT_EXPECT(iris_a11y__map_role(IRIS_ROLE_TEXTAREA) == 61);   /* TEXT        */
+    OT_EXPECT(iris_a11y__map_role(IRIS_ROLE_DISCLOSURE) == 62); /* TOGGLE_BUTTON */
+    OT_EXPECT(iris_a11y__map_role(IRIS_ROLE_MENU) == 33);       /* MENU          */
+    OT_EXPECT(iris_a11y__map_role(IRIS_ROLE_DIALOG) == 16);     /* DIALOG        */
+    OT_EXPECT(iris_a11y__map_role(IRIS_ROLE_PROGRESS) == 42);   /* PROGRESS_BAR  */
+    OT_EXPECT(iris_a11y__map_role(IRIS_ROLE_TABLE) == 55);      /* TABLE         */
+    OT_EXPECT(iris_a11y__map_role(IRIS_ROLE_ROW) == 90);        /* TABLE_ROW     */
+    OT_EXPECT(iris_a11y__map_role(IRIS_ROLE_MENUITEM) == 35);   /* MENU_ITEM     */
+    OT_EXPECT(iris_a11y__map_role(IRIS_ROLE_LINK) == 88);       /* LINK          */
+    OT_EXPECT(iris_a11y__map_role(IRIS_ROLE_NONE) == 67);       /* UNKNOWN       */
     OT_EXPECT_STR_EQ(iris_a11y__role_name(IRIS_ATSPI_ROLE_PROGRESS_BAR), "progress bar");
     OT_EXPECT_STR_EQ(iris_a11y__role_name(IRIS_ATSPI_ROLE_TABLE_ROW), "table row");
 
@@ -102,19 +102,19 @@ int main(void) {
     OT_EXPECT(lo == ((1u << 11) | (1u << 8) | (1u << 24) | (1u << 25)));
     OT_EXPECT(hi == 0);
     iris_a11y__state_bits(
-        LENS_A11Y_FOCUSED | LENS_A11Y_CHECKED | LENS_A11Y_EXPANDED | LENS_A11Y_SELECTED, &lo, &hi);
+        IRIS_A11Y_FOCUSED | IRIS_A11Y_CHECKED | IRIS_A11Y_EXPANDED | IRIS_A11Y_SELECTED, &lo, &hi);
     /* + FOCUSED(12) | CHECKED(4) | EXPANDED(10) | SELECTED(23) */
     OT_EXPECT(lo == ((1u << 11) | (1u << 8) | (1u << 24) | (1u << 25) | (1u << 12) | (1u << 4) |
                      (1u << 10) | (1u << 23)));
     OT_EXPECT(hi == 0);
-    iris_a11y__state_bits(LENS_A11Y_DISABLED, &lo, &hi);
+    iris_a11y__state_bits(IRIS_A11Y_DISABLED, &lo, &hi);
     OT_EXPECT(lo == (1u << 25)); /* SHOWING only */
     OT_EXPECT(hi == 0);
 
     /* --- node_fill: deep copies + sibling index --- */
     iris_a11y__node cur[8];
     memset(cur, 0, sizeof cur);
-    lens_semantics sem = {.role = LENS_ROLE_BUTTON, .name = "OK", .value = nullptr, .flags = 0};
+    iris_semantics sem = {.role = IRIS_ROLE_BUTTON, .name = "OK", .value = nullptr, .flags = 0};
     iris_a11y__node_fill(&cur[0], &sem, 100, 0, cur, 0);
     OT_EXPECT_STR_EQ(cur[0].name, "OK");
     OT_EXPECT(cur[0].value[0] == '\0');
@@ -136,9 +136,9 @@ int main(void) {
     iris_a11y__node f1[4], f2[4];
     memset(f1, 0, sizeof f1);
     memset(f2, 0, sizeof f2);
-    lens_semantics s1 = {.role = LENS_ROLE_BUTTON, .name = "One", .value = nullptr, .flags = 0};
-    lens_semantics s2 = {
-        .role = LENS_ROLE_CHECKBOX, .name = "Two", .value = nullptr, .flags = LENS_A11Y_CHECKED};
+    iris_semantics s1 = {.role = IRIS_ROLE_BUTTON, .name = "One", .value = nullptr, .flags = 0};
+    iris_semantics s2 = {
+        .role = IRIS_ROLE_CHECKBOX, .name = "Two", .value = nullptr, .flags = IRIS_A11Y_CHECKED};
     iris_a11y__node_fill(&f1[0], &s1, 1, 0, f1, 0);
     iris_a11y__node_fill(&f1[1], &s2, 2, 0, f1, 1);
     size_t n = iris_a11y__diff(nullptr, 0, f1, 2, evs, 32);
@@ -147,8 +147,8 @@ int main(void) {
     OT_EXPECT(evs[1].kind == IRIS_A11Y__EV_ADD && evs[1].id == 2 && evs[1].index == 1);
 
     /* frame 2: id 1 renamed, id 2 removed, id 3 added (unchecked, new name) */
-    lens_semantics s1b = {.role = LENS_ROLE_BUTTON, .name = "One!", .value = nullptr, .flags = 0};
-    lens_semantics s3 = {.role = LENS_ROLE_SLIDER, .name = "Vol", .value = "0.5", .flags = 0};
+    iris_semantics s1b = {.role = IRIS_ROLE_BUTTON, .name = "One!", .value = nullptr, .flags = 0};
+    iris_semantics s3 = {.role = IRIS_ROLE_SLIDER, .name = "Vol", .value = "0.5", .flags = 0};
     iris_a11y__node_fill(&f2[0], &s1b, 1, 0, f2, 0);
     iris_a11y__node_fill(&f2[1], &s3, 3, 0, f2, 1);
     n = iris_a11y__diff(f1, 2, f2, 2, evs, 32);
@@ -160,8 +160,8 @@ int main(void) {
     OT_EXPECT(evs[2].node && strcmp(evs[2].node->name, "One!") == 0);
 
     /* frame 3: slider value moves, checkbox state flips, role changes */
-    lens_semantics s3b = {.role = LENS_ROLE_SLIDER, .name = "Vol", .value = "0.7", .flags = 0};
-    lens_semantics s1c = {.role = LENS_ROLE_LINK, .name = "One!", .value = nullptr, .flags = 0};
+    iris_semantics s3b = {.role = IRIS_ROLE_SLIDER, .name = "Vol", .value = "0.7", .flags = 0};
+    iris_semantics s1c = {.role = IRIS_ROLE_LINK, .name = "One!", .value = nullptr, .flags = 0};
     iris_a11y__node_fill(&f1[0], &s1c, 1, 0, f1, 0);
     iris_a11y__node_fill(&f1[1], &s3b, 3, 0, f1, 1);
     n = iris_a11y__diff(f2, 2, f1, 2, evs, 32);
@@ -169,13 +169,13 @@ int main(void) {
      * the fixed per-node order role, name, value, states; node order is the
      * cur walk order (id 1 first, then id 3). */
     OT_EXPECT(n == 2);
-    OT_EXPECT(evs[0].kind == IRIS_A11Y__EV_ROLE && evs[0].id == 1 && evs[0].role == LENS_ROLE_LINK);
+    OT_EXPECT(evs[0].kind == IRIS_A11Y__EV_ROLE && evs[0].id == 1 && evs[0].role == IRIS_ROLE_LINK);
     OT_EXPECT(evs[1].kind == IRIS_A11Y__EV_VALUE && evs[1].id == 3);
 
     /* state flip: checked -> unchecked on a stable id */
-    lens_semantics c_on = {
-        .role = LENS_ROLE_CHECKBOX, .name = "C", .value = nullptr, .flags = LENS_A11Y_CHECKED};
-    lens_semantics c_off = {.role = LENS_ROLE_CHECKBOX, .name = "C", .value = nullptr, .flags = 0};
+    iris_semantics c_on = {
+        .role = IRIS_ROLE_CHECKBOX, .name = "C", .value = nullptr, .flags = IRIS_A11Y_CHECKED};
+    iris_semantics c_off = {.role = IRIS_ROLE_CHECKBOX, .name = "C", .value = nullptr, .flags = 0};
     memset(f1, 0, sizeof f1);
     memset(f2, 0, sizeof f2);
     iris_a11y__node_fill(&f1[0], &c_on, 5, 0, f1, 0);
@@ -240,8 +240,8 @@ int main(void) {
     /* --- diff routes text-role value changes to EV_TEXT --- */
     memset(f1, 0, sizeof f1);
     memset(f2, 0, sizeof f2);
-    lens_semantics t1 = {.role = LENS_ROLE_TEXTFIELD, .name = "F", .value = "hel", .flags = 0};
-    lens_semantics t2 = {.role = LENS_ROLE_TEXTFIELD, .name = "F", .value = "hello", .flags = 0};
+    iris_semantics t1 = {.role = IRIS_ROLE_TEXTFIELD, .name = "F", .value = "hel", .flags = 0};
+    iris_semantics t2 = {.role = IRIS_ROLE_TEXTFIELD, .name = "F", .value = "hello", .flags = 0};
     iris_a11y__node_fill(&f1[0], &t1, 7, 0, f1, 0);
     iris_a11y__node_fill(&f2[0], &t2, 7, 0, f2, 0);
     n = iris_a11y__diff(f1, 1, f2, 1, evs, 32);

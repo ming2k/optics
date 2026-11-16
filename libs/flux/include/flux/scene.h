@@ -25,8 +25,14 @@ typedef struct flux_camera {
     flux_mat4 projection;
 } flux_camera;
 
-FLUX_API void flux_camera_perspective(flux_camera *cam, float fov_y_rad, float aspect, float z_near,
-                                      float z_far);
+typedef struct flux_camera_perspective_opts {
+    float fov_y_rad; /* vertical field of view, radians */
+    float aspect;    /* width / height                  */
+    float z_near;
+    float z_far;
+} flux_camera_perspective_opts;
+
+FLUX_API void flux_camera_perspective(flux_camera *cam, const flux_camera_perspective_opts *opts);
 
 FLUX_API void flux_camera_look_at(flux_camera *cam, flux_vec3 eye, flux_vec3 center, flux_vec3 up);
 

@@ -106,7 +106,12 @@ static const uint8_t *px_at(const uint8_t *px, uint32_t x, uint32_t y) {
 int main(void) {
     /* ---- CPU oracle ---- */
     flux_canvas *cpu = nullptr;
-    OT_EXPECT(flux_canvas_create_cpu(W, H, 1.0f, &cpu) == FLUX_OK);
+    OT_EXPECT(flux_canvas_create(&(flux_canvas_desc){.type = FLUX_TYPE_CANVAS_DESC,
+                                                     .backend = FLUX_CANVAS_BACKEND_CPU,
+                                                     .scale = 1.0f,
+                                                     .width = W,
+                                                     .height = H},
+                                 &cpu) == FLUX_OK);
     OT_EXPECT(cpu != nullptr);
 
     flux_arena arena;

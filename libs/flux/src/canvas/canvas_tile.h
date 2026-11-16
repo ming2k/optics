@@ -1,29 +1,25 @@
 /*
- * Tile-compute coverage backend (ADR-0120 Phase B).
- *
- * Consumes flattened contours and produces an analytic coverage plane
- * entirely on the GPU via compute shaders (no MSAA, no stencil attachment,
- * continuous 1x coverage).
- *
- * Phase B1: Segment extraction and SSBO storage buffer transport.
- * Phase B2: Coarse rasterization (16x16 tile binning).
- * Phase B3: Winding backdrop computation (two-level prefix sum).
- * Phase B4: Fine raster per-pixel area integration.
+ * canvas_tile.h — Tile-compute 2D analytic coverage types & helpers (ADR-0120).
  */
+
 #ifndef FLUX_CANVAS_TILE_H
 #define FLUX_CANVAS_TILE_H
 
 #include "internal.h"
-#include <flux/core.h>
-#include <flux/curve.h>
+#include <stddef.h>
+#include <stdint.h>
 
 #define FLUX_TILE_SIZE 16u
+#define FLUX_TILE_BD_SCALE 65536
 
-/* A single 2D line segment in physical device space, consumable by GPU compute shaders (ADR-0121).
- */
-typedef flux_segment flux_tile_segment;
+/* Flattened line segment in physical canvas pixels (16 bytes). */
+typedef struct flux_tile_segment {
+    float x0, y0;
+    float x1, y1;
+} flux_tile_segment;
+static_assert(sizeof(flux_tile_segment) == 16, "flux_tile_segment must match GPU GpuSegment");
 
-/* Header block for the segment SSBO, read by GPU coarse binning compute passes. */
+/* Header for GPU Segment SSBO upload (align to 16 bytes for BDA). */
 typedef struct flux_tile_segment_header {
     uint32_t segment_count;
     uint32_t fill_rule; /* 0 = NonZero, 1 = EvenOdd */
@@ -32,13 +28,32 @@ typedef struct flux_tile_segment_header {
     uint32_t pad[2];
 } flux_tile_segment_header;
 
-/* Metadata per 16x16 tile. */
+/* Metadata per 16x16 tile (16 bytes; matches GPU GpuTileHeader). */
 typedef struct flux_tile_desc {
     uint32_t segment_offset;
     uint32_t segment_count;
-    int32_t backdrop_winding; /* Phase B3: base winding entering from left */
+    uint32_t cursor;
     uint32_t pad;
 } flux_tile_desc;
+static_assert(sizeof(flux_tile_desc) == 16, "flux_tile_desc must match GPU GpuTileHeader");
+
+/* Per-draw GPU tile dispatch block read by compute bin/scan and vector fragment shaders. */
+typedef struct flux_gpu_tile_dispatch {
+    uint64_t segs;
+    uint64_t tile_headers;
+    uint64_t row_backdrops;
+    uint64_t tile_indices;
+    uint32_t seg_count;
+    uint32_t max_indices;
+    uint32_t tile_ox;
+    uint32_t tile_oy;
+    uint32_t tiles_x;
+    uint32_t tiles_y;
+    uint32_t fill_rule;
+    uint32_t _pad0;
+} flux_gpu_tile_dispatch;
+static_assert(sizeof(flux_gpu_tile_dispatch) == 64,
+              "flux_gpu_tile_dispatch must match GPU GpuTileDispatch");
 
 /* Compute tile grid dimensions for a given pixel width and height. */
 static inline void canvas_tile_grid_dims(uint32_t w, uint32_t h, uint32_t *out_tx,
@@ -49,18 +64,21 @@ static inline void canvas_tile_grid_dims(uint32_t w, uint32_t h, uint32_t *out_t
         *out_ty = (h + FLUX_TILE_SIZE - 1u) / FLUX_TILE_SIZE;
 }
 
-/* Extract flattened segments from CPU contour points into a host segment buffer.
- * Zero-length segments (coincident endpoints) are filtered out.
- * Returns the number of segments extracted. */
+/* Convert flattened contours into closed linear segments and compute tight bounds. */
 uint32_t canvas_tile_extract_segments(const flux_point *pts, const flux_canvas_contour *cons,
                                       uint32_t ncons, flux_tile_segment *out_segs, uint32_t cap,
                                       flux_rect *out_bounds);
 
 /* Upload segments into a GPU storage buffer.
- * Allocates or reuses *out_buf with usage STORAGE | TRANSFER_SRC. */
+ * Allocates or reuses *out_buf with usage STORAGE | TRANSFER_SRC | TRANSFER_DST. */
 flux_result canvas_tile_upload_segments(flux_device *d, const flux_tile_segment *segs,
                                         uint32_t count, flux_fill_rule rule, flux_rect bounds,
                                         flux_buffer **out_buf);
+
+/* Conservative upper bound on the number of (tile, segment) bin entries for a GPU dispatch. */
+uint32_t canvas_tile_estimate_max_indices(const flux_tile_segment *segs, uint32_t seg_count,
+                                          uint32_t tile_ox, uint32_t tile_oy, uint32_t tiles_x,
+                                          uint32_t tiles_y);
 
 /* Precise segment-to-tile intersection test. */
 bool canvas_tile_segment_intersects(flux_tile_segment seg, float tile_x0, float tile_y0,
@@ -73,14 +91,13 @@ flux_result canvas_tile_bin_segments(const flux_tile_segment *segs, uint32_t seg
                                      uint32_t *out_indices, uint32_t indices_cap,
                                      uint32_t *out_total_indices);
 
-/* Compute winding backdrop for every tile via two-level prefix sum (Phase B3).
- * Fills out_tiles[...].backdrop_winding matching flux_curve_cover_winding on all interior tiles. */
+/* Compute exact fixed-point (FLUX_TILE_BD_SCALE) per-pixel-row right-side backdrop
+ * for every pixel row of every tile (`tiles_x * tiles_y * FLUX_TILE_SIZE` int32_t entries). */
 flux_result canvas_tile_compute_backdrop(const flux_tile_segment *segs, uint32_t seg_count,
                                          uint32_t width, uint32_t height,
-                                         flux_tile_desc *out_tiles);
+                                         int32_t *out_row_backdrops);
 
-/* Phase B4: End-to-end tile-compute rasterizer (coarse binning + backdrop + fine raster).
- * Evaluates exact area integration matching coverage_raster.c formulation. */
+/* End-to-end CPU reference for the tiled rasterizer (binning + per-row backdrop + fine area). */
 flux_result canvas_tile_rasterize(const flux_tile_segment *segs, uint32_t seg_count,
                                   flux_fill_rule rule, float ox, float oy, uint32_t w, uint32_t h,
                                   float *out_cov);

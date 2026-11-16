@@ -19,7 +19,12 @@ typedef struct {
 
 static void fixture_open(fixture *f) {
     OT_EXPECT(lens_create(&(lens_desc){}, &f->ui) == FLUX_OK);
-    OT_EXPECT(flux_canvas_create_cpu(W, H, 1.0f, &f->canvas) == FLUX_OK);
+    OT_EXPECT(flux_canvas_create(&(flux_canvas_desc){.type = FLUX_TYPE_CANVAS_DESC,
+                                                     .backend = FLUX_CANVAS_BACKEND_CPU,
+                                                     .scale = 1.0f,
+                                                     .width = W,
+                                                     .height = H},
+                                 &f->canvas) == FLUX_OK);
 }
 
 static void fixture_close(fixture *f) {
@@ -173,7 +178,12 @@ static void test_scroll_offset_invalidates_descendant_records(void) {
 static void test_hidpi_scroll_clip_alignment(void) {
     fixture f;
     OT_EXPECT(lens_create(&(lens_desc){}, &f.ui) == FLUX_OK);
-    OT_EXPECT(flux_canvas_create_cpu(W * 2, H * 2, 2.0f, &f.canvas) == FLUX_OK);
+    OT_EXPECT(flux_canvas_create(&(flux_canvas_desc){.type = FLUX_TYPE_CANVAS_DESC,
+                                                     .backend = FLUX_CANVAS_BACKEND_CPU,
+                                                     .scale = 2.0f,
+                                                     .width = W * 2,
+                                                     .height = H * 2},
+                                 &f.canvas) == FLUX_OK);
     lens_set_scale(f.ui, 2.0f);
 
     const lens_input hidpi_in = {.display_size = {W, H}, .cursor = {50, 50}, .dt_seconds = 0.016f};

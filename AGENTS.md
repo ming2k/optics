@@ -6,24 +6,25 @@
 - **Clean Git State**: Do not leave scratch files, temporary binaries, or untracked test logs in the working tree.
 
 ## 2. Core Mental Model & Subsystem Boundaries
-- **Micro-Kernel Topology**: Optics is a high-performance C23 graphics and UI stack organized into seven orthogonal libraries under `libs/`:
-  - `flux`: Vulkan 1.3 RHI, 2D vector canvas (GPU & headless CPU fallback `<flux/canvas_cpu.h>`), 3D draw core, compute pipelines, analytic curve kernel.
-  - `glyph`: HarfBuzz-backed text shaping, layout metrics, and dynamic texture atlas caching.
-  - `vista`: Scene graph orchestration, cameras, hierarchical transforms, and spatial bounds.
-  - `prism`: Physical surface materials: dielectric Liquid Glass (refraction, dispersion, contact AO), Frosted Glass, Acrylic, and Mica.
-  - `transit`: Provable motion physics, closed-form analytic spring integration, and parametric easing.
-  - `reticle`: Vector-art document compiler (SVG path grammar, shape decomposition, gradient resolution, headless rasterization).
-  - `lens`: Immediate-mode UI engine, layout (Grid/Flex/Flow), retained store state machines, and accessibility tree export (A11y).
-  - `iris`: Native OS windowing, event pump, display pacing (Wayland, Win32, Cocoa), pre-lens event seam (ADR-0107), and dual-thread pipeline (ADR-0124).
+- **Topology**: Optics is a C23 graphics and UI stack of nine libraries under `libs/`. Dependencies point one way; the build graph is the authority (`meson.build` per library):
+  - `flux` (Vulkan only): Vulkan 1.3 RHI, 2D vector canvas (GPU & CPU backend `<flux/canvas_cpu.h>`), 3D draw core, compute pipelines, image effects, analytic curve kernel. One library, one ABI, no optional modules.
+  - `glyph` (→ flux): HarfBuzz-backed text shaping, layout metrics, and dynamic texture atlas caching.
+  - `reticle` (→ flux): Vector-art document compiler (SVG path grammar, shape decomposition, gradient resolution, headless rasterization).
+  - `vista` (→ flux): Scene graph, cameras, hierarchical transforms, glTF loading.
+  - `prism` (→ flux): Surface materials: Liquid Glass (refraction, dispersion, contact AO), Frosted Glass, Acrylic, and Mica.
+  - `transit` (header-only, libm): Closed-form analytic spring integration and parametric easing.
+  - `iris` (→ flux): Native OS windowing, event pump, display pacing (Wayland, Win32, Cocoa), event seam (ADR-0107), dual-thread pipeline (ADR-0124), and the UI-host seam `<iris/host.h>`. Must never include a UI header.
+  - `lens` (→ flux, glyph, reticle): Immediate-mode UI engine, layout (Grid/Flex/Flow), retained store, accessibility tree. Headless: must never include a windowing header.
+  - `aperture` (→ iris, lens): Application shell. The only library that links both iris and lens; implements `iris_ui_host` over a lens context.
 - **Pure C23 Baseline**: Idiomatic modern C (`-std=c23`) across all modules:
   - Pointers: Always use `nullptr` (never `NULL` or `0`).
   - Zero-initialization: Always use `{}` (never `{0}`).
   - Enums: Explicit underlying types (`typedef enum name : uint32_t { ... }`).
   - Attributes: Standard C23 `[[nodiscard]]`, `[[reproducible]]`, `[[unsequenced]]`.
   - Assertions: Standard C23 `static_assert(cond, msg)`.
-- **Single Opts Descriptor Paradigm**: Every public functional entry point accepts **exactly one** typed descriptor pointer (`const module_<item>_opts *opts`) and returns a structured response. Dual API tiers (`_ex`), parameter suffixes (`_wrapped`, `_primary`), and floating state modifiers are strictly forbidden.
-- **Material Boundary Separation (ADR-0063)**: `flux` (Layer 0) must NEVER reference named materials (`prism_`, `liquid_glass`) or higher-level shaders. Enforced natively by linker and build-system dependency isolation.
-- **Zero-Alloc Frame Walk**: Render walk and widget layout passes (`lens_begin` ➔ `lens_end`) must never invoke libc `malloc`/`calloc`/`realloc`/`free`. Memory borrows strictly from the per-frame arena (`ui->arena`).
+- **Descriptor Rule**: A public function takes at most four parameters; anything needing more configuration takes exactly one typed descriptor (`const module_<item>_opts *` or `_desc *`), never two. Scalar setters, getters and pure math/geometry kernels stay positional. Variant suffixes (`_ex`, `_wrapped`, `_primary`) are forbidden: a variant is a descriptor field. Enforced by `tools/check_api.py`; `tools/config/api_baseline.txt` lists the functions still to convert and may only shrink.
+- **Material Boundary Separation (ADR-0063)**: `flux` must NEVER reference named materials (`prism_`, `liquid_glass`) or higher-level shaders. Enforced natively by linker and build-system dependency isolation.
+- **Zero-Alloc Steady-State Frame**: A frame that builds the same widgets as the previous one runs `lens_begin` ➔ `lens_end` without calling libc `malloc`/`calloc`/`realloc`/`free`, whatever the input; it borrows from the per-frame arena (`ui->arena`). Structural change (a node entering or leaving, the node store resizing) may use the persistent allocator. Enforced by `tests/lens/test_zero_alloc.c`.
 - **Library Stdout Purity**: Shared library TUs must never write to `stdout` (`printf`, `puts`), reserving stdout for IPC. Use `stderr` for diagnostics.
 
 ## 3. Engineering Discipline
@@ -35,7 +36,7 @@
 ## 4. On-Demand Standards Routing
 Do not guess repository rules or rely on stale assumptions. Consult authoritative specifications as needed:
 - Standards Suite Catalog: `docs/dev/standards/README.md`
-  - System Architecture & 5-Gate Review Matrix: `docs/dev/standards/architecture.md`
+  - System Architecture, Library Graph & Red-Lines: `docs/dev/standards/architecture.md`
   - Invariant & Constraint Policy: `docs/dev/standards/invariants.md`
   - C23 API Design & Opts Conventions: `docs/dev/standards/api-design.md`
   - ADR Standards & Template: `docs/dev/standards/adr.md`

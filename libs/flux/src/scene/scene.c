@@ -47,12 +47,12 @@ alignas(uint32_t) static const unsigned char scene_vector_frag_spv[] = {
 /*  Camera                                                            */
 /* ================================================================== */
 
-void flux_camera_perspective(flux_camera *cam, float fov_y_rad, float aspect, float z_near,
-                             float z_far) {
-    if (!cam)
+void flux_camera_perspective(flux_camera *cam, const flux_camera_perspective_opts *opts) {
+    if (!cam || !opts)
         return;
     cam->view = flux_mat4_identity();
-    cam->projection = flux_mat4_perspective(fov_y_rad, aspect, z_near, z_far);
+    cam->projection =
+        flux_mat4_perspective(opts->fov_y_rad, opts->aspect, opts->z_near, opts->z_far);
 }
 
 void flux_camera_look_at(flux_camera *cam, flux_vec3 eye, flux_vec3 center, flux_vec3 up) {

@@ -156,7 +156,7 @@ canvas, which applies the output transform:
 
     /* once: a working-space target */
     flux_image *scene_rt = nullptr;
-    flux_image_create_render_target(d, w, h, FLUX_FORMAT_RGBA16_SFLOAT, &scene_rt);
+    flux_image_create (FLUX_IMAGE_USAGE_RENDER_TARGET)(d, w, h, FLUX_FORMAT_RGBA16_SFLOAT, &scene_rt);
 
     /* per frame: render the scene into it, then composite */
     flux_frame_prepare_image_target(frame, scene_rt);

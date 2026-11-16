@@ -1,5 +1,5 @@
 /* app_cocoa.m — native macOS Cocoa window + Vulkan (Metal, via flux) +
- * lens_input. Mirrors app_wayland.c section-for-section:
+ * iris_input. Mirrors app_wayland.c section-for-section:
  *
  *   connection → window → pointer → keyboard → IME → clipboard → frame
  *   pacing → run/teardown.
@@ -8,7 +8,7 @@
  * frame-pacing policy stays identical to the other backends (ADR-0044). The
  * view is layer-backed by a CAMetalLayer and the Vulkan surface is created
  * with VK_EXT_metal_surface (MoltenVK). Pointer and keyboard events are
- * folded into one lens_input per frame (ADR-0029).
+ * folded into one iris_input per frame (ADR-0029).
  *
  * Compiled with ARC (see the darwin branch in libs/iris/meson.build).
  *
@@ -66,6 +66,7 @@
 #include "a11y_prefs_internal.h"
 #include "display_pacer.h"
 #include "frame_mailbox.h"
+#include "ui_host.h"
 #include "platform_input.h"
 #include "platform_internal.h"
 #include "platform_text.h"
@@ -99,35 +100,35 @@ static const NSInteger kIrisEventSubtypeWakeup = 0x4952; /* 'IR' — wakeup seam
 static const NSInteger kIrisEventSubtypePaste = 0x4950;  /* 'IP' — clipboard   */
 
 /* ------------------------------------------------------------------ */
-/*  Accumulated input, drained into one lens_input per frame             */
+/*  Accumulated input, drained into one iris_input per frame             */
 /* ------------------------------------------------------------------ */
 
 typedef struct cp_accum {
     double cx, cy;                  /* latest cursor, view-local (top-left) */
-    bool down[LENS_MOUSE_COUNT];    /* held state (persists)                */
-    bool pressed[LENS_MOUSE_COUNT]; /* edges this frame                     */
-    bool released[LENS_MOUSE_COUNT];
+    bool down[IRIS_BUTTON_COUNT];    /* held state (persists)                */
+    bool pressed[IRIS_BUTTON_COUNT]; /* edges this frame                     */
+    bool released[IRIS_BUTTON_COUNT];
     double scroll_x, scroll_y;       /* wheel steps this frame               */
     double scroll_px_x, scroll_px_y; /* precise (trackpad) points this frame */
     uint32_t mods;                   /* level state (persists)               */
     char text[256];                  /* committed text this frame; must match
-                                       lens_input.text_utf8 (static_assert below) */
-    char preedit[LENS_PREEDIT_MAX];  /* IME preedit string (level state)     */
+                                       iris_input.text_utf8 (static_assert below) */
+    char preedit[IRIS_PREEDIT_MAX];  /* IME preedit string (level state)     */
     uint32_t preedit_cursor;         /* caret byte offset in preedit         */
     uint32_t preedit_sel_lo;         /* selection byte range in preedit      */
     uint32_t preedit_sel_hi;
-    lens_key_event keys[LENS_INPUT_MAX_KEYS];
+    iris_key_event keys[IRIS_INPUT_MAX_KEYS];
     uint32_t key_count;
 } cp_accum;
 
-/* The staging buffers feed lens_input by whole-buffer memcpy in
+/* The staging buffers feed iris_input by whole-buffer memcpy in
  * drain_input; pin the sizes so a lens-side change fails at compile time
  * instead of over-reading the accumulator (the wayland backend carries
  * the same guards). */
-static_assert(sizeof((cp_accum *)0)->text == sizeof((lens_input *)0)->text_utf8,
-              "cp_accum.text must match lens_input.text_utf8");
-static_assert(sizeof((cp_accum *)0)->preedit == sizeof((lens_input *)0)->preedit_utf8,
-              "cp_accum.preedit must match lens_input.preedit_utf8");
+static_assert(sizeof((cp_accum *)0)->text == sizeof((iris_input *)0)->text_utf8,
+              "cp_accum.text must match iris_input.text_utf8");
+static_assert(sizeof((cp_accum *)0)->preedit == sizeof((iris_input *)0)->preedit_utf8,
+              "cp_accum.preedit must match iris_input.preedit_utf8");
 
 /* ------------------------------------------------------------------ */
 /*  Platform state                                                       */
@@ -146,7 +147,8 @@ static int64_t cocoa_query_refresh_ns(NSWindow *window);
     IrisView *view;
     id win_delegate; /* IrisWindowDelegate *, kept opaque to dodge the cycle */
 
-    lens *ui; /* set after lens_create; IME/theme callbacks check it */
+    const iris_ui_host *ui; /* live UI host; null before start / after teardown */
+    iris_ui_frame ui_frame; /* report of the most recent UI frame */
 
     int width, height;   /* window content size in *logical* pixels      */
     float scale;         /* current backing scale (device px per point)  */
@@ -272,25 +274,8 @@ static void cursor_apply(IrisPlatform *pl) {
  * as the Win32 backend. Returns true when the effective cursor changed. */
 static bool cursor_follow_hint(IrisPlatform *pl) {
     iris_cursor eff = pl->host_cursor;
-    if (eff == IRIS_CURSOR_DEFAULT && pl->ui) {
-        switch (lens_get_cursor_hint(pl->ui)) {
-        case LENS_CURSOR_POINTER:
-            eff = IRIS_CURSOR_POINTER;
-            break;
-        case LENS_CURSOR_TEXT:
-            eff = IRIS_CURSOR_TEXT;
-            break;
-        case LENS_CURSOR_RESIZE_EW:
-            eff = IRIS_CURSOR_RESIZE_EW;
-            break;
-        case LENS_CURSOR_RESIZE_NS:
-            eff = IRIS_CURSOR_RESIZE_NS;
-            break;
-        case LENS_CURSOR_DEFAULT:
-        default:
-            break;
-        }
-    }
+    if (eff == IRIS_CURSOR_DEFAULT && pl->ui)
+        eff = pl->ui_frame.cursor;
     if (eff == pl->effective_cursor)
         return false;
     pl->effective_cursor = eff;
@@ -493,7 +478,7 @@ static int mouse_index_from_event(NSEvent *event) {
         b = IRIS_POINTER_BUTTON_UNKNOWN;
         break;
     }
-    return iris_pointer_button_to_lens(b);
+    return iris_pointer_button_index(b);
 }
 
 /* ------------------------------------------------------------------ */
@@ -511,14 +496,14 @@ static bool cocoa_emit_pointer(IrisPlatform *pl, iris_event_type type, double x,
     return true;
 }
 
-static bool cocoa_emit_button(IrisPlatform *pl, double x, double y, int lens_button, bool down) {
+static bool cocoa_emit_button(IrisPlatform *pl, double x, double y, int button_index, bool down) {
     iris_event ev = {
         .type = IRIS_EVENT_POINTER_BUTTON,
-        .button = {.x = (float)x, .y = (float)y, .button = lens_button, .pressed = down}};
+        .button = {.x = (float)x, .y = (float)y, .button = button_index, .pressed = down}};
     if (!iris__event_seam_emit(&ev))
         return false;
     int i = ev.button.button;
-    if (i < 0 || i >= LENS_MOUSE_COUNT)
+    if (i < 0 || i >= IRIS_BUTTON_COUNT)
         return false;
     pl->acc.cx = ev.button.x;
     pl->acc.cy = ev.button.y;
@@ -537,10 +522,10 @@ static bool cocoa_emit_scroll(IrisPlatform *pl, double dx, double dy, bool conti
     if (!iris__event_seam_emit(&ev))
         return false;
     if (ev.scroll.dx != 0.0f)
-        iris_scroll_accum_lens(&pl->acc.scroll_y, &pl->acc.scroll_px_y, &pl->acc.scroll_x,
+        iris_scroll_accum_delta(&pl->acc.scroll_y, &pl->acc.scroll_px_y, &pl->acc.scroll_x,
                                &pl->acc.scroll_px_x, 1, (double)ev.scroll.dx, ev.scroll.continuous);
     if (ev.scroll.dy != 0.0f)
-        iris_scroll_accum_lens(&pl->acc.scroll_y, &pl->acc.scroll_px_y, &pl->acc.scroll_x,
+        iris_scroll_accum_delta(&pl->acc.scroll_y, &pl->acc.scroll_px_y, &pl->acc.scroll_x,
                                &pl->acc.scroll_px_x, 0, (double)ev.scroll.dy, ev.scroll.continuous);
     return true;
 }
@@ -550,8 +535,8 @@ static bool cocoa_emit_key(IrisPlatform *pl, int key, bool pressed, bool repeat,
                      .keyboard = {.key = key, .pressed = pressed, .repeat = repeat, .mods = mods}};
     if (!iris__event_seam_emit(&ev))
         return false;
-    if (ev.keyboard.key != 0 && pl->acc.key_count < LENS_INPUT_MAX_KEYS)
-        pl->acc.keys[pl->acc.key_count++] = (lens_key_event){
+    if (ev.keyboard.key != 0 && pl->acc.key_count < IRIS_INPUT_MAX_KEYS)
+        pl->acc.keys[pl->acc.key_count++] = (iris_key_event){
             .key = ev.keyboard.key, .pressed = ev.keyboard.pressed, .repeat = ev.keyboard.repeat};
     return true;
 }
@@ -671,52 +656,52 @@ enum {
 static int key_sentinel(unsigned short keyCode) {
     switch (keyCode) {
     case kVK_Escape:
-        return LENS_KEY_ESCAPE;
+        return IRIS_KEY_ESCAPE;
     case kVK_Tab:
-        return LENS_KEY_TAB;
+        return IRIS_KEY_TAB;
     case kVK_Return:
     case kVK_ANSI_KeypadEnter:
-        return LENS_KEY_RETURN;
+        return IRIS_KEY_RETURN;
     case kVK_Delete:
-        return LENS_KEY_BACKSPACE;
+        return IRIS_KEY_BACKSPACE;
     case kVK_ForwardDelete:
-        return LENS_KEY_DELETE;
+        return IRIS_KEY_DELETE;
     case kVK_LeftArrow:
-        return LENS_KEY_LEFT;
+        return IRIS_KEY_LEFT;
     case kVK_RightArrow:
-        return LENS_KEY_RIGHT;
+        return IRIS_KEY_RIGHT;
     case kVK_UpArrow:
-        return LENS_KEY_UP;
+        return IRIS_KEY_UP;
     case kVK_DownArrow:
-        return LENS_KEY_DOWN;
+        return IRIS_KEY_DOWN;
     case kVK_Home:
-        return LENS_KEY_HOME;
+        return IRIS_KEY_HOME;
     case kVK_End:
-        return LENS_KEY_END;
+        return IRIS_KEY_END;
     case kVK_F1:
-        return LENS_KEY_F1;
+        return IRIS_KEY_F1;
     case kVK_F2:
-        return LENS_KEY_F2;
+        return IRIS_KEY_F2;
     case kVK_F3:
-        return LENS_KEY_F3;
+        return IRIS_KEY_F3;
     case kVK_F4:
-        return LENS_KEY_F4;
+        return IRIS_KEY_F4;
     case kVK_F5:
-        return LENS_KEY_F5;
+        return IRIS_KEY_F5;
     case kVK_F6:
-        return LENS_KEY_F6;
+        return IRIS_KEY_F6;
     case kVK_F7:
-        return LENS_KEY_F7;
+        return IRIS_KEY_F7;
     case kVK_F8:
-        return LENS_KEY_F8;
+        return IRIS_KEY_F8;
     case kVK_F9:
-        return LENS_KEY_F9;
+        return IRIS_KEY_F9;
     case kVK_F10:
-        return LENS_KEY_F10;
+        return IRIS_KEY_F10;
     case kVK_F11:
-        return LENS_KEY_F11;
+        return IRIS_KEY_F11;
     case kVK_F12:
-        return LENS_KEY_F12;
+        return IRIS_KEY_F12;
     default:
         return 0;
     }
@@ -771,10 +756,8 @@ static int key_sentinel(unsigned short keyCode) {
         if (str) {
             const char *utf8 = [str UTF8String];
             if (utf8 && _platform && _platform->ui) {
-                lens_paste(_platform->ui, &(lens_paste_opts){.utf8 = utf8, .len = strlen(utf8)});
-                lens_deliver_drop(
-                    _platform->ui,
-                    &(lens_deliver_drop_opts){.payload = utf8, .len = strlen(utf8), .pos = drop_pos});
+                iris__ui_paste(_platform->ui, utf8, strlen(utf8));
+                iris__ui_drop(_platform->ui, utf8, strlen(utf8), drop_pos);
                 return YES;
             }
         }
@@ -787,11 +770,8 @@ static int key_sentinel(unsigned short keyCode) {
             if (path) {
                 const char *utf8 = [path UTF8String];
                 if (utf8 && _platform && _platform->ui) {
-                    lens_paste(_platform->ui,
-                               &(lens_paste_opts){.utf8 = utf8, .len = strlen(utf8)});
-                    lens_deliver_drop(_platform->ui,
-                                      &(lens_deliver_drop_opts){
-                                          .payload = utf8, .len = strlen(utf8), .pos = drop_pos});
+                    iris__ui_paste(_platform->ui, utf8, strlen(utf8));
+                    iris__ui_drop(_platform->ui, utf8, strlen(utf8), drop_pos);
                     return YES;
                 }
             }
@@ -931,7 +911,7 @@ static int key_sentinel(unsigned short keyCode) {
 }
 
 /* Scroll: two distinct channels. Trackpads (and Magic Mice) deliver precise
- * deltas in points — those land in lens_input.scroll_pixels_* so widgets do
+ * deltas in points — those land in iris_input.scroll_pixels_* so widgets do
  * not multiply finger motion by a line factor. Classic wheel mice deliver
  * line-step deltas — those land in scroll_x/y. Both follow the same sign
  * convention lens uses on Wayland (wheel-down / content-down is negative);
@@ -1041,13 +1021,13 @@ static int key_sentinel(unsigned short keyCode) {
     NSEventModifierFlags f = [event modifierFlags];
     uint32_t m = 0;
     if (f & NSEventModifierFlagShift)
-        m |= LENS_MOD_SHIFT;
+        m |= IRIS_MOD_SHIFT;
     if (f & NSEventModifierFlagControl)
-        m |= LENS_MOD_CTRL;
+        m |= IRIS_MOD_CTRL;
     if (f & NSEventModifierFlagOption)
-        m |= LENS_MOD_ALT;
+        m |= IRIS_MOD_ALT;
     if (f & NSEventModifierFlagCommand)
-        m |= LENS_MOD_SUPER;
+        m |= IRIS_MOD_SUPER;
     (void)cocoa_emit_modifiers(pl, m);
 }
 
@@ -1100,11 +1080,11 @@ static uint32_t utf8_byte_offset(NSString *s, NSUInteger loc) {
     }
     _marked_text = [s copy];
 
-    char pre[LENS_PREEDIT_MAX];
+    char pre[IRIS_PREEDIT_MAX];
     const char *utf8 = [_marked_text UTF8String];
     if (utf8) {
         /* boundary-aware copy: a raw byte cap could split a multi-byte
-         * sequence at LENS_PREEDIT_MAX and hand lens invalid UTF-8. */
+         * sequence at IRIS_PREEDIT_MAX and hand lens invalid UTF-8. */
         iris_utf8_copy(pre, sizeof pre, utf8);
     } else {
         pre[0] = '\0';
@@ -1119,7 +1099,7 @@ static uint32_t utf8_byte_offset(NSString *s, NSUInteger loc) {
     if (len > [_marked_text length] - loc)
         len = [_marked_text length] - loc;
     _selected_in_marked = NSMakeRange(loc, len);
-    /* The preedit buffer caps at LENS_PREEDIT_MAX - 1 bytes; cocoa_emit_preedit
+    /* The preedit buffer caps at IRIS_PREEDIT_MAX - 1 bytes; cocoa_emit_preedit
      * truncates on a code-point boundary and clamps the offsets to match. */
     (void)cocoa_emit_preedit(pl, pre, utf8_byte_offset(_marked_text, loc),
                              utf8_byte_offset(_marked_text, loc),
@@ -1179,7 +1159,7 @@ static uint32_t utf8_byte_offset(NSString *s, NSUInteger loc) {
     IrisPlatform *pl = _platform;
     if (!pl || !pl->ui || ![self window])
         return NSZeroRect;
-    flux_rect caret = lens_caret_rect(pl->ui);
+    flux_rect caret = pl->ui_frame.text.caret;
     if (caret.w <= 0.0f)
         return NSZeroRect;
     NSRect r = NSMakeRect(caret.x, caret.y, caret.w, caret.h);
@@ -1189,7 +1169,7 @@ static uint32_t utf8_byte_offset(NSString *s, NSUInteger loc) {
 }
 
 /* Swallow unhandled action selectors (moveLeft:, deleteBackward:, …) so
- * AppKit does not beep for keys lens already consumed through lens_input. */
+ * AppKit does not beep for keys lens already consumed through iris_input. */
 - (void)doCommandBySelector:(SEL)selector {
     (void)selector;
 }
@@ -1343,14 +1323,14 @@ static void deliver_paste(IrisPlatform *pl) {
         return;
     const char *utf8 = [s UTF8String];
     if (utf8)
-        lens_paste(pl->ui, &(lens_paste_opts){.utf8 = utf8, .len = strlen(utf8)});
+        iris__ui_paste(pl->ui, utf8, strlen(utf8));
 }
 
 /* ------------------------------------------------------------------ */
-/*  Build one lens_input from the accumulated state                     */
+/*  Build one iris_input from the accumulated state                     */
 /* ------------------------------------------------------------------ */
 
-static void drain_input(IrisPlatform *pl, lens_input *in, float dt) {
+static void drain_input(IrisPlatform *pl, iris_input *in, float dt) {
     memset(in, 0, sizeof *in);
     in->cursor = (flux_point){(float)pl->acc.cx, (float)pl->acc.cy};
     in->display_size = (flux_point){(float)pl->width, (float)pl->height};
@@ -1360,7 +1340,7 @@ static void drain_input(IrisPlatform *pl, lens_input *in, float dt) {
     in->scroll_y = (float)pl->acc.scroll_y;
     in->scroll_pixels_x = (float)pl->acc.scroll_px_x;
     in->scroll_pixels_y = (float)pl->acc.scroll_px_y;
-    for (int i = 0; i < LENS_MOUSE_COUNT; i++) {
+    for (int i = 0; i < IRIS_BUTTON_COUNT; i++) {
         in->mouse_down[i] = pl->acc.down[i];
         in->mouse_pressed[i] = pl->acc.pressed[i];
         in->mouse_released[i] = pl->acc.released[i];
@@ -1377,7 +1357,7 @@ static void drain_input(IrisPlatform *pl, lens_input *in, float dt) {
      * delete-surrounding request, so both stay 0 (memset above). */
 
     /* clear per-frame edges; keep level state (down/cursor/mods/preedit) */
-    for (int i = 0; i < LENS_MOUSE_COUNT; i++)
+    for (int i = 0; i < IRIS_BUTTON_COUNT; i++)
         pl->acc.pressed[i] = pl->acc.released[i] = false;
     pl->acc.scroll_x = pl->acc.scroll_y = 0.0;
     pl->acc.scroll_px_x = pl->acc.scroll_px_y = 0.0;
@@ -1387,9 +1367,9 @@ static void drain_input(IrisPlatform *pl, lens_input *in, float dt) {
 
 /* Diagnostics go to stderr, never stdout: a consumer's stdout may be an
  * IPC wire (see flux_console_logger). */
-static void log_raw(const lens_input *in) {
-    static const char *names[LENS_MOUSE_COUNT] = {"left", "right", "middle"};
-    for (int b = 0; b < LENS_MOUSE_COUNT; b++) {
+static void log_raw(const iris_input *in) {
+    static const char *names[IRIS_BUTTON_COUNT] = {"left", "right", "middle"};
+    for (int b = 0; b < IRIS_BUTTON_COUNT; b++) {
         if (in->mouse_pressed[b])
             fprintf(stderr, "[raw] mouse press   %s\n", names[b]);
         if (in->mouse_released[b])
@@ -1447,7 +1427,7 @@ static bool acc_has_user_input(IrisPlatform *pl, double *pcx, double *pcy) {
     bool edge = pl->acc.key_count != 0 || pl->acc.text[0] != '\0' || pl->acc.preedit[0] != '\0' ||
                 pl->acc.scroll_x != 0.0 || pl->acc.scroll_y != 0.0 || pl->acc.scroll_px_x != 0.0 ||
                 pl->acc.scroll_px_y != 0.0;
-    for (int i = 0; i < LENS_MOUSE_COUNT; i++)
+    for (int i = 0; i < IRIS_BUTTON_COUNT; i++)
         edge = edge || pl->acc.pressed[i] || pl->acc.released[i] || pl->acc.down[i];
     return moved || edge;
 }
@@ -1479,9 +1459,7 @@ static void on_color_scheme_changed(iris_color_scheme scheme, void *user) {
     IrisPlatform *pl = (__bridge IrisPlatform *)user;
     if (!pl || !pl->ui)
         return;
-    lens_theme th =
-        (scheme == IRIS_COLOR_SCHEME_PREFER_LIGHT) ? lens_theme_default() : lens_theme_dark();
-    lens_set_theme(pl->ui, th);
+    iris__ui_set_color_scheme(pl->ui, scheme);
 }
 
 /* Accessibility-preference watcher callback (ADR-0075): delivered on the
@@ -1492,20 +1470,7 @@ static void on_a11y_prefs(const iris_a11y_prefs *prefs, void *user) {
     IrisPlatform *pl = (__bridge IrisPlatform *)user;
     if (!pl || !pl->ui)
         return;
-    lens_set_reduced_motion(pl->ui, prefs->reduced_motion);
-    lens_set_text_scale(pl->ui, prefs->text_scale);
-    if (prefs->high_contrast) {
-        lens_theme th = lens_get_theme(pl->ui);
-        th.color_bg = flux_color_rgba(0x00, 0x00, 0x00, 0xff);
-        th.color_fg = flux_color_rgba(0xff, 0xff, 0xff, 0xff);
-        th.color_hover = flux_color_rgba(0x2a, 0x2a, 0x2a, 0xff);
-        th.color_active = flux_color_rgba(0x55, 0x55, 0x55, 0xff);
-        th.color_border = th.color_fg;
-        th.color_disabled = flux_color_rgba(0xaa, 0xaa, 0xaa, 0xff);
-        lens_set_theme(pl->ui, th);
-    } else {
-        on_color_scheme_changed(iris_query_system_color_scheme(), (__bridge void *)pl);
-    }
+    iris__ui_set_a11y_prefs(pl->ui, prefs);
     /* Force a frame so the new preferences reach the screen even while the
      * loop is idle-parked. */
     pl->animation_frame_requested = true;
@@ -1549,7 +1514,7 @@ typedef struct cocoa_present_context {
     IrisPlatform *pl;
     flux_surface *surface;
     flux_canvas *canvas;
-    const iris_app_config *cfg;
+    const iris_app_opts *cfg;
 } cocoa_present_context;
 
 static void *cocoa_presenter_thread_main(void *arg) {
@@ -1576,7 +1541,7 @@ static void *cocoa_presenter_thread_main(void *arg) {
         if (!pkt)
             continue;
 
-        if (pkt->snapshot) {
+        if (pkt->snapshot || pkt->host_list) {
             uint32_t target_w = (uint32_t)ceilf(pkt->width * pkt->scale);
             uint32_t target_h = (uint32_t)ceilf(pkt->height * pkt->scale);
             flux_surface_info sinfo;
@@ -1623,7 +1588,7 @@ static void *cocoa_presenter_thread_main(void *arg) {
                     }
                     if (pkt->snapshot) {
                         drew =
-                            (lens_snapshot_submit(pkt->snapshot, ctx->canvas) == FLUX_OK) || drew;
+                            (iris__ui_snapshot_submit(ctx->cfg->ui, pkt->snapshot, ctx->canvas) == FLUX_OK) || drew;
                     }
                     (void)flux_canvas_end(ctx->canvas);
                 }
@@ -1636,13 +1601,11 @@ static void *cocoa_presenter_thread_main(void *arg) {
                 }
             }
         }
-
-        iris_mailbox_recycle(&pl->mailbox, pkt);
     }
     return nullptr;
 }
 
-static int lens_host_start_drag_cocoa(const char *text, size_t len, uint32_t actions, void *user) {
+static int cocoa_start_drag(const char *text, size_t len, uint32_t actions, void *user) {
     (void)user;
     iris_dnd_source src = {
         .actions = actions,
@@ -1652,7 +1615,7 @@ static int lens_host_start_drag_cocoa(const char *text, size_t len, uint32_t act
     return iris_dnd_start(&src);
 }
 
-int iris_app_run_cocoa(const iris_app_config *cfg) {
+int iris_app_run_cocoa(const iris_app_opts *cfg) {
     /* All resources declared up front (and every ObjC strong local nil-
      * initialized) so a single `fail:` cleanup block runs on every exit
      * path; under ARC a goto may not jump over a declaration with an
@@ -1661,7 +1624,8 @@ int iris_app_run_cocoa(const iris_app_config *cfg) {
     VkSurfaceKHR vk_surface = VK_NULL_HANDLE;
     flux_surface *surface = NULL;
     flux_canvas *canvas = NULL;
-    lens *ui = NULL;
+    const iris_ui_host *ui = NULL; /* set once the UI host started */
+    bool ui_started = false;
     bool host_started = false;
     bool wakeup_registered = false;
     int rc = 1; /* pessimistic; set to 0 only on success */
@@ -1802,23 +1766,23 @@ int iris_app_run_cocoa(const iris_app_config *cfg) {
             goto fail;
         }
 
-        if (lens_create(
-                &(lens_desc){
-                    .device = device,
-                    .theme = cfg->dark ? lens_theme_dark()
-                                       : (iris_system_prefers_dark() ? lens_theme_dark()
-                                                                     : lens_theme_default()),
-                    .scale = pl->scale,
-                    .clipboard = {.set_text = clip_set_text,
-                                  .request_text = clip_request_text,
-                                  .user = (__bridge void *)pl},
-                    .dnd = {.start_drag = lens_host_start_drag_cocoa, .user = (__bridge void *)pl}},
-                &ui) != FLUX_OK) {
-            fprintf(stderr, "lens_create failed\n");
+        if (!iris__ui_start(cfg->ui,
+                            &(iris_ui_start_info){
+                                .device = device,
+                                .scale = pl->scale,
+                                .dark = cfg->dark || iris_system_prefers_dark(),
+                                .services = {.clipboard_set_text = clip_set_text,
+                                             .clipboard_request_text = clip_request_text,
+                                             .start_drag = cocoa_start_drag,
+                                             .user = (__bridge void *)pl},
+                            })) {
+            fprintf(stderr, "iris UI host start failed\n");
             goto fail;
         }
+        ui = cfg->ui;
+        ui_started = true;
 
-        if (cfg->start && !cfg->start(ui, device, cfg->user)) {
+        if (cfg->start && !cfg->start(device, cfg->user)) {
             fprintf(stderr, "iris host start callback failed\n");
             goto fail;
         }
@@ -1834,7 +1798,7 @@ int iris_app_run_cocoa(const iris_app_config *cfg) {
          * main-thread prepare pass. Recorded host content travels through the
          * mailbox as an immutable display list. */
         if (!cfg->prepare) {
-            iris_mailbox_init(&pl->mailbox);
+            iris_mailbox_init(&pl->mailbox, cfg->ui);
             pl->present_sem = dispatch_semaphore_create(0);
             atomic_init(&pl->presenter_running, true);
             if (pthread_create(&pl->present_thread, NULL, cocoa_presenter_thread_main, &pctx) == 0)
@@ -1899,10 +1863,7 @@ int iris_app_run_cocoa(const iris_app_config *cfg) {
          * Applied unconditionally — accessibility is not opt-in. */
         {
             iris_a11y_prefs prefs = iris_a11y_prefs_query();
-            lens_set_reduced_motion(ui, prefs.reduced_motion);
-            lens_set_text_scale(ui, prefs.text_scale);
-            if (prefs.high_contrast)
-                on_a11y_prefs(&prefs, (__bridge void *)pl);
+            iris__ui_set_a11y_prefs(ui, &prefs);
         }
         pl->a11y_prefs_watching =
             (iris_a11y_prefs__watch_backend(on_a11y_prefs, (__bridge void *)pl) == 0);
@@ -1982,7 +1943,7 @@ int iris_app_run_cocoa(const iris_app_config *cfg) {
                 if (pl->pending_scale > 0.0f && pl->pending_scale != pl->scale) {
                     pl->scale = pl->pending_scale;
                     cocoa_emit_scale(pl->scale);
-                    lens_set_scale(ui, pl->scale);
+                    iris__ui_set_scale(ui, pl->scale);
                     pl->resized = true;
                 }
                 if (pl->resized) {
@@ -2007,20 +1968,17 @@ int iris_app_run_cocoa(const iris_app_config *cfg) {
                 }
                 last_sim_ns = sim_ns;
 
-                lens_input in;
+                iris_input in;
                 drain_input(pl, &in, dt);
                 if (cfg->log_raw)
                     log_raw(&in);
 
-                lens_begin(ui, &in);
-                if (cfg->build)
-                    cfg->build(ui, &in, cfg->user);
-                lens_end(ui);
+                iris__ui_frame(ui, &in, &pl->ui_frame);
 
                 /* Inert with a11y_stub.c; kept for a future NSAccessibility
                  * bridge. */
-                if (pl->a11y_running)
-                    iris_a11y_update(ui);
+                if (pl->a11y_running && ui)
+                    (void)iris_a11y_update(ui);
 
                 /* Cursor: follow the hovered widget's semantic hint unless
                  * the host pinned a cursor with iris_set_cursor. */
@@ -2028,7 +1986,7 @@ int iris_app_run_cocoa(const iris_app_config *cfg) {
                     cursor_apply(pl);
 
                 /* Cadence evaluation via iris_pacer (ADR-0122). */
-                bool chrome_damaged = lens_frame_needs_repaint(ui);
+                bool chrome_damaged = pl->ui_frame.damaged;
                 bool surface_forced = resized_this_frame || surface_needs_paint;
 
                 iris_pace_inputs pace_in = {
@@ -2041,9 +1999,9 @@ int iris_app_run_cocoa(const iris_app_config *cfg) {
                     .host_static = pl->record_static,
                     .has_host_content = has_host_content,
                     .chrome_damaged = chrome_damaged,
-                    .caret_ticking = lens_caret_clock_live(ui),
+                    .caret_ticking = pl->ui_frame.caret_ticking,
                     .surface_needs_paint = surface_forced,
-                    .lens_animating = lens_anim_pending(ui),
+                    .ui_animating = pl->ui_frame.animating,
                 };
                 pl->frame_skip_render = false;
                 pl->record_static = false;
@@ -2061,8 +2019,8 @@ int iris_app_run_cocoa(const iris_app_config *cfg) {
                          * presentation worker thread. */
                         flux_display_list *host_list = iris_record_host_canvas(cfg, pl->scale);
 
-                        lens_scene_snapshot *snapshot = nullptr;
-                        if (lens_snapshot_create(ui, &snapshot) == FLUX_OK ||
+                        iris_ui_snapshot *snapshot = nullptr;
+                        if (iris__ui_snapshot_create(ui, &snapshot) == FLUX_OK ||
                             host_list != nullptr) {
                             iris_frame_packet *pkt = iris_mailbox_acquire(&pl->mailbox);
                             if (pkt) {
@@ -2072,20 +2030,19 @@ int iris_app_run_cocoa(const iris_app_config *cfg) {
                                  * thread: the presentation thread must not
                                  * re-query lens, and the set has to travel with
                                  * the snapshot it describes. */
-                                pkt->damage_count = lens_damage_rects(
-                                    ui,
-                                    &(lens_damage_opts){.rects = pkt->damage,
-                                                        .capacity = LENS_DAMAGE_RECTS_CAPACITY});
+                                pkt->damage_count = iris__ui_damage_rects(
+                                    ui, pkt->damage, IRIS_DAMAGE_RECTS_CAPACITY);
                                 pkt->force_paint = surface_forced;
-                                lens_theme th = lens_get_theme(ui);
-                                pkt->clear_color = th.color_bg;
+                                pkt->clear_color = pl->ui_frame.clear_color;
                                 pkt->has_clear = !cfg->no_clear;
                                 pkt->scale = pl->scale;
                                 pkt->width = pl->width;
                                 pkt->height = pl->height;
                                 iris_mailbox_publish(&pl->mailbox, pkt);
                                 dispatch_semaphore_signal(pl->present_sem);
-                                if (snapshot && lens_snapshot_activate(ui, snapshot) == FLUX_OK) {
+                                /* Without a UI layer there is nothing to activate:
+                                 * the published host content is the whole frame. */
+                                if (!ui || iris__ui_snapshot_activate(ui, snapshot) == FLUX_OK) {
                                     surface_needs_paint = false;
                                 }
                                 if (++frame_no == 1) {
@@ -2098,9 +2055,7 @@ int iris_app_run_cocoa(const iris_app_config *cfg) {
                                             pl->scale);
                                 }
                             }
-                            if (snapshot) {
-                                lens_snapshot_release(snapshot);
-                            }
+                            iris__ui_snapshot_release(ui, snapshot);
                             if (host_list) {
                                 flux_display_list_release(host_list);
                             }
@@ -2130,11 +2085,10 @@ int iris_app_run_cocoa(const iris_app_config *cfg) {
 
                     /* Clear to the current theme's body background; recorded
                      * host content draws *under* lens's chrome. */
-                    lens_theme th = lens_get_theme(ui);
-                    flux_color clear = th.color_bg;
+                    flux_color clear = pl->ui_frame.clear_color;
                     flux_color *pass_clear = cfg->no_clear ? NULL : &clear;
                     bool drew = false;
-                    lens_scene_snapshot *snapshot = nullptr;
+                    iris_ui_snapshot *snapshot = nullptr;
                     flux_display_list *host_list = iris_record_host_canvas(cfg, pl->scale);
 
                     /* Damage scope for this surface (ADR-0149): the set travels
@@ -2144,7 +2098,7 @@ int iris_app_run_cocoa(const iris_app_config *cfg) {
                     iris_frame_damage dmg = {0};
                     const bool localize = !surface_forced && !has_host_content;
                     if (localize) {
-                        dmg = iris_frame_lens_damage(ui, pl->scale, (int32_t)info.width,
+                        dmg = iris_frame_ui_damage(ui, pl->scale, (int32_t)info.width,
                                                      (int32_t)info.height, /*force_full=*/false);
                     } else {
                         dmg.full = true;
@@ -2166,8 +2120,12 @@ int iris_app_run_cocoa(const iris_app_config *cfg) {
                         if (host_list) {
                             drew = flux_canvas_submit_display_list(canvas, &(flux_canvas_submit_display_list_opts){.list = host_list}) == FLUX_OK;
                         }
-                        if (lens_snapshot_create(ui, &snapshot) == FLUX_OK) {
-                            drew = lens_snapshot_submit(snapshot, canvas) == FLUX_OK || drew;
+                        if (!ui) {
+                            /* Canvas-only host: the cleared pass plus whatever the host
+                             * recorded is the frame. */
+                            drew = true;
+                        } else if (iris__ui_snapshot_create(ui, &snapshot) == FLUX_OK) {
+                            drew = (iris__ui_snapshot_submit(ui, snapshot, canvas) == FLUX_OK) || drew;
                         }
                         if (flux_canvas_end(canvas) != FLUX_OK)
                             drew = false;
@@ -2175,11 +2133,11 @@ int iris_app_run_cocoa(const iris_app_config *cfg) {
                     flux_display_list_release(host_list);
 
                     if (!drew) {
-                        lens_snapshot_release(snapshot);
+                        iris__ui_snapshot_release(ui, snapshot);
                         goto fail;
                     }
                     if (flux_frame_submit(frame) != FLUX_OK) {
-                        lens_snapshot_release(snapshot);
+                        iris__ui_snapshot_release(ui, snapshot);
                         goto fail;
                     }
                     r = flux_frame_present(frame);
@@ -2187,18 +2145,17 @@ int iris_app_run_cocoa(const iris_app_config *cfg) {
                         view_physical_size(pl, &phys_w, &phys_h);
                         (void)flux_surface_resize(surface, phys_w, phys_h);
                     } else if (r != FLUX_OK) {
-                        lens_snapshot_release(snapshot);
+                        iris__ui_snapshot_release(ui, snapshot);
                         goto fail;
                     } else if (drew) {
-                        flux_result activated = lens_snapshot_activate(ui, snapshot);
-                        if (activated != FLUX_OK) {
-                            lens_snapshot_release(snapshot);
+                        if (ui && iris__ui_snapshot_activate(ui, snapshot) != FLUX_OK) {
+                            iris__ui_snapshot_release(ui, snapshot);
                             goto fail;
                         }
                         surface_needs_paint = false;
                     }
 
-                    lens_snapshot_release(snapshot);
+                    iris__ui_snapshot_release(ui, snapshot);
 
                     if (++frame_no == 1)
                         fprintf(stderr,
@@ -2207,7 +2164,7 @@ int iris_app_run_cocoa(const iris_app_config *cfg) {
                 }
 
                 if (quiesced) {
-                    lens_text_compact(ui);
+                    iris__ui_quiesce(ui);
                 }
             } /* @autoreleasepool (loop iteration) */
         }
@@ -2221,7 +2178,9 @@ int iris_app_run_cocoa(const iris_app_config *cfg) {
          * disappears. Keep the active platform published during the
          * callback so thread-affine iris helpers remain valid. */
         if (host_started && cfg->stop)
-            cfg->stop(ui, device, cfg->user);
+            cfg->stop(device, cfg->user);
+        if (ui_started)
+            iris__ui_stop(cfg->ui);
 
         /* Stop publishing this platform to the context-free APIs — any host
          * call after this returns is a no-op rather than a use-after-free. */
@@ -2239,8 +2198,8 @@ int iris_app_run_cocoa(const iris_app_config *cfg) {
         /* GPU side first: let in-flight work finish before tearing down. */
         if (device)
             flux_device_wait_idle(device);
-        if (ui)
-            lens_release(ui);
+        if (ui_started)
+            iris__ui_destroy(cfg->ui);
         pl->ui = NULL; /* after this, queued main-thread callbacks must not touch lens */
         if (pl->theme_watching)
             iris_theme__unwatch_backend();

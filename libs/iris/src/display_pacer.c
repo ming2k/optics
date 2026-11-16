@@ -83,7 +83,7 @@ iris_pace_decision iris_pacer_tick(iris_pacer *p, const iris_pace_inputs *in) {
      * A blink flip arrives as `chrome_damaged` (lens reports the transition),
      * which is why nothing here mentions the caret. */
     bool cadence_active = grace || animating || in->host_skip_render || in->surface_needs_paint ||
-                          in->chrome_damaged || in->lens_animating;
+                          in->chrome_damaged || in->ui_animating;
 
     /* Is a frame pending at all? Three terms keep the low idle tick alive:
      *   - `has_host_content`: such a host's content is opaque to lens, so

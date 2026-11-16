@@ -53,7 +53,12 @@ static ink_counts render_and_classify(lens_icon_id id, float size) {
     lens_end(ui);
 
     flux_canvas *c = nullptr;
-    if (flux_canvas_create_cpu(box, box, 1.0f, &c) != FLUX_OK) {
+    if (flux_canvas_create(&(flux_canvas_desc){.type = FLUX_TYPE_CANVAS_DESC,
+                                               .backend = FLUX_CANVAS_BACKEND_CPU,
+                                               .scale = 1.0f,
+                                               .width = box,
+                                               .height = box},
+                           &c) != FLUX_OK) {
         lens_release(ui);
         return k;
     }
@@ -75,8 +80,8 @@ static ink_counts render_and_classify(lens_icon_id id, float size) {
             for (uint32_t x = 0; x < w; ++x) {
                 const uint8_t *p = &px[(size_t)y * stride + (size_t)x * 4];
                 int r = p[0], g = p[1], b = p[2];
-                if (r + g + b < 20)
-                    continue; /* background */
+                if (r <= 40 && g <= 40 && b <= 40)
+                    continue; /* background or dim AA fringe below primary threshold */
                 if (r > g + 40 && r > b + 40)
                     k.red++;
                 else if (g > r + 40 && g > b + 40)

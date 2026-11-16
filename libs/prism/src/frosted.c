@@ -253,8 +253,13 @@ static flux_result frosted_ensure_slot(prism_frosted_filter *filter, uint32_t in
     if (slot->output)
         flux_image_release(slot->output);
     *slot = (frosted_filter_slot){};
-    flux_result r =
-        flux_image_create_compute_writable(filter->device, width, height, format, &slot->output);
+    flux_result r = flux_image_create(filter->device,
+                                      &(flux_image_desc){.type = FLUX_TYPE_IMAGE_DESC,
+                                                         .width = width,
+                                                         .height = height,
+                                                         .format = format,
+                                                         .usage = FLUX_IMAGE_USAGE_COMPUTE_WRITE},
+                                      &slot->output);
     if (r != FLUX_OK)
         return r;
     slot->width = width;

@@ -7,11 +7,10 @@
 //!          `PKG_CONFIG_PATH`.
 //!        - Dev: set `IRIS_BUILD_DIR=<iris-source>/build` so the meson
 //!          build tree's `meson-uninstalled/*.pc` is prepended to
-//!          `PKG_CONFIG_PATH`. iris depends on lens (which depends on
-//!          flux), so when dev mode is on we also prepend LENS_BUILD_DIR
-//!          and FLUX_BUILD_DIR's uninstalled dirs — otherwise pkg-config
-//!          resolves `Requires: lens >= 0.0.30` against any stale system
-//!          copy. Optionally also set `IRIS_SOURCE_DIR=<iris-source>` so
+//!          `PKG_CONFIG_PATH`. iris depends on flux and nothing else, so
+//!          when dev mode is on we also prepend FLUX_BUILD_DIR's
+//!          uninstalled dir — otherwise pkg-config resolves
+//!          `Requires: flux` against any stale system copy. Optionally also set `IRIS_SOURCE_DIR=<iris-source>` so
 //!          bindgen reads headers straight from the source checkout.
 //!   2. Publish non-system link dirs as rpath metadata (`cargo:rpaths`)
 //!      so the `iris` crate's build.rs can relay them to its own targets
@@ -28,7 +27,6 @@
 //!                      contain iris-uninstalled.pc.
 //!   IRIS_USE_INSTALLED set to `1` to skip the build tree and link the
 //!                      system-installed iris.
-//!   LENS_BUILD_DIR     optional, dev mode for the lens dependency.
 //!   FLUX_BUILD_DIR     optional, dev mode for the flux dependency.
 //!   PKG_CONFIG_PATH    respected and prepended-to, never clobbered.
 
@@ -39,7 +37,6 @@ fn main() {
     println!("cargo:rerun-if-env-changed=IRIS_USE_INSTALLED");
     println!("cargo:rerun-if-env-changed=IRIS_BUILD_DIR");
     println!("cargo:rerun-if-env-changed=IRIS_SOURCE_DIR");
-    println!("cargo:rerun-if-env-changed=LENS_BUILD_DIR");
     println!("cargo:rerun-if-env-changed=FLUX_BUILD_DIR");
     println!("cargo:rerun-if-env-changed=OPTICS_SOURCE_DIR");
     println!("cargo:rerun-if-env-changed=OPTICS_BUILD_DIR");
@@ -85,11 +82,11 @@ fn main() {
 
     if dev_mode {
         let dir = build_dir.as_ref().unwrap();
-        // iris's own uninstalled tree first, then lens's and flux's (iris
-        // Requires lens, lens Requires flux — both must be reachable so
-        // pkg-config does not fall back to stale system copies).
+        // iris's own uninstalled tree first, then flux's (iris Requires
+        // flux — it must be reachable so pkg-config does not fall back to
+        // a stale system copy).
         let mut dirs = vec![dir.join("meson-uninstalled")];
-        for var in ["LENS_BUILD_DIR", "FLUX_BUILD_DIR"] {
+        for var in ["FLUX_BUILD_DIR"] {
             let other = env::var_os(var)
                 .map(PathBuf::from)
                 .or_else(|| checkout_root.as_ref().map(|root| root.join("build")));
@@ -118,7 +115,7 @@ fn main() {
                  - install iris (`meson install` into a prefix on \
                  PKG_CONFIG_PATH),\n  \
                  - set IRIS_BUILD_DIR=<iris-source>/build (and optionally \
-                 LENS_BUILD_DIR / FLUX_BUILD_DIR) to link meson build trees, or\n  \
+                 FLUX_BUILD_DIR) to link meson build trees, or\n  \
                  - set IRIS_USE_INSTALLED=1.",
             )
         });
@@ -131,7 +128,7 @@ fn main() {
     // metadata channel and the iris crate re-emits DEP_IRIS_RPATHS. This
     // mirrors flux-sys's `cargo:rpaths` mechanism. System installs (/usr/lib,
     // /lib) need no rpath; custom prefixes (~/.flux-prefix, $PREFIX) do, so
-    // `cargo run --example` / `cargo test` find libiris + liblens + libflux
+    // `cargo run --example` / `cargo test` find libiris + libflux
     // without LD_LIBRARY_PATH.
     let rpaths: Vec<String> = iris
         .link_paths
@@ -141,11 +138,11 @@ fn main() {
         .collect();
     println!("cargo:rpaths={}", rpaths.join(";"));
     if os == "windows" {
-        // Windows has no rpath: stage the DLLs (iris + its lens/flux
-        // dependencies) next to the cargo profile output so test/example
+        // Windows has no rpath: stage the DLLs (iris + its flux
+        // dependency) next to the cargo profile output so test/example
         // binaries find them. Runs in installed mode too — an installed
         // prefix's bin/ is not on PATH by default.
-        stage_windows_dlls(&iris.link_paths, &["iris", "lens", "flux"]);
+        stage_windows_dlls(&iris.link_paths, &["iris", "flux"]);
     }
 
     let mut clang_args: Vec<String> = iris
@@ -155,8 +152,7 @@ fn main() {
         .collect();
     if let Some(src) = &source_dir {
         clang_args.insert(0, format!("-I{}", src.join("libs/iris/include").display()));
-        clang_args.insert(1, format!("-I{}", src.join("libs/lens/include").display()));
-        clang_args.insert(2, format!("-I{}", src.join("libs/flux/include").display()));
+        clang_args.insert(1, format!("-I{}", src.join("libs/flux/include").display()));
     }
 
     let bindings = bindgen::Builder::default()
@@ -164,29 +160,21 @@ fn main() {
         .header("wrapper.h")
         .clang_args(&clang_args)
         .clang_arg("-std=c23")
-        // Only bindgen iris_* types and functions. lens_* (lens) and flux_*
-        // types are referenced in the C signatures but bound from their own
-        // -sys crates at the Rust seam — we just see opaque void pointers
-        // in their place.
+        // Only bindgen iris_* types and functions. flux_* types are
+        // referenced in the C signatures but bound from flux-sys.
         .allowlist_function("iris_.*")
         .allowlist_type("iris_.*")
         .allowlist_var("IRIS_.*")
-        // flux/lens seam types (flux_canvas, flux_device, lens, lens_input)
-        // appear in iris signatures only as pointers. They are blocklisted
-        // and re-exported from their own -sys crates via the raw_line below,
-        // so exactly one Rust definition of each handle exists across the
-        // stack and pointers cross crate seams without casts.
+        // flux seam types are blocklisted and re-exported from flux-sys via
+        // the raw_line below, so exactly one Rust definition of each exists
+        // across the stack and values cross crate seams without casts.
         .blocklist_type("flux_.*")
         .blocklist_function("flux_.*")
         .blocklist_var("FLUX_.*")
-        .blocklist_type("lens")
-        .blocklist_type("lens_.*")
-        .blocklist_function("lens_.*")
-        .blocklist_var("LENS_.*")
         .raw_line(
-            "pub use flux_sys::{flux_canvas, flux_device, flux_encoder, flux_frame, flux_point};",
+            "pub use flux_sys::{flux_canvas, flux_color, flux_device, flux_encoder, flux_frame, \
+             flux_point, flux_rect, flux_result};",
         )
-        .raw_line("pub use lens_sys::{lens, lens_input};")
         .default_enum_style(bindgen::EnumVariation::Rust {
             non_exhaustive: false,
         })
@@ -207,6 +195,10 @@ fn main() {
             "app.h",
             "capability.h",
             "cursor.h",
+            "dnd.h",
+            "event.h",
+            "host.h",
+            "a11y_prefs.h",
             "theme.h",
             "file_dialog.h",
             "a11y.h",

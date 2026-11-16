@@ -353,8 +353,14 @@ static flux_result layer_ensure_slot(prism_backdrop_layer_filter *filter, uint32
                              flux_image_height(slot->scratch) != cap_h)) {
             if (slot->scratch)
                 flux_image_release(slot->scratch);
-            flux_result r = flux_image_create_compute_writable(filter->device, cap_w, cap_h, format,
-                                                               &slot->scratch);
+            flux_result r =
+                flux_image_create(filter->device,
+                                  &(flux_image_desc){.type = FLUX_TYPE_IMAGE_DESC,
+                                                     .width = cap_w,
+                                                     .height = cap_h,
+                                                     .format = format,
+                                                     .usage = FLUX_IMAGE_USAGE_COMPUTE_WRITE},
+                                  &slot->scratch);
             if (r != FLUX_OK)
                 return r;
         }
@@ -367,13 +373,23 @@ static flux_result layer_ensure_slot(prism_backdrop_layer_filter *filter, uint32
     if (slot->stats)
         flux_buffer_release(slot->stats);
     *slot = (backdrop_layer_slot){};
-    flux_result r =
-        flux_image_create_compute_writable(filter->device, width, height, format, &slot->output);
+    flux_result r = flux_image_create(filter->device,
+                                      &(flux_image_desc){.type = FLUX_TYPE_IMAGE_DESC,
+                                                         .width = width,
+                                                         .height = height,
+                                                         .format = format,
+                                                         .usage = FLUX_IMAGE_USAGE_COMPUTE_WRITE},
+                                      &slot->output);
     if (r != FLUX_OK)
         return r;
     if (need_scratch) {
-        r = flux_image_create_compute_writable(filter->device, cap_w, cap_h, format,
-                                               &slot->scratch);
+        r = flux_image_create(filter->device,
+                              &(flux_image_desc){.type = FLUX_TYPE_IMAGE_DESC,
+                                                 .width = cap_w,
+                                                 .height = cap_h,
+                                                 .format = format,
+                                                 .usage = FLUX_IMAGE_USAGE_COMPUTE_WRITE},
+                              &slot->scratch);
         if (r != FLUX_OK)
             return r;
     }

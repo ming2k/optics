@@ -8,6 +8,7 @@
  *   - Native Iris windowing (zero GLFW, system cursor, fractional HiDPI).
  */
 
+#include <aperture/aperture.h>
 #include <flux/flux.h>
 #include <flux/scene.h>
 #include <flux/vulkan.h>
@@ -340,7 +341,10 @@ static void on_prepare(flux_frame *frame, flux_canvas *canvas, flux_device *devi
         float diag = app->fr.half_diag * 2.0f;
         float z_near = (app->fr.half_diag > 0.0f) ? app->fr.half_diag * 0.05f : 0.1f;
         float z_far = (dist + diag) * 5.0f + 1.0f;
-        flux_camera_perspective(&cam, ORBIT_FOV_Y, aspect, z_near, z_far);
+        flux_camera_perspective(&cam, &(flux_camera_perspective_opts){.fov_y_rad = ORBIT_FOV_Y,
+                                                                      .aspect = aspect,
+                                                                      .z_near = z_near,
+                                                                      .z_far = z_far});
 
         float yaw = app->time * ORBIT_SPEED;
         float cp = cosf(ORBIT_PITCH);
@@ -349,7 +353,9 @@ static void on_prepare(flux_frame *frame, flux_canvas *canvas, flux_device *devi
                                        app->fr.center.z + dist * cp * cosf(yaw));
         flux_camera_look_at(&cam, eye, app->fr.center, (flux_vec3){0, 1, 0});
     } else {
-        flux_camera_perspective(&cam, 1.0f, aspect, 0.1f, 100.0f);
+        flux_camera_perspective(
+            &cam, &(flux_camera_perspective_opts){
+                      .fov_y_rad = 1.0f, .aspect = aspect, .z_near = 0.1f, .z_far = 100.0f});
         flux_camera_look_at(&cam, (flux_vec3){3, 2.5f, 4}, (flux_vec3){0, 0, 0},
                             (flux_vec3){0, 1, 0});
     }
@@ -413,7 +419,7 @@ int main(int argc, char **argv) {
     };
 
     printf("flux gltf_viewer — native Iris window (Esc to quit)\n");
-    int rc = iris_app_run(&(iris_app_opts){
+    int rc = aperture_app_run(&(aperture_app_opts){
         .title = orbit ? "flux gltf viewer — orbit" : "flux gltf viewer",
         .app_id = "org.optics.flux.gltf-viewer",
         .width = 960,

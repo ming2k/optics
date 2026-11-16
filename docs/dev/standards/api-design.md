@@ -4,48 +4,64 @@ This document establishes the mandatory conventions and invariants for all C and
 
 ---
 
-## 1. The Single Opts Descriptor Paradigm
+## 1. The Descriptor Rule
 
-Every public functional entry point across all libraries in Optics must follow this exact signature pattern:
+A descriptor is for configuration. Operands are parameters.
+
+1. **At most four parameters.** A public function that needs more than four
+   takes one descriptor instead of growing its list:
+   ```c
+   <result> <module>_<verb>(<context> *ctx, const <module>_<noun>_opts *opts);
+   ```
+2. **At most one descriptor.** A function never takes two.
+3. **No variant suffixes.** `_ex`, `_wrapped`, `_sized`, `_primary` and the
+   like are forbidden. A variant is a field of the descriptor, not a second
+   entry point.
+4. **Creation and widget calls always take a descriptor**, even when they are
+   small today: they are where configuration accumulates.
+5. **Positional is correct for operands.** Scalar setters and getters
+   (`flux_canvas_rotate(c, radians)`, `lens_set_scale(ui, scale)`), lifecycle
+   primitives (`retain` / `release`), and value kernels — pure math and
+   geometry in `<flux/math.h>`, `<flux/curve.h>`, `<flux/sdf.h>` and the path
+   verbs — keep their arguments positional at any count. Wrapping six control
+   point floats in a struct obscures the call without adding anything.
+
+Callers pass descriptors as C23 compound literals; a zeroed field means "the
+default":
 
 ```c
-// Mandatory Signature Pattern:
-<ReturnStruct> <module>_<verb/noun>(<Context> *ctx, const <module>_<noun>_opts *opts);
+lens_button(ui, &(lens_button_opts){
+    .label = "Save",
+    .variant = LENS_BUTTON_PRIMARY,
+});
 ```
 
-### Key Rules:
-1. **Pointers to Descriptors**: The `opts` argument must always be a `const *` pointer to allow passing `{}` or `nullptr` safely.
-2. **C23 Compound Literals**: Callers pass options using modern C23 compound literal syntax (`{}` for zero initialization, `nullptr` for null pointers):
-   ```c
-   // Terse, idiomatic C23 invocation (a real canonical widget call):
-   lens_button(ui, &(lens_button_opts){
-       .label = "Save",
-       .variant = LENS_BUTTON_PRIMARY,
-   });
-   ```
-3. **C23 Language Baseline**:
-   - **Pointers**: Always use native `nullptr` (never `NULL` or `0`).
-   - **Zero-initialization**: Always use `{}` (never `{0}`).
-   - **Typed Enums**: Explicit fixed underlying types `typedef enum name : uint32_t { ... }`.
-   - **Attributes**: Standard C23 `[[nodiscard]]`, `[[reproducible]]`, `[[unsequenced]]`.
-   - **Static Assertions**: Standard C23 `static_assert(cond, msg)`.
-4. **Structured Return**:
-   - Fallible public entry points return `flux_result` (the stack-wide status type) or a typed response descriptor; query/accessor entry points may return a value directly. Bare `int` error codes and unchecked out-parameters are prohibited.
+Fallible entry points return `flux_result` (the stack-wide status type) or a
+typed response; queries may return a value directly. Bare `int` error codes
+and unchecked out-parameters are prohibited in new API.
 
-### Migration Status
+### Enforcement
 
-Waves 1–6 (`glyph`, `vista`, `prism`, `iris`, `flux`, `lens`) are all landed;
-`reticle` was already compliant. Every operation entry point across the stack
-now accepts a typed `const <module>_<op>_opts *` descriptor (or its existing
-`*_desc *` descriptor), with folded variants (`glyph_draw_outlined`,
-`flux_scene_draw_mesh_{lit,skinned,skinned_lit}`,
-`flux_image_update_region_{strided,premultiply}`,
-`flux_encoder_draw_geometry_slot`, `flux_canvas_submit_display_list_bound`)
-unified into their canonical descriptor fields. Math, pure getters/single-scalar
-setters, lifecycle primitives, version accessors, callbacks, and raw Vulkan
-handle/readback accessors remain explicit exceptions per
-([ADR-0165](../../adr/0165-single-opts-descriptor-migration-by-library.md)).
-`tools/check_api.py` enforces the suffix ratchet against regressions.
+`tools/check_api.py` (`meson test --suite lint`) parses every public
+declaration under `libs/*/include` and fails on a function with more than four
+parameters outside the value-kernel headers, on a second descriptor, and on a
+variant suffix. Functions that predate the rule are listed in
+`tools/config/api_baseline.txt`. That file is a ratchet: a function not on it
+fails the check, and an entry that no longer violates fails until it is
+deleted. Converting a function means removing its line.
+
+This rule replaces the earlier "every entry point takes exactly one descriptor"
+wording ([ADR-0165](../../adr/0165-single-opts-descriptor-migration-by-library.md),
+amended by [ADR-0166](../../adr/0166-one-way-library-graph-and-enforced-invariants.md)),
+which the headers never satisfied and no tool checked.
+
+### C23 Baseline
+
+- **Pointers**: `nullptr` (never `NULL` or `0`).
+- **Zero-initialization**: `{}` (never `{0}`).
+- **Typed enums**: fixed underlying types, `typedef enum name : uint32_t { ... }`.
+- **Attributes**: `[[nodiscard]]`, `[[reproducible]]`, `[[unsequenced]]`.
+- **Static assertions**: `static_assert(cond, msg)`.
 
 ---
 

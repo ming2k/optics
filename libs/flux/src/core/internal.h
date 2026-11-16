@@ -982,7 +982,8 @@ struct flux_frame {
     flux_surface *surface; /* not retained — surface owns the frame slot */
     uint32_t slot;         /* 0..frames_in_flight-1; matches per_frame[] */
     flux_frame_state state;
-    bool pass_active; /* true between begin_pass and end_pass */
+    bool pass_active;        /* true between hardware begin_pass and end_pass */
+    bool canvas_pass_active; /* true between deferred canvas begin and end */
     bool readback_requested;
     /* Exact physical-pixel source region copied when readback_requested is
      * true. Full-frame compatibility requests populate the surface extent. */

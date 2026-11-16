@@ -142,8 +142,7 @@ FLUX_API void flux_get_last_error(flux_error_info *out);
  * "lens_snapshot_activate" — because that is what the caller's log needs to name.
  * The slot is thread-local, matching flux's own failures: one thread's
  * diagnostic never affects another's. */
-FLUX_API void flux_set_diagnostic(flux_result code, const char *function, const char *file,
-                                  int line, const char *message);
+FLUX_API void flux_set_diagnostic(const flux_error_info *info);
 
 /* Compose a message into the thread-local formatting arena and return it, for
  * passing to `flux_set_diagnostic` when the text needs values spliced in. The
@@ -308,7 +307,8 @@ typedef enum flux_struct_type : uint32_t {
     FLUX_TYPE_MESH_SKIN_DESC = 21,
     FLUX_TYPE_MATERIAL_SURFACE_DESC = 22,
     FLUX_TYPE_EFFECT_BLUR_REGIONS_DESC = 23,
-    FLUX_TYPE_CANVAS_NO_STENCIL_DESC = 24,
+    /* 24 was FLUX_TYPE_CANVAS_NO_STENCIL_DESC — retired when analytic
+     * tiled coverage replaced stencil-then-cover (ADR-0116/0120). Never reuse. */
     FLUX_TYPE_DEVICE_DRM_NODE_DESC = 25,
     FLUX_TYPE_DEVICE_FEATURES_DESC = 26,
     FLUX_TYPE_GLYPH_RUN_HOST_ATLAS_DESC = 27,
@@ -317,8 +317,6 @@ typedef enum flux_struct_type : uint32_t {
     FLUX_TYPE_IMAGE_COLOR_SPACE_DESC = 30,
     FLUX_TYPE_SURFACE_OUTPUT_COLOR_DESC = 31,
     FLUX_TYPE_SURFACE_OFFSCREEN_FORMAT_DESC = 32,
-    FLUX_TYPE_CANVAS_ANTIALIAS_DESC = 33,
-    FLUX_TYPE_CANVAS_SUPERSAMPLE_DESC = 34,
     FLUX_TYPE_EFFECT_SHADOW_DESC = 40,
     FLUX_TYPE_CPU_TARGET_DESC = 46,
     FLUX_TYPE_MATERIAL_VECTOR_DESC = 47,
@@ -339,10 +337,6 @@ typedef enum flux_struct_type : uint32_t {
  * fires, a value was inserted or reordered instead of appended — see
  * docs/reference/api.md before changing them. */
 static_assert(FLUX_TYPE_DEVICE_DESC == 1, "flux_struct_type: append only — never renumber");
-static_assert(FLUX_TYPE_CANVAS_ANTIALIAS_DESC == 33,
-              "flux_struct_type: append only — never renumber");
-static_assert(FLUX_TYPE_CANVAS_SUPERSAMPLE_DESC == 34,
-              "flux_struct_type: append only — never renumber");
 static_assert(FLUX_TYPE_EFFECT_SHADOW_DESC == 40, "flux_struct_type: append only — never renumber");
 static_assert(FLUX_TYPE_OBSERVE_OPTS == 48, "flux_struct_type: append only — never renumber");
 static_assert(FLUX_TYPE_OBSERVE_REPORT_OPTS == 49,
@@ -492,6 +486,23 @@ FLUX_API bool flux_icc_profile_color_space(const flux_icc_profile *p, flux_color
 /*  Sampled image (refcounted GPU resource)                           */
 /* ------------------------------------------------------------------ */
 
+/* What an image is for. One vocabulary for creation (flux_image_desc::usage)
+ * and for the capability query below. */
+typedef enum flux_image_usage : uint32_t {
+    /* Sampled content, uploaded from `initial_data` or by region updates. */
+    FLUX_IMAGE_USAGE_SAMPLED = 0,
+    /* STORAGE | SAMPLED | TRANSFER, parked in SHADER_READ_ONLY_OPTIMAL: the
+     * intermediate currency of compute effects. Bring it to GENERAL around a
+     * dispatch with flux_image_transition (<flux/vulkan.h>). RGBA8/BGRA8 UNORM
+     * always; RGBA16_SFLOAT where the device supports rgba16f storage. Holds
+     * only a weak device reference: keep the device alive for its lifetime. */
+    FLUX_IMAGE_USAGE_COMPUTE_WRITE = 1,
+    /* COLOR_ATTACHMENT | SAMPLED with undefined initial contents. Prepare it
+     * before flux_frame_begin_pass and finish it after flux_frame_end_pass;
+     * outside that interval it is sampleable. */
+    FLUX_IMAGE_USAGE_RENDER_TARGET = 2,
+} flux_image_usage;
+
 /* Images are core GPU resources shared by canvas, scene, and effect
  * modules. Pixel uploads are tightly packed and copied before create/update
  * returns. Render-target helpers keep the image sampleable between passes. */
@@ -502,7 +513,8 @@ typedef struct flux_image_desc {
     uint32_t height;
     flux_format format;       /* 8-bit colour formats, or RGBA16_SFLOAT
                                * (working-space linear content, ADR-0069) */
-    const void *initial_data; /* optional; size = w*h*bytes_per_pixel */
+    const void *initial_data; /* SAMPLED only, optional; size = w*h*bytes_per_pixel */
+    flux_image_usage usage;   /* default SAMPLED */
 } flux_image_desc;
 
 #define FLUX_IMAGE_DESC_INIT {.type = FLUX_TYPE_IMAGE_DESC}
@@ -553,48 +565,17 @@ FLUX_API flux_format flux_image_format(const flux_image *image);
  * the caller's own device reference. */
 FLUX_API flux_device *flux_image_device(const flux_image *image);
 
-/* Create a COLOR_ATTACHMENT | SAMPLED image with undefined initial contents.
- * Prepare it immediately before flux_frame_begin_pass and finish it after
- * flux_frame_end_pass; outside that interval it is sampleable. */
-FLUX_NODISCARD FLUX_API flux_result flux_image_create_render_target(flux_device *d, uint32_t width,
-                                                                    uint32_t height,
-                                                                    flux_format format,
-                                                                    flux_image **out);
+/* Render-target images (FLUX_IMAGE_USAGE_RENDER_TARGET) bracket their pass: */
 FLUX_NODISCARD FLUX_API flux_result flux_frame_prepare_image_target(flux_frame *frame,
                                                                     flux_image *target);
 FLUX_NODISCARD FLUX_API flux_result flux_frame_finish_image_target(flux_frame *frame,
                                                                    flux_image *target);
 
-/* Create a STORAGE | SAMPLED image with undefined initial contents, in
- * VK_IMAGE_LAYOUT_GENERAL, registered into both the sampled and the storage
- * bindless slots (read them via flux_image_bindless_handle and
- * flux_image_bindless_storage_handle in <flux/vulkan.h>). RGBA8/BGRA8_UNORM
- * are supported everywhere (Vulkan guarantees their storage access);
- * RGBA16_SFLOAT — the ADR-0069 working-space format — requires the
- * device's rgba16f storage feature and fails with FLUX_ERROR_UNSUPPORTED
- * where it is absent. This is the output and
- * intermediate currency of compute effects; the effect module's own
- * operators are built on it.
- *
- * The image holds only a weak device reference: the caller must keep the
- * device alive for the image's whole lifetime (a filter or pool that
- * retains the device satisfies this). Release with flux_image_release. */
-FLUX_NODISCARD FLUX_API flux_result flux_image_create_compute_writable(
-    flux_device *d, uint32_t width, uint32_t height, flux_format format, flux_image **out);
-
-/* Image usage support query — discover capabilities instead of failing
- * on them. flux_image_create_compute_writable documents
- * FLUX_ERROR_UNSUPPORTED for RGBA16_SFLOAT on devices without rgba16f
- * storage; this query answers the question BEFORE the attempt. Returns
- * false (never an error) for unknown formats, NULL devices, or
- * unsupported usage combinations on this device. */
-typedef enum flux_image_usage_query : uint32_t {
-    FLUX_IMAGE_USAGE_SAMPLED = 0,       /* shader sampling (all flux images)   */
-    FLUX_IMAGE_USAGE_COMPUTE_WRITE = 1, /* storage write (compute_writable)  */
-} flux_image_usage_query;
-
+/* Capability query — discover support instead of failing on it. Returns false
+ * (never an error) for unknown formats, null devices, or a usage this device
+ * cannot provide for `format`. */
 FLUX_API bool flux_device_supports_image_usage(const flux_device *d, flux_format format,
-                                               flux_image_usage_query usage);
+                                               flux_image_usage usage);
 
 /* Upload tightly packed pixels into an in-bounds sub-region. The image view
  * and bindless handle remain valid across the update. Requires the image to

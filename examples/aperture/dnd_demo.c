@@ -8,6 +8,7 @@
  */
 
 #include "app_shell.h"
+#include <aperture/aperture.h>
 #include <iris/app.h>
 #include <iris/capability.h>
 #include <iris/dnd.h>
@@ -163,12 +164,12 @@ int main(int argc, char **argv) {
     (void)argc;
     (void)argv;
     app a = {};
-    iris_app_config cfg = {
+    aperture_app_opts cfg = {
         .title = "Optics — Drag and Drop Demonstration",
         .width = 900,
         .height = 540,
         .user = &a,
         .build = build,
     };
-    return iris_app_run(&cfg);
+    return aperture_app_run(&cfg);
 }

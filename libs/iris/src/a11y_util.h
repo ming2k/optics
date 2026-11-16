@@ -17,7 +17,7 @@
 #define IRIS_A11Y_UTIL_H
 
 #include <flux/math.h>
-#include <lens/lens.h>
+#include <iris/host.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -25,19 +25,19 @@
 /* Roles that expose org.a11y.atspi.Action — the AT can invoke them.
  * Buttons, checkboxes, radios, disclosure toggles, menu items, and links
  * all do something when activated; labels / panels / scroll areas do not. */
-bool iris_a11y__supports_action(lens_role r);
+bool iris_a11y__supports_action(iris_role r);
 
 /* Roles that expose org.a11y.atspi.Text — single- or multi-line text input. */
-bool iris_a11y__supports_text(lens_role r);
+bool iris_a11y__supports_text(iris_role r);
 
 /* Roles that expose org.a11y.atspi.Value — anything with a scalar range
  * (sliders; progress bars read back their completion through it). */
-bool iris_a11y__supports_value(lens_role r);
+bool iris_a11y__supports_value(iris_role r);
 
 /* The localized-independent action name AT-SPI clients announce for the
  * primary action of `r` ("click" / "toggle" / "press"), or NULL when the
  * role is not actionable. */
-const char *iris_a11y__action_name(lens_role r);
+const char *iris_a11y__action_name(iris_role r);
 
 /* Parse a lens semantic `value` string (a slider readout like "1.5" or
  * "42") into a double. Returns 0.0 for NULL / empty / non-numeric input. */
@@ -89,13 +89,13 @@ typedef enum iris_atspi_state : uint32_t {
 } iris_atspi_state;
 
 /* Map lens role → AT-SPI role (IRIS_ATSPI_ROLE_UNKNOWN when unmapped). */
-iris_atspi_role iris_a11y__map_role(lens_role r);
+iris_atspi_role iris_a11y__map_role(iris_role r);
 
 /* The RoleName string clients display for an AT-SPI role ("push button", …). */
 const char *iris_a11y__role_name(iris_atspi_role r);
 
-/* Build the AT-SPI (lo, hi) state bitfield from lens's LENS_A11Y_* flags. */
-void iris_a11y__state_bits(uint32_t lens_flags, uint32_t *out_lo, uint32_t *out_hi);
+/* Build the AT-SPI (lo, hi) state bitfield from lens's IRIS_A11Y_* flags. */
+void iris_a11y__state_bits(uint32_t flags, uint32_t *out_lo, uint32_t *out_hi);
 
 /* ------------------------------------------------------------------ */
 /*  Per-frame tree diff (which Event.Object signals to emit)           */
@@ -108,20 +108,20 @@ void iris_a11y__state_bits(uint32_t lens_flags, uint32_t *out_lo, uint32_t *out_
 #define IRIS_A11Y__NODE_VALUE_MAX 256
 
 typedef struct iris_a11y__node {
-    lens_id id;
-    lens_id parent;
-    lens_role role;
+    iris_node_id id;
+    iris_node_id parent;
+    iris_role role;
     char name[IRIS_A11Y__NODE_NAME_MAX];
     char value[IRIS_A11Y__NODE_VALUE_MAX];
-    uint32_t flags;   /* LENS_A11Y_*                        */
+    uint32_t flags;   /* IRIS_A11Y_*                        */
     int32_t index;    /* index among same-parent siblings    */
     flux_rect bounds; /* solved bounds this frame (Component / BoundsChanged) */
 } iris_a11y__node;
 
 /* Copy one walked lens node into snapshot storage (deep string copies,
  * sibling index computed against the partially built `cur` array). */
-void iris_a11y__node_fill(iris_a11y__node *dst, const lens_semantics *s, lens_id id, lens_id parent,
-                          const iris_a11y__node *cur, size_t n_cur);
+void iris_a11y__node_fill(iris_a11y__node *dst, const iris_semantics *s, iris_node_id id,
+                          iris_node_id parent, const iris_a11y__node *cur, size_t n_cur);
 
 /* ------------------------------------------------------------------ */
 /*  Text-changed delta (Event.Object::TextChanged)                     */
@@ -165,11 +165,11 @@ typedef enum iris_a11y__event_kind : uint32_t {
 
 typedef struct iris_a11y__event {
     iris_a11y__event_kind kind;
-    lens_id id;
-    lens_id parent;                   /* add/remove: the parent the change is reported on */
+    iris_node_id id;
+    iris_node_id parent;              /* add/remove: the parent the change is reported on */
     int32_t index;                    /* add/remove: index in that parent's child list    */
     int32_t state;                    /* STATE_ON/OFF: iris_atspi_state bit               */
-    lens_role role;                   /* ROLE: the new role                               */
+    iris_role role;                   /* ROLE: the new role                               */
     iris_a11y__text_delta text;       /* TEXT: the edit delta                   */
     const iris_a11y__node *node;      /* the current-frame node (NULL for REMOVE,
                                          which points at `prev_node` instead)   */

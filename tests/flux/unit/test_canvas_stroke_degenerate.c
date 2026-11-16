@@ -32,7 +32,12 @@ int main(void) {
     OT_EXPECT(flux_arena_init(&arena, 1u << 16, nullptr) == FLUX_OK);
 
     flux_canvas *c = nullptr;
-    OT_EXPECT(flux_canvas_create_cpu(W, H, 1.0f, &c) == FLUX_OK);
+    OT_EXPECT(flux_canvas_create(&(flux_canvas_desc){.type = FLUX_TYPE_CANVAS_DESC,
+                                                     .backend = FLUX_CANVAS_BACKEND_CPU,
+                                                     .scale = 1.0f,
+                                                     .width = W,
+                                                     .height = H},
+                                 &c) == FLUX_OK);
     OT_EXPECT(c != nullptr);
 
     /* Circle centred (36,48) r=24 as four cubics, a trailing zero-length

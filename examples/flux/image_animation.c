@@ -7,6 +7,7 @@
  *   - Native Iris windowing with fractional HiDPI and system cursor.
  */
 
+#include <aperture/aperture.h>
 #include <flux/canvas.h>
 #include <flux/flux.h>
 #include <iris/app.h>
@@ -287,7 +288,7 @@ static void on_record(flux_encoder *enc, float scale, void *user) {
 int main(void) {
     image_animation_app app = {};
     printf("flux image_animation — native Iris window (Esc to quit)\n");
-    return iris_app_run(&(iris_app_opts){
+    return aperture_app_run(&(aperture_app_opts){
         .title = "flux image animation",
         .app_id = "org.optics.flux.image-animation",
         .width = 1100,

@@ -1232,6 +1232,7 @@ flux_result flux_frame_submit(flux_frame *f) {
     if (f->pass_active) {
         flux_frame_end_pass(f);
     }
+    f->canvas_pass_active = false;
 
     bool copy_readback = s->offscreen_require_readback || f->readback_requested;
     flux_readback_region readback_region = s->offscreen_require_readback
@@ -1598,7 +1599,7 @@ flux_result flux_frame_materialize_image(flux_frame *f, flux_image *image) {
     /* Compute cannot be recorded inside a render pass, so the caller must be
      * at a boundary. Reporting it here keeps the failure at the call site
      * instead of surfacing as a Vulkan validation error later. */
-    if (f->pass_active) {
+    if (flux_frame_has_active_pass(f)) {
         FLUX_FAIL(FLUX_ERROR_INVALID_STATE,
                   "materialize requires a pass boundary; a canvas pass is active");
         return FLUX_ERROR_INVALID_STATE;
@@ -1669,7 +1670,7 @@ flux_frame_state flux_frame_get_state(const flux_frame *f) {
 }
 
 bool flux_frame_has_active_pass(const flux_frame *f) {
-    return f ? f->pass_active : false;
+    return f ? (f->pass_active || f->canvas_pass_active) : false;
 }
 
 flux_device *flux_frame_device(const flux_frame *f) {

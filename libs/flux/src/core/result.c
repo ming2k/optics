@@ -75,9 +75,11 @@ void flux_set_last_errorf(flux_result code, const char *function, const char *fi
  * Delegates to the same slot so a caller's `flux_get_last_error` cannot tell
  * flux-native and consumer-detected failures apart — which is the point: the
  * binding reads one contract either way. */
-void flux_set_diagnostic(flux_result code, const char *function, const char *file, int line,
-                         const char *message) {
-    flux_set_last_error(code, function, file, line, message, 0);
+void flux_set_diagnostic(const flux_error_info *info) {
+    if (!info)
+        return;
+    flux_set_last_error(info->code, info->function, info->file, info->line, info->message,
+                        info->backend_code);
 }
 
 const char *flux_diagnostic_format(const char *fmt, ...) {

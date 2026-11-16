@@ -9,9 +9,14 @@ typedef struct popup_menu_state {
     int32_t focused_index;
 } popup_menu_state;
 
-int32_t lens_popup_menu(lens *ui, const char *menu_id, flux_rect anchor_rect,
-                        const lens_menu_item *items, uint32_t item_count,
-                        const lens_menu_opts *opts) {
+int32_t lens_popup_menu(lens *ui, const lens_menu_opts *opts) {
+    if (!opts)
+        return -1;
+    const char *menu_id = opts->id;
+    const flux_rect anchor_rect = opts->anchor;
+    const lens_menu_item *items = opts->items;
+    const uint32_t item_count = opts->item_count;
+
     if (!ui || !menu_id || !items || item_count == 0)
         return -1;
 

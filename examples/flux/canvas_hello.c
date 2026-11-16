@@ -5,6 +5,7 @@
  * rounded rectangles, and image drawing, running natively on Iris.
  */
 
+#include <aperture/aperture.h>
 #include <flux/canvas.h>
 #include <flux/flux.h>
 #include <iris/app.h>
@@ -245,7 +246,7 @@ static void on_record(flux_encoder *enc, float scale, void *user) {
 int main(void) {
     canvas_hello_app app = {};
     printf("flux canvas_hello — native Iris window (Esc to quit)\n");
-    return iris_app_run(&(iris_app_opts){
+    return aperture_app_run(&(aperture_app_opts){
         .title = "flux canvas — hello",
         .app_id = "org.optics.flux.canvas-hello",
         .width = 960,

@@ -13,8 +13,7 @@ growth, device-wide waits, and sigma-dependent shader loops.
 You have a `flux_device *d`, a `flux_image *input` in
 `FLUX_FORMAT_RGBA8_UNORM` or `FLUX_FORMAT_BGRA8_UNORM`, and a
 `VkCommandBuffer cmd` you are recording into (typically pulled from
-`flux_frame_vk_command_buffer(frame)` inside a frame). The build
-must have `-Deffect=true` (default).
+`flux_frame_vk_command_buffer(frame)` inside a frame).
 
 ## The minimum call
 
@@ -51,7 +50,7 @@ Keep one filter per surface/frame stream. Release it after the last referencing
 frame has completed. The output keeps the input dimensions and uses
 `FLUX_FORMAT_RGBA8_UNORM`. For
 backdrop blur, render the scene into a quarter-resolution
-`flux_image_create_render_target` and scale `sigma` by the same factor.
+`flux_image_create (FLUX_IMAGE_USAGE_RENDER_TARGET)` and scale `sigma` by the same factor.
 The filter always records two downsample and two upsample passes; `sigma`
 changes sample offsets without changing the sample count.
 

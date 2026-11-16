@@ -8,6 +8,7 @@
  * scaling work out of the box via Iris.
  */
 
+#include <aperture/aperture.h>
 #include <flux/canvas.h>
 #include <flux/flux.h>
 #include <glyph/glyph.h>
@@ -100,7 +101,7 @@ static void on_record(flux_encoder *enc, float scale, void *user) {
 int main(void) {
     text_hello_app app = {};
     printf("glyph hello — native Iris window (Esc to quit)\n");
-    return iris_app_run(&(iris_app_opts){
+    return aperture_app_run(&(aperture_app_opts){
         .title = "glyph — hello",
         .app_id = "org.optics.glyph.hello",
         .width = 800,

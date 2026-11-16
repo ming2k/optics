@@ -132,20 +132,15 @@ impl TreeView {
             .collect();
 
         let raw_opts = lens_sys::lens_tree_opts {
+            id: id_c.as_ptr(),
+            items: raw_items.as_mut_ptr(),
+            item_count: raw_items.len() as u32,
             height: self.height,
             row_height: self.row_height,
             indent_per_level: self.indent_per_level,
         };
 
-        let act = unsafe {
-            lens_sys::lens_tree_view(
-                frame.as_raw(),
-                id_c.as_ptr(),
-                raw_items.as_mut_ptr(),
-                raw_items.len() as u32,
-                &raw_opts,
-            )
-        };
+        let act = unsafe { lens_sys::lens_tree_view(frame.as_raw(), &raw_opts) };
 
         // Copy back expanded state
         for (it, raw) in items.iter_mut().zip(&raw_items) {

@@ -59,26 +59,14 @@ else
   tracy_dep = declare_dependency()
 endif
 
-opt_canvas = get_option('canvas')
-opt_scene = get_option('scene')
-opt_compute = get_option('compute')
-opt_effect = get_option('effect')
 opt_glyph = get_option('glyph')
 opt_vista = get_option('vista')
 opt_transit = get_option('transit')
 opt_reticle = get_option('reticle')
 opt_prism = get_option('prism')
-# lens consumes glyph and reticle, and both consume the flux canvas. iris
-# consumes lens. The feature graph is explicit here so a disabled dependency
-# cannot turn into a late undefined reference.
-opt_lens = opt_canvas and opt_glyph and opt_reticle
-
-if opt_vista and not opt_scene
-  error('vista requires the flux scene module — pass -Dvista=false with -Dscene=false')
-endif
-if opt_reticle and not opt_canvas
-  error('reticle requires the flux canvas module — pass -Dreticle=false with -Dcanvas=false')
-endif
+# lens consumes glyph and reticle. The feature graph is explicit here so a
+# disabled dependency cannot turn into a late undefined reference.
+opt_lens = opt_glyph and opt_reticle
 
 subdir('libs/flux')
 
@@ -114,12 +102,16 @@ else
   prism_dep = declare_dependency()
 endif
 
+# iris is the platform shell and needs flux only. lens is the UI engine and
+# needs glyph + reticle. aperture is the one library that links both.
+subdir('libs/iris')
+
 if opt_lens
   subdir('libs/lens')
-  subdir('libs/iris')
+  subdir('libs/aperture')
 else
   lens_dep = declare_dependency()
-  iris_dep = declare_dependency()
+  aperture_dep = declare_dependency()
 endif
 
 # ====================================================================
@@ -127,8 +119,8 @@ endif
 # ====================================================================
 optics_inc = include_directories('include')
 
-optics_deps = [flux_dep]
-optics_requires = ['flux = ' + meson.project_version()]
+optics_deps = [flux_dep, iris_dep]
+optics_requires = ['flux = ' + meson.project_version(), 'iris = ' + meson.project_version()]
 optics_compile_args = []
 
 if opt_transit
@@ -158,12 +150,12 @@ if opt_prism
   optics_compile_args += '-DOPTICS_HAVE_PRISM=1'
 endif
 if opt_lens
-  optics_deps += [lens_dep, iris_dep]
+  optics_deps += [lens_dep, aperture_dep]
   optics_requires += [
     'lens = ' + meson.project_version(),
-    'iris = ' + meson.project_version(),
+    'aperture = ' + meson.project_version(),
   ]
-  optics_compile_args += ['-DOPTICS_HAVE_LENS=1', '-DOPTICS_HAVE_IRIS=1']
+  optics_compile_args += ['-DOPTICS_HAVE_LENS=1', '-DOPTICS_HAVE_APERTURE=1']
 endif
 
 install_headers('include/optics/optics.h', subdir : 'optics')
@@ -186,7 +178,8 @@ pkg.generate(
 
 if get_option('examples')
   subdir('examples/flux')
-  if opt_lens and opt_effect and opt_prism
+  subdir('examples/iris')
+  if opt_lens and opt_prism
     subdir('examples/showcase')
   endif
   if opt_lens and opt_glyph
@@ -203,7 +196,7 @@ if get_option('examples')
   endif
   if opt_lens
     subdir('examples/lens')
-    subdir('examples/iris')
+    subdir('examples/aperture')
     subdir('examples/scenarios')
   endif
 endif

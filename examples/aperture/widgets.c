@@ -4,6 +4,7 @@
  */
 
 #include "app_shell.h"
+#include <aperture/aperture.h>
 #include <iris/app.h>
 #include <iris/window.h>
 #include <lens/lens.h>
@@ -242,7 +243,7 @@ int main(void) {
         .bio = "",
     };
     printf("iris widgets reference. Interactions print here. Esc quits.\n\n");
-    return iris_app_run(&(iris_app_config){
+    return aperture_app_run(&(aperture_app_opts){
         .title = "iris — widgets",
         .width = 560,
         .height = 900,

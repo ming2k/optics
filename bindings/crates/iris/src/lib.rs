@@ -1,36 +1,19 @@
-//! Safe Rust bindings to **iris** — the L3 application toolkit of the
-//! flux/lens stack.
+//! Safe Rust bindings to **iris** — the platform shell of the optics stack.
 //!
-//! iris owns the window, GPU device, and event loop. Each frame it runs two
-//! host callbacks:
+//! iris owns the native window, the event pump and the frame cadence, and
+//! depends on flux only. This crate wraps the parts of it an application
+//! calls directly:
 //!
-//! 1. **build** ([`Frame`] + [`Input`]) — inside an open `lens_begin/end`
-//!    pair. The host builds its chrome (immediate-mode lens widgets) and
-//!    reads the per-frame [`Input`] snapshot to drive anything lens itself
-//!    does not own.
-//! 2. **record** ([`RecordHost`]) — on the UI thread, before the frame is
-//!    submitted. The host records host canvas content into an immutable
-//!    display list; iris composites it under the chrome. Use it for surfaces
-//!    lens cannot describe (a document canvas, an image, a custom render path).
+//! - window control ([`window_close`], [`window_maximize`], ...) and
+//!   [`set_cursor`];
+//! - frame pacing requests ([`request_animation_frame`], ...);
+//! - [`system_prefers_dark`] / [`ColorScheme`] and the scheme watcher;
+//! - native file dialogs ([`pick_file`], [`FileDialog`]), capability queries
+//!   and drag-and-drop.
 //!
-//! Either closure may be `None` — a pure-chrome app skips `record`, a
-//! pure-canvas demo skips `build`.
-//!
-//! ```no_run
-//! use iris::{Application, Config};
-//!
-//! Application::run_with_record(
-//!     Config::new("Demo").unwrap(),
-//!     |_frame, _input| { /* build chrome */ },
-//!     Some(|_host| { /* record document surface */ }),
-//! ).unwrap();
-//! ```
-//!
-//! Outside `Application::run`, this crate also exposes:
-//! - [`system_prefers_dark`] / [`ColorScheme`] — query the desktop's
-//!   colour-scheme preference at startup.
-//! - [`pick_file`] — open the host desktop's native file picker via
-//!   xdg-desktop-portal.
+//! Running an application with a lens UI is the `aperture` crate's job
+//! (`aperture::Application`); it builds on this one. The raw UI-host seam a
+//! different UI layer would implement is available through [`sys`].
 
 #![deny(rust_2018_idioms)]
 
@@ -39,164 +22,7 @@ use std::os::raw::c_int;
 
 /// Raw-bindings escape hatch (see the `flux` crate's note). Kept `pub`
 /// deliberately as the one documented unsafe escape hatch.
-/// Raw-bindings escape hatch (see the `flux` crate's note). Kept `pub`
-/// deliberately as the one documented unsafe escape hatch.
 pub use iris_sys as sys;
-
-pub use lens::key;
-pub use lens::mods;
-pub use lens::patterns::{
-    self, DataGrid, DataGridAction, DataGridCol, MenuItem, MenubarItem, SegmentedControl,
-    SegmentedItem, SortDir, TreeAction, TreeItem, TreeView, menubar, popup_menu,
-};
-pub use lens::{
-    Align, Band, Color, CursorHint, DndDropInfo, Frame, Icon, Input, LayoutOpts, MouseButton,
-    PlaceMode, PlaceOpts, Rect, Response, Style, TextBuf, Theme, Ui,
-};
-
-/// Borrowed handles passed to [`Application::run_with_record`] for decoupled host canvas recording (ADR-0127).
-pub struct RecordHost {
-    encoder: *mut sys::flux_encoder,
-    scale: f32,
-}
-
-impl RecordHost {
-    /// Borrowed encoder command recorder for this frame.
-    pub fn encoder(&mut self) -> flux::Encoder {
-        // SAFETY: iris handed us a live `flux_encoder*` for the duration of the record callback.
-        unsafe { flux::Encoder::borrow_raw(self.encoder) }
-    }
-
-    /// Current display scale factor.
-    pub fn scale(&self) -> f32 {
-        self.scale
-    }
-}
-
-/// A thin wrapper over the raw pointers iris hands to the optional start
-/// callback: the lens context and the flux device iris owns for this app.
-/// The callback runs once — after iris has created its device, canvas and
-/// lens context, before the first frame — which makes it the right place to
-/// set up device-dependent resources (text shapers, image uploads) without
-/// installing a per-frame record callback: a start hook costs nothing per
-/// frame and does not defeat the backend's idle frame-skip. The same
-/// device-borrow rule as [`StartHost::flux_device`] applies.
-pub struct StartHost {
-    ui: *mut sys::lens,
-    device: *mut sys::flux_device,
-}
-
-impl StartHost {
-    /// The live `lens*`, as the safe crate's borrowed [`Ui`] handle. Valid
-    /// for the app's lifetime; iris destroys the context at shutdown.
-    pub fn ui(&self) -> Ui {
-        // SAFETY: iris keeps `lens*` alive for the whole run; `Ui::borrow`
-        // is the safe non-owning view over it (no destroy on drop).
-        // SAFETY: iris handed us live typed pointers for the callback's duration.
-        unsafe { Ui::borrow_raw(self.ui) }
-    }
-
-    /// The `flux_device*` iris owns, as a borrowed (non-owning)
-    /// `flux::Device`. Borrow it — never open a second device in the same
-    /// process.
-    pub fn flux_device(&self) -> flux::Device {
-        // SAFETY: see [`StartHost::flux_device`]; same contract, the start
-        // callback's device pointer lives until shutdown.
-        unsafe { flux::Device::borrow_raw(self.device) }
-    }
-}
-
-/// The handle iris hands to the optional `stop` callback: the same borrows
-/// as [`StartHost`], live one last time after the frame loop and before
-/// iris tears down lens, flux, and the device (ADR-0045). This is where
-/// hosts release every device-backed resource created from
-/// [`StartHost::flux_device`].
-pub type StopHost = StartHost;
-
-/// Errors returned by [`Application::run`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RunError {
-    /// The platform returned a non-zero exit code.
-    Platform(i32),
-    /// The config contained a NULL byte in the title.
-    BadTitle,
-    /// The config contained a NULL byte in the desktop application ID.
-    BadAppId,
-}
-
-impl std::fmt::Display for RunError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            RunError::Platform(rc) => write!(f, "iris_app_run exited with code {rc}"),
-            RunError::BadTitle => write!(f, "window title contains an interior NUL byte"),
-            RunError::BadAppId => write!(f, "application ID contains an interior NUL byte"),
-        }
-    }
-}
-
-impl std::error::Error for RunError {}
-
-/// Application configuration handed to [`Application::run`].
-pub struct Config {
-    title: CString,
-    app_id: CString,
-    width: i32,
-    height: i32,
-    dark: bool,
-    log_raw: bool,
-}
-
-impl Config {
-    /// A default-sized window with the given title that follows the system
-    /// colour scheme.
-    pub fn new(title: impl Into<String>) -> Result<Config, RunError> {
-        let title = CString::new(title.into()).map_err(|_| RunError::BadTitle)?;
-        Ok(Config {
-            title,
-            app_id: CString::new("ai.opencode.iris").expect("static app ID is valid"),
-            width: 960,
-            height: 640,
-            dark: false,
-            log_raw: false,
-        })
-    }
-
-    /// Set the stable desktop application ID used by Wayland compositors
-    /// for window grouping, launcher matching, and icon lookup.
-    pub fn app_id(mut self, app_id: impl Into<String>) -> Result<Self, RunError> {
-        self.app_id = CString::new(app_id.into()).map_err(|_| RunError::BadAppId)?;
-        Ok(self)
-    }
-
-    /// Set the initial window size (logical pixels).
-    pub fn size(mut self, width: i32, height: i32) -> Self {
-        self.width = width;
-        self.height = height;
-        self
-    }
-
-    /// Force the dark theme instead of following the system preference.
-    pub fn force_dark(mut self) -> Self {
-        self.dark = true;
-        self
-    }
-
-    /// Log raw platform input events to stderr (debugging).
-    pub fn log_raw(mut self) -> Self {
-        self.log_raw = true;
-        self
-    }
-}
-
-/// The application entry point.
-///
-/// Wraps `iris_app_run`. `build` runs once per frame inside an open
-/// `lens_begin/end` pair, with `input` being the same [`Input`] snapshot
-/// lens is consuming this frame. `record` (if `Some`) records host canvas
-/// content into an immutable display list before the frame is submitted, so
-/// it lands under the chrome. Blocks the calling thread until the window is
-/// closed.
-pub struct Application;
 
 /// Request one more frame at Iris's active animation cadence.
 ///
@@ -255,247 +81,6 @@ pub fn record_mark_static() {
 /// callback.
 pub fn request_frame_skip_render() {
     unsafe { sys::iris_request_frame_skip_render() };
-}
-
-impl Application {
-    /// Run the application until the user closes the window. Blocks the
-    /// calling thread; callbacks run on it. See [`Config`] for the setup
-    /// surface and the crate docs for the callback model.
-    pub fn run<B>(config: Config, build: B) -> Result<(), RunError>
-    where
-        B: FnMut(&mut Frame<'_>, &Input),
-    {
-        Self::run_impl(
-            config,
-            None::<fn(StartHost) -> bool>,
-            None::<fn(StopHost)>,
-            build,
-            None::<fn(RecordHost)>,
-        )
-    }
-
-    /// Like [`Application::run`], plus a one-shot `start` callback that iris
-    /// invokes after its device/canvas/lens setup and before the first frame
-    /// (see [`StartHost`]). The callback returning `false` aborts the run.
-    pub fn run_with_start<B, S>(config: Config, start: S, build: B) -> Result<(), RunError>
-    where
-        B: FnMut(&mut Frame<'_>, &Input),
-        S: FnMut(StartHost) -> bool,
-    {
-        Self::run_impl(
-            config,
-            Some(start),
-            None::<fn(StopHost)>,
-            build,
-            None::<fn(RecordHost)>,
-        )
-    }
-
-    /// The full lifecycle form (ADR-0045): `start` runs after iris's
-    /// device/canvas/lens setup and before the first frame (returning
-    /// `false` aborts the run); `stop` runs after the frame loop and before
-    /// iris destroys the device, giving hosts a deterministic point to
-    /// release device-backed resources. `record` is the optional host canvas
-    /// recorder. Either may be `None`.
-    pub fn run_with_lifecycle<B, S, T, R>(
-        config: Config,
-        start: Option<S>,
-        stop: Option<T>,
-        build: B,
-        record: Option<R>,
-    ) -> Result<(), RunError>
-    where
-        B: FnMut(&mut Frame<'_>, &Input),
-        S: FnMut(StartHost) -> bool,
-        T: FnMut(StopHost),
-        R: FnMut(RecordHost) + 'static,
-    {
-        Self::run_impl(config, start, stop, build, record)
-    }
-
-    /// Run an application with a host canvas recorder (ADR-0127).
-    ///
-    /// The `record` closure records vector drawing into a CPU-bound
-    /// [`flux::Encoder`]. The resulting immutable display list is submitted
-    /// by the same presentation pipeline as lens chrome, on every backend.
-    pub fn run_with_record<B, R>(
-        config: Config,
-        build: B,
-        record: Option<R>,
-    ) -> Result<(), RunError>
-    where
-        B: FnMut(&mut Frame<'_>, &Input),
-        R: FnMut(RecordHost) + 'static,
-    {
-        Self::run_impl(
-            config,
-            None::<fn(StartHost) -> bool>,
-            None::<fn(StopHost)>,
-            build,
-            record,
-        )
-    }
-
-    fn run_impl<B, S, T, R>(
-        config: Config,
-        start: Option<S>,
-        stop: Option<T>,
-        build: B,
-        record: Option<R>,
-    ) -> Result<(), RunError>
-    where
-        B: FnMut(&mut Frame<'_>, &Input),
-        S: FnMut(StartHost) -> bool,
-        T: FnMut(StopHost),
-        R: FnMut(RecordHost) + 'static,
-    {
-        let build_box: Box<B> = Box::new(build);
-        let start_box: Option<Box<S>> = start.map(Box::new);
-        let stop_box: Option<Box<T>> = stop.map(Box::new);
-        let record_box: Option<Box<R>> = record.map(Box::new);
-
-        let mut run_state = RunState {
-            build: build_box,
-            start: start_box,
-            stop: stop_box,
-            record: record_box,
-        };
-
-        extern "C" fn build_trampoline<B, S, T, R>(
-            ui: *mut sys::lens,
-            in_: *const sys::lens_input,
-            user: *mut std::os::raw::c_void,
-        ) where
-            B: FnMut(&mut Frame<'_>, &Input),
-            S: FnMut(StartHost) -> bool,
-            T: FnMut(StopHost),
-            R: FnMut(RecordHost),
-        {
-            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let run = unsafe { &mut *(user as *mut RunState<B, S, T, R>) };
-                let mut frame = unsafe { Frame::from_raw(ui) };
-                let input = unsafe { Input::from_raw_ref(in_) };
-                (run.build)(&mut frame, input);
-            }));
-        }
-
-        extern "C" fn record_trampoline<B, S, T, R>(
-            enc: *mut sys::flux_encoder,
-            scale: f32,
-            user: *mut std::os::raw::c_void,
-        ) where
-            B: FnMut(&mut Frame<'_>, &Input),
-            S: FnMut(StartHost) -> bool,
-            T: FnMut(StopHost),
-            R: FnMut(RecordHost),
-        {
-            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let run = unsafe { &mut *(user as *mut RunState<B, S, T, R>) };
-                if let Some(r) = run.record.as_mut() {
-                    r(RecordHost {
-                        encoder: enc,
-                        scale,
-                    });
-                }
-            }));
-        }
-
-        extern "C" fn start_trampoline<B, S, T, R>(
-            ui: *mut sys::lens,
-            device: *mut sys::flux_device,
-            user: *mut std::os::raw::c_void,
-        ) -> bool
-        where
-            B: FnMut(&mut Frame<'_>, &Input),
-            S: FnMut(StartHost) -> bool,
-            T: FnMut(StopHost),
-            R: FnMut(RecordHost),
-        {
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let run = unsafe { &mut *(user as *mut RunState<B, S, T, R>) };
-                match run.start.as_mut() {
-                    Some(s) => s(StartHost { ui, device }),
-                    None => true,
-                }
-            }))
-            .unwrap_or(false)
-        }
-
-        extern "C" fn stop_trampoline<B, S, T, R>(
-            ui: *mut sys::lens,
-            device: *mut sys::flux_device,
-            user: *mut std::os::raw::c_void,
-        ) where
-            B: FnMut(&mut Frame<'_>, &Input),
-            S: FnMut(StartHost) -> bool,
-            T: FnMut(StopHost),
-            R: FnMut(RecordHost),
-        {
-            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let run = unsafe { &mut *(user as *mut RunState<B, S, T, R>) };
-                if let Some(t) = run.stop.as_mut() {
-                    t(StartHost { ui, device });
-                }
-            }));
-        }
-
-        let user_ptr = &mut run_state as *mut _ as *mut std::os::raw::c_void;
-        let record_fn: sys::iris_record_fn = if run_state.record.is_some() {
-            Some(record_trampoline::<B, S, T, R>)
-        } else {
-            None
-        };
-        let start_fn: sys::iris_start_fn = if run_state.start.is_some() {
-            Some(start_trampoline::<B, S, T, R>)
-        } else {
-            None
-        };
-        let stop_fn: sys::iris_stop_fn = if run_state.stop.is_some() {
-            Some(stop_trampoline::<B, S, T, R>)
-        } else {
-            None
-        };
-
-        let cfg = sys::iris_app_config {
-            title: config.title.as_ptr(),
-            app_id: config.app_id.as_ptr(),
-            width: config.width,
-            height: config.height,
-            dark: config.dark,
-            log_raw: config.log_raw,
-            no_clear: false,
-            on_event: None,
-            start: start_fn,
-            stop: stop_fn,
-            build: Some(build_trampoline::<B, S, T, R>),
-            record: record_fn,
-            prepare: None,
-            user: user_ptr,
-        };
-
-        let rc = unsafe { sys::iris_app_run(&cfg) };
-        if rc != 0 {
-            return Err(RunError::Platform(rc));
-        }
-        Ok(())
-    }
-}
-
-/// Holds the closures through the C trampolines. Generic over `B`, `P`, `S`
-/// and `T` so each trampoline can cast the opaque `user` pointer back to a
-/// type that knows the concrete closure shapes. When a slot is `None` the
-/// matching trampoline is never installed.
-struct RunState<B, S, T, R>
-where
-    B: FnMut(&mut Frame<'_>, &Input),
-    S: FnMut(StartHost) -> bool,
-    T: FnMut(StopHost),
-    R: FnMut(RecordHost),
-{
-    build: Box<B>,
-    start: Option<Box<S>>,
-    stop: Option<Box<T>>,
-    record: Option<Box<R>>,
 }
 
 /// System colour-scheme preference (queried at startup).
@@ -587,9 +172,10 @@ pub fn stop_color_scheme_watcher() {
 /// Cursor appearance the host wants iris to show over its window.
 ///
 /// This is an L3 concern: iris owns the window and the cursor surface, so it
-/// owns cursor appearance too. [`Application::run`] automatically maps the
-/// hovered Lens widget's [`CursorHint`]; hosts use [`set_cursor`] for custom
-/// canvas regions and other application-specific overrides.
+/// owns cursor appearance too. While the host cursor is `Default`, iris shows
+/// the semantic cursor the UI layer reports for the widget under the pointer;
+/// hosts use [`set_cursor`] for custom canvas regions and other
+/// application-specific overrides.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[repr(i32)]
 pub enum Cursor {
@@ -628,29 +214,17 @@ impl Cursor {
     }
 }
 
-impl From<CursorHint> for Cursor {
-    fn from(hint: CursorHint) -> Self {
-        match hint {
-            CursorHint::Default => Self::Default,
-            CursorHint::Pointer => Self::Pointer,
-            CursorHint::Text => Self::Text,
-            CursorHint::ResizeEw => Self::ResizeEw,
-            CursorHint::ResizeNs => Self::ResizeNs,
-        }
-    }
-}
-
 /// Set the cursor the next pointer motion will show. Idempotent; passing the
 /// same value twice does no work.
 ///
 /// An explicit choice stays pinned until you call `set_cursor(Cursor::Default)`,
 /// which hands cursor control back to the backend's per-frame follow of the
-/// hovered Lens widget's [`CursorHint`] (the backend does that natively on all
+/// hovered widget's cursor hint (the backend does that natively on all
 /// platforms — Wayland included — so hosts do not need to re-assert a custom
 /// cursor every frame, only to keep it pinned).
 ///
 /// No-op when iris was built without cursor-shape support (the compositor's
-/// default arrow stays) or before [`Application::run`] starts. Thread-
+/// default arrow stays) or before the application loop starts. Thread-
 /// affine: call from the same thread that drives the run loop.
 pub fn set_cursor(cursor: Cursor) {
     unsafe { sys::iris_set_cursor(cursor.raw()) }
@@ -1625,61 +1199,6 @@ mod tests {
     }
 
     #[test]
-    fn config_new_rejects_interior_nul() {
-        assert!(matches!(Config::new("a\0b"), Err(RunError::BadTitle)));
-        assert!(matches!(Config::new("\0"), Err(RunError::BadTitle)));
-    }
-
-    #[test]
-    fn config_new_defaults() {
-        let cfg = Config::new("Demo").unwrap();
-        assert_eq!(cfg.title.to_str().unwrap(), "Demo");
-        assert_eq!(cfg.app_id.to_str().unwrap(), "ai.opencode.iris");
-        assert_eq!((cfg.width, cfg.height), (960, 640));
-        assert!(!cfg.dark);
-        assert!(!cfg.log_raw);
-    }
-
-    #[test]
-    fn config_builders_set_fields() {
-        let cfg = Config::new("x")
-            .unwrap()
-            .app_id("io.example.Demo")
-            .unwrap()
-            .size(720, 480)
-            .force_dark()
-            .log_raw();
-        assert_eq!((cfg.width, cfg.height), (720, 480));
-        assert_eq!(cfg.app_id.to_str().unwrap(), "io.example.Demo");
-        assert!(cfg.dark);
-        assert!(cfg.log_raw);
-    }
-
-    #[test]
-    fn run_error_display() {
-        assert_eq!(
-            RunError::Platform(7).to_string(),
-            "iris_app_run exited with code 7"
-        );
-        assert_eq!(
-            RunError::BadTitle.to_string(),
-            "window title contains an interior NUL byte"
-        );
-        assert_eq!(
-            RunError::BadAppId.to_string(),
-            "application ID contains an interior NUL byte"
-        );
-    }
-
-    #[test]
-    fn config_rejects_interior_nul_in_app_id() {
-        assert!(matches!(
-            Config::new("Demo").unwrap().app_id("io.example\0Demo"),
-            Err(RunError::BadAppId)
-        ));
-    }
-
-    #[test]
     fn watch_error_display() {
         assert_eq!(
             WatchError::Unavailable.to_string(),
@@ -1711,15 +1230,6 @@ mod tests {
     }
 
     #[test]
-    fn lens_cursor_hints_map_to_platform_cursor_shapes() {
-        assert_eq!(Cursor::from(CursorHint::Default), Cursor::Default);
-        assert_eq!(Cursor::from(CursorHint::Pointer), Cursor::Pointer);
-        assert_eq!(Cursor::from(CursorHint::Text), Cursor::Text);
-        assert_eq!(Cursor::from(CursorHint::ResizeEw), Cursor::ResizeEw);
-        assert_eq!(Cursor::from(CursorHint::ResizeNs), Cursor::ResizeNs);
-    }
-
-    #[test]
     fn version_is_nonempty_numeric() {
         let v = version();
         assert!(!v.is_empty());
@@ -1746,21 +1256,6 @@ mod tests {
         assert_eq!(
             dark,
             matches!(scheme, ColorScheme::PreferDark | ColorScheme::NoPreference)
-        );
-    }
-
-    /// Compile-only check that the full-lifecycle entry point keeps its
-    /// signature (start/stop trampolines wired, ADR-0045). Never called:
-    /// it would open a window.
-    #[allow(dead_code)]
-    fn run_with_lifecycle_signature() {
-        let cfg = Config::new("sig").unwrap();
-        let _ = Application::run_with_lifecycle(
-            cfg,
-            None::<fn(StartHost) -> bool>,
-            None::<fn(StopHost)>,
-            |_f: &mut Frame<'_>, _i: &Input| {},
-            None::<fn(RecordHost)>,
         );
     }
 }

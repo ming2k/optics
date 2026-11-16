@@ -199,3 +199,4 @@ silent fallback. Its primitives have landed.
 | 0163 | [Repository-Root Cargo Workspace and a Honest Git-Dependency Boundary](0163-repository-root-cargo-workspace.md) | Accepted |
 | 0164 | [Umbrella Feature Detection Uses Distribution Flags, Not Host Header Probing](0164-umbrella-feature-detection-flags.md) | Accepted |
 | 0165 | [Single Opts Descriptor Migration by Library](0165-single-opts-descriptor-migration-by-library.md) | Accepted |
+| 0166 | [One-Way Library Graph and Enforced Invariants](0166-one-way-library-graph-and-enforced-invariants.md) | Accepted |

@@ -2,6 +2,7 @@
 
 #include "app_shell.h"
 #include "ui_events.h"
+#include <aperture/aperture.h>
 #include <iris/app.h>
 #include <iris/window.h>
 #include <lens/lens.h>
@@ -214,7 +215,7 @@ int main(void) {
            "Click File or Edit for dropdowns. Click Modal for a dialog.\n"
            "Esc quits the application; it also dismisses the top popup.\n\n");
 
-    return iris_app_run(&(iris_app_config){
+    return aperture_app_run(&(aperture_app_opts){
         .title = "iris — Placement Demo",
         .width = 720,
         .height = 480,

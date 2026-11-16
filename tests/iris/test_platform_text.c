@@ -11,7 +11,7 @@
 #include "optics_test.h"
 #include "platform_text.h"
 
-#include <lens/lens.h>
+#include <iris/host.h>
 #include <string.h>
 
 int main(void) {
@@ -67,17 +67,17 @@ int main(void) {
     iris_utf8_copy(buf, sizeof buf, nullptr);
     OT_EXPECT_STR_EQ(buf, "");
 
-    /* --- lens_input staging sizes (the buffers the backends clip into) ---
+    /* --- iris_input staging sizes (the buffers the backends clip into) ---
      * text_utf8 grew to 256 for full-sentence IME conversion and preedit to
-     * LENS_PREEDIT_MAX=256; the Wayland accumulator mirrors these sizes and
+     * IRIS_PREEDIT_MAX=256; the Wayland accumulator mirrors these sizes and
      * static_asserts against them, so pin the lens side here. */
-    OT_EXPECT(sizeof((lens_input *)0)->text_utf8 == 256);
-    OT_EXPECT(sizeof((lens_input *)0)->preedit_utf8 == 256);
-    OT_EXPECT(LENS_PREEDIT_MAX == 256);
+    OT_EXPECT(sizeof((iris_input *)0)->text_utf8 == 256);
+    OT_EXPECT(sizeof((iris_input *)0)->preedit_utf8 == 256);
+    OT_EXPECT(IRIS_PREEDIT_MAX == 256);
 
     /* A full-sentence IME commit staged at the new size: 300 bytes into a
      * 256 buffer keeps 255 (NUL takes the last byte), boundary-clean. */
-    char big[sizeof((lens_input *)0)->text_utf8];
+    char big[sizeof((iris_input *)0)->text_utf8];
     char src[300];
     memset(src, 'a', sizeof src - 1);
     src[sizeof src - 1] = '\0';

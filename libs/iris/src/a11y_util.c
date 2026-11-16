@@ -7,43 +7,43 @@
 #include <stdlib.h>
 #include <string.h>
 
-bool iris_a11y__supports_action(lens_role r) {
+bool iris_a11y__supports_action(iris_role r) {
     switch (r) {
-    case LENS_ROLE_BUTTON:
-    case LENS_ROLE_CHECKBOX:
-    case LENS_ROLE_RADIO:
-    case LENS_ROLE_DISCLOSURE:
-    case LENS_ROLE_MENU:
-    case LENS_ROLE_MENUITEM:
-    case LENS_ROLE_LINK:
+    case IRIS_ROLE_BUTTON:
+    case IRIS_ROLE_CHECKBOX:
+    case IRIS_ROLE_RADIO:
+    case IRIS_ROLE_DISCLOSURE:
+    case IRIS_ROLE_MENU:
+    case IRIS_ROLE_MENUITEM:
+    case IRIS_ROLE_LINK:
         return true;
-    case LENS_ROLE_LABEL:
-    case LENS_ROLE_GROUP:
-    case LENS_ROLE_SCROLLAREA:
-    case LENS_ROLE_TEXTFIELD:
-    case LENS_ROLE_TEXTAREA:
-    case LENS_ROLE_SLIDER:
-    case LENS_ROLE_DIALOG:
-    case LENS_ROLE_PROGRESS:
-    case LENS_ROLE_TABLE:
-    case LENS_ROLE_ROW:
-    case LENS_ROLE_NONE:
+    case IRIS_ROLE_LABEL:
+    case IRIS_ROLE_GROUP:
+    case IRIS_ROLE_SCROLLAREA:
+    case IRIS_ROLE_TEXTFIELD:
+    case IRIS_ROLE_TEXTAREA:
+    case IRIS_ROLE_SLIDER:
+    case IRIS_ROLE_DIALOG:
+    case IRIS_ROLE_PROGRESS:
+    case IRIS_ROLE_TABLE:
+    case IRIS_ROLE_ROW:
+    case IRIS_ROLE_NONE:
     default:
         return false;
     }
 }
 
-bool iris_a11y__supports_text(lens_role r) {
-    return r == LENS_ROLE_TEXTFIELD || r == LENS_ROLE_TEXTAREA;
+bool iris_a11y__supports_text(iris_role r) {
+    return r == IRIS_ROLE_TEXTFIELD || r == IRIS_ROLE_TEXTAREA;
 }
 
-bool iris_a11y__supports_value(lens_role r) {
-    return r == LENS_ROLE_SLIDER || r == LENS_ROLE_PROGRESS;
+bool iris_a11y__supports_value(iris_role r) {
+    return r == IRIS_ROLE_SLIDER || r == IRIS_ROLE_PROGRESS;
 }
 
 /* The single advertised action is "click" (ADR-0062): one activation verb
  * every actionable role shares; AT clients invoke it via DoAction(0). */
-const char *iris_a11y__action_name(lens_role r) {
+const char *iris_a11y__action_name(iris_role r) {
     return iris_a11y__supports_action(r) ? "click" : nullptr;
 }
 
@@ -77,43 +77,43 @@ int iris_a11y__char_count_utf8(const char *s) {
 /*  Role / state mapping                                               */
 /* ------------------------------------------------------------------ */
 
-iris_atspi_role iris_a11y__map_role(lens_role r) {
+iris_atspi_role iris_a11y__map_role(iris_role r) {
     switch (r) {
-    case LENS_ROLE_LABEL:
+    case IRIS_ROLE_LABEL:
         return IRIS_ATSPI_ROLE_LABEL;
-    case LENS_ROLE_BUTTON:
+    case IRIS_ROLE_BUTTON:
         return IRIS_ATSPI_ROLE_PUSH_BUTTON;
-    case LENS_ROLE_CHECKBOX:
+    case IRIS_ROLE_CHECKBOX:
         return IRIS_ATSPI_ROLE_CHECK_BOX;
-    case LENS_ROLE_SLIDER:
+    case IRIS_ROLE_SLIDER:
         return IRIS_ATSPI_ROLE_SLIDER;
-    case LENS_ROLE_DISCLOSURE:
+    case IRIS_ROLE_DISCLOSURE:
         return IRIS_ATSPI_ROLE_TOGGLE_BUTTON;
-    case LENS_ROLE_SCROLLAREA:
+    case IRIS_ROLE_SCROLLAREA:
         return IRIS_ATSPI_ROLE_SCROLL_PANE;
-    case LENS_ROLE_TEXTFIELD:
+    case IRIS_ROLE_TEXTFIELD:
         return IRIS_ATSPI_ROLE_ENTRY;
-    case LENS_ROLE_TEXTAREA:
+    case IRIS_ROLE_TEXTAREA:
         return IRIS_ATSPI_ROLE_TEXT;
-    case LENS_ROLE_MENU:
+    case IRIS_ROLE_MENU:
         return IRIS_ATSPI_ROLE_MENU;
-    case LENS_ROLE_RADIO:
+    case IRIS_ROLE_RADIO:
         return IRIS_ATSPI_ROLE_RADIO_BUTTON;
-    case LENS_ROLE_GROUP:
+    case IRIS_ROLE_GROUP:
         return IRIS_ATSPI_ROLE_PANEL;
-    case LENS_ROLE_DIALOG:
+    case IRIS_ROLE_DIALOG:
         return IRIS_ATSPI_ROLE_DIALOG;
-    case LENS_ROLE_PROGRESS:
+    case IRIS_ROLE_PROGRESS:
         return IRIS_ATSPI_ROLE_PROGRESS_BAR;
-    case LENS_ROLE_TABLE:
+    case IRIS_ROLE_TABLE:
         return IRIS_ATSPI_ROLE_TABLE;
-    case LENS_ROLE_ROW:
+    case IRIS_ROLE_ROW:
         return IRIS_ATSPI_ROLE_TABLE_ROW;
-    case LENS_ROLE_MENUITEM:
+    case IRIS_ROLE_MENUITEM:
         return IRIS_ATSPI_ROLE_MENU_ITEM;
-    case LENS_ROLE_LINK:
+    case IRIS_ROLE_LINK:
         return IRIS_ATSPI_ROLE_LINK;
-    case LENS_ROLE_NONE:
+    case IRIS_ROLE_NONE:
     default:
         return IRIS_ATSPI_ROLE_UNKNOWN;
     }
@@ -170,23 +170,23 @@ static void state_set(uint32_t *lo, uint32_t *hi, int bit) {
         *hi |= (1u << (bit - 32));
 }
 
-void iris_a11y__state_bits(uint32_t lens_flags, uint32_t *out_lo, uint32_t *out_hi) {
+void iris_a11y__state_bits(uint32_t flags, uint32_t *out_lo, uint32_t *out_hi) {
     uint32_t lo = 0, hi = 0;
     /* Every widget is focusable+enabled+sensitive+showing unless the lens
      * DISABLED flag is set. */
-    if (!(lens_flags & LENS_A11Y_DISABLED)) {
+    if (!(flags & IRIS_A11Y_DISABLED)) {
         state_set(&lo, &hi, IRIS_ATSPI_STATE_FOCUSABLE);
         state_set(&lo, &hi, IRIS_ATSPI_STATE_ENABLED);
         state_set(&lo, &hi, IRIS_ATSPI_STATE_SENSITIVE);
     }
     state_set(&lo, &hi, IRIS_ATSPI_STATE_SHOWING);
-    if (lens_flags & LENS_A11Y_FOCUSED)
+    if (flags & IRIS_A11Y_FOCUSED)
         state_set(&lo, &hi, IRIS_ATSPI_STATE_FOCUSED);
-    if (lens_flags & LENS_A11Y_CHECKED)
+    if (flags & IRIS_A11Y_CHECKED)
         state_set(&lo, &hi, IRIS_ATSPI_STATE_CHECKED);
-    if (lens_flags & LENS_A11Y_EXPANDED)
+    if (flags & IRIS_A11Y_EXPANDED)
         state_set(&lo, &hi, IRIS_ATSPI_STATE_EXPANDED);
-    if (lens_flags & LENS_A11Y_SELECTED)
+    if (flags & IRIS_A11Y_SELECTED)
         state_set(&lo, &hi, IRIS_ATSPI_STATE_SELECTED);
     *out_lo = lo;
     *out_hi = hi;
@@ -196,8 +196,8 @@ void iris_a11y__state_bits(uint32_t lens_flags, uint32_t *out_lo, uint32_t *out_
 /*  Per-frame tree diff                                                */
 /* ------------------------------------------------------------------ */
 
-void iris_a11y__node_fill(iris_a11y__node *dst, const lens_semantics *s, lens_id id, lens_id parent,
-                          const iris_a11y__node *cur, size_t n_cur) {
+void iris_a11y__node_fill(iris_a11y__node *dst, const iris_semantics *s, iris_node_id id,
+                          iris_node_id parent, const iris_a11y__node *cur, size_t n_cur) {
     dst->id = id;
     dst->parent = parent;
     dst->role = s->role;
@@ -213,7 +213,7 @@ void iris_a11y__node_fill(iris_a11y__node *dst, const lens_semantics *s, lens_id
     dst->index = index;
 }
 
-static const iris_a11y__node *find_by_id(const iris_a11y__node *nodes, size_t n, lens_id id) {
+static const iris_a11y__node *find_by_id(const iris_a11y__node *nodes, size_t n, iris_node_id id) {
     for (size_t i = 0; i < n; i++)
         if (nodes[i].id == id)
             return &nodes[i];
@@ -332,16 +332,16 @@ size_t iris_a11y__diff(const iris_a11y__node *prev, size_t n_prev, const iris_a1
             }
         }
         static const struct {
-            uint32_t lens_flag;
+            uint32_t flag;
             int32_t atspi_state;
         } tracked[] = {
-            {LENS_A11Y_CHECKED, IRIS_ATSPI_STATE_CHECKED},
-            {LENS_A11Y_EXPANDED, IRIS_ATSPI_STATE_EXPANDED},
-            {LENS_A11Y_SELECTED, IRIS_ATSPI_STATE_SELECTED},
+            {IRIS_A11Y_CHECKED, IRIS_ATSPI_STATE_CHECKED},
+            {IRIS_A11Y_EXPANDED, IRIS_ATSPI_STATE_EXPANDED},
+            {IRIS_A11Y_SELECTED, IRIS_ATSPI_STATE_SELECTED},
         };
         for (size_t t = 0; t < sizeof tracked / sizeof tracked[0]; t++) {
-            bool was = (p->flags & tracked[t].lens_flag) != 0;
-            bool is = (c->flags & tracked[t].lens_flag) != 0;
+            bool was = (p->flags & tracked[t].flag) != 0;
+            bool is = (c->flags & tracked[t].flag) != 0;
             if (was != is) {
                 PUSH(((iris_a11y__event){.kind =
                                              is ? IRIS_A11Y__EV_STATE_ON : IRIS_A11Y__EV_STATE_OFF,

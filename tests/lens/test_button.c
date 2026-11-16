@@ -129,7 +129,12 @@ static size_t rendered_icon_pixels_with_outline(lens_icon_id icon, bool *center_
     lens_test_end(ui);
 
     flux_canvas *canvas = nullptr;
-    OT_EXPECT(flux_canvas_create_cpu(24, 24, 1.0f, &canvas) == FLUX_OK);
+    OT_EXPECT(flux_canvas_create(&(flux_canvas_desc){.type = FLUX_TYPE_CANVAS_DESC,
+                                                     .backend = FLUX_CANVAS_BACKEND_CPU,
+                                                     .scale = 1.0f,
+                                                     .width = 24,
+                                                     .height = 24},
+                                 &canvas) == FLUX_OK);
     flux_color black = flux_color_rgba_premul(0, 0, 0, 255);
     OT_EXPECT(flux_canvas_begin(canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
                                                                  .clear_color = &black}) ==

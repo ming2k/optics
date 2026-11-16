@@ -3,7 +3,7 @@
 # Unlike per-library starter examples, showcases demonstrate cross-module
 # full-stack integration (Flux + Prism + Lens + Iris).
 
-if opt_effect and get_option('prism')
+if get_option('prism')
   executable('material_gallery',
     'material_gallery/main.c',
     'material_gallery/ui.c',
@@ -12,6 +12,6 @@ if opt_effect and get_option('prism')
     'material_gallery/view_frosted.c',
     'material_gallery/view_acrylic.c',
     'material_gallery/view_mica.c',
-    dependencies : [flux_dep, prism_dep, lens_dep, iris_dep, m_dep],
+    dependencies : [flux_dep, prism_dep, lens_dep, aperture_dep, m_dep],
   )
 endif

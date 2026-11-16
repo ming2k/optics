@@ -7,23 +7,28 @@ Optics libraries, and Vulkan fit together.
 
 ```text
 application
-  ├── iris ── window, event loop, desktop integration
-  │     └── lens ── UI state, layout, input, draw lists
+  ├── aperture ── lens UI in an iris window
+  │     ├── iris ── window, event loop, frame cadence, desktop integration
+  │     │     └── flux
+  │     └── lens ── UI state, layout, input, snapshots
   │           ├── glyph ── text shaping and dynamic atlas
+  │           ├── reticle ── SVG icons and static art
   │           └── flux canvas
   └── direct rendering
         ├── vista ── glTF content and scene hierarchy
-        ├── transit ── motion vocabulary and state transition
-        ├── prism ── physical materials and liquid glass
+        ├── transit ── motion vocabulary (header-only)
+        ├── prism ── surface materials
         └── flux canvas / scene / compute / effect
-                    └── flux-core ── device, frame, memory, sync
+                    └── device, frame, memory, sync
                                       └── Vulkan 1.3
 ```
 
-Applications can stop at the `iris` surface for a complete UI host or use any
-lower layer directly. `lens` remains useful without a window. The content
-siblings are producers of `flux` primitives, not alternate rendering
-backends.
+There are three ways in. `aperture_app_run` is a complete application host: a
+window, a lens UI, and optional canvas content underneath it. `iris_app_run` on
+its own is a window with flux content and no UI toolkit, or with a different
+UI layer plugged into `<iris/host.h>`. `lens` on its own is a headless UI
+engine. The content siblings are producers of `flux` primitives, not alternate
+rendering backends.
 
 `flux_compute` is a first-class peer: it does not need a surface or swapchain,
 and it records dispatch commands into its own command buffers or a frame's
@@ -43,6 +48,13 @@ integration. In a direct `flux` application, the application creates the
 Input reaches `lens` as data. Windowing, portal calls, system theme watching,
 and the accessibility bus remain in `iris`, which keeps `lens` deterministic
 and embeddable.
+
+### Iris Knows No UI Toolkit
+
+`iris` depends on `flux` only. It folds input into an `iris_input`, calls the
+UI host's `frame`, and presents the snapshot the host publishes; what the host
+is made of is not its concern. `aperture` is the single place where lens and
+iris meet, so the binding exists once rather than once per platform backend.
 
 ### Flux-core Owns the Frame
 
@@ -74,10 +86,10 @@ through public `flux` APIs and remain separately consumable libraries.
 `iris` reifies each native event — Wayland `wl_pointer`, Win32 `WM_*`,
 Cocoa `NSEvent` — into one platform-neutral `iris_event`
 (`<iris/event.h>`) in arrival order. Before folding the survivors into the
-frame's `lens_input`, `iris` runs the host's optional
+frame's `iris_input`, `iris` runs the host's optional
 `iris_app_opts.on_event` callback, which may drop or rewrite each event.
 This is the only point at which a host may change what `lens` sees;
-`build`'s `in` is a read-only copy of the already-folded snapshot. `iris`
+The UI host's `frame` receives the already-folded snapshot; `aperture` converts it to `lens_input` for `build`. `iris`
 itself applies no policy — it reifies, orders, folds, and forwards. See
 [ADR-0107](../adr/0107-iris-pre-lens-event-seam.md).
 

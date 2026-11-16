@@ -124,7 +124,6 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
                     .document = doc,
                     .width = 8,
                     .height = 8,
-                    .supersample = 1,
                     .format = RETICLE_PIXELS_RGBA8_PREMUL,
                     .paint = RETICLE_PAINT_THEME,
                 },

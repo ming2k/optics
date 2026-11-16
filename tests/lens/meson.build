@@ -15,7 +15,9 @@ tests = ['test_id', 'test_store', 'test_layout', 'test_input',
          'test_skin', 'test_audit_fixes', 'test_a11y_activate',
          'test_store_spike', 'test_abi_guards', 'test_skin_userdata', 'test_user_widget_kind',
          'test_icon_info', 'test_dnd', 'test_tab_strip',
-         'test_datagrid', 'test_tree_view', 'test_menu']
+         'test_datagrid', 'test_tree_view', 'test_menu',
+         # The zero-allocation frame walk, enforced by allocator interposition.
+         'test_zero_alloc']
 
 foreach t : tests
   exe = executable(t, t + '.c',

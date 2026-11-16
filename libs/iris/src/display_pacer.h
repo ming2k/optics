@@ -113,9 +113,9 @@ typedef struct iris_pace_inputs {
     bool host_animating;
 
     /* An eased value / spring is still in flight inside lens
-     * (lens_anim_pending). Keeps the cadence warm; it does not by itself
+     * (iris_ui_frame.animating). Keeps the cadence warm; it does not by itself
      * force a paint — the chrome damage the build reports does. */
-    bool lens_animating;
+    bool ui_animating;
 
     /* The host declared this frame a zero-render skip
      * (iris_request_frame_skip_render): canvas unchanged, cadence continues. */
@@ -128,14 +128,14 @@ typedef struct iris_pace_inputs {
      * Hosts without one only ever paint on lens chrome damage. */
     bool has_host_content;
 
-    /* lens_frame_needs_repaint(): the UI chrome itself changed. This already
+    /* iris_ui_frame.damaged: the UI chrome itself changed. This already
      * includes a caret blink *flip* (ADR-0151), because lens reports the
      * transition as damage — so a flip paints through `forced`, exactly like
      * any other chrome change. */
     bool chrome_damaged;
 
     /* A caret blink clock is live: some text widget holds focus and the blink
-     * is enabled (lens_caret_clock_live).
+     * is enabled (iris_ui_frame.caret_ticking).
      *
      * This is a *level*, and it deliberately does not force a paint. Its only
      * job is to keep the low idle tick alive, because lens advances the blink

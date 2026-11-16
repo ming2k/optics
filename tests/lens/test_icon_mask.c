@@ -76,7 +76,12 @@ static int icon_partial_levels(lens_icon_id id, float size) {
     lens_end(ui);
 
     flux_canvas *c = nullptr;
-    if (flux_canvas_create_cpu(w, h, 1.0f, &c) != FLUX_OK) {
+    if (flux_canvas_create(&(flux_canvas_desc){.type = FLUX_TYPE_CANVAS_DESC,
+                                               .backend = FLUX_CANVAS_BACKEND_CPU,
+                                               .scale = 1.0f,
+                                               .width = w,
+                                               .height = h},
+                           &c) != FLUX_OK) {
         lens_release(ui);
         return -1;
     }
@@ -121,7 +126,12 @@ static bool icon_centroid(lens_icon_id id, float size, float scale, uint32_t box
     /* Content scale stays 1.0: lens already applies ui->scale internally, so a
      * scaled canvas here would apply it twice. */
     flux_canvas *c = nullptr;
-    if (flux_canvas_create_cpu(w, h, 1.0f, &c) != FLUX_OK) {
+    if (flux_canvas_create(&(flux_canvas_desc){.type = FLUX_TYPE_CANVAS_DESC,
+                                               .backend = FLUX_CANVAS_BACKEND_CPU,
+                                               .scale = 1.0f,
+                                               .width = w,
+                                               .height = h},
+                           &c) != FLUX_OK) {
         lens_release(ui);
         return false;
     }

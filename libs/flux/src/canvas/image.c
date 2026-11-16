@@ -234,11 +234,31 @@ static uint32_t bytes_per_pixel(flux_format f) {
     }
 }
 
+static flux_result image_create_compute_writable(flux_device *d, uint32_t width, uint32_t height,
+                                                 flux_format fmt, flux_image **out);
+static flux_result image_create_render_target(flux_device *d, uint32_t width, uint32_t height,
+                                              flux_format fmt, flux_image **out);
+
 flux_result flux_image_create(flux_device *d, const flux_image_desc *desc, flux_image **out) {
     if (!d || !desc || !out)
         return FLUX_ERROR_INVALID_ARGUMENT;
     if (desc->type != FLUX_TYPE_IMAGE_DESC) {
         FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "desc->type != FLUX_TYPE_IMAGE_DESC");
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    }
+    if (desc->usage != FLUX_IMAGE_USAGE_SAMPLED) {
+        /* Attachment and storage images start with undefined contents: pixel
+         * data and a colour-space tag describe uploads, which they never take. */
+        if (desc->initial_data || desc->next) {
+            FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT,
+                      "initial_data / extensions apply to FLUX_IMAGE_USAGE_SAMPLED only");
+            return FLUX_ERROR_INVALID_ARGUMENT;
+        }
+        if (desc->usage == FLUX_IMAGE_USAGE_COMPUTE_WRITE)
+            return image_create_compute_writable(d, desc->width, desc->height, desc->format, out);
+        if (desc->usage == FLUX_IMAGE_USAGE_RENDER_TARGET)
+            return image_create_render_target(d, desc->width, desc->height, desc->format, out);
+        FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "unknown flux_image_usage");
         return FLUX_ERROR_INVALID_ARGUMENT;
     }
     if (desc->width == 0 || desc->height == 0) {
@@ -784,7 +804,7 @@ void flux_image_release(flux_image *im) {
 }
 
 bool flux_device_supports_image_usage(const flux_device *d, flux_format format,
-                                      flux_image_usage_query usage) {
+                                      flux_image_usage usage) {
     if (!d)
         return false;
 
@@ -845,17 +865,20 @@ bool flux_device_supports_image_usage(const flux_device *d, flux_format format,
     case FLUX_IMAGE_USAGE_SAMPLED:
         return (props.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT) != 0;
     case FLUX_IMAGE_USAGE_COMPUTE_WRITE:
-        /* Mirrors flux_image_create_compute_writable's policy exactly:
-         * storage access, with the sRGB-view portability carve-out. */
+        /* Mirrors the COMPUTE_WRITE creation policy exactly: storage access,
+         * with the sRGB-view portability carve-out. */
         if (format == FLUX_FORMAT_RGBA8_SRGB || format == FLUX_FORMAT_BGRA8_SRGB)
             return false;
         return (props.optimalTilingFeatures & VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT) != 0;
+    case FLUX_IMAGE_USAGE_RENDER_TARGET:
+        return (props.optimalTilingFeatures & VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT) != 0 &&
+               (props.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT) != 0;
     }
     return false;
 }
 
-flux_result flux_image_create_compute_writable(flux_device *d, uint32_t width, uint32_t height,
-                                               flux_format fmt, flux_image **out) {
+static flux_result image_create_compute_writable(flux_device *d, uint32_t width, uint32_t height,
+                                                 flux_format fmt, flux_image **out) {
     if (!d || !out)
         return FLUX_ERROR_INVALID_ARGUMENT;
     if (width == 0 || height == 0) {
@@ -993,11 +1016,12 @@ flux_result flux_frame_prepare_image_target(flux_frame *f, flux_image *target) {
     if (!f || !target)
         return FLUX_ERROR_INVALID_ARGUMENT;
     if (!target->render_target) {
-        FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT,
-                  "image target was not created with flux_image_create_render_target");
+        FLUX_FAIL(
+            FLUX_ERROR_INVALID_ARGUMENT,
+            "image target was not created with flux_image_create (FLUX_IMAGE_USAGE_RENDER_TARGET)");
         return FLUX_ERROR_INVALID_ARGUMENT;
     }
-    if (f->state != FLUX_FRAME_STATE_RECORDING || f->pass_active) {
+    if (f->state != FLUX_FRAME_STATE_RECORDING || flux_frame_has_active_pass(f)) {
         FLUX_FAIL(FLUX_ERROR_INVALID_STATE, "image target prepare outside frame pass boundary");
         return FLUX_ERROR_INVALID_STATE;
     }
@@ -1041,11 +1065,12 @@ flux_result flux_frame_finish_image_target(flux_frame *f, flux_image *target) {
     if (!f || !target)
         return FLUX_ERROR_INVALID_ARGUMENT;
     if (!target->render_target) {
-        FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT,
-                  "image target was not created with flux_image_create_render_target");
+        FLUX_FAIL(
+            FLUX_ERROR_INVALID_ARGUMENT,
+            "image target was not created with flux_image_create (FLUX_IMAGE_USAGE_RENDER_TARGET)");
         return FLUX_ERROR_INVALID_ARGUMENT;
     }
-    if (f->state != FLUX_FRAME_STATE_RECORDING || f->pass_active) {
+    if (f->state != FLUX_FRAME_STATE_RECORDING || flux_frame_has_active_pass(f)) {
         FLUX_FAIL(FLUX_ERROR_INVALID_STATE, "image target finish outside frame pass boundary");
         return FLUX_ERROR_INVALID_STATE;
     }
@@ -1088,8 +1113,8 @@ flux_result flux_frame_finish_image_target(flux_frame *f, flux_image *target) {
  * stay undefined until the first caller-recorded target pass; this avoids a
  * synchronous one-shot queue submission during frame recording. Strong device
  * ref (caller-owned, like flux_image_create — not the effect-pool weak ref). */
-flux_result flux_image_create_render_target(flux_device *d, uint32_t width, uint32_t height,
-                                            flux_format fmt, flux_image **out) {
+static flux_result image_create_render_target(flux_device *d, uint32_t width, uint32_t height,
+                                              flux_format fmt, flux_image **out) {
     if (!d || !out)
         return FLUX_ERROR_INVALID_ARGUMENT;
     if (width == 0 || height == 0) {

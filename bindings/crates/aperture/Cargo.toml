@@ -1,0 +1,19 @@
+[package]
+name = "aperture"
+description = "Safe Rust bindings to aperture: the application shell that runs a lens UI in an iris window"
+publish = false
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+links = "aperture_rs"
+
+[dependencies]
+aperture-sys = { path = "../aperture-sys", version = "0.0.79" }
+iris = { path = "../iris", version = "0.0.79" }
+lens = { path = "../lens", version = "0.0.79" }
+flux = { path = "../flux", version = "0.0.79" }
+
+[[example]]
+name = "hello"

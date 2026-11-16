@@ -364,7 +364,12 @@ static void test_band_render_order(void) {
     lens *ui = nullptr;
     flux_canvas *canvas = nullptr;
     OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
-    OT_EXPECT(flux_canvas_create_cpu(400, 300, 1.0f, &canvas) == FLUX_OK);
+    OT_EXPECT(flux_canvas_create(&(flux_canvas_desc){.type = FLUX_TYPE_CANVAS_DESC,
+                                                     .backend = FLUX_CANVAS_BACKEND_CPU,
+                                                     .scale = 1.0f,
+                                                     .width = 400,
+                                                     .height = 300},
+                                 &canvas) == FLUX_OK);
 
     const flux_color RED = 0xFFFF0000u;
     const flux_color GREEN = 0xFF00FF00u;
@@ -461,7 +466,12 @@ static void test_intra_band_registration_order(void) {
     lens *ui = nullptr;
     flux_canvas *canvas = nullptr;
     OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
-    OT_EXPECT(flux_canvas_create_cpu(400, 300, 1.0f, &canvas) == FLUX_OK);
+    OT_EXPECT(flux_canvas_create(&(flux_canvas_desc){.type = FLUX_TYPE_CANVAS_DESC,
+                                                     .backend = FLUX_CANVAS_BACKEND_CPU,
+                                                     .scale = 1.0f,
+                                                     .width = 400,
+                                                     .height = 300},
+                                 &canvas) == FLUX_OK);
 
     const flux_color CYAN = 0xFF00FFFFu;
     const flux_color YELLOW = 0xFFFFFF00u;
@@ -492,7 +502,12 @@ static void test_base_band_request_clamped_to_chrome(void) {
     lens *ui = nullptr;
     flux_canvas *canvas = nullptr;
     OT_EXPECT(lens_create(&(lens_desc){}, &ui) == FLUX_OK);
-    OT_EXPECT(flux_canvas_create_cpu(400, 300, 1.0f, &canvas) == FLUX_OK);
+    OT_EXPECT(flux_canvas_create(&(flux_canvas_desc){.type = FLUX_TYPE_CANVAS_DESC,
+                                                     .backend = FLUX_CANVAS_BACKEND_CPU,
+                                                     .scale = 1.0f,
+                                                     .width = 400,
+                                                     .height = 300},
+                                 &canvas) == FLUX_OK);
 
     const flux_color BLUE = 0xFF0000FFu;
     lens_place_opts o = exact_at((flux_rect){0, 0, 200, 200}, LENS_BAND_BASE, BLUE);

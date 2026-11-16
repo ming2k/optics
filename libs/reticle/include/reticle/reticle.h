@@ -299,10 +299,6 @@ typedef struct reticle_rasterize_opts {
     const reticle_document *document;
     uint32_t width; /* output extent in physical pixels; both must be non-zero */
     uint32_t height;
-    /* Samples per axis for the software rasterizer: 0 selects the canvas
-     * default (2 -> 4 samples/px), 1 is aliased, up to
-     * FLUX_CANVAS_SUPERSAMPLE_MAX. */
-    uint32_t supersample;
     reticle_pixel_format format;
     reticle_paint_mode paint;
     flux_color color;   /* theme / monochrome colour, as in reticle_draw */

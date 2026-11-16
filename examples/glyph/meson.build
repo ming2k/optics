@@ -3,5 +3,5 @@
 
 executable('text_hello',
   'text_hello.c',
-  dependencies : [glyph_dep, iris_dep, m_dep],
+  dependencies : [glyph_dep, aperture_dep, m_dep],
 )

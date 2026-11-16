@@ -1,9 +1,10 @@
-/* frame_mailbox.c — lockless triple-buffered snapshot exchange (ADR-0124).
+/* frame_mailbox.c — wait-free triple-buffered snapshot exchange (ADR-0124).
  *
  * Implements the wait-free atomic handoff channel between UI thread and
  * Compositor thread. See frame_mailbox.h for interface contracts. */
 
 #include "frame_mailbox.h"
+#include "ui_host.h"
 #include <flux/profile.h>
 #include <math.h>
 #include <string.h>
@@ -27,7 +28,7 @@ static iris_frame_damage iris_damage_from(const flux_rect *rects, uint32_t count
     }
     const float s = scale > 0.0f ? scale : 1.0f;
     uint32_t kept = 0;
-    for (uint32_t i = 0; i < count && kept < LENS_DAMAGE_RECTS_CAPACITY; i++) {
+    for (uint32_t i = 0; i < count && kept < IRIS_DAMAGE_RECTS_CAPACITY; i++) {
         const flux_rect d = rects[i];
         if (!(d.w > 0.0f) || !(d.h > 0.0f))
             continue;
@@ -64,9 +65,9 @@ iris_frame_damage iris_frame_packet_damage(const iris_frame_packet *pkt) {
         out.full = true;
         return out;
     }
-    const uint32_t count = pkt->damage_count < LENS_DAMAGE_RECTS_CAPACITY
+    const uint32_t count = pkt->damage_count < IRIS_DAMAGE_RECTS_CAPACITY
                                ? pkt->damage_count
-                               : LENS_DAMAGE_RECTS_CAPACITY;
+                               : IRIS_DAMAGE_RECTS_CAPACITY;
     /* The packet carries logical extents plus the scale; the rects are logical
      * too. Deriving the device extent here (rather than trusting a caller to
      * pass one convention) is what stops the clip from being applied in the
@@ -77,160 +78,86 @@ iris_frame_damage iris_frame_packet_damage(const iris_frame_packet *pkt) {
     return iris_damage_from(pkt->damage, count, s, dev_w, dev_h, pkt->force_paint);
 }
 
-iris_frame_damage iris_frame_lens_damage(const lens *ui, float scale, int32_t width, int32_t height,
-                                         bool force_full) {
-    flux_rect rects[LENS_DAMAGE_RECTS_CAPACITY];
-    const uint32_t count = lens_damage_rects(
-        ui, &(lens_damage_opts){.rects = rects, .capacity = LENS_DAMAGE_RECTS_CAPACITY});
+iris_frame_damage iris_frame_ui_damage(const iris_ui_host *ui, float scale, int32_t width,
+                                       int32_t height, bool force_full) {
+    flux_rect rects[IRIS_DAMAGE_RECTS_CAPACITY];
+    const uint32_t count = iris__ui_damage_rects(ui, rects, IRIS_DAMAGE_RECTS_CAPACITY);
     return iris_damage_from(rects, count, scale, width, height, force_full);
 }
 
-void iris_mailbox_init(iris_frame_mailbox *mb) {
+#define IRIS_MAILBOX_FRESH 0x80000000u
+#define IRIS_MAILBOX_INDEX 0x3u
+
+/* Drop the references a packet holds. Runs on whichever thread owns the
+ * packet at the time; in practice the UI thread (acquire) or teardown. */
+static void packet_clear(iris_frame_mailbox *mb, iris_frame_packet *pkt) {
+    iris__ui_snapshot_release(mb->ui, pkt->snapshot);
+    pkt->snapshot = nullptr;
+    if (pkt->host_list)
+        flux_display_list_release(pkt->host_list);
+    pkt->host_list = nullptr;
+}
+
+void iris_mailbox_init(iris_frame_mailbox *mb, const iris_ui_host *ui) {
     if (!mb)
         return;
     memset(mb, 0, sizeof *mb);
-    mb->spare = &mb->pool[0];
-    mb->spare2 = &mb->pool[1];
-    atomic_init(&mb->recycle, &mb->pool[2]);
-    atomic_init(&mb->ready, nullptr);
+    mb->ui = ui;
+    mb->back = 0;
+    mb->front = 2;
+    atomic_init(&mb->middle, 1u);
     atomic_init(&mb->sequence, 0);
 }
 
 void iris_mailbox_destroy(iris_frame_mailbox *mb) {
     if (!mb)
         return;
-    for (int i = 0; i < 3; i++) {
-        if (mb->pool[i].snapshot) {
-            lens_snapshot_release(mb->pool[i].snapshot);
-            mb->pool[i].snapshot = nullptr;
-        }
-        if (mb->pool[i].host_list) {
-            flux_display_list_release(mb->pool[i].host_list);
-            mb->pool[i].host_list = nullptr;
-        }
-    }
-    mb->spare = nullptr;
-    mb->spare2 = nullptr;
-    atomic_store_explicit(&mb->ready, nullptr, memory_order_relaxed);
-    atomic_store_explicit(&mb->recycle, nullptr, memory_order_relaxed);
+    for (int i = 0; i < 3; i++)
+        packet_clear(mb, &mb->pool[i]);
 }
 
 iris_frame_packet *iris_mailbox_acquire(iris_frame_mailbox *mb) {
     if (!mb)
         return nullptr;
-
-    while (true) {
-        /* Check if the compositor thread returned a consumed packet. */
-        iris_frame_packet *recycled =
-            atomic_exchange_explicit(&mb->recycle, nullptr, memory_order_acquire);
-        if (recycled) {
-            if (recycled->snapshot) {
-                lens_snapshot_release(recycled->snapshot);
-                recycled->snapshot = nullptr;
-            }
-            if (recycled->host_list) {
-                flux_display_list_release(recycled->host_list);
-                recycled->host_list = nullptr;
-            }
-            if (!mb->spare) {
-                mb->spare = recycled;
-            } else if (!mb->spare2) {
-                mb->spare2 = recycled;
-            } else {
-                return recycled;
-            }
-        }
-
-        if (mb->spare) {
-            iris_frame_packet *pick = mb->spare;
-            mb->spare = nullptr;
-            if (pick->snapshot) {
-                lens_snapshot_release(pick->snapshot);
-                pick->snapshot = nullptr;
-            }
-            if (pick->host_list) {
-                flux_display_list_release(pick->host_list);
-                pick->host_list = nullptr;
-            }
-            return pick;
-        }
-
-        if (mb->spare2) {
-            iris_frame_packet *pick = mb->spare2;
-            mb->spare2 = nullptr;
-            if (pick->snapshot) {
-                lens_snapshot_release(pick->snapshot);
-                pick->snapshot = nullptr;
-            }
-            if (pick->host_list) {
-                flux_display_list_release(pick->host_list);
-                pick->host_list = nullptr;
-            }
-            return pick;
-        }
-
-        /* All 3 buffers in flight: yield momentarily to let compositor recycle. */
-#if defined(__x86_64__) || defined(_M_X64)
-        __builtin_ia32_pause();
-#endif
-    }
+    iris_frame_packet *pkt = &mb->pool[mb->back];
+    packet_clear(mb, pkt);
+    return pkt;
 }
 
 void iris_mailbox_publish(iris_frame_mailbox *mb, iris_frame_packet *pkt) {
-    if (!mb || !pkt)
+    if (!mb || pkt != &mb->pool[mb->back])
         return;
 
     FLUX_PROFILE_ZONE(z, "iris.mailbox_publish");
     pkt->sequence = atomic_fetch_add_explicit(&mb->sequence, 1, memory_order_relaxed) + 1;
     FLUX_PROFILE_PLOT_INT("iris.mailbox_seq", (int64_t)pkt->sequence);
-    if (pkt->snapshot)
-        lens_snapshot_retain(pkt->snapshot);
+    iris__ui_snapshot_retain(mb->ui, pkt->snapshot);
     if (pkt->host_list)
         flux_display_list_retain(pkt->host_list);
 
-    /* Atomic handoff to the compositor thread. */
-    iris_frame_packet *superseded = atomic_exchange_explicit(&mb->ready, pkt, memory_order_release);
-    if (superseded) {
-        if (superseded->snapshot) {
-            lens_snapshot_release(superseded->snapshot);
-            superseded->snapshot = nullptr;
-        }
-        if (superseded->host_list) {
-            flux_display_list_release(superseded->host_list);
-            superseded->host_list = nullptr;
-        }
-        if (!mb->spare) {
-            mb->spare = superseded;
-        } else if (!mb->spare2) {
-            mb->spare2 = superseded;
-        }
-    }
+    /* Hand the filled packet over and take whatever was in the shared slot:
+     * a spare, or a frame the presenter never got to (superseded). */
+    const uint32_t old =
+        atomic_exchange_explicit(&mb->middle, mb->back | IRIS_MAILBOX_FRESH, memory_order_acq_rel);
+    mb->back = old & IRIS_MAILBOX_INDEX;
     FLUX_PROFILE_ZONE_END(z);
 }
 
 iris_frame_packet *iris_mailbox_claim(iris_frame_mailbox *mb) {
     if (!mb)
         return nullptr;
+    /* Only this thread ever clears FRESH, so once it is observed set the
+     * exchange below is guaranteed to take a fresh packet — possibly a newer
+     * one than the load saw, which is exactly what a claim should return. */
+    if (!(atomic_load_explicit(&mb->middle, memory_order_acquire) & IRIS_MAILBOX_FRESH))
+        return nullptr;
     FLUX_PROFILE_ZONE(z, "iris.mailbox_claim");
-    iris_frame_packet *pkt = atomic_exchange_explicit(&mb->ready, nullptr, memory_order_acquire);
+    const uint32_t old = atomic_exchange_explicit(&mb->middle, mb->front, memory_order_acq_rel);
+    mb->front = old & IRIS_MAILBOX_INDEX;
     FLUX_PROFILE_ZONE_END(z);
-    return pkt;
+    return &mb->pool[mb->front];
 }
 
-void iris_mailbox_recycle(iris_frame_mailbox *mb, iris_frame_packet *pkt) {
-    if (!mb || !pkt)
-        return;
-
-    /* Hand the consumed packet back to the UI thread. */
-    iris_frame_packet *stale = atomic_exchange_explicit(&mb->recycle, pkt, memory_order_release);
-    if (stale) {
-        if (stale->snapshot) {
-            lens_snapshot_release(stale->snapshot);
-            stale->snapshot = nullptr;
-        }
-        if (stale->host_list) {
-            flux_display_list_release(stale->host_list);
-            stale->host_list = nullptr;
-        }
-    }
+bool iris_mailbox_pending(const iris_frame_mailbox *mb) {
+    return mb && (atomic_load_explicit(&mb->middle, memory_order_acquire) & IRIS_MAILBOX_FRESH);
 }

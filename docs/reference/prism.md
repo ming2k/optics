@@ -10,7 +10,7 @@ the split; the material model is
 [ADR-0046](../adr/0046-liquid-glass-convex-lens-model.md) and the focus
 field is [ADR-0050](../adr/0050-single-body-liquid-glass-focus-field.md).
 
-Requires flux built with `-Dcompute=true`. Headers: `<prism/prism.h>`
+Headers: `<prism/prism.h>`
 (umbrella), `<prism/liquid_glass.h>`, `<prism/frosted.h>`,
 `<prism/acrylic.h>`, `<prism/mica.h>`, and `<prism/backdrop_layer.h>`.
 
@@ -18,7 +18,7 @@ Requires flux built with `-Dcompute=true`. Headers: `<prism/prism.h>`
 
 | Flag       | Default | Effect                                                              |
 |------------|---------|---------------------------------------------------------------------|
-| `-Dprism`  | `true`  | Compile the prism material library. Errors out if `-Dcompute=false`. |
+| `-Dprism`  | `true`  | Compile the prism material library.                                  |
 
 The pkg-config file is `prism` and declares a requirement on `flux`, so
 `pkg-config --cflags --libs prism` pulls in both.

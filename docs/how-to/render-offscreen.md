@@ -8,8 +8,7 @@ any headless host. No `VkSurfaceKHR`, no windowing library.
 
 A `flux_device *d` created with `desc.headless = true` (no
 windowing-system instance extensions needed). Any module that draws
-into a frame works on top; the examples below use the canvas
-(`-Dcanvas=true`, default).
+into a frame works on top; the examples below use the canvas.
 
 ## Create the surface
 

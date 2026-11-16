@@ -1,7 +1,7 @@
 /*
  * flux — C23 Vulkan-first graphics library.
  *
- * Umbrella header. Pulls in every module enabled at build time.
+ * Umbrella header. Pulls in every module; libflux has no optional modules.
  * Consumers who want to keep their preprocessor narrow may
  * include the per-module headers directly:
  *
@@ -11,12 +11,11 @@
  *   <flux/sdf.h>      always available (analytic distance fields, ADR-0118)
  *   <flux/observe.h>  always available (allocation ledger, ADR-0129)
  *   <flux/vulkan.h>   raw Vulkan handle accessors
- *   <flux/dmabuf.h>   iff built on Linux (FLUX_HAVE_DMABUF; core-level,
- *                     independent of the canvas module)
- *   <flux/canvas.h>   iff built with -Dcanvas=true
- *   <flux/scene.h>    iff built with -Dscene=true
- *   <flux/compute.h>  iff built with -Dcompute=true
- *   <flux/effect.h>   iff built with -Deffect=true
+ *   <flux/dmabuf.h>   iff built on Linux (FLUX_HAVE_DMABUF)
+ *   <flux/canvas.h>   2D canvas (GPU and CPU backends)
+ *   <flux/scene.h>    3D draw core
+ *   <flux/compute.h>  compute pipelines
+ *   <flux/effect.h>   image effects
  *
  * Text shaping is not in libflux: it lives in the glyph sibling
  * (`<glyph/glyph.h>`), which feeds flux_canvas_draw_glyph_run (ADR-0016, ADR-0106).
@@ -36,21 +35,10 @@
 #include <flux/dmabuf.h>
 #endif
 
-#if defined(FLUX_HAVE_CANVAS)
 #include <flux/canvas.h>
 #include <flux/canvas_helpers.h>
-#endif
-
-#if defined(FLUX_HAVE_SCENE)
-#include <flux/scene.h>
-#endif
-
-#if defined(FLUX_HAVE_COMPUTE)
 #include <flux/compute.h>
-#endif
-
-#if defined(FLUX_HAVE_EFFECT)
 #include <flux/effect.h>
-#endif
+#include <flux/scene.h>
 
 #endif /* FLUX_H */

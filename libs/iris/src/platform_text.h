@@ -1,7 +1,7 @@
 /* platform_text.h — shared UTF-8 helpers for the platform backends.
  *
  * Every backend funnels native text (IME commits, preedits, clipboard,
- * drops) into the same fixed-size lens_input buffers. Truncating those at a
+ * drops) into the same fixed-size iris_input buffers. Truncating those at a
  * raw byte count can split a multi-byte sequence and produce invalid UTF-8,
  * which downstream consumers (D-Bus string marshalling, text shapers) are
  * entitled to reject. These helpers keep every truncation on a code-point
@@ -45,13 +45,13 @@ bool iris_text_memento_update(char **saved, size_t *saved_len, uint32_t *saved_c
 void iris_text_memento_clear(char **saved, size_t *saved_len, uint32_t *saved_cursor);
 
 /* Is `cp` a code point the backends must deliver as COMMITTED TEXT
- * (lens_input.text_utf8)? False for control characters: the C0 range
+ * (iris_input.text_utf8)? False for control characters: the C0 range
  * (Return \r, Tab \t, Backspace \b, …) AND the DEL character 0x7f.
  *
  * DEL is the subtle one: xkb maps the Delete keysym (0xffff) and Win32
  * maps Ctrl+Backspace's WM_CHAR to exactly U+007F, so without the second
  * half of the test every Delete press would ALSO deliver "\x7f" as text —
- * the key event already carries the intent (LENS_KEY_DELETE), and the
+ * the key event already carries the intent (IRIS_KEY_DELETE), and the
  * invisible byte would corrupt editor buffers. Cocoa's characters filter
  * has always excluded it ("Control characters (Return "\r", Tab "\t",
  * DEL 0x7f) are not text"); this predicate pins the same rule for all

@@ -36,7 +36,7 @@ IRIS_API void iris_record_mark_static(void) {
 #endif
 }
 
-flux_display_list *iris_record_host_canvas(const iris_app_config *cfg, float scale) {
+flux_display_list *iris_record_host_canvas(const iris_app_opts *cfg, float scale) {
     if (!cfg || !cfg->record)
         return nullptr;
     flux_encoder *enc = nullptr;
@@ -73,7 +73,7 @@ IRIS_API int iris_post_to_main_thread(iris_main_thread_fn fn, void *user) {
 #endif
 }
 
-IRIS_API int iris_app_run(const iris_app_config *cfg) {
+IRIS_API int iris_app_run(const iris_app_opts *cfg) {
     /* Both callbacks are optional: a pure-lens app leaves paint NULL, a
      * pure-canvas demo leaves build NULL. Rejecting an empty config here
      * would force every minimal example to register a no-op closure. */

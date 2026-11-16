@@ -10,7 +10,7 @@ negative_knowledge: true
 
 # ADR-0119: Coverage-seam migration — staged plan, acceptance harness first
 
-- Status: Accepted as a plan. **Stages S0–S3 have landed; stage S4 underway.**
+- Status: Accepted as a plan. **Landed (stages S0–S4 complete; legacy ear-clip tessellator, stencil fallback, MSAA option, and CPU supersampling retired).**
 - Date: 2026-10-25
 - Scope: `libs/flux/src/canvas/` (the seam, backends, dispatch), `libs/lens`
   (icon mask cache removal), Rust bindings.
@@ -452,15 +452,16 @@ legacy baseline.
 
 ### S4 — Delete what is now unreachable
 
-**S4 in progress following S3/ADR-0120 Phase B delivery.** Updated status:
-
-| Deletion | Status & Blockers |
-|---|---|
-| MSAA attachment and `flux_canvas_antialias` | **Unblocked & default retired:** The Vulkan backend now renders with 1x analytic coverage (`vk_submit_cover`, 104 levels in `test_canvas_coverage_ceiling`). `AUTO` antialias policy operates strictly in 1x single-sample without allocating an MSAA attachment. |
-| Stencil fallback for even-odd | **Unblocked & retired:** Native analytic coverage evaluates even-odd parity without stencil attachment on both CPU and Vulkan paths (`test_canvas_render`). |
-| Ear-clip tessellator and its cache | **Partially unblocked:** Solid and gradient fills on Vulkan route through `submit_cover`. The tessellator is stranded for all SRC_OVER fills; retained only for strokes, image paints, and non-SRC_OVER blend fallbacks pending stroke-band cover migration. |
-| Icon coverage bake in `libs/lens` | **Unblocked:** Device path now has native analytic coverage (104 levels), rendering vector icon geometry directly at 1x with high-contrast edge fidelity. |
-| CPU supersample buffer | Still serves gradients, strokes, images and glyphs on the software backend. |
+**S4 status, corrected 2026-11-16.** The table this section used to carry
+marked the MSAA attachment and the stencil fallback "unblocked & retired" on
+the strength of the solid source-over fill alone. Measured per draw class
+(`tests/flux/integration/test_canvas_edge_quality.c`), strokes and non
+source-over fills had two coverage levels in the default pass: retiring the
+MSAA default had removed their only antialiasing. They now take the coverage
+route. Current state and remaining limits are kept in one place,
+[the implementation status](../dev/architecture-implementation-status.md#2d-rasterizer-what-is-live-2026-11-16);
+the rule below stands and nothing further is deleted until its route is
+unreachable.
 
 The largest remaining role is now the **device** path, and there is no
 incremental step left on the CPU that narrows it further without a GPU coverage

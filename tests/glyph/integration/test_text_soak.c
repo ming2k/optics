@@ -106,7 +106,12 @@ int main(void) {
     }
 
     flux_canvas *c = nullptr;
-    OT_EXPECT(flux_canvas_create_cpu(256, 128, 1.0f, &c) == FLUX_OK);
+    OT_EXPECT(flux_canvas_create(&(flux_canvas_desc){.type = FLUX_TYPE_CANVAS_DESC,
+                                                     .backend = FLUX_CANVAS_BACKEND_CPU,
+                                                     .scale = 1.0f,
+                                                     .width = 256,
+                                                     .height = 128},
+                                 &c) == FLUX_OK);
 
     /* --- Phase 1: oversize working set (forces evictions, maybe pages). */
     for (uint32_t round = 0; round < 3; round++) {

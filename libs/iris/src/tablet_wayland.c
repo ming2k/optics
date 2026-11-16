@@ -1,8 +1,8 @@
 /* tablet_wayland.c — zwp_tablet_v2 (tablet-tool-unstable-v2) pen input.
  *
  * Bridges Wayland tablet events into the pointer accumulator: pen motion
- * drives the same cursor coordinates, tip contact drives LENS_MOUSE_LEFT,
- * and pressure/eraser ride along in the new size-guarded lens_input pen
+ * drives the same cursor coordinates, tip contact drives IRIS_BUTTON_LEFT,
+ * and pressure/eraser ride along in the new size-guarded iris_input pen
  * fields. The tablet-tool protocol state machine (manager → seat →
  * per-tool objects) lives entirely here; app_wayland.c only registers the
  * global and forwards seat creation.
@@ -104,7 +104,7 @@ static void tool_apply_down(bool down) {
         return;
     g_tablet.down = down;
     if (g_host.button)
-        g_host.button(g_host.user, LENS_MOUSE_LEFT, down);
+        g_host.button(g_host.user, IRIS_BUTTON_LEFT, down);
 }
 
 static void tablet_tool_proximity_in(void *data, struct zwp_tablet_tool_v2 *tool, uint32_t serial,
@@ -188,9 +188,9 @@ static void tablet_tool_button(void *data, struct zwp_tablet_tool_v2 *tool, uint
      * contract is built from. The tip contact keeps LEFT. */
     int i = -1;
     if (button == 0x14b) /* BTN_STYLUS */
-        i = LENS_MOUSE_RIGHT;
+        i = IRIS_BUTTON_RIGHT;
     else if (button == 0x14c) /* BTN_STYLUS2 */
-        i = LENS_MOUSE_MIDDLE;
+        i = IRIS_BUTTON_MIDDLE;
     if (i < 0 || !g_host.button)
         return;
     g_host.button(g_host.user, i, state == ZWP_TABLET_TOOL_V2_BUTTON_STATE_PRESSED);
@@ -298,7 +298,7 @@ void iris_wayland__tablet_global_removed(uint32_t name) {
     (void)name;
 }
 
-void iris_wayland__tablet_fill_input(lens_input *in) {
+void iris_wayland__tablet_fill_input(iris_input *in) {
     in->pen_active = g_tablet.in_proximity && g_tablet.down;
     /* Tools without a pressure axis never send pressure events; contact
      * should still read as full pressure so opacity math degrades

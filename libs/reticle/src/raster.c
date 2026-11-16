@@ -5,9 +5,8 @@
  * snapshot in CI. It uses flux's device-less CPU canvas, so it needs no Vulkan
  * device, no surface, and no window, and it is safe off the UI thread.
  *
- * The coverage readback is flux's own box-filtered alpha plane, not a
- * re-derivation: a mask baked here resolves exactly as many grey levels as the
- * canvas's supersample factor allows, which is the property mask caches key on. */
+ * The coverage readback is flux's 1x continuous analytic coverage alpha plane
+ * (matching the alpha channel of RGBA8 readback). */
 
 #include "internal.h"
 
@@ -37,8 +36,12 @@ flux_result reticle_rasterize(const reticle_rasterize_opts *opts, reticle_pixmap
     *out = (reticle_pixmap){};
 
     flux_canvas *canvas = nullptr;
-    flux_result result =
-        flux_canvas_create_cpu_ss(opts->width, opts->height, 1.0f, opts->supersample, &canvas);
+    flux_result result = flux_canvas_create(&(flux_canvas_desc){.type = FLUX_TYPE_CANVAS_DESC,
+                                                                .backend = FLUX_CANVAS_BACKEND_CPU,
+                                                                .scale = 1.0f,
+                                                                .width = opts->width,
+                                                                .height = opts->height},
+                                            &canvas);
     if (result != FLUX_OK)
         return result;
 

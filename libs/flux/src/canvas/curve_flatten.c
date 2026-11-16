@@ -34,9 +34,11 @@
  * contours in the same path need. Beyond this the polyline is coarser than
  * the tolerance asks for — a bounded, documented degradation, in the same
  * class as the scratch-buffer cap it protects. */
-#define CURVE_FLATTEN_MAX_SPAN 1024
+#define CURVE_FLATTEN_MAX_SPAN 16384
 
 typedef struct flatten_state {
+    flux_flatten_grow_fn grow; /* optional grow callback; nullptr for fixed buffers */
+    void *grow_ctx;
     flux_point *pts;
     flux_canvas_contour *cons;
     uint32_t pts_cap;
@@ -46,17 +48,29 @@ typedef struct flatten_state {
     flux_canvas_contour *cur; /* active contour, or nullptr between contours */
     flux_point last;          /* last point written, for zero-length suppression */
     bool have_last;
-    bool done; /* set when a buffer cap is reached; stops the walk */
+    bool done; /* set when buffer growth fails or fixed cap is reached */
 } flatten_state;
 
-/* Append a point unconditionally. Reports and drops on scratch exhaustion. */
-static void emit_point(flatten_state *st, float x, float y) {
-    if (st->point_count >= st->pts_cap) {
+static bool ensure_points_room(flatten_state *st) {
+    if (st->point_count < st->pts_cap)
+        return true;
+    if (st->grow && st->grow(st->grow_ctx, st->point_count + 1, 0, &st->pts, &st->pts_cap,
+                             &st->cons, &st->cons_cap)) {
+        return true;
+    }
+    if (!st->grow) {
         FLUX_FAIL(FLUX_ERROR_OUT_OF_RANGE,
                   "canvas path scratch exhausted (FLUX_CANVAS_PATH_SCRATCH_CAP); "
                   "flattened points dropped");
-        return;
     }
+    st->done = true;
+    return false;
+}
+
+/* Append a point unconditionally, growing scratch via callback when provided. */
+static void emit_point(flatten_state *st, float x, float y) {
+    if (st->done || !ensure_points_room(st))
+        return;
     st->pts[st->point_count++] = (flux_point){x, y};
     if (st->cur)
         st->cur->count++;
@@ -73,14 +87,18 @@ static void emit_point_unique(flatten_state *st, float x, float y) {
     emit_point(st, x, y);
 }
 
-/* Open a contour at the cursor unless one is already open. Returns false when
- * the contour cap is reached (the whole walk then stops). */
+/* Open a contour at the cursor unless one is already open. Grows canvas contour
+ * scratch when owned; returns false on fixed-cap exhaustion or OOM. */
 static bool begin_if_needed(flatten_state *st, float cx, float cy) {
     if (st->cur)
         return true;
     if (st->contour_count >= st->cons_cap) {
-        st->done = true;
-        return false;
+        if (st->grow && st->grow(st->grow_ctx, 0, st->contour_count + 1, &st->pts, &st->pts_cap,
+                                 &st->cons, &st->cons_cap)) {
+        } else {
+            st->done = true;
+            return false;
+        }
     }
     flux_canvas_contour *co = &st->cons[st->contour_count++];
     co->start = st->point_count;
@@ -90,7 +108,7 @@ static bool begin_if_needed(flatten_state *st, float cx, float cy) {
     co->first_y = cy;
     st->cur = co;
     emit_point(st, cx, cy);
-    return true;
+    return !st->done;
 }
 
 /* Sample a quadratic (or line) at `k` uniform steps, emitting the interior and
@@ -105,7 +123,7 @@ static void sample_quad(flatten_state *st, flux_curve_seg s, float tol) {
     for (uint32_t i = 1; i <= k; ++i) {
         flux_point p = flux_curve_quad_eval(s, (float)i * inv);
         emit_point_unique(st, p.x, p.y);
-        if (st->done || st->point_count >= st->pts_cap)
+        if (st->done)
             return;
     }
 }
@@ -121,15 +139,18 @@ static void flatten_cubic(flatten_state *st, flux_point p0, flux_point p1, flux_
     for (uint32_t i = 1; i <= k; ++i) {
         flux_point p = flux_curve_cubic_eval(p0, p1, p2, p3, (float)i * inv);
         emit_point_unique(st, p.x, p.y);
-        if (st->point_count >= st->pts_cap)
+        if (st->done)
             return;
     }
 }
 
-flatten_multi flatten_path_to_contours(const flux_path *p, float pixel_scale, flux_point *out_pts,
-                                       uint32_t pts_cap, flux_canvas_contour *out_cons,
-                                       uint32_t cons_cap) {
+flatten_multi flatten_path_to_contours_dyn(const flux_path *p, float pixel_scale,
+                                           flux_point *out_pts, uint32_t pts_cap,
+                                           flux_canvas_contour *out_cons, uint32_t cons_cap,
+                                           flux_flatten_grow_fn grow, void *grow_ctx) {
     flatten_state st = {};
+    st.grow = grow;
+    st.grow_ctx = grow_ctx;
     st.pts = out_pts;
     st.cons = out_cons;
     st.pts_cap = pts_cap;
@@ -214,6 +235,13 @@ flatten_multi flatten_path_to_contours(const flux_path *p, float pixel_scale, fl
 
     flatten_multi res = {st.point_count, st.contour_count};
     return res;
+}
+
+flatten_multi flatten_path_to_contours(const flux_path *p, float pixel_scale, flux_point *out_pts,
+                                       uint32_t pts_cap, flux_canvas_contour *out_cons,
+                                       uint32_t cons_cap) {
+    return flatten_path_to_contours_dyn(p, pixel_scale, out_pts, pts_cap, out_cons, cons_cap,
+                                        nullptr, nullptr);
 }
 
 /* Operator-norm upper bound of `m`'s 2×2 linear part. Callers pass the

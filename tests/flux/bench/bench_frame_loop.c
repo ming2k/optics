@@ -64,7 +64,13 @@ int main(void) {
 
     flux_image *targets[TARGETS] = {};
     for (uint32_t i = 0; i < TARGETS; ++i)
-        (void)flux_image_create_render_target(d, W / 3, H / 3, tf, &targets[i]);
+        (void)flux_image_create(d,
+                                &(flux_image_desc){.type = FLUX_TYPE_IMAGE_DESC,
+                                                   .width = W / 3,
+                                                   .height = H / 3,
+                                                   .format = tf,
+                                                   .usage = FLUX_IMAGE_USAGE_RENDER_TARGET},
+                                &targets[i]);
 
     /* Warm-up: shader/pipeline compilation and first-touch allocations
      * must not pollute the measurement. */

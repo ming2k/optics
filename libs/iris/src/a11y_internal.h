@@ -23,7 +23,7 @@
 #define IRIS_A11Y_INTERNAL_H
 
 #include <flux/math.h>
-#include <lens/lens.h>
+#include <iris/host.h>
 #include <stdbool.h>
 
 /* Poll integration for fd-capable backends (see header comment). -1 / 0 /

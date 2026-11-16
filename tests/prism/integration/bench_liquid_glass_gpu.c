@@ -137,7 +137,13 @@ static bool bench_init(bench *b, uint32_t body_count) {
     VkFormat sf = flux_surface_vk_format(b->surface);
     flux_format fmt =
         (sf == VK_FORMAT_B8G8R8A8_UNORM) ? FLUX_FORMAT_BGRA8_UNORM : FLUX_FORMAT_RGBA8_UNORM;
-    if (flux_image_create_render_target(b->device, BENCH_W, BENCH_H, fmt, &b->capture) != FLUX_OK)
+    if (flux_image_create(b->device,
+                          &(flux_image_desc){.type = FLUX_TYPE_IMAGE_DESC,
+                                             .width = BENCH_W,
+                                             .height = BENCH_H,
+                                             .format = fmt,
+                                             .usage = FLUX_IMAGE_USAGE_RENDER_TARGET},
+                          &b->capture) != FLUX_OK)
         return false;
 
     flux_canvas_desc cd = {.type = FLUX_TYPE_CANVAS_DESC, .surface = b->surface};

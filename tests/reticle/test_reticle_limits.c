@@ -268,14 +268,6 @@ static void rasterize_refuses_degenerate_requests(void) {
                       .document = doc, .width = 8, .height = 8, .format = (reticle_pixel_format)99},
                   &pixmap) == FLUX_ERROR_INVALID_ARGUMENT);
     OT_EXPECT(pixmap.pixels == nullptr);
-    /* An out-of-range supersample factor is refused by flux, and that refusal
-     * must reach the caller rather than being silently clamped. */
-    OT_EXPECT(reticle_rasterize(&(reticle_rasterize_opts){.document = doc,
-                                                          .width = 8,
-                                                          .height = 8,
-                                                          .format = RETICLE_PIXELS_RGBA8_PREMUL,
-                                                          .supersample = 999},
-                                &pixmap) != FLUX_OK);
     reticle_pixmap_deinit(&pixmap);
     reticle_release(doc);
 }

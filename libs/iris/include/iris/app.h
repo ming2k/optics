@@ -1,32 +1,29 @@
 /*
  * iris/app.h — cross-platform application entry point.
  *
- * iris_app_run() opens a window, creates a flux device + canvas + lens
- * context, runs the platform event loop, and drives an optional host
- * lifecycle around two per-frame callbacks:
+ * iris_app_run() opens a window, creates a flux device, surface and canvas,
+ * runs the platform event loop and drives the frame cadence. iris depends on
+ * flux only: what is drawn comes from two independent, optional sources.
  *
- *   1. start(ui, device) — creates host resources from Iris-owned contexts.
- *   2. build(ui, in) — runs inside an open lens_begin/end pair. The host
- *      builds its chrome (immediate-mode lens widgets) and reads `in`, the
- *      same lens_input snapshot lens is consuming this frame.
- *   3. record(enc, scale) — runs on the UI thread and records host canvas
- *      content into an immutable DisplayList. The list is submitted under
- *      lens's chrome by the presentation pipeline. Returning without drawing
- *      is fine.
- *   4. stop(ui, device) — releases host resources before Iris tears down
- *      Lens, Flux, and the device.
+ *   - Host canvas content: `record(enc, scale)` runs on the UI thread and
+ *     records into an immutable display list; `prepare(frame, ...)` runs a
+ *     pre-canvas GPU pass. Both are plain flux.
+ *   - A UI layer: `ui` is an `iris_ui_host` (iris/host.h) that builds a frame
+ *     from the folded input and publishes immutable snapshots. Its visuals
+ *     composite over the host canvas content. iris never includes a UI
+ *     header; `aperture` binds lens to this seam.
+ *
+ * Lifecycle: start(device) → frames → stop(device), around the UI host's own
+ * start/stop/destroy.
  *
  * One platform backend is compiled in per build (ADR-0044): Wayland
- * (src/app_wayland.c), Win32 (src/app_win32.c), or Cocoa
- * (src/app_cocoa.m) — dispatched from iris_app_run in src/app.c. The
- * same C signature is the contract every backend satisfies. A backend
- * is compiled in when its platform dependency is
- * satisfied; defining IRIS_BUILD_NO_BACKEND at compile time produces a
- * linkable libiris with iris_app_run returning a non-zero code, for
+ * (src/app_wayland.c), Win32 (src/app_win32.c), or Cocoa (src/app_cocoa.m) —
+ * dispatched from iris_app_run in src/app.c. Defining IRIS_BUILD_NO_BACKEND
+ * produces a linkable libiris whose iris_app_run returns non-zero, for
  * platform-less CI / bindgen builds.
  *
- * Concurrency: iris_app_run blocks the calling thread until the window
- * is closed. All callbacks run on the same thread.
+ * Concurrency: iris_app_run blocks the calling thread until the window is
+ * closed. All callbacks run on that thread unless iris/host.h says otherwise.
  */
 #ifndef IRIS_APP_H
 #define IRIS_APP_H
@@ -34,7 +31,6 @@
 #include <flux/canvas.h>
 #include <flux/core.h>
 #include <iris/event.h>
-#include <lens/lens.h>
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -82,16 +78,8 @@ IRIS_API const char *iris_version_string(void);
 /*  Application                                                       */
 /* ================================================================== */
 
-/* Per-frame build callback. `ui` is live inside an open lens_begin/end
- * pair; `in` is the same lens_input snapshot lens is consuming this frame
- * (read-only — hosts that want to filter what lens sees must do so before
- * iris_app_run, by owning the event source). `user` is the pointer passed
- * in iris_app_config.
- *
- * This is where the host builds its chrome (immediate-mode lens widgets).
- * Drawing *canvas content* (e.g. a document surface the chrome sits over)
- * belongs in iris_record_fn, which runs before the frame is submitted. */
-typedef void (*iris_build_fn)(lens *ui, const lens_input *in, void *user);
+/* The UI layer plugged into the frame loop; defined in <iris/host.h>. */
+typedef struct iris_ui_host iris_ui_host;
 
 /* Per-frame host canvas recording callback (ADR-0127).
  *
@@ -104,12 +92,10 @@ typedef void (*iris_build_fn)(lens *ui, const lens_input *in, void *user);
  * with `glyph_record` at the same scale.
  *
  * The recorded commands are compiled into an immutable flux_display_list and
- * submitted under lens's chrome. This is the only host canvas path: there is
- * no live-canvas callback, so recording never touches a swapchain and every
- * backend uses the same decoupled presentation pipeline (ADR-0124/ADR-0127).
- *
- * When both `record` and `build` are provided, iris runs in fully decoupled
- * dual-thread mode across all platforms (Wayland, Win32, Cocoa). */
+ * submitted under the UI layer's visuals. This is the only host canvas path:
+ * there is no live-canvas callback, so recording never touches a swapchain
+ * and every backend uses the same decoupled presentation pipeline
+ * (ADR-0124/ADR-0127). */
 typedef void (*iris_record_fn)(flux_encoder *enc, float scale, void *user);
 
 /* Per-frame prepare callback (optional).
@@ -127,24 +113,24 @@ typedef void (*iris_prepare_fn)(flux_frame *frame, flux_canvas *canvas, flux_dev
 
 /* Application-resource lifecycle.
  *
- * `start` runs after iris has created its flux device, canvas, and lens
- * context, but before the first frame. Returning false aborts the run.
- * `stop` runs after the frame loop and before iris destroys any of those
- * objects, allowing hosts to release device-backed resources in dependency
- * order. `stop` is called only when `start` was absent or returned true. */
-typedef bool (*iris_start_fn)(lens *ui, flux_device *device, void *user);
-typedef void (*iris_stop_fn)(lens *ui, flux_device *device, void *user);
+ * `start` runs after iris has created its flux device and canvas and after
+ * the UI host started, but before the first frame. Returning false aborts
+ * the run. `stop` runs after the frame loop and before iris destroys any of
+ * those objects, allowing hosts to release device-backed resources in
+ * dependency order. `stop` is called only when `start` was absent or
+ * returned true. */
+typedef bool (*iris_start_fn)(flux_device *device, void *user);
+typedef void (*iris_stop_fn)(flux_device *device, void *user);
 
 /* Pre-fold event interception (optional, ADR-0107).
  *
  * iris reifies each native event into an `iris_event` (iris/event.h) in
  * arrival order. When `on_event` is set, iris invokes it once per event,
  * synchronously on the iris_app_run thread, *before* folding survivors
- * into the frame's lens_input and outside any lens_begin/end pair. The
- * host may drop an event (return IRIS_EVENT_DROP) or rewrite its fields
- * and deliver it (mutate `*ev`, return IRIS_EVENT_PASS). This is the only
- * point at which a host may change what lens sees; `build`'s `in` is a
- * read-only copy of the already-folded snapshot.
+ * into the frame's iris_input. The host may drop an event (return
+ * IRIS_EVENT_DROP) or rewrite its fields and deliver it (mutate `*ev`,
+ * return IRIS_EVENT_PASS). This is the only point at which a host may change
+ * what the UI layer sees.
  *
  * `on_event == nullptr` (the default) is behaviourally identical to a
  * build without this seam and incurs no per-event cost. Events flagged
@@ -156,22 +142,20 @@ typedef struct iris_app_opts {
     int32_t width;           /* initial logical width (0 = default)  */
     int32_t height;          /* initial logical height (0 = default) */
     bool dark;               /* force dark; false = follow system    */
+    const iris_ui_host *ui;  /* UI layer (iris/host.h); nullptr = canvas only */
     bool log_raw;            /* debug raw input events to stderr     */
     bool no_clear;           /* skip canvas clear; preserves content rendered in prepare */
     iris_event_fn on_event;  /* pre-fold event interception (optional, ADR-0107) */
     iris_start_fn start;     /* resource setup before first frame (optional) */
     iris_stop_fn stop;       /* resource teardown before iris GPU teardown (optional) */
-    iris_build_fn build;     /* per-frame build callback (may be nullptr) */
     iris_record_fn record;   /* host canvas recorder, the only canvas path (optional) */
     iris_prepare_fn prepare; /* pre-canvas frame compute/render pass (optional) */
     void *user;              /* opaque pointer passed to callbacks */
 } iris_app_opts;
 
-typedef iris_app_opts iris_app_config;
-
 /* Request one more frame at the backend's active animation cadence.
  *
- * Call this from a build or record callback while time-based host content is
+ * Call this from a UI-frame or record callback while time-based host content is
  * still moving. Repeating the request every frame sustains the animation;
  * stopping lets the backend return to its low-power idle cadence. The call is
  * thread-affine to iris_app_run and is a no-op outside an active app. */
@@ -180,7 +164,7 @@ IRIS_API void iris_request_animation_frame(void);
 /* Declare the current frame's recorded host canvas content static.
  *
  * Recorded host content is opaque to lens, so backends normally keep
- * presenting every scheduled frame — including a full clear to the theme
+ * presenting every scheduled frame — including a full clear to the
  * background. When the host knows its scene is pixel-identical to what is
  * already on screen (a paused animation, a settled audio visualizer), this
  * call lets the backend skip the entire record → clear → submit → present
@@ -189,8 +173,8 @@ IRIS_API void iris_request_animation_frame(void);
  * record callback.
  *
  * The declaration covers one frame only. Any user input, a resize or buffer
- * scale change, a following iris_request_animation_frame, or lens-reported
- * chrome damage forces the next frame to present again; hosts should keep
+ * scale change, a following iris_request_animation_frame, or UI damage
+ * forces the next frame to present again; hosts should keep
  * calling this every frame their scene is still static. Recording content
  * after declaring it static is contradictory — the recording is skipped along
  * with the pass. No-op without an active app or without a record callback. */
@@ -214,7 +198,7 @@ IRIS_API void iris_record_mark_static(void);
  * Precedence note for the request+skip pattern: a fresh
  * iris_request_animation_frame does NOT veto a same-frame skip — the skip
  * wins for rendering, while the request re-arms the active deadline. Any
- * input, resize/scale change, or lens-reported chrome damage forces a real
+ * input, resize/scale change, or UI damage forces a real
  * present regardless of both declarations; those events invalidate what is
  * on screen and neither per-frame declaration can have accounted for them.
  * The flag is consumed once and must be re-issued every frame. No-op
@@ -233,8 +217,8 @@ typedef void (*iris_main_thread_fn)(void *user);
  *
  * Thread-safe: callable from ANY thread (worker threads, OS callbacks,
  * watcher pumps). The function runs on the main thread the next time the
- * event loop wakes, outside any lens_begin/end pair — so posted callbacks
- * may legally call main-thread-affine APIs such as lens_paste. Posts made
+ * event loop wakes, outside the UI layer's frame — so posted callbacks may
+ * legally call main-thread-affine APIs. Posts made
  * while no iris_app_run loop is active are dropped and iris_app_run's
  * teardown drains or rejects everything still queued, so fn never runs
  * against torn-down host state.

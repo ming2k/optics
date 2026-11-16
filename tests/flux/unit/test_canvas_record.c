@@ -52,7 +52,12 @@ static flux_canvas_cache_entry record_ui(flux_canvas *c) {
 
 static void test_replay_pixel_identical(void) {
     flux_canvas *c = nullptr;
-    OT_EXPECT(flux_canvas_create_cpu(W, H, 1.0f, &c) == FLUX_OK);
+    OT_EXPECT(flux_canvas_create(&(flux_canvas_desc){.type = FLUX_TYPE_CANVAS_DESC,
+                                                     .backend = FLUX_CANVAS_BACKEND_CPU,
+                                                     .scale = 1.0f,
+                                                     .width = W,
+                                                     .height = H},
+                                 &c) == FLUX_OK);
 
     uint8_t live[W * H * 4], replayed[W * H * 4];
 
@@ -75,7 +80,12 @@ static void test_replay_pixel_identical(void) {
 
 static void test_replay_refuses_clip_change(void) {
     flux_canvas *c = nullptr;
-    OT_EXPECT(flux_canvas_create_cpu(W, H, 1.0f, &c) == FLUX_OK);
+    OT_EXPECT(flux_canvas_create(&(flux_canvas_desc){.type = FLUX_TYPE_CANVAS_DESC,
+                                                     .backend = FLUX_CANVAS_BACKEND_CPU,
+                                                     .scale = 1.0f,
+                                                     .width = W,
+                                                     .height = H},
+                                 &c) == FLUX_OK);
 
     uint8_t blank[W * H * 4];
 
@@ -107,7 +117,12 @@ static void test_replay_refuses_clip_change(void) {
 
 static void test_replay_refuses_transform_change(void) {
     flux_canvas *c = nullptr;
-    OT_EXPECT(flux_canvas_create_cpu(W, H, 1.0f, &c) == FLUX_OK);
+    OT_EXPECT(flux_canvas_create(&(flux_canvas_desc){.type = FLUX_TYPE_CANVAS_DESC,
+                                                     .backend = FLUX_CANVAS_BACKEND_CPU,
+                                                     .scale = 1.0f,
+                                                     .width = W,
+                                                     .height = H},
+                                 &c) == FLUX_OK);
 
     begin_clear(c);
     flux_canvas_cache_entry rec = record_ui(c);
@@ -132,7 +147,12 @@ static void test_replay_refuses_transform_change(void) {
 
 static void test_replay_refuses_released_handle(void) {
     flux_canvas *c = nullptr;
-    OT_EXPECT(flux_canvas_create_cpu(W, H, 1.0f, &c) == FLUX_OK);
+    OT_EXPECT(flux_canvas_create(&(flux_canvas_desc){.type = FLUX_TYPE_CANVAS_DESC,
+                                                     .backend = FLUX_CANVAS_BACKEND_CPU,
+                                                     .scale = 1.0f,
+                                                     .width = W,
+                                                     .height = H},
+                                 &c) == FLUX_OK);
 
     begin_clear(c);
     flux_canvas_cache_entry rec = record_ui(c);
@@ -156,7 +176,12 @@ static void test_replay_refuses_released_handle(void) {
 
 static void test_nested_recording_captures_replay(void) {
     flux_canvas *c = nullptr;
-    OT_EXPECT(flux_canvas_create_cpu(W, H, 1.0f, &c) == FLUX_OK);
+    OT_EXPECT(flux_canvas_create(&(flux_canvas_desc){.type = FLUX_TYPE_CANVAS_DESC,
+                                                     .backend = FLUX_CANVAS_BACKEND_CPU,
+                                                     .scale = 1.0f,
+                                                     .width = W,
+                                                     .height = H},
+                                 &c) == FLUX_OK);
 
     uint8_t live[W * H * 4], replayed[W * H * 4];
 

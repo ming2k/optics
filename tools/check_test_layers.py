@@ -125,7 +125,7 @@ def check_unit_cpu_purity(root: pathlib.Path) -> list[str]:
     candidates = list(root.glob("tests/**/unit/**/*.c"))
     # These directories are unit-shaped at the top level; their integration/
     # and fuzz/ subdirectories are allowed to touch a device.
-    for library in ("lens", "iris", "reticle", "transit", "vista"):
+    for library in ("lens", "iris", "aperture", "reticle", "transit", "vista"):
         for path in (root / "tests" / library).glob("*.c"):
             candidates.append(path)
     for path in sorted(candidates):

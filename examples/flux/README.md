@@ -9,7 +9,7 @@ meson compile -C build
 ```
 
 The windowed examples (`canvas_hello`, `image_animation`, `scene_cube`) run on
-native Iris (`iris_app_run`) with native Wayland cursor-shape and fractional HiDPI.
+native Iris through `aperture_app_run` with native Wayland cursor-shape and fractional HiDPI.
 The headless compute example (`compute_fill`) runs without a window and builds unconditionally.
 
 Effect showcases — demos where a visual or mathematical effect is the point
@@ -27,7 +27,7 @@ rather than the API — live in [`../showcase`](../showcase/).
 ### Shared bootstrap
 
 `canvas_hello`, `image_animation`, and `scene_cube` share Iris's native application
-bootstrap (`iris_app_run`, `iris_app_opts`, device/canvas lifecycle, and automatic
+bootstrap (`aperture_app_run`, `aperture_app_opts`, device/canvas lifecycle, and automatic
 Wayland/XDG resize and HiDPI scaling).
 
 ---

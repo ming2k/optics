@@ -4,8 +4,8 @@
  * The canvas front end (canvas.c and the geometry/path/paint helpers) is
  * backend-neutral: it owns the transform/clip stack, tessellates verbs into
  * triangle batches, and assembles the shared uniform block (flux_canvas_push).
- * Everything that touches the GPU — target/MSAA/stencil resources, render
- * passes, pipeline binding, and the draw itself — lives behind this vtable.
+ * Everything that touches the GPU — target resources, render passes,
+ * pipeline binding, and the draw itself — lives behind this vtable.
  *
  * A backend keeps its private per-canvas state in flux_canvas::backend_data
  * (allocated in canvas_init, freed in canvas_destroy); the front end never
@@ -13,7 +13,7 @@
  *
  * Two implementations exist (Skia-style CPU/GPU parity):
  *   - Vulkan (flux_canvas_backend_vk): records into the frame's command
- *     buffer via cached pipelines, resolving 4x MSAA to the surface/target.
+ *     buffer via cached 1x pipelines and GPU compute tile rasterization.
  *     This is the default.
  *   - CPU raster (flux_canvas_backend_cpu): rasterizes the same batches on
  *     the host, selecting a scanline routine per canvas_pipe_id and
@@ -44,12 +44,10 @@ struct flux_canvas_backend {
 
     /* Open a render pass. `target` selects the destination: NULL renders to
      * the canvas's surface (swapchain), non-NULL renders into an offscreen
-     * flux_image (ADR-0017). `config` is the normalized clear, antialias,
-     * dirty-render-area, and stencil policy parsed once by the front end from
-     * the stable public descriptor plus its pNext extensions. The backend sets
-     * up attachments/barriers, primes the render-area scissor, and sets
-     * c->stencil_available for the geometry fallback. On success the caller
-     * sets c->recording/pass_active. */
+     * flux_image (ADR-0017). `config` is the normalized clear and
+     * dirty-render-area policy parsed once by the front end from the public
+     * descriptor. The backend sets up attachments/barriers and primes the
+     * render-area scissor. On success the caller sets c->recording/pass_active. */
     flux_result (*begin_pass)(const flux_canvas_backend *self, flux_canvas *c, flux_frame *f,
                               flux_image *target, const canvas_pass_config *config);
 
@@ -105,6 +103,16 @@ struct flux_canvas_backend {
                                 uint32_t ncons, flux_fill_rule rule, const canvas_paint *paint,
                                 flux_recti clip);
 
+    /* Optional (nullable): the same coverage route for geometry that already is
+     * a triangle list — stroke expansions and the fill fallback. `verts` are in
+     * physical pixels, three per triangle, any orientation; shared edges cancel
+     * exactly under area coverage, so the mesh fills without seams. Returns
+     * FLUX_ERROR_UNSUPPORTED to decline (paint kind, size bounds); the caller
+     * then draws the triangles directly. */
+    flux_result (*submit_cover_triangles)(const flux_canvas_backend *self, flux_canvas *c,
+                                          const flux_canvas_vertex *verts, uint32_t vertex_count,
+                                          const canvas_paint *paint, flux_recti clip);
+
     /* Optional (nullable) pixel snapshot: return premultiplied RGBA8 for the
      * whole canvas. The CPU backend implements it (its framebuffer); the GPU
      * backend leaves it NULL (readback goes through an offscreen target). */
@@ -125,7 +133,7 @@ struct flux_canvas_backend {
 const flux_canvas_backend *flux_canvas_backend_vk(void);
 
 /* The software (CPU) backend. Stateless singleton. Used by headless canvases
- * created with flux_canvas_create_cpu (see flux/canvas_cpu.h). */
+ * created with flux_canvas_create (CPU backend) (see flux/canvas_cpu.h). */
 const flux_canvas_backend *flux_canvas_backend_cpu(void);
 
 #endif /* FLUX_CANVAS_BACKEND_H */

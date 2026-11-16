@@ -226,7 +226,10 @@ int main(void) {
     OT_EXPECT(flux_target_create(d, &depth_desc, &depth) == FLUX_OK);
 
     flux_camera cam;
-    flux_camera_perspective(&cam, 1.0f, (float)W / (float)H, 0.1f, 100.0f);
+    flux_camera_perspective(&cam, &(flux_camera_perspective_opts){.fov_y_rad = 1.0f,
+                                                                  .aspect = (float)W / (float)H,
+                                                                  .z_near = 0.1f,
+                                                                  .z_far = 100.0f});
     flux_camera_look_at(&cam, (flux_vec3){0, 0, 4}, (flux_vec3){0, 0, 0}, (flux_vec3){0, 1, 0});
 
     flux_format color_fmt = flux_format_from_vk(flux_surface_vk_format(s));
@@ -456,7 +459,13 @@ int main(void) {
              * variant 1: 16F working-space target (edge decode). */
             flux_format tfmt = variant == 0 ? color_fmt : FLUX_FORMAT_RGBA16_SFLOAT;
             flux_image *rt = nullptr;
-            OT_EXPECT(flux_image_create_render_target(d, W, H, tfmt, &rt) == FLUX_OK);
+            OT_EXPECT(flux_image_create(d,
+                                        &(flux_image_desc){.type = FLUX_TYPE_IMAGE_DESC,
+                                                           .width = W,
+                                                           .height = H,
+                                                           .format = tfmt,
+                                                           .usage = FLUX_IMAGE_USAGE_RENDER_TARGET},
+                                        &rt) == FLUX_OK);
 
             flux_material_desc md = {
                 .type = FLUX_TYPE_MATERIAL_DESC,

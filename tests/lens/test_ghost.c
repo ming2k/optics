@@ -23,7 +23,12 @@ static void fixture_open(fixture *f) {
     f->ui = nullptr;
     f->canvas = nullptr;
     OT_EXPECT(lens_create(&(lens_desc){}, &f->ui) == FLUX_OK);
-    OT_EXPECT(flux_canvas_create_cpu(W, H, 1.0f, &f->canvas) == FLUX_OK);
+    OT_EXPECT(flux_canvas_create(&(flux_canvas_desc){.type = FLUX_TYPE_CANVAS_DESC,
+                                                     .backend = FLUX_CANVAS_BACKEND_CPU,
+                                                     .scale = 1.0f,
+                                                     .width = W,
+                                                     .height = H},
+                                 &f->canvas) == FLUX_OK);
 }
 
 static void fixture_close(fixture *f) {

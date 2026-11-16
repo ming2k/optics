@@ -2,6 +2,7 @@
 
 #include "app_shell.h"
 #include "ui_events.h"
+#include <aperture/aperture.h>
 #include <iris/app.h>
 #include <iris/window.h>
 
@@ -182,7 +183,7 @@ int main(void) {
 
     printf("iris — desktop demo.\nEsc quits.\n\n");
 
-    return iris_app_run(&(iris_app_config){
+    return aperture_app_run(&(aperture_app_opts){
         .title = "iris — Desktop Demo",
         .width = 980,
         .height = 640,

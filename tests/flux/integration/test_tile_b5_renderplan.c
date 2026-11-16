@@ -46,7 +46,12 @@ int main(void) {
 
     /* 1. CPU Reference rendering via CPU Canvas */
     flux_canvas *cpu_canvas = nullptr;
-    OT_EXPECT(flux_canvas_create_cpu(W, H, 1.0f, &cpu_canvas) == FLUX_OK);
+    OT_EXPECT(flux_canvas_create(&(flux_canvas_desc){.type = FLUX_TYPE_CANVAS_DESC,
+                                                     .backend = FLUX_CANVAS_BACKEND_CPU,
+                                                     .scale = 1.0f,
+                                                     .width = W,
+                                                     .height = H},
+                                 &cpu_canvas) == FLUX_OK);
 
     flux_color clear = flux_color_rgba(0, 0, 0, 255);
     OT_EXPECT(

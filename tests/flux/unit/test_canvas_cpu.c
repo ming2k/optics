@@ -6,7 +6,9 @@
 #include "optics_test.h"
 #include <flux/canvas.h>
 #include <flux/canvas_cpu.h>
+#include <flux/canvas_helpers.h>
 #include <flux/math.h>
+#include <math.h>
 #include <stddef.h>
 
 /* Fetch an RGBA8 pixel from a premultiplied framebuffer. */
@@ -23,7 +25,12 @@ int main(void) {
 
     /* ---- Solid fill on an opaque black clear ---- */
     flux_canvas *c = nullptr;
-    OT_EXPECT(flux_canvas_create_cpu(W, H, 1.0f, &c) == FLUX_OK);
+    OT_EXPECT(flux_canvas_create(&(flux_canvas_desc){.type = FLUX_TYPE_CANVAS_DESC,
+                                                     .backend = FLUX_CANVAS_BACKEND_CPU,
+                                                     .scale = 1.0f,
+                                                     .width = W,
+                                                     .height = H},
+                                 &c) == FLUX_OK);
     OT_EXPECT(c != nullptr);
 
     flux_color black = flux_color_rgba_premul(0, 0, 0, 255);
@@ -103,7 +110,12 @@ int main(void) {
     flux_canvas_release(c);
 
     /* ---- Clip follows the current HiDPI transform and cannot expand ---- */
-    OT_EXPECT(flux_canvas_create_cpu(W, H, 2.0f, &c) == FLUX_OK);
+    OT_EXPECT(flux_canvas_create(&(flux_canvas_desc){.type = FLUX_TYPE_CANVAS_DESC,
+                                                     .backend = FLUX_CANVAS_BACKEND_CPU,
+                                                     .scale = 2.0f,
+                                                     .width = W,
+                                                     .height = H},
+                                 &c) == FLUX_OK);
     OT_EXPECT(flux_canvas_begin(c, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
                                                             .clear_color = &black}) == FLUX_OK);
     flux_canvas_clip_rect(c, (flux_rect){0, 0, 16, 32});
@@ -119,7 +131,12 @@ int main(void) {
     flux_canvas_release(c);
 
     /* ---- Linear gradient ---- */
-    OT_EXPECT(flux_canvas_create_cpu(W, H, 1.0f, &c) == FLUX_OK);
+    OT_EXPECT(flux_canvas_create(&(flux_canvas_desc){.type = FLUX_TYPE_CANVAS_DESC,
+                                                     .backend = FLUX_CANVAS_BACKEND_CPU,
+                                                     .scale = 1.0f,
+                                                     .width = W,
+                                                     .height = H},
+                                 &c) == FLUX_OK);
     flux_gradient_stop stops[2] = {
         {0.0f, flux_color_rgba_premul(255, 0, 0, 255)},
         {1.0f, flux_color_rgba_premul(0, 0, 255, 255)},
@@ -140,7 +157,12 @@ int main(void) {
     /* Dimensions that overflow the supersample buffer are rejected before any
      * allocation or wrapped size calculation. */
     c = nullptr;
-    OT_EXPECT(flux_canvas_create_cpu(UINT32_MAX, 1, 1.0f, &c) == FLUX_ERROR_OUT_OF_RANGE);
+    OT_EXPECT(flux_canvas_create(&(flux_canvas_desc){.type = FLUX_TYPE_CANVAS_DESC,
+                                                     .backend = FLUX_CANVAS_BACKEND_CPU,
+                                                     .scale = 1.0f,
+                                                     .width = UINT32_MAX,
+                                                     .height = 1},
+                                 &c) == FLUX_ERROR_OUT_OF_RANGE);
     OT_EXPECT(c == nullptr);
 
     /* ---- Unified factory + pass API (Skia SkSurface-style) ---- */
@@ -160,10 +182,8 @@ int main(void) {
     px(fb, stride, 32, 32, p);
     OT_EXPECT(p[0] > 250 && p[1] < 5 && p[2] < 5 && p[3] > 250);
 
-    /* Descriptor LOAD preserves the previous pass, while explicit NONE
-     * permits a clear without asking the backend for multisampling. */
+    /* Descriptor LOAD preserves the previous pass. */
     flux_canvas_pass_desc pd = FLUX_CANVAS_PASS_DESC_INIT;
-    pd.antialias = FLUX_CANVAS_ANTIALIAS_NONE;
     pd.frame = nullptr;
     OT_EXPECT(flux_canvas_begin(c, &pd) == FLUX_OK);
     OT_EXPECT(flux_canvas_end(c) == FLUX_OK);
@@ -180,11 +200,7 @@ int main(void) {
     px(fb, stride, 32, 32, p);
     OT_EXPECT(p[0] < 5 && p[1] < 5 && p[2] > 250 && p[3] > 250);
 
-    /* An explicitly no-stencil pass keeps ordinary CPU solid/image-style
-     * operations valid, matching the Vulkan pass contract. */
-    flux_canvas_no_stencil_desc no_stencil = FLUX_CANVAS_NO_STENCIL_DESC_INIT;
-    no_stencil.enabled = true;
-    pd.next = &no_stencil;
+    /* Tagged pNext extensions keep ordinary CPU operations valid. */
     pd.clear_color = &black;
     pd.frame = nullptr;
     OT_EXPECT(flux_canvas_begin(c, &pd) == FLUX_OK);
@@ -268,82 +284,187 @@ int main(void) {
     pd.frame = nullptr;
     OT_EXPECT(flux_canvas_begin(c, &pd) == FLUX_ERROR_INVALID_ARGUMENT);
 
-    pd.clear_color = nullptr;
-    pd.antialias = FLUX_CANVAS_ANTIALIAS_MSAA_4X;
-    pd.damage = (flux_damage){};
-    pd.frame = nullptr;
-    OT_EXPECT(flux_canvas_begin(c, &pd) == FLUX_ERROR_INVALID_ARGUMENT);
+    flux_canvas_release(c);
 
-    /* ---- Antialias create-time policy (flux_canvas_antialias_desc) -----
-     *
-     * The CPU oracle's 4x supersampling mirrors GPU 4x MSAA and must stay
-     * the default (the cross-platform consistency test depends on it).
-     * FLUX_CANVAS_ANTIALIAS_NONE must select the aliased 1-sample buffer:
-     * identical flat interiors, 4x less sample-buffer memory. */
+    /* ---- Analytic path fill/stroke (>2048 pts), sloped AA, EVEN_ODD, and blends ---- */
     {
-        flux_canvas *ss2 = nullptr, *ss1 = nullptr;
-        OT_EXPECT(flux_canvas_create_cpu(64, 64, 1.0f, &ss2) == FLUX_OK);
-        OT_EXPECT(flux_canvas_create_cpu_aa(64, 64, 1.0f, FLUX_CANVAS_ANTIALIAS_NONE, &ss1) ==
+        const uint32_t CW = 96, CH = 96;
+        flux_canvas *ac = nullptr;
+        OT_EXPECT(flux_canvas_create(&(flux_canvas_desc){.type = FLUX_TYPE_CANVAS_DESC,
+                                                         .backend = FLUX_CANVAS_BACKEND_CPU,
+                                                         .scale = 1.0f,
+                                                         .width = CW,
+                                                         .height = CH},
+                                     &ac) == FLUX_OK);
+        flux_arena arena;
+        OT_EXPECT(flux_arena_init(&arena, 256u * 1024u, nullptr) == FLUX_OK);
+
+        /* 1 & 2. >2048-vertex circle fill and >2048-vertex ring stroke. */
+        flux_path *many = nullptr;
+        OT_EXPECT(flux_path_create(&many, &arena) == FLUX_OK);
+        const uint32_t N = 2600;
+        for (uint32_t i = 0; i < N; ++i) {
+            float ang = (float)i * (6.28318530718f / (float)N);
+            float x = 48.0f + 30.0f * cosf(ang);
+            float y = 48.0f + 30.0f * sinf(ang);
+            if (i == 0)
+                flux_path_move_to(many, x, y);
+            else
+                flux_path_line_to(many, x, y);
+        }
+        flux_path_close(many);
+
+        flux_set_diagnostic(&(flux_error_info){.code = FLUX_OK});
+        OT_EXPECT(flux_canvas_begin(ac, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                                 .clear_color = &black}) ==
                   FLUX_OK);
+        flux_geometry fg = {.kind = FLUX_GEOM_PATH,
+                            .path = {.path = many, .fill_rule = FLUX_FILL_NON_ZERO}};
+        flux_brush rb = flux_brush_solid(flux_color_rgba_premul(255, 0, 0, 255));
+        flux_canvas_draw_geometry(ac, &(flux_canvas_draw_geometry_opts){.geom = &fg, .brush = &rb});
+        OT_EXPECT(flux_canvas_end(ac) == FLUX_OK);
+        flux_error_info err = {};
+        flux_get_last_error(&err);
+        OT_EXPECT(err.code == FLUX_OK);
 
-        flux_color black = flux_color_rgba_premul(0, 0, 0, 255);
-        OT_EXPECT(
-            flux_canvas_begin(ss2, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
-                                                            .clear_color = &black}) == FLUX_OK);
-        flux_canvas_fill_rect_color(ss2, (flux_rect){16, 16, 32, 32},
-                                    flux_color_rgba_premul(255, 0, 0, 255));
-        OT_EXPECT(flux_canvas_end(ss2) == FLUX_OK);
-        OT_EXPECT(
-            flux_canvas_begin(ss1, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
-                                                            .clear_color = &black}) == FLUX_OK);
-        flux_canvas_fill_rect_color(ss1, (flux_rect){16, 16, 32, 32},
-                                    flux_color_rgba_premul(255, 0, 0, 255));
-        OT_EXPECT(flux_canvas_end(ss1) == FLUX_OK);
+        uint32_t aw = 0, ah = 0, ast = 0;
+        const uint8_t *afb = flux_canvas_cpu_pixels(ac, &aw, &ah, &ast);
+        OT_EXPECT(afb != nullptr);
+        uint8_t cp[4];
+        px(afb, ast, 48, 48, cp); /* inside 2600-pt fill */
+        OT_EXPECT(cp[0] > 250 && cp[1] < 5 && cp[2] < 5);
+        px(afb, ast, 4, 4, cp); /* outside */
+        OT_EXPECT(cp[0] < 5 && cp[3] > 250);
 
-        uint32_t w2, h2, st2, w1, h1, st1;
-        const uint8_t *p2 = flux_canvas_cpu_pixels(ss2, &w2, &h2, &st2);
-        const uint8_t *p1 = flux_canvas_cpu_pixels(ss1, &w1, &h1, &st1);
-        OT_EXPECT(p2 && p1 && w2 == 64 && w1 == 64);
+        flux_set_diagnostic(&(flux_error_info){.code = FLUX_OK});
+        OT_EXPECT(flux_canvas_begin(ac, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                                 .clear_color = &black}) ==
+                  FLUX_OK);
+        flux_geometry sg = {.kind = FLUX_GEOM_PATH, .path = {.path = many}};
+        sg.stroke.width = 4.0f;
+        flux_canvas_draw_geometry(ac, &(flux_canvas_draw_geometry_opts){.geom = &sg, .brush = &rb});
+        OT_EXPECT(flux_canvas_end(ac) == FLUX_OK);
+        flux_get_last_error(&err);
+        OT_EXPECT(err.code == FLUX_OK);
+        afb = flux_canvas_cpu_pixels(ac, &aw, &ah, &ast);
+        px(afb, ast, 78, 48, cp); /* on ring stroke at (48+30, 48) */
+        OT_EXPECT(cp[0] > 240);
+        px(afb, ast, 48, 48, cp); /* center is hollow */
+        OT_EXPECT(cp[0] < 5);
 
-        /* Flat interiors must be byte-identical: supersampling only
-         * affects coverage edges. */
-        int interior_mismatch = 0, solid2 = 0, solid1 = 0;
-        for (uint32_t y = 0; y < 64; ++y) {
-            for (uint32_t x = 0; x < 64; ++x) {
-                const uint8_t *q2 = p2 + y * st2 + x * 4;
-                const uint8_t *q1 = p1 + y * st1 + x * 4;
-                if (x >= 18 && x < 46 && y >= 18 && y < 46 && q2[0] != q1[0])
-                    interior_mismatch++;
-                if (q2[0] > 200)
-                    solid2++;
-                if (q1[0] > 200)
-                    solid1++;
+        /* 3. Sloped stroke anti-aliasing: >16 distinct red grey levels. */
+        flux_path *diag = nullptr;
+        OT_EXPECT(flux_path_create(&diag, &arena) == FLUX_OK);
+        flux_path_move_to(diag, 8.0f, 12.0f);
+        flux_path_line_to(diag, 88.0f, 80.0f);
+        OT_EXPECT(flux_canvas_begin(ac, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                                 .clear_color = &black}) ==
+                  FLUX_OK);
+        flux_geometry dg = {.kind = FLUX_GEOM_PATH, .path = {.path = diag}};
+        dg.stroke.width = 2.0f;
+        flux_canvas_draw_geometry(ac, &(flux_canvas_draw_geometry_opts){.geom = &dg, .brush = &rb});
+        OT_EXPECT(flux_canvas_end(ac) == FLUX_OK);
+        afb = flux_canvas_cpu_pixels(ac, &aw, &ah, &ast);
+        int seen_lvl[256] = {};
+        for (uint32_t yy = 0; yy < CH; ++yy) {
+            for (uint32_t xx = 0; xx < CW; ++xx) {
+                uint8_t rch = afb[(size_t)yy * ast + (size_t)xx * 4];
+                seen_lvl[rch] = 1;
             }
         }
-        OT_EXPECT(interior_mismatch == 0);
-        OT_EXPECT(solid2 >= 32 * 32);
-        OT_EXPECT(solid1 >= 32 * 32);
+        int partial = 0;
+        for (int lvl = 1; lvl < 255; ++lvl)
+            partial += seen_lvl[lvl];
+        OT_EXPECT(partial > 16);
 
-        flux_canvas_release(ss2);
-        flux_canvas_release(ss1);
+        /* 4. Self-intersecting 5-point star: EVEN_ODD vs NON_ZERO center winding. */
+        flux_path *star = nullptr;
+        OT_EXPECT(flux_path_create(&star, &arena) == FLUX_OK);
+        const int order[5] = {0, 2, 4, 1, 3};
+        for (int i = 0; i < 5; ++i) {
+            float a = -1.5707963f + (float)order[i] * (6.28318530718f / 5.0f);
+            float sx = 48.0f + 36.0f * cosf(a);
+            float sy = 48.0f + 36.0f * sinf(a);
+            if (i == 0)
+                flux_path_move_to(star, sx, sy);
+            else
+                flux_path_line_to(star, sx, sy);
+        }
+        flux_path_close(star);
+
+        OT_EXPECT(flux_canvas_begin(ac, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                                 .clear_color = &black}) ==
+                  FLUX_OK);
+        flux_geometry star_eo = {.kind = FLUX_GEOM_PATH,
+                                 .path = {.path = star, .fill_rule = FLUX_FILL_EVEN_ODD}};
+        flux_canvas_draw_geometry(
+            ac, &(flux_canvas_draw_geometry_opts){.geom = &star_eo, .brush = &rb});
+        OT_EXPECT(flux_canvas_end(ac) == FLUX_OK);
+        afb = flux_canvas_cpu_pixels(ac, &aw, &ah, &ast);
+        px(afb, ast, 48, 48, cp); /* center of star hollow under EVEN_ODD */
+        OT_EXPECT(cp[0] < 5);
+
+        OT_EXPECT(flux_canvas_begin(ac, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                                 .clear_color = &black}) ==
+                  FLUX_OK);
+        flux_geometry star_nz = {.kind = FLUX_GEOM_PATH,
+                                 .path = {.path = star, .fill_rule = FLUX_FILL_NON_ZERO}};
+        flux_canvas_draw_geometry(
+            ac, &(flux_canvas_draw_geometry_opts){.geom = &star_nz, .brush = &rb});
+        OT_EXPECT(flux_canvas_end(ac) == FLUX_OK);
+        afb = flux_canvas_cpu_pixels(ac, &aw, &ah, &ast);
+        px(afb, ast, 48, 48, cp); /* center of star filled under NON_ZERO */
+        OT_EXPECT(cp[0] > 250);
+
+        /* 5. PLUS, MULTIPLY, and SRC blend modes on analytic path fills. */
+        flux_color yellow = flux_color_rgba_premul(180, 180, 0, 255);
+        flux_path *sq = nullptr;
+        OT_EXPECT(flux_path_create(&sq, &arena) == FLUX_OK);
+        flux_path_add_rect(sq, (flux_rect){10.0f, 10.0f, 30.0f, 30.0f});
+        flux_geometry sqg = {.kind = FLUX_GEOM_PATH, .path = {.path = sq}};
+
+        /* PLUS blue over yellow -> whiteish/bright RGB */
+        flux_brush b_plus = flux_brush_solid(flux_color_rgba_premul(0, 0, 255, 255));
+        b_plus.blend = FLUX_BLEND_PLUS;
+        OT_EXPECT(flux_canvas_begin(ac, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                                 .clear_color = &yellow}) ==
+                  FLUX_OK);
+        flux_canvas_draw_geometry(
+            ac, &(flux_canvas_draw_geometry_opts){.geom = &sqg, .brush = &b_plus});
+        OT_EXPECT(flux_canvas_end(ac) == FLUX_OK);
+        afb = flux_canvas_cpu_pixels(ac, &aw, &ah, &ast);
+        px(afb, ast, 25, 25, cp);
+        OT_EXPECT(cp[0] > 170 && cp[1] > 170 && cp[2] > 250);
+
+        /* MULTIPLY red over yellow -> keeps R, zeroes G */
+        flux_brush b_mul = flux_brush_solid(flux_color_rgba_premul(255, 0, 0, 255));
+        b_mul.blend = FLUX_BLEND_MULTIPLY;
+        OT_EXPECT(flux_canvas_begin(ac, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                                 .clear_color = &yellow}) ==
+                  FLUX_OK);
+        flux_canvas_draw_geometry(ac,
+                                  &(flux_canvas_draw_geometry_opts){.geom = &sqg, .brush = &b_mul});
+        OT_EXPECT(flux_canvas_end(ac) == FLUX_OK);
+        afb = flux_canvas_cpu_pixels(ac, &aw, &ah, &ast);
+        px(afb, ast, 25, 25, cp);
+        OT_EXPECT(cp[0] > 170 && cp[0] < 190 && cp[1] < 5 && cp[2] < 5);
+
+        /* SRC semi-transparent cyan over yellow -> overwrites yellow cleanly */
+        flux_brush b_src = flux_brush_solid(flux_color_rgba_premul(0, 128, 128, 128));
+        b_src.blend = FLUX_BLEND_SRC;
+        OT_EXPECT(flux_canvas_begin(ac, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
+                                                                 .clear_color = &yellow}) ==
+                  FLUX_OK);
+        flux_canvas_draw_geometry(ac,
+                                  &(flux_canvas_draw_geometry_opts){.geom = &sqg, .brush = &b_src});
+        OT_EXPECT(flux_canvas_end(ac) == FLUX_OK);
+        afb = flux_canvas_cpu_pixels(ac, &aw, &ah, &ast);
+        px(afb, ast, 25, 25, cp);
+        OT_EXPECT(cp[0] < 5 && cp[1] > 50 && cp[1] == cp[2] && cp[3] > 110 && cp[3] < 145);
+
+        flux_arena_deinit(&arena);
+        flux_canvas_release(ac);
     }
-
-    /* The descriptor route honours the same extension. */
-    {
-        flux_canvas_antialias_desc aa = FLUX_CANVAS_ANTIALIAS_DESC_INIT;
-        aa.antialias = FLUX_CANVAS_ANTIALIAS_NONE;
-        flux_canvas_desc cd = FLUX_CANVAS_DESC_INIT;
-        cd.backend = FLUX_CANVAS_BACKEND_CPU;
-        cd.width = 8;
-        cd.height = 8;
-        cd.next = &aa;
-        flux_canvas *c = nullptr;
-        OT_EXPECT(flux_canvas_create(&cd, &c) == FLUX_OK);
-        OT_EXPECT(c != nullptr);
-        flux_canvas_release(c);
-    }
-
-    flux_canvas_release(c);
 
     return OT_REPORT();
 }

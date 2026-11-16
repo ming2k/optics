@@ -47,7 +47,12 @@ static uint8_t ink_at(const uint8_t *fb, int x, int y) {
 static const uint8_t *render_circle_stroke(flux_arena *arena, flux_canvas **out_c, float radius,
                                            float width, int *ref_out) {
     flux_canvas *c = nullptr;
-    if (flux_canvas_create_cpu(W, H, 1.0f, &c) != FLUX_OK)
+    if (flux_canvas_create(&(flux_canvas_desc){.type = FLUX_TYPE_CANVAS_DESC,
+                                               .backend = FLUX_CANVAS_BACKEND_CPU,
+                                               .scale = 1.0f,
+                                               .width = W,
+                                               .height = H},
+                           &c) != FLUX_OK)
         return nullptr;
 
     flux_path *p = nullptr;

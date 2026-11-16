@@ -109,23 +109,11 @@ VSR operates across three distinct, physically decoupled phases:
 * It can be cached indefinitely by userland UI frameworks (e.g., `lens`), shared across thread boundaries, or submitted repeatedly.
 
 ### Phase 3: Replay & Tiered Acceleration (`flux_canvas`)
-When submitted via `flux_canvas_submit_display_list(c, list)`, the engine executes the stream through a tiered acceleration pipeline:
+When submitted via `flux_canvas_submit_display_list(c, list)`, the engine executes the stream through three converged 1x analytic routes:
 
-1. **Analytic SDF Fast-Path**: For axis-aligned rounded rectangles and circles with solid colors, CPU vertex generation is bypassed entirely. The GPU evaluates signed distance fields directly in `CANVAS_PIPE_SDF`.
-2. **Tessellation Cache (`tess_cache`)**: For arbitrary Bézier paths, the engine computes an FNV-1a hash over the path verb stream and stroke parameters.
-   * *First frame*: The path is subdivided and ear-clipped into a triangle soup, stored in the bounded LRU cache.
-   * *Subsequent frames*: The cache hits. Triangle generation time drops to **zero**, and pre-computed vertices are dispatched immediately.
-3. **Stencil-then-Cover Fallback**: Self-intersecting complex paths or even-odd winding rules that stall ear-clipping fall back to Vulkan stencil-pass evaluation (`CANVAS_PIPE_STENCIL_WRITE`).
-
-> **Accepted direction — not yet implemented.** Steps 2 and 3 above are retired
-> by [ADR-0115](../adr/0115-analytic-curve-kernel-single-geometry-authority.md)
-> through [ADR-0117](../adr/0117-perspective-correct-scene-vector-coverage.md):
-> curve geometry gains a single analytic authority that emits coverage strips
-> instead of triangles, the canvas rasterizes analytic coverage at 1× sample
-> rate (retiring both the tessellation cache and the stencil fallback, and
-> replacing pass-scoped MSAA), and the scene gains perspective-correct vector
-> coverage. The steps above describe the live implementation until that
-> program lands.
+1. **Analytic SDF Fast-Path**: For rounded rectangles, circles, and squircles under similarity transforms, CPU vertex generation is bypassed. `CANVAS_PIPE_SDF` evaluates exact shape-space signed distance fields per fragment.
+2. **Batched Axis-Aligned Integers**: Integer axis-aligned solid/gradient rectangles batch into `submit_triangles` (`CANVAS_PIPE_SOLID` / `CANVAS_PIPE_GRADIENT`), and unclipped integer axis-aligned images keep `CANVAS_PIPE_IMAGE`.
+3. **Tiled Analytic Coverage (`CANVAS_PIPE_VECTOR`)**: Arbitrary paths (nonzero and even-odd), strokes, rotated/fractional rectangles, image-pattern fills/strokes, and rounded-clip images dispatch through GPU compute 16×16 tile binning with per-pixel-row suffix winding backdrops (`canvas_tile_bin_*` / `canvas_tile_scan_*`) and fragment area evaluation (`canvas_vector.frag.slang`), with no segment cap, stencil buffer, ear-clipping tessellator, or MSAA attachment. The CPU backend evaluates the matching shapes through 1x `canvas_coverage_rasterize` across all blend modes.
 
 ---
 

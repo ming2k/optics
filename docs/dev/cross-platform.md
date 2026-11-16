@@ -62,9 +62,9 @@ SDK); they are gated by the native `macos-14` CI job instead.
 These are the rules that keep behaviour identical across platforms; any
 platform code must preserve them:
 
-1. **Logical pixels everywhere.** Input coordinates, `lens_input`
+1. **Logical pixels everywhere.** Input coordinates, `iris_input`
    geometry, and layout use logical pixels; the host reports the
-   device-pixel ratio via `lens_desc.scale` / `lens_set_scale`
+   device-pixel ratio via `iris_ui_start_info.scale` / `iris_ui_host.set_scale`
    (Wayland fractional-scale, Win32 per-monitor DPI, Cocoa
    `backingScaleFactor`).
 2. **CPU canvas as the rendering oracle.** `canvas_cpu` is a pixel-level
@@ -72,11 +72,11 @@ platform code must preserve them:
    identically on every OS. Rendering conformance tests compare GPU
    output against it rather than against per-platform goldens.
 3. **Damage-driven frame pacing.** Hosts paint when
-   `lens_frame_needs_repaint` / `lens_anim_pending` say so, not on a
+   `iris_ui_frame.damaged` / `iris_ui_frame.animating` say so, not on a
    fixed timer; the platform event loop (poll / MsgWait / CFRunLoop)
    supplies the deadline sleep.
-4. **Async paste.** `lens_clipboard.request_text` is always answered
-   later via `lens_paste` — never synchronously — matching the strictest
+4. **Async paste.** `iris_ui_services.clipboard_request_text` is always answered
+   later via `iris_ui_host.paste` — never synchronously — matching the strictest
    platform (Wayland) so all three behave alike. On Wayland the read runs
    on a detached helper thread with a hard 5 s deadline (a stuck or
    malicious selection owner cannot hang the UI) and completion is
@@ -85,18 +85,18 @@ platform code must preserve them:
    deadline pattern (2 s for drops). Win32 posts
    `WM_IRIS_PASTE_DELIVER`, Cocoa an ApplicationDefined event.
 5. **IME contract.** Composition state travels in
-   `lens_input.preedit_utf8` + cursor/clause fields; the candidate window
-   is positioned from `lens_caret_rect`; `ime_delete_before/after` covers
+   `iris_input.preedit_utf8` + cursor/clause fields; the candidate window
+   is positioned from `iris_ui_frame.text.caret`; `ime_delete_before/after` covers
    `delete_surrounding_text`. Platform IMEs (text-input-v3, IMM/TSF,
    NSTextInputClient) must reduce to exactly these fields. Strings clipped
    into the fixed-size input buffers (`text_utf8[256]`,
-   `preedit_utf8[LENS_PREEDIT_MAX=256]`) go through the shared
+   `preedit_utf8[IRIS_PREEDIT_MAX=256]`) go through the shared
    boundary-aware helpers (`src/platform_text.h`) — never a raw byte cap
    that could split a multi-byte UTF-8 sequence.
 6. **Accessibility-preference contract (ADR-0075).** Every backend
    queries the OS accessibility preference set at startup
    (`iris_a11y_prefs_query`) and applies it to lens unconditionally —
-   `lens_set_reduced_motion`, `lens_set_text_scale`, and the
+   `iris_ui_host.set_a11y_prefs`, and the
    high-contrast theme mutation — then watches for changes through its
    backend slot with main-thread delivery. A platform with no readable
    source for a field reports the library default (false / false / 1.0);
@@ -111,7 +111,7 @@ platform code must preserve them:
 7. **Keyboard contract.** Every backend reports both press and release
    edges for each mappable key; letters/digits are normalised to the
    unshifted ASCII code (`'a'`, never `'A'`) with shift travelling in
-   `lens_input.mods` only; `lens_key_event.repeat` marks synthesised
+   `iris_input.mods` only; `iris_key_event.repeat` marks synthesised
    auto-repeat presses (Wayland repeats client-side from the compositor's
    `repeat_info`, Win32 and Cocoa report OS auto-repeat) and lens treats a
    repeat exactly like a press. The authoritative statement lives in
@@ -119,7 +119,7 @@ platform code must preserve them:
 8. **Event seam (ADR-0107).** Every backend reifies each native event into
    an `iris_event` (`<iris/event.h>`) and routes it through
    `iris__event_seam_emit` (`src/event_internal.h`) *before* folding
-   survivors into `lens_input`. No backend writes the input accumulator
+   survivors into `iris_input`. No backend writes the input accumulator
    directly for lens-facing input. The host may observe, drop, or rewrite
    each event at the single pre-fold seam (`iris_app_opts.on_event`).
    Lifecycle events (CLOSE / RESIZE / SCALE / FOCUS) carry
@@ -134,7 +134,7 @@ elsewhere:
 
 - **Drag-and-drop** into the window is implemented on the Wayland backend
   only (real MIME negotiation over `text/uri-list` / `text/plain`, a
-  bounded read on a detached helper thread, delivery through `lens_paste`).
+  bounded read on a detached helper thread, delivery through `iris_ui_host.paste`).
   Win32 and Cocoa have no drop target yet.
 - **Primary selection** (middle-click paste) is Wayland-only: copies are
   mirrored onto `zwp_primary_selection_unstable_v1` and a middle-button

@@ -176,7 +176,12 @@ static void draw_requires_exactly_one_destination(void) {
               }) == FLUX_ERROR_INVALID_ARGUMENT);
     /* Both: ambiguous, refused. */
     flux_canvas *canvas = nullptr;
-    if (flux_canvas_create_cpu(8, 8, 1.0f, &canvas) == FLUX_OK) {
+    if (flux_canvas_create(&(flux_canvas_desc){.type = FLUX_TYPE_CANVAS_DESC,
+                                               .backend = FLUX_CANVAS_BACKEND_CPU,
+                                               .scale = 1.0f,
+                                               .width = 8,
+                                               .height = 8},
+                           &canvas) == FLUX_OK) {
         flux_encoder *encoder = nullptr;
         if (flux_encoder_create(&(flux_encoder_desc){}, &encoder) == FLUX_OK) {
             OT_EXPECT(reticle_draw(&(reticle_draw_opts){
@@ -220,7 +225,12 @@ static void encoder_recording_replays_identically(void) {
     flux_encoder *encoder = nullptr;
     flux_canvas *canvas = nullptr;
     if (flux_encoder_create(&(flux_encoder_desc){}, &encoder) != FLUX_OK ||
-        flux_canvas_create_cpu(16, 16, 1.0f, &canvas) != FLUX_OK) {
+        flux_canvas_create(&(flux_canvas_desc){.type = FLUX_TYPE_CANVAS_DESC,
+                                               .backend = FLUX_CANVAS_BACKEND_CPU,
+                                               .scale = 1.0f,
+                                               .width = 16,
+                                               .height = 16},
+                           &canvas) != FLUX_OK) {
         reticle_pixmap_deinit(&immediate);
         if (encoder)
             flux_encoder_destroy(encoder);

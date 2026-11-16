@@ -7,20 +7,20 @@
  * into one `iris_event` per native event, in arrival order. The host may
  * observe, drop, or rewrite each event at the single pre-fold seam
  * (`iris_event_fn` in iris/app.h) before iris folds the survivors into the
- * frame's `lens_input`.
+ * frame's `iris_input` (iris/host.h).
  *
  * The pipeline is deliberately one-directional:
  *
  *     native → [reify] → iris_event → [intercept: on_event] → [accumulate]
- *            → [fold into lens_input] → [lens consumes] → build(ui, in)
+ *            → [fold into iris_input] → iris_ui_host.frame(in)
  *
  * Rules this type upholds (ADR-0107):
  *   - Platform-neutral. No native handles, pointers, or compositor
  *     serials. Platform-specific capability travels through the capability
  *     APIs (iris/capability.h, ADR-0099), never through this struct.
- *   - One vocabulary. Key ids and modifier masks are the LENS_KEY_* /
- *     LENS_MOD_* values from <lens/lens.h>; pointer buttons are
- *     LENS_MOUSE_LEFT / _RIGHT / _MIDDLE. There are no parallel enums.
+ *   - One vocabulary. Key ids, modifier masks and pointer buttons are the
+ *     IRIS_KEY_* / IRIS_MOD_* / IRIS_BUTTON_* values defined below; events and
+ *     the folded iris_input share them.
  *   - Intrinsically ordered. `sequence` is a monotonic counter iris stamps
  *     at emit time; it never wraps within an app run.
  *
@@ -32,7 +32,6 @@
 #ifndef IRIS_EVENT_H
 #define IRIS_EVENT_H
 
-#include <lens/lens.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -40,6 +39,50 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/* ================================================================== */
+/*  Input vocabulary                                                   */
+/* ================================================================== */
+
+typedef enum iris_button : uint32_t {
+    IRIS_BUTTON_LEFT = 0,
+    IRIS_BUTTON_RIGHT = 1,
+    IRIS_BUTTON_MIDDLE = 2,
+} iris_button;
+#define IRIS_BUTTON_COUNT 3
+
+/* Key ids. Printable ASCII (0x20-0x7E) travels as its unshifted codepoint
+ * ('a', never 'A'); the values below name the non-printing keys. Non-ASCII
+ * printable input never produces a key event — it arrives as committed text. */
+#define IRIS_KEY_ESCAPE 256
+#define IRIS_KEY_TAB 258
+#define IRIS_KEY_RETURN 259
+#define IRIS_KEY_BACKSPACE 260
+#define IRIS_KEY_DELETE 261
+#define IRIS_KEY_LEFT 262
+#define IRIS_KEY_RIGHT 263
+#define IRIS_KEY_HOME 264
+#define IRIS_KEY_END 265
+#define IRIS_KEY_UP 266
+#define IRIS_KEY_DOWN 267
+#define IRIS_KEY_F1 280
+#define IRIS_KEY_F2 281
+#define IRIS_KEY_F3 282
+#define IRIS_KEY_F4 283
+#define IRIS_KEY_F5 284
+#define IRIS_KEY_F6 285
+#define IRIS_KEY_F7 286
+#define IRIS_KEY_F8 287
+#define IRIS_KEY_F9 288
+#define IRIS_KEY_F10 289
+#define IRIS_KEY_F11 290
+#define IRIS_KEY_F12 291
+
+/* Modifier level-state bits. */
+#define IRIS_MOD_SHIFT (1u << 0)
+#define IRIS_MOD_CTRL (1u << 1)
+#define IRIS_MOD_ALT (1u << 2)
+#define IRIS_MOD_SUPER (1u << 3)
 
 /* ================================================================== */
 /*  Event kind                                                         */
@@ -96,7 +139,7 @@ typedef struct iris_event {
 
         struct {
             float x, y;   /* logical surface-local pixels     */
-            int button;   /* LENS_MOUSE_LEFT / _RIGHT / _MIDDLE */
+            int button;   /* IRIS_BUTTON_*            */
             bool pressed; /* true = down edge, false = up edge  */
         } button;
 
@@ -107,14 +150,14 @@ typedef struct iris_event {
         } scroll;
 
         struct {
-            int key;       /* LENS_KEY_* or printable ASCII      */
+            int key;       /* IRIS_KEY_* or printable ASCII      */
             bool pressed;  /* down edge / up edge                */
             bool repeat;   /* synthesised auto-repeat press      */
-            uint32_t mods; /* LENS_MOD_* level state at the edge */
+            uint32_t mods; /* IRIS_MOD_* level state at the edge */
         } keyboard;
 
         struct {
-            uint32_t mods; /* LENS_MOD_* level state */
+            uint32_t mods; /* IRIS_MOD_* level state */
         } modifiers;
 
         struct {
@@ -182,14 +225,13 @@ typedef enum iris_event_disposition : uint32_t {
 /* Host interception callback (iris_app_opts.on_event, ADR-0107).
  *
  * Invoked once per reified event, in arrival order, synchronously on the
- * iris_app_run thread, before folding, and outside any lens_begin/end
- * pair. The host may mutate `*ev` fields and return PASS to deliver the
+ * iris_app_run thread, before folding and outside the UI layer's frame.
+ * The host may mutate `*ev` fields and return PASS to deliver the
  * rewritten event, or return DROP to discard it. For events flagged
  * IRIS_EVENT_F_UNDROPPABLE the host is still called but iris ignores a
  * DROP. `user` is the pointer passed in iris_app_opts.
  *
- * The callback runs outside a lens_begin/end pair, so it must not call
- * lens APIs or re-enter iris_app_run. */
+ * The callback must not re-enter iris_app_run. */
 typedef iris_event_disposition (*iris_event_fn)(iris_event *ev, void *user);
 
 #ifdef __cplusplus

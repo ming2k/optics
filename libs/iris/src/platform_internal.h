@@ -13,7 +13,7 @@
  * Entry points dispatched from app.c (one per backend; only the compiled
  * backend's symbol is referenced):
  *
- *   int iris_app_run_<backend>(const iris_app_config *cfg);
+ *   int iris_app_run_<backend>(const iris_app_opts *cfg);
  *     Owns the whole app lifecycle: create the native window + flux device
  *     + surface + canvas + lens context, honour cfg->{title,app_id,width,
  *     height,dark}, invoke cfg->start/build/paint/stop at the documented
@@ -52,27 +52,27 @@
  *
  * Input mapping (platform_input.h):
  *   Native pointer button codes are translated to iris_pointer_button and
- *   then to LENS_MOUSE_* indices via iris_pointer_button_to_lens(). Never
+ *   then to IRIS_BUTTON_* indices via iris_pointer_button_index(). Never
  *   include another platform's headers (linux/input-event-codes.h is
  *   Linux-only, windows.h Win32-only, …).
  *
  * Event seam (event_internal.h, ADR-0107):
  *   Every native event is reified into one iris_event and routed through
  *   iris__event_seam_emit() BEFORE it is applied to the backend
- *   accumulator; only survivors are folded into lens_input. A backend must
- *   not write lens_input directly, and must not apply an event the seam
+ *   accumulator; only survivors are folded into iris_input. A backend must
+ *   not write iris_input directly, and must not apply an event the seam
  *   dropped. Host rewrites are read back out of the same iris_event. Emit
  *   order is arrival order; iris stamps the monotonic sequence.
  *
  * Keyboard contract (all three backends MUST hold these; lens relies on
  * them):
  *   (a) Both edges are reported: every mappable key produces a
- *       lens_key_event with pressed=true on key-down and pressed=false on
+ *       iris_key_event with pressed=true on key-down and pressed=false on
  *       key-up. (Win32: WM_KEYDOWN/UP; Cocoa: keyDown:/keyUp:; Wayland:
  *       wl_keyboard.key state.)
  *   (b) Letters and digits are normalised to their UNSHIFTED ASCII code
  *       ('a', never 'A'; '1', never '!') — shift state travels in
- *       lens_input.mods only, so Ctrl/Shift chords compare equal across
+ *       iris_input.mods only, so Ctrl/Shift chords compare equal across
  *       platforms. Wayland derives the id from the level-0 keysym of the
  *       key's active layout (xkb_keymap_key_get_syms_by_level), Win32 from
  *       the virtual-key code, Cocoa from charactersIgnoringModifiers.
@@ -87,7 +87,7 @@
  *       on any backend — it arrives as committed text only (IME or
  *       layout), which is the channel editors must consume for content.
  *       Shortcut matching should never rely on non-ASCII key events.
- *   (c) lens_key_event.repeat marks synthesised auto-repeat presses:
+ *   (c) iris_key_event.repeat marks synthesised auto-repeat presses:
  *       Wayland implements client-side repeat from the compositor's
  *       wl_keyboard.repeat_info (a timerfd in the event loop re-emits the
  *       held key, with its text, until key-up / focus loss / modifier
@@ -102,21 +102,21 @@
  *       Delete keysym's xkb UTF-8 mapping and Win32's WM_CHAR for
  *       Ctrl+Backspace are both exactly 0x7f, so a plain ">= 0x20" test
  *       leaks an invisible "\x7f" into text_utf8 alongside the key event.
- *       The intent rides the lens_key_event (LENS_KEY_DELETE); editors
+ *       The intent rides the iris_key_event (IRIS_KEY_DELETE); editors
  *       would otherwise insert garbage on every Delete press.
  *
- * IME truncation contract: every string funneled into lens_input's
- * fixed-size buffers (text_utf8[256] / preedit_utf8[LENS_PREEDIT_MAX=256])
+ * IME truncation contract: every string funneled into iris_input's
+ * fixed-size buffers (text_utf8[256] / preedit_utf8[IRIS_PREEDIT_MAX=256])
  * is clipped with the shared boundary-aware helpers in platform_text.h —
  * never a raw byte cap, which can split a multi-byte sequence and hand
  * lens invalid UTF-8. Backend staging buffers (the Wayland accumulator's
  * text/preedit, the IME commit slot) are sized to match and pinned by
- * static_assert against the lens_input members.
+ * static_assert against the iris_input members.
  *
  * lens contract (unchanged, platform-neutral): fold native input into one
- * lens_input per frame; wire lens_clipboard{set_text,request_text,user} to
+ * iris_input per frame; wire iris_ui_services clipboard{set_text,request_text,user} to
  * the native clipboard; drive iris_a11y_update(ui) once per frame after
- * lens_end when the a11y bridge is running (Linux: also integrate the
+ * the UI frame when the a11y bridge is running (Linux: also integrate the
  * bridge's fd via src/a11y_internal.h; Win32/Cocoa ship their own bridge).
  */
 #ifndef IRIS_PLATFORM_INTERNAL_H
@@ -128,22 +128,22 @@
 
 /* Record the host canvas callback into an immutable display list.
  * Implemented once in app.c so every backend uses the same recording path. */
-flux_display_list *iris_record_host_canvas(const iris_app_config *cfg, float scale);
+flux_display_list *iris_record_host_canvas(const iris_app_opts *cfg, float scale);
 
 /* Wayland — implemented by app_wayland.c (Linux). */
-int iris_app_run_wayland(const iris_app_config *cfg);
+int iris_app_run_wayland(const iris_app_opts *cfg);
 void iris_request_animation_frame_wayland(void);
 void iris_record_mark_static_wayland(void);
 void iris_request_frame_skip_render_wayland(void);
 
 /* Win32 — implemented by app_win32.c (ADR-0056). */
-int iris_app_run_win32(const iris_app_config *cfg);
+int iris_app_run_win32(const iris_app_opts *cfg);
 void iris_request_animation_frame_win32(void);
 void iris_record_mark_static_win32(void);
 void iris_request_frame_skip_render_win32(void);
 
 /* Cocoa — implemented by app_cocoa.m (ADR-0056). */
-int iris_app_run_cocoa(const iris_app_config *cfg);
+int iris_app_run_cocoa(const iris_app_opts *cfg);
 void iris_request_animation_frame_cocoa(void);
 void iris_record_mark_static_cocoa(void);
 void iris_request_frame_skip_render_cocoa(void);

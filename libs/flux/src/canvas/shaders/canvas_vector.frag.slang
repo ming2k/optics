@@ -1,14 +1,12 @@
 /*
- * canvas_vector.frag.slang — GPU 2D Analytic Fragment Vector Rasterizer in Slang (ADR-0116).
+ * canvas_vector.frag.slang — GPU 2D tiled analytic vector rasterizer
+ * (ADR-0116 / ADR-0120): exact per-pixel area coverage using pre-binned
+ * 16x16 tile segment lists and per-pixel-row backdrops, shading solid,
+ * linear/radial gradients, and affine-mapped image patterns.
  */
 
-#include "canvas_color.slang"
-#include "flux_vector_eval.slang"
-
-struct GpuSegment {
-    float x0, y0;
-    float x1, y1;
-};
+#include "canvas_image_common.slang"
+#include "canvas_tile_common.slang"
 
 struct GradStop {
     float    t;
@@ -16,20 +14,22 @@ struct GradStop {
 };
 
 struct PushConstants {
-    uint64_t     verts;
-    float2       inv_window_size;
-    uint64_t     color_params;
-    uint32_t     kind; /* 0 = solid, 1 = linear grad, 2 = radial grad */
-    uint32_t     num_stops;
-    float2       grad_from;
-    float2       grad_to;
-    float        grad_radius;
-    float        _pad1;
-    GradStop     stops[8];
-    GpuSegment*  segs;
-    uint32_t     seg_count;
-    uint32_t     fill_rule; /* 0 = NonZero, 1 = EvenOdd */
-    uint32_t     _pad2;
+    uint64_t         verts;
+    float2           inv_window_size;
+    ColorParams*     color_params;
+    uint32_t         kind; /* lower byte: 0 solid, 1 linear, 2 radial, 3 image pattern */
+    uint32_t         num_stops;
+    float2           grad_from;
+    float2           grad_to;
+    float            grad_radius;
+    float            _pad1;
+    GradStop         stops[8];
+    GpuTileDispatch* tile_dispatch;
+    uint32_t         image_handle;
+    uint32_t         sampler_handle;
+    float2           uv_row0;
+    float2           uv_row1;
+    float2           uv_off;
 };
 
 [[vk::push_constant]]
@@ -72,31 +72,41 @@ float4 eval_grad(float t, float4 v_color) {
 [shader("fragment")]
 float4 main(FragmentInput input) : SV_Target {
     float2 p = input.v_pos;
+    float2 pixel = floor(p);
 
-    int winding = 0;
-    float min_dist_sq = 1e30f;
-
-    for (uint32_t i = 0u; i < pc.seg_count; ++i) {
-        GpuSegment s = pc.segs[i];
-        flux_vector_eval_segment(p, float2(s.x0, s.y0), float2(s.x1, s.y1), winding, min_dist_sq);
-    }
-
-    float coverage = flux_vector_eval_coverage(winding, min_dist_sq, pc.fill_rule, 1.0f);
+    GpuTileDispatch* d = pc.tile_dispatch;
+    float area = tile_eval_pixel_area(d, pixel);
+    float coverage = flux_vector_area_coverage(area, d.fill_rule);
 
     if (coverage <= 0.0f)
         discard;
 
+    uint32_t base_kind = pc.kind & 0xFFu;
     float4 src_color;
-    if (pc.kind == 0u) {
+    if (base_kind == 0u) {
         src_color = input.v_color;
-    } else if (pc.kind == 1u) {
-        float2 d = pc.grad_to - pc.grad_from;
-        float len2 = dot(d, d);
-        float t = clamp(dot(p - pc.grad_from, d) / (len2 > 0.0f ? len2 : 1.0f), 0.0f, 1.0f);
+    } else if (base_kind == 1u) {
+        float2 dv = pc.grad_to - pc.grad_from;
+        float len2 = dot(dv, dv);
+        float t = clamp(dot(p - pc.grad_from, dv) / (len2 > 0.0f ? len2 : 1.0f), 0.0f, 1.0f);
         src_color = eval_grad(t, input.v_color);
-    } else {
+    } else if (base_kind == 2u) {
         float t = clamp(length(p - pc.grad_from) / pc.grad_radius, 0.0f, 1.0f);
         src_color = eval_grad(t, input.v_color);
+    } else {
+        uint32_t ih = pc.image_handle & 0x0FFFFFFFu;
+        uint32_t sh = pc.sampler_handle & 0x0FFFFFFFu;
+        float2 uv = float2(dot(pc.uv_row0, p) + pc.uv_off.x, dot(pc.uv_row1, p) + pc.uv_off.y);
+        float2 uv_ddx = float2(pc.uv_row0.x, pc.uv_row1.x);
+        float2 uv_ddy = float2(pc.uv_row0.y, pc.uv_row1.y);
+        float4 texel = u_textures[NonUniformResourceIndex(ih)].SampleGrad(
+            u_samplers[NonUniformResourceIndex(sh)], uv, uv_ddx, uv_ddy);
+        if (base_kind == 6u)
+            texel.a = 1.0f;
+        texel = flux_canvas_decode_texel(texel, pc.kind, sh, pc.color_params);
+        src_color = texel * input.v_color;
+        if (base_kind == 6u)
+            src_color.a = 1.0f;
     }
 
     return float4(src_color.rgb * coverage, src_color.a * coverage);

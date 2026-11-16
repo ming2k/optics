@@ -52,7 +52,7 @@
 /* Bounded splitting. A band needs a split only where two edges cross inside it;
  * the cap turns pathological input into an explicit error rather than unbounded
  * work. */
-#define COV_MAX_SPLITS 4096
+#define COV_MAX_SPLITS 65536
 #define COV_SUBBAND_STACK_CAP 64
 
 typedef struct cov_edge {
@@ -359,20 +359,22 @@ flux_result canvas_coverage_rasterize(const flux_point *pts, const flux_canvas_c
             sort_active_edges(act, entries, na, s_ym);
 
             bool crossed = false;
-            for (uint32_t i = 0; i + 1 < na; ++i) {
-                if (edge_x_at(act[i], s_yb) > edge_x_at(act[i + 1], s_yb) + 1e-6f) {
-                    crossed = true;
-                    break;
+            /* Subbands <= 1e-5 px high or at float32 ULP resolution cannot add
+             * visible area and are integrated atomically without splitting. */
+            if (s_yb - s_ya > 1e-5f && s_ym > s_ya && s_ym < s_yb &&
+                stack_top + 2 <= COV_SUBBAND_STACK_CAP) {
+                for (uint32_t i = 0; i + 1 < na; ++i) {
+                    if (edge_x_at(act[i], s_ya) > edge_x_at(act[i + 1], s_ya) + 1e-6f ||
+                        edge_x_at(act[i], s_yb) > edge_x_at(act[i + 1], s_yb) + 1e-6f) {
+                        crossed = true;
+                        break;
+                    }
                 }
             }
 
             if (crossed) {
                 if (++splits > COV_MAX_SPLITS) {
                     rc = FLUX_ERROR_OUT_OF_RANGE;
-                    break;
-                }
-                if (!(s_ym > s_ya && s_ym < s_yb) || stack_top + 2 > COV_SUBBAND_STACK_CAP) {
-                    rc = FLUX_ERROR_UNSUPPORTED;
                     break;
                 }
                 /* Push second half then first half to process top-to-bottom */

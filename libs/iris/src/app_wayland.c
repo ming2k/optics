@@ -1,330 +1,13 @@
-/* app_wayland.c — native Wayland window + Vulkan (via flux) + lens_input.
+/* app_wayland.c — native Wayland window + Vulkan (via flux) + iris_input.
  *
  * Replaces the GLFW glue the examples used to share. Pure Wayland:
  * xdg-shell for the toplevel, xdg-decoration for a server-side title bar
  * when available, xkbcommon for the keymap, and VK_KHR_wayland_surface to
  * hand flux core a VkSurfaceKHR. Pointer and keyboard events are folded
- * into one lens_input per frame (ADR-0029).
+ * into one iris_input per frame (ADR-0029).
  */
 
-#include "a11y_internal.h"
-#include "a11y_prefs_internal.h"
-#include "platform_input.h"
-#include "platform_internal.h"
-#include "platform_text.h"
-#include "platform_wakeup.h"
-#include "tablet_wayland.h"
-#include "theme_watch_internal.h"
-
-#include <iris/a11y.h>
-#include <iris/cursor.h>
-#include <iris/dnd.h>
-#include <iris/theme.h>
-#include <iris/window.h>
-
-#include <flux/flux.h>
-#include <flux/vulkan.h>
-
-#include <vulkan/vulkan.h>
-#include <vulkan/vulkan_wayland.h>
-
-#include "primary-selection-unstable-v1-client-protocol.h"
-#include "tablet-unstable-v2-client-protocol.h"
-#include "text-input-unstable-v3-client-protocol.h"
-#include "xdg-decoration-unstable-v1-client-protocol.h"
-#include "xdg-foreign-unstable-v2-client-protocol.h"
-#include "xdg-shell-client-protocol.h"
-#include <wayland-client.h>
-#include <xkbcommon/xkbcommon-compose.h>
-#include <xkbcommon/xkbcommon.h>
-
-#include "cursor-shape-v1-client-protocol.h"
-#include "display_pacer.h"
-#include "fractional-scale-v1-client-protocol.h"
-#include "frame_mailbox.h"
-#include "iris_fd_observe.h"
-#include "presentation-time-client-protocol.h"
-#include "xdg-activation-v1-client-protocol.h"
-#include <linux/input-event-codes.h> /* BTN_LEFT / BTN_RIGHT / BTN_MIDDLE — Linux-only, this file only */
-#include <sched.h>
-#include <semaphore.h>
-#include <sys/resource.h>
-
-#include <ctype.h>
-#include <errno.h>
-#include <locale.h>
-#include <poll.h>
-#include <pthread.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <sys/eventfd.h>
-#include <sys/mman.h>
-#include <sys/timerfd.h>
-#include <time.h>
-#include <unistd.h>
-
-/* focus.c maps Tab from this portable keycode (ADR-0029). */
-#define WP_KEY_TAB 258
-
-/* ------------------------------------------------------------------ */
-/*  Accumulated input, drained into one lens_input per frame             */
-/* ------------------------------------------------------------------ */
-
-typedef struct wp_accum {
-    double cx, cy;                  /* latest cursor, surface-local   */
-    bool down[LENS_MOUSE_COUNT];    /* held state (persists)          */
-    bool pressed[LENS_MOUSE_COUNT]; /* edges this frame               */
-    bool released[LENS_MOUSE_COUNT];
-    double scroll_x, scroll_y;       /* wheel steps (notches) this frame */
-    double scroll_px_x, scroll_px_y; /* continuous (touchpad) distance,
-                                        logical px (see ADR-0036)      */
-    uint32_t axis_source;            /* this event group's axis source
-                                         (WL_POINTER_AXIS_SOURCE_*),
-                                         scoped by wl_pointer.frame     */
-    uint32_t mods;                   /* level state (persists)         */
-    char text[256];                  /* committed text this frame; sized
-                                        like lens_input.text_utf8       */
-    char preedit[LENS_PREEDIT_MAX];  /* IME preedit string             */
-    uint32_t preedit_cursor;         /* caret byte offset in preedit   */
-    uint32_t preedit_sel_lo;         /* active clause, byte range      */
-    uint32_t preedit_sel_hi;
-    lens_key_event keys[LENS_INPUT_MAX_KEYS];
-    uint32_t key_count;
-} wp_accum;
-
-/* The staging buffers feed lens_input by whole-buffer memcpy in
- * drain_input; pin the sizes so a lens-side change fails at compile time
- * instead of over-reading the accumulator. */
-static_assert(sizeof((wp_accum *)0)->text == sizeof((lens_input *)0)->text_utf8,
-              "wp_accum.text must match lens_input.text_utf8");
-static_assert(sizeof((wp_accum *)0)->preedit == sizeof((lens_input *)0)->preedit_utf8,
-              "wp_accum.preedit must match lens_input.preedit_utf8");
-
-/* ------------------------------------------------------------------ */
-/*  Platform state                                                     */
-/* ------------------------------------------------------------------ */
-
-/* One wl_output binding so we can read its scale. */
-#define WP_MAX_OUTPUTS 8
-typedef struct wp_output {
-    struct wl_output *wl;
-    uint32_t name; /* registry global name (for global_remove) */
-    int scale;     /* output integer scale (1, 2, 3 …) */
-    bool entered;  /* surface currently on this output */
-} wp_output;
-
-/* MIME types advertised by a data/primary-selection offer. Offers announce
- * their types via offer events BEFORE the selection/enter event binds them,
- * so types accumulate into a `pending` slot first and move into the matching
- * bound slot when the offer is bound. This is what real MIME negotiation
- * (paste / drop) keys off. The `offer` member is an identity cookie only —
- * it holds a wl_data_offer or a zwp_primary_selection_offer_v1 and is only
- * ever compared, never dereferenced through this struct. */
-struct wp_offer_mimes {
-    struct wl_data_offer *offer;
-    bool uri_list;           /* text/uri-list                */
-    bool text_utf8;          /* text/plain;charset=utf-8     */
-    bool text_plain;         /* text/plain                   */
-    bool gnome_copied_files; /* x-special/gnome-copied-files */
-};
-
-typedef struct wp_platform {
-    struct wl_display *display;
-    struct wl_registry *registry;
-    struct wl_compositor *compositor;
-    struct wl_subcompositor *subcompositor;
-    uint32_t subcompositor_name;
-    struct xdg_wm_base *wm_base;
-    struct xdg_activation_v1 *activation;
-    uint32_t activation_name;
-    struct wl_seat *seat;
-    uint32_t seat_name; /* registry global name (for global_remove) */
-    struct zxdg_decoration_manager_v1 *deco_mgr;
-
-    struct wl_data_device_manager *data_device_mgr;
-    struct wl_data_device *data_device;
-    struct wl_data_offer *selection_offer; /* current clipboard offer */
-    struct wl_data_offer *dnd_offer;       /* current drag offer         */
-    struct wl_data_offer *dnd_job_offer;   /* offer owned by an in-flight
-                                              async drop read (item: the
-                                              read runs on a helper thread;
-                                              finish+destroy on delivery)  */
-    struct wl_data_source *copy_source;    /* our outgoing selection  */
-    char *copy_buf;                        /* text we currently advertise for copy     */
-    size_t copy_len;
-    uint32_t last_serial; /* most recent input serial (set_selection) */
-    bool dnd_inside;      /* drag currently over our surface           */
-    flux_point dnd_pos;   /* last reported drag position (surface px)  */
-
-    /* Drag-and-drop source state (ADR-0086) */
-    struct wl_data_source *drag_source;
-    iris_dnd_source drag_info;
-    char *drag_text_buf;
-    size_t drag_text_len;
-    bool drag_active;
-
-    /* Primary selection (zwp_primary_selection_unstable_v1): the X11-style
-     * middle-click clipboard. clip_set_text mirrors the copy onto it; a
-     * middle-button press requests its text and pastes it (async, like the
-     * clipboard paste path). */
-    struct zwp_primary_selection_device_manager_v1 *primsel_mgr;
-    struct zwp_primary_selection_device_v1 *primsel_device;
-    struct zwp_primary_selection_offer_v1 *primsel_offer;
-    struct zwp_primary_selection_source_v1 *primsel_source;
-    struct wp_offer_mimes primsel_pending_mimes, primsel_offer_mimes;
-
-    struct wp_offer_mimes pending_offer_mimes, selection_offer_mimes, dnd_offer_mimes;
-
-    /* Pointer + keyboard + touch (touch is optional). */
-    struct wl_pointer *pointer;
-    struct wl_keyboard *keyboard;
-    struct wl_touch *touch;
-
-    struct wl_surface *surface;
-    struct xdg_surface *xdg_surface;
-    struct xdg_toplevel *toplevel;
-    struct zxdg_toplevel_decoration_v1 *deco;
-
-    /* xdg-foreign-unstable-v2: exports a stable handle naming this window,
-     * passed to portal dialogs (file_dialog_portal.c) as parent_window so
-     * the picker stays modal to us. */
-    struct zxdg_exporter_v2 *foreign_exporter;
-    struct zxdg_exported_v2 *foreign_exported;
-    char foreign_handle[80]; /* empty until the compositor answers */
-
-    /* Cursor: cursor-shape-v1 (the modern wayland-protocols path). The
-     * compositor renders the cursor with its own configured theme, so we
-     * never load a cursor theme ourselves — this guarantees the cursor
-     * always matches the user's desktop (Adwaita on GNOME, Breeze on KDE,
-     * …) instead of falling back to a hard-coded theme name. The manager
-     * is bound at registry time; the per-pointer device is created lazily
-     * on the first enter. If the compositor doesn't support cursor-shape,
-     * `cursor_shape_mgr` stays NULL and iris_set_cursor is a no-op. */
-    struct wp_cursor_shape_manager_v1 *cursor_shape_mgr;
-    struct wp_cursor_shape_device_v1 *cursor_shape_device;
-    iris_cursor host_cursor;      /* last explicit iris_set_cursor (DEFAULT = none) */
-    iris_cursor effective_cursor; /* what the compositor is asked to show       */
-    uint32_t cursor_serial;       /* most recent enter/motion serial */
-    bool cursor_inside;           /* pointer currently inside our surface */
-    struct xkb_context *xkb_ctx;
-    struct xkb_keymap *xkb_keymap;
-    struct xkb_state *xkb_state;
-
-    /* Dead-key composition (xkbcommon-compose): fed each non-repeat key
-     * press; a completed sequence replaces the key's own UTF-8 text. NULL
-     * when no compose table exists for the locale (dead keys then fall
-     * through as ordinary keysyms). */
-    struct xkb_compose_table *compose_table;
-    struct xkb_compose_state *compose_state;
-
-    /* Client-side key repeat, driven by the compositor's repeat_info: a
-     * timerfd in pump_events' poll set fires after `repeat_delay` ms and
-     * then every 1000/`repeat_rate` ms while `rep_key` is held. rate 0 (or
-     * no repeat_info ever received, e.g. wl_keyboard < v4) disables repeat.
-     * Cancelled on key release, kb_leave, a new key press, or a modifier
-     * change. */
-    int repeat_fd;
-    int32_t repeat_rate;  /* chars/sec, 0 = disabled */
-    int32_t repeat_delay; /* ms before the first repeat */
-    uint32_t rep_key;     /* evdev keycode being repeated */
-    int rep_lens_key;     /* its resolved lens key id (0 = unmappable) */
-    bool rep_active;      /* timer armed */
-
-    struct zwp_text_input_manager_v3 *text_input_mgr;
-    struct zwp_text_input_v3 *text_input;
-    struct wl_surface *text_input_surface;
-
-    /* Per-widget IM ownership: the text input is enabled exactly while the
-     * window has keyboard focus AND a lens text widget is focused
-     * (re-evaluated once per frame after lens_end — see im_frame_update).
-     * `im_surr` is the last surrounding text reported to the compositor, so
-     * set_surrounding_text goes out only on content/cursor changes. */
-    bool kb_focused;
-    bool im_active;
-    char *im_surr;
-    size_t im_surr_len;
-    uint32_t im_surr_cursor;
-
-    /* Pending IME state (double-buffered by text-input-v3 done event).
-     * commit is sized like lens_input.text_utf8: a full-sentence IME
-     * conversion must survive staging before the boundary-aware append
-     * clips it into the per-frame accumulator. */
-    struct {
-        char commit[256];
-        char preedit[LENS_PREEDIT_MAX];
-        int32_t preedit_cursor_begin;
-        int32_t preedit_cursor_end;
-        uint32_t delete_before;
-        uint32_t delete_after;
-        bool has_commit;
-        bool has_preedit;
-        bool has_delete;
-    } ime;
-
-    wp_output outputs[WP_MAX_OUTPUTS];
-    int n_outputs;
-    int buffer_scale;  /* max scale of entered outputs; ≥1     */
-    int pending_scale; /* recomputed from enter/leave + globals */
-
-    struct wp_fractional_scale_manager_v1 *fractional_scale_mgr;
-    struct wp_fractional_scale_v1 *fractional_scale_obj;
-
-    int width, height;        /* surface size in *logical* pixels      */
-    int pending_w, pending_h; /* from the latest toplevel.configure    */
-    int min_w, min_h;         /* size hints last sent to the compositor */
-    int max_w, max_h;         /* 0 = no limit                            */
-    bool running;
-    bool resized;                   /* size or scale changed -> resize swap  */
-    bool animation_frame_requested; /* host asked for active-rate follow-up */
-    bool record_static;             /* host declared this frame's canvas content static */
-    bool frame_skip_render;         /* host asked to skip rendering but keep the active cadence */
-    lens *ui;                       /* so output/scale callbacks can update  */
-
-    /* Live colour-scheme watching + accessibility bridge: optional, fail-soft. */
-    bool theme_watching;
-    bool a11y_prefs_watching;
-    bool a11y_running;
-    int a11y_fd;
-
-    /* Cross-thread wakeup seam (platform_wakeup.h): an eventfd in the
-     * pump_events poll set. The colour-scheme watcher's pump thread posts
-     * through it; the loop drains the queue on this thread. */
-    int wakeup_fd;
-
-    /* --- Display pacing (ADR-0122) ---------------------------------------
-     * Presentation is paced by the display, not by a client timer. Two
-     * compositor signals drive the loop:
-     *
-     *   wl_surface.frame        — the grant to draw the next frame. Requested
-     *                             before each commit; the callback is what the
-     *                             frame loop waits for instead of sleeping on
-     *                             a hardcoded 60 Hz period.
-     *   wp_presentation_feedback— the compositor's own report of when the
-     *                             frame reached the display (latency / dropped
-     *                             frames) and the real refresh interval, which
-     *                             is how 120/144 Hz is learned rather than
-     *                             assumed.
-     *
-     * `refresh_ns` stays 0 until one of those two sources reports a value;
-     * the pacer then falls back to its "refresh rate not learned yet" period
-     * rather than a hardcoded 60 Hz target. */
-    struct wp_presentation *presentation;
-    struct wl_callback *frame_cb; /* outstanding wl_surface.frame, or NULL  */
-    bool frame_cb_pending;        /* requested, not yet fired              */
-    bool frame_cb_fired;          /* fired this iteration                  */
-    int64_t frame_cb_time_ns;     /* compositor timestamp of that callback */
-    int64_t refresh_ns;           /* learned display period; 0 = unknown   */
-
-    /* Decoupled dual-thread presentation engine (ADR-0124) */
-    iris_frame_mailbox mailbox;
-    pthread_t present_thread;
-    sem_t present_sem;
-    _Atomic(bool) presenter_running;
-    bool has_presenter_thread;
-
-    wp_accum acc;
-} wp_platform;
+#include "wayland_internal.h"
 
 /* Theme watcher callback: invoked on the iris main thread (delivered
  * through the wakeup seam) when the portal emits a SettingChanged for
@@ -333,9 +16,7 @@ static void wp_on_color_scheme_changed(iris_color_scheme scheme, void *user) {
     wp_platform *pl = user;
     if (!pl || !pl->ui)
         return;
-    lens_theme th =
-        (scheme == IRIS_COLOR_SCHEME_PREFER_LIGHT) ? lens_theme_default() : lens_theme_dark();
-    lens_set_theme(pl->ui, th);
+    iris__ui_set_color_scheme(pl->ui, scheme);
 }
 
 /* Accessibility-preference watcher callback (ADR-0075): same delivery path
@@ -346,30 +27,7 @@ static void wp_on_a11y_prefs(const iris_a11y_prefs *prefs, void *user) {
     wp_platform *pl = user;
     if (!pl || !pl->ui)
         return;
-    lens_set_reduced_motion(pl->ui, prefs->reduced_motion);
-    lens_set_text_scale(pl->ui, prefs->text_scale);
-    if (prefs->high_contrast) {
-        /* Raised-contrast variant of the current token set: pure black on
-         * pure white both directions, full-strength borders. Applied as a
-         * theme mutation rather than a separate preset so the app's own
-         * theme customisations (if any) are overridden deliberately, not
-         * silently. */
-        lens_theme th = lens_get_theme(pl->ui);
-        th.color_bg = flux_color_rgba(0x00, 0x00, 0x00, 0xff);
-        th.color_fg = flux_color_rgba(0xff, 0xff, 0xff, 0xff);
-        th.color_hover = flux_color_rgba(0x2a, 0x2a, 0x2a, 0xff);
-        th.color_active = flux_color_rgba(0x55, 0x55, 0x55, 0xff);
-        th.color_border = th.color_fg;
-        th.color_disabled = flux_color_rgba(0xaa, 0xaa, 0xaa, 0xff);
-        lens_set_theme(pl->ui, th);
-    } else {
-        /* Restore the scheme-appropriate preset; the theme callback keeps
-         * light/dark in sync from here on. */
-        wp_on_color_scheme_changed(iris_query_system_color_scheme(), pl);
-    }
-    /* Force a frame so the new preferences reach the screen even while the
-     * loop is idle-parked (the watcher itself does not schedule one). */
-    pl->animation_frame_requested = true;
+    iris__ui_set_a11y_prefs(pl->ui, prefs);
 }
 
 /* Recompute the scale we should use: max integer scale across the outputs
@@ -418,7 +76,7 @@ static int mouse_index(uint32_t button) {
         b = IRIS_POINTER_BUTTON_UNKNOWN;
         break;
     }
-    return iris_pointer_button_to_lens(b);
+    return iris_pointer_button_index(b);
 }
 
 /* Forward decl: cursor_apply is defined later (in the cursor section),
@@ -459,7 +117,7 @@ static bool wp_emit_button(wp_platform *pl, double x, double y, int lens_button,
     if (!iris__event_seam_emit(&ev))
         return false;
     int i = ev.button.button;
-    if (i < 0 || i >= LENS_MOUSE_COUNT)
+    if (i < 0 || i >= IRIS_BUTTON_COUNT)
         return false; /* host rewrote the button out of range: drop */
     pl->acc.cx = ev.button.x;
     pl->acc.cy = ev.button.y;
@@ -474,7 +132,7 @@ static bool wp_emit_button(wp_platform *pl, double x, double y, int lens_button,
 
 static bool wp_emit_scroll(wp_platform *pl, uint32_t axis, double platform_delta, bool continuous) {
     iris_event ev = {.type = IRIS_EVENT_SCROLL, .scroll = {.continuous = continuous}};
-    double lens = iris_scroll_lens_delta(platform_delta);
+    double lens = iris_scroll_delta(platform_delta);
     if (axis == 0)
         ev.scroll.dy = (float)lens;
     else
@@ -483,11 +141,13 @@ static bool wp_emit_scroll(wp_platform *pl, uint32_t axis, double platform_delta
         return false;
     /* The host may move the delta between axes or flip `continuous`. */
     if (ev.scroll.dx != 0.0f)
-        iris_scroll_accum_lens(&pl->acc.scroll_y, &pl->acc.scroll_px_y, &pl->acc.scroll_x,
-                               &pl->acc.scroll_px_x, 1, (double)ev.scroll.dx, ev.scroll.continuous);
+        iris_scroll_accum_delta(&pl->acc.scroll_y, &pl->acc.scroll_px_y, &pl->acc.scroll_x,
+                                &pl->acc.scroll_px_x, 1, (double)ev.scroll.dx,
+                                ev.scroll.continuous);
     if (ev.scroll.dy != 0.0f)
-        iris_scroll_accum_lens(&pl->acc.scroll_y, &pl->acc.scroll_px_y, &pl->acc.scroll_x,
-                               &pl->acc.scroll_px_x, 0, (double)ev.scroll.dy, ev.scroll.continuous);
+        iris_scroll_accum_delta(&pl->acc.scroll_y, &pl->acc.scroll_px_y, &pl->acc.scroll_x,
+                                &pl->acc.scroll_px_x, 0, (double)ev.scroll.dy,
+                                ev.scroll.continuous);
     return true;
 }
 
@@ -496,8 +156,8 @@ static bool wp_emit_key(wp_platform *pl, int key, bool pressed, bool repeat, uin
                      .keyboard = {.key = key, .pressed = pressed, .repeat = repeat, .mods = mods}};
     if (!iris__event_seam_emit(&ev))
         return false;
-    if (ev.keyboard.key != 0 && pl->acc.key_count < LENS_INPUT_MAX_KEYS)
-        pl->acc.keys[pl->acc.key_count++] = (lens_key_event){
+    if (ev.keyboard.key != 0 && pl->acc.key_count < IRIS_INPUT_MAX_KEYS)
+        pl->acc.keys[pl->acc.key_count++] = (iris_key_event){
             .key = ev.keyboard.key, .pressed = ev.keyboard.pressed, .repeat = ev.keyboard.repeat};
     return true;
 }
@@ -521,7 +181,7 @@ static bool wp_emit_text(wp_platform *pl, const char *utf8, size_t len) {
 
 static bool wp_emit_preedit(wp_platform *pl, const char *utf8, int32_t cursor_begin,
                             int32_t cursor_end) {
-    char clipped[LENS_PREEDIT_MAX];
+    char clipped[IRIS_PREEDIT_MAX];
     iris_utf8_copy(clipped, sizeof clipped, utf8);
     uint32_t plen = (uint32_t)strlen(clipped);
     uint32_t lo = clamp_preedit_off(cursor_begin, plen);
@@ -561,10 +221,10 @@ static bool wp_emit_ime_delete(wp_platform *pl, uint32_t before, uint32_t after)
 }
 
 /* Drag-and-drop position. The dropped payload itself is delivered through
- * the async paste path (lens_deliver_drop), not folded into lens_input;
+ * the async paste path (lens_deliver_drop), not folded into iris_input;
  * this event carries the cursor position and DnD activity so the host can
  * observe/intercept it like any other pointer motion. */
-static bool wp_emit_dnd(wp_platform *pl, double x, double y, bool active) {
+bool wp_emit_dnd(wp_platform *pl, double x, double y, bool active) {
     iris_event ev = {.type = IRIS_EVENT_DND,
                      .dnd = {.x = (float)x, .y = (float)y, .active = active}};
     if (!iris__event_seam_emit(&ev))
@@ -626,7 +286,6 @@ static void ptr_motion(void *data, struct wl_pointer *p, uint32_t t, wl_fixed_t 
 }
 /* Forward decl: defined in the primary-selection section, but ptr_button
  * needs it for middle-click paste. */
-static void primsel_paste(wp_platform *pl);
 
 static void ptr_button(void *data, struct wl_pointer *p, uint32_t serial, uint32_t t,
                        uint32_t button, uint32_t state) {
@@ -642,7 +301,7 @@ static void ptr_button(void *data, struct wl_pointer *p, uint32_t serial, uint32
     bool down = (state == WL_POINTER_BUTTON_STATE_PRESSED);
     (void)wp_emit_button(pl, pl->acc.cx, pl->acc.cy, i, down);
     if (down && button == BTN_MIDDLE)
-        primsel_paste(pl);
+        wp_primsel_paste(pl);
 }
 /* Wheel vs. touchpad is a *source* property (wl_pointer.axis_source),
  * not a property of the event type: a two-finger touchpad scroll arrives
@@ -751,7 +410,7 @@ static void ptr_axis_relative_direction(void *d, struct wl_pointer *p, uint32_t 
  * app's platform through this single static pointer. Set at the top of
  * iris_app_run_wayland, cleared at exit. Documented as thread-affine:
  * callers must drive it from the same thread that runs iris_app_run. */
-static wp_platform *g_active_pl = nullptr;
+wp_platform *g_active_pl = nullptr;
 
 void iris_request_animation_frame_wayland(void) {
     wp_platform *pl = g_active_pl;
@@ -830,25 +489,8 @@ static void cursor_apply(wp_platform *pl) {
  * changed. */
 static bool cursor_follow_hint(wp_platform *pl) {
     iris_cursor eff = pl->host_cursor;
-    if (eff == IRIS_CURSOR_DEFAULT && pl->ui) {
-        switch (lens_get_cursor_hint(pl->ui)) {
-        case LENS_CURSOR_POINTER:
-            eff = IRIS_CURSOR_POINTER;
-            break;
-        case LENS_CURSOR_TEXT:
-            eff = IRIS_CURSOR_TEXT;
-            break;
-        case LENS_CURSOR_RESIZE_EW:
-            eff = IRIS_CURSOR_RESIZE_EW;
-            break;
-        case LENS_CURSOR_RESIZE_NS:
-            eff = IRIS_CURSOR_RESIZE_NS;
-            break;
-        case LENS_CURSOR_DEFAULT:
-        default:
-            break;
-        }
-    }
+    if (eff == IRIS_CURSOR_DEFAULT && pl->ui)
+        eff = pl->ui_frame.cursor;
     if (eff == pl->effective_cursor)
         return false;
     pl->effective_cursor = eff;
@@ -1066,7 +708,7 @@ static const struct wl_pointer_listener pointer_listener = {
 };
 
 /* ------------------------------------------------------------------ */
-/*  Touch (wl_touch) — single-touch mapped to mouse + LENS_MOUSE_LEFT  */
+/*  Touch (wl_touch) — single-touch mapped to mouse + IRIS_BUTTON_LEFT  */
 /* ------------------------------------------------------------------ */
 
 /* Multi-touch is intentionally collapsed to a single pointer; lens's input
@@ -1086,8 +728,8 @@ static void touch_down(void *data, struct wl_touch *t, uint32_t serial, uint32_t
     if (g_touch_active_id == -1) {
         g_touch_active_id = id;
         double tx = wl_fixed_to_double(x), ty = wl_fixed_to_double(y);
-        if (!pl->acc.down[LENS_MOUSE_LEFT])
-            (void)wp_emit_button(pl, tx, ty, LENS_MOUSE_LEFT, true);
+        if (!pl->acc.down[IRIS_BUTTON_LEFT])
+            (void)wp_emit_button(pl, tx, ty, IRIS_BUTTON_LEFT, true);
         else
             (void)wp_emit_pointer(pl, IRIS_EVENT_POINTER_MOVE, tx, ty);
     }
@@ -1099,8 +741,8 @@ static void touch_up(void *data, struct wl_touch *t, uint32_t serial, uint32_t t
     wp_platform *pl = data;
     if (g_touch_active_id == id) {
         g_touch_active_id = -1;
-        if (pl->acc.down[LENS_MOUSE_LEFT])
-            (void)wp_emit_button(pl, pl->acc.cx, pl->acc.cy, LENS_MOUSE_LEFT, false);
+        if (pl->acc.down[IRIS_BUTTON_LEFT])
+            (void)wp_emit_button(pl, pl->acc.cx, pl->acc.cy, IRIS_BUTTON_LEFT, false);
     }
 }
 static void touch_motion(void *data, struct wl_touch *t, uint32_t time, int32_t id, wl_fixed_t x,
@@ -1123,7 +765,7 @@ static void touch_cancel(void *d, struct wl_touch *t) {
      * do not leave the mouse "stuck down". */
     wp_platform *pl = g_active_pl;
     if (pl) {
-        pl->acc.down[LENS_MOUSE_LEFT] = false;
+        pl->acc.down[IRIS_BUTTON_LEFT] = false;
     }
     g_touch_active_id = -1;
 }
@@ -1160,7 +802,7 @@ static const struct wl_touch_listener touch_listener = {
  * the user's preference (wl_keyboard.repeat_info: rate in chars/sec, delay
  * in ms). We implement repeat ourselves: while a key is held, a timerfd in
  * pump_events' poll set fires after `delay` ms and then every 1000/rate ms,
- * and each expiry re-emits the key as lens_key_event{pressed=true,
+ * and each expiry re-emits the key as iris_key_event{pressed=true,
  * repeat=true} plus its UTF-8 text (composed sequences are a per-press
  * affair, so repeats bypass compose and emit the key's own utf8). The
  * repeat follows the newest pressed key and is cancelled by its release,
@@ -1257,7 +899,7 @@ static void im_deactivate(wp_platform *pl) {
  * platform_text helper). Returns true when set_surrounding_text was sent;
  * the caller then folds the commit into its own (enable transition or
  * steady-state update). */
-static bool im_report_surrounding(wp_platform *pl, const lens_text_context *ctx) {
+static bool im_report_surrounding(wp_platform *pl, const iris_text_context *ctx) {
     if (!iris_text_memento_update(&pl->im_surr, &pl->im_surr_len, &pl->im_surr_cursor, ctx->utf8,
                                   ctx->len, ctx->cursor))
         return false;
@@ -1392,7 +1034,7 @@ static void ti_done(void *data, struct zwp_text_input_v3 *ti, uint32_t serial) {
      * 3. Set preedit string
      *
      * The actual deletion is performed by lens when it sees the
-     * ime_delete_before / ime_delete_after fields in lens_input — we just
+     * ime_delete_before / ime_delete_after fields in iris_input — we just
      * forward the request through drain_input. */
     if (pl->ime.has_delete)
         (void)wp_emit_ime_delete(pl, pl->ime.delete_before, pl->ime.delete_after);
@@ -1412,7 +1054,7 @@ static void ti_done(void *data, struct zwp_text_input_v3 *ti, uint32_t serial) {
     pl->ime.has_commit = false;
     pl->ime.has_preedit = false;
     /* NOTE: delete_before/delete_after are NOT cleared here — drain_input
-     * consumes them when it assembles lens_input, then clears. This is so
+     * consumes them when it assembles iris_input, then clears. This is so
      * a ti_done arriving between frames still delivers the delete request
      * to lens on the next frame. */
 }
@@ -1469,7 +1111,7 @@ static void kb_key(void *data, struct wl_keyboard *k, uint32_t serial, uint32_t 
     /* Keyboard contract (platform_internal.h): both edges are reported, and
      * letters/digits are normalised to the UNSHIFTED key ('a', not 'A';
      * '1', not '!') so Ctrl/Shift chords line up across platforms — shift
-     * state travels in lens_input.mods only. Deriving the key id from the
+     * state travels in iris_input.mods only. Deriving the key id from the
      * level-0 keysym of the key's active layout gives exactly that, and —
      * just as important — press and release always agree on the id even if
      * the modifier state changed in between. */
@@ -1479,31 +1121,31 @@ static void kb_key(void *data, struct wl_keyboard *k, uint32_t serial, uint32_t 
     xkb_keysym_t sym = (n_level0 > 0) ? level0[0] : xkb_state_key_get_one_sym(pl->xkb_state, code);
 
     int fk = 0;
-    if (pl->acc.key_count < LENS_INPUT_MAX_KEYS) {
+    if (pl->acc.key_count < IRIS_INPUT_MAX_KEYS) {
         if (sym == XKB_KEY_Escape)
-            fk = LENS_KEY_ESCAPE;
+            fk = IRIS_KEY_ESCAPE;
         else if (sym == XKB_KEY_Tab)
-            fk = LENS_KEY_TAB;
+            fk = IRIS_KEY_TAB;
         else if (sym == XKB_KEY_Return)
-            fk = LENS_KEY_RETURN;
+            fk = IRIS_KEY_RETURN;
         else if (sym == XKB_KEY_BackSpace)
-            fk = LENS_KEY_BACKSPACE;
+            fk = IRIS_KEY_BACKSPACE;
         else if (sym == XKB_KEY_Delete)
-            fk = LENS_KEY_DELETE;
+            fk = IRIS_KEY_DELETE;
         else if (sym == XKB_KEY_Left)
-            fk = LENS_KEY_LEFT;
+            fk = IRIS_KEY_LEFT;
         else if (sym == XKB_KEY_Right)
-            fk = LENS_KEY_RIGHT;
+            fk = IRIS_KEY_RIGHT;
         else if (sym == XKB_KEY_Up)
-            fk = LENS_KEY_UP;
+            fk = IRIS_KEY_UP;
         else if (sym == XKB_KEY_Down)
-            fk = LENS_KEY_DOWN;
+            fk = IRIS_KEY_DOWN;
         else if (sym == XKB_KEY_Home)
-            fk = LENS_KEY_HOME;
+            fk = IRIS_KEY_HOME;
         else if (sym == XKB_KEY_End)
-            fk = LENS_KEY_END;
+            fk = IRIS_KEY_END;
         else if (sym >= XKB_KEY_F1 && sym <= XKB_KEY_F12)
-            fk = LENS_KEY_F1 + (int)(sym - XKB_KEY_F1);
+            fk = IRIS_KEY_F1 + (int)(sym - XKB_KEY_F1);
         /* ASCII letters (and digits) so widgets see Ctrl+C/V/X/A etc.
          * xkb keysyms for these equal their ASCII codepoints; the level-0
          * keysym is the unshifted one ('a', never 'A'). */
@@ -1575,10 +1217,10 @@ static void kb_modifiers(void *data, struct wl_keyboard *k, uint32_t serial, uin
         const char *name;
         uint32_t bit;
     } m[] = {
-        {XKB_MOD_NAME_SHIFT, LENS_MOD_SHIFT},
-        {XKB_MOD_NAME_CTRL, LENS_MOD_CTRL},
-        {XKB_MOD_NAME_ALT, LENS_MOD_ALT},
-        {XKB_MOD_NAME_LOGO, LENS_MOD_SUPER},
+        {XKB_MOD_NAME_SHIFT, IRIS_MOD_SHIFT},
+        {XKB_MOD_NAME_CTRL, IRIS_MOD_CTRL},
+        {XKB_MOD_NAME_ALT, IRIS_MOD_ALT},
+        {XKB_MOD_NAME_LOGO, IRIS_MOD_SUPER},
     };
     uint32_t new_mods = 0;
     for (size_t i = 0; i < sizeof m / sizeof m[0]; i++) {
@@ -1619,809 +1261,6 @@ static const struct wl_keyboard_listener keyboard_listener = {
     .modifiers = kb_modifiers,
     .repeat_info = kb_repeat,
 };
-
-/* ------------------------------------------------------------------ */
-/*  Clipboard (wl_data_device) — bridges lens_clipboard to the selection */
-/* ------------------------------------------------------------------ */
-
-/* Offers announce their MIME types via offer events before the
- * selection/enter event binds them; accumulate into the pending slot and
- * move the record when the offer is bound (ddev_selection / ddev_enter). */
-static struct wp_offer_mimes *offer_mime_slot(wp_platform *pl, struct wl_data_offer *off) {
-    if (pl->pending_offer_mimes.offer == off)
-        return &pl->pending_offer_mimes;
-    if (pl->selection_offer_mimes.offer == off)
-        return &pl->selection_offer_mimes;
-    if (pl->dnd_offer_mimes.offer == off)
-        return &pl->dnd_offer_mimes;
-    return nullptr;
-}
-
-static void doffer_offer(void *data, struct wl_data_offer *off, const char *mime) {
-    wp_platform *pl = data;
-    struct wp_offer_mimes *slot = offer_mime_slot(pl, off);
-    if (!slot)
-        return;
-    if (strcmp(mime, "text/uri-list") == 0)
-        slot->uri_list = true;
-    else if (strcmp(mime, "x-special/gnome-copied-files") == 0)
-        slot->gnome_copied_files = true;
-    else if (strcmp(mime, "text/plain;charset=utf-8") == 0)
-        slot->text_utf8 = true;
-    else if (strcmp(mime, "text/plain") == 0)
-        slot->text_plain = true;
-}
-static void doffer_source_actions(void *d, struct wl_data_offer *o, uint32_t a) {
-    (void)d;
-    (void)o;
-    (void)a;
-}
-static void doffer_action(void *d, struct wl_data_offer *o, uint32_t a) {
-    (void)d;
-    (void)o;
-    (void)a;
-}
-static const struct wl_data_offer_listener data_offer_listener = {
-    .offer = doffer_offer,
-    .source_actions = doffer_source_actions,
-    .action = doffer_action,
-};
-
-/* The compositor announces a new offer object before selection/enter. */
-static void ddev_data_offer(void *data, struct wl_data_device *dev, struct wl_data_offer *offer) {
-    wp_platform *pl = data;
-    (void)dev;
-    /* A previous offer that was announced but never bound (no selection /
-     * enter referenced it) is ours to destroy, or it leaks. */
-    if (pl->pending_offer_mimes.offer && pl->pending_offer_mimes.offer != offer)
-        wl_data_offer_destroy(pl->pending_offer_mimes.offer);
-    pl->pending_offer_mimes = (struct wp_offer_mimes){.offer = offer,
-                                                      .uri_list = false,
-                                                      .text_utf8 = false,
-                                                      .text_plain = false,
-                                                      .gnome_copied_files = false};
-    wl_data_offer_add_listener(offer, &data_offer_listener, pl);
-}
-static void ddev_selection(void *data, struct wl_data_device *dev, struct wl_data_offer *offer) {
-    wp_platform *pl = data;
-    (void)dev;
-    if (pl->selection_offer && pl->selection_offer != offer)
-        wl_data_offer_destroy(pl->selection_offer);
-    pl->selection_offer = offer; /* may be NULL when selection is cleared */
-    pl->selection_offer_mimes = (struct wp_offer_mimes){.offer = offer};
-    if (offer && pl->pending_offer_mimes.offer == offer) {
-        pl->selection_offer_mimes = pl->pending_offer_mimes;
-        pl->pending_offer_mimes = (struct wp_offer_mimes){};
-    }
-}
-
-/* Strongest readable text MIME on the offer, or NULL when it carries no
- * text we can use (image-only drags, …). uri-list is preferred for file
- * drags; utf-8 text beats legacy text/plain. */
-static const char *offer_pick_mime(const struct wp_offer_mimes *m) {
-    if (m->gnome_copied_files)
-        return "x-special/gnome-copied-files";
-    if (m->uri_list)
-        return "text/uri-list";
-    if (m->text_utf8)
-        return "text/plain;charset=utf-8";
-    if (m->text_plain)
-        return "text/plain";
-    return nullptr;
-}
-
-/* Read a received offer fd with a hard overall deadline. Returns a malloc'd
- * buffer (caller frees) and its length via *out_len; NULL on error/timeout.
- * Runs on the async reader thread for every path (paste, primary paste,
- * drop) — never on the UI thread (cross-platform.md invariant 4). */
-#define WP_DND_READ_TIMEOUT_MS 2000
-#define WP_DROP_MAX (1u << 20) /* 1 MiB — matches lens's paste staging cap */
-static long long now_ns(void); /* defined with the frame-pacing helpers */
-
-static char *read_offer_fd(int fd, int timeout_ms, size_t *out_len) {
-    *out_len = 0;
-    char *out = nullptr;
-    size_t total = 0;
-    long long deadline = now_ns() + (long long)timeout_ms * 1000000LL;
-    for (;;) {
-        long long remain_ms = (deadline - now_ns()) / 1000000LL;
-        if (remain_ms <= 0)
-            break; /* deadline: a hostile or stuck source cannot hang the UI */
-        struct pollfd pfd = {.fd = fd, .events = POLLIN};
-        int pr = poll(&pfd, 1, (int)(remain_ms > 100 ? 100 : remain_ms));
-        if (pr < 0) {
-            if (errno == EINTR)
-                continue;
-            break;
-        }
-        if (pr == 0)
-            continue; /* re-check the deadline */
-        char chunk[16384];
-        ssize_t r = read(fd, chunk, sizeof chunk);
-        if (r == 0)
-            break; /* EOF */
-        if (r < 0) {
-            if (errno == EINTR)
-                continue;
-            break;
-        }
-        if (total + (size_t)r > WP_DROP_MAX) {
-            fprintf(stderr, "iris: drop/paste payload exceeds %u bytes; truncated\n",
-                    (unsigned)WP_DROP_MAX);
-            size_t room = WP_DROP_MAX - total;
-            if (room) {
-                char *grown = realloc(out, WP_DROP_MAX);
-                if (!grown) {
-                    free(out);
-                    return nullptr;
-                }
-                out = grown;
-                memcpy(out + total, chunk, room);
-                total = WP_DROP_MAX;
-            }
-            break;
-        }
-        char *grown = realloc(out, total + (size_t)r);
-        if (!grown) {
-            free(out);
-            return nullptr;
-        }
-        out = grown;
-        memcpy(out + total, chunk, (size_t)r);
-        total += (size_t)r;
-    }
-    *out_len = total;
-    return out;
-}
-
-/* ------------------------------------------------------------------ */
-/*  Async offer reads (clipboard paste / primary paste / DND drop)       */
-/* ------------------------------------------------------------------ */
-
-/* cross-platform.md invariant 4: the UI thread never blocks reading a
- * selection or drop payload — a stuck or malicious source must not hang
- * the app. Every read (clipboard paste, middle-click primary paste, DND
- * drop) runs on a detached helper thread with a hard deadline, and
- * completion is posted through iris_post_to_main_thread — which also makes
- * the self-paste case correct: the main thread keeps dispatching, so our
- * own data source can answer. */
-#define WP_PASTE_TIMEOUT_MS 5000
-
-typedef struct wp_paste_job {
-    wp_platform *pl;
-    int fd;
-    struct wl_data_offer *offer; /* DND drop only: finish+destroy on delivery */
-    uint32_t timeout_ms;
-    bool strip_crlf; /* strip trailing \\r\\n (uri-list drops) */
-} wp_paste_job;
-
-typedef struct wp_paste_result {
-    wp_platform *pl;
-    char *text; /* NULL when the read failed or timed out */
-    size_t len;
-    struct wl_data_offer *offer;
-} wp_paste_result;
-
-/* Runs on the iris main thread via iris_post_to_main_thread. pl->ui is
- * checked (not just pl): teardown clears it before draining the queue. */
-static void paste_deliver(void *user) {
-    wp_paste_result *res = user;
-    /* A drop's offer stays alive until the read completes so we can tell
-     * the source the transfer finished (protocol: finish before destroy).
-     * The slot check guards against teardown having destroyed it already. */
-    if (res->offer && res->pl->dnd_job_offer == res->offer) {
-        wl_data_offer_finish(res->offer);
-        wl_data_offer_destroy(res->offer);
-        res->pl->dnd_job_offer = nullptr;
-    }
-    if (res->pl->ui && res->text && res->len) {
-        lens_paste(res->pl->ui, &(lens_paste_opts){.utf8 = res->text, .len = res->len});
-        lens_deliver_drop(res->pl->ui, &(lens_deliver_drop_opts){.payload = res->text,
-                                                                 .len = res->len,
-                                                                 .pos = res->pl->dnd_pos});
-    }
-    free(res->text);
-    free(res);
-}
-
-static void *paste_reader_main(void *arg) {
-    wp_paste_job *job = arg;
-    size_t len = 0;
-    char *text = read_offer_fd(job->fd, (int)job->timeout_ms, &len);
-    iris_fd_close_record(job->fd, "fd_pipe_read");
-    if (text && job->strip_crlf) {
-        /* uri-list payloads are CRLF-terminated; the terminator is not
-         * part of the dropped text. */
-        while (len && (text[len - 1] == '\n' || text[len - 1] == '\r'))
-            text[--len] = '\0';
-    }
-
-    wp_paste_result *res = malloc(sizeof *res);
-    if (res) {
-        res->pl = job->pl;
-        res->text = text;
-        res->len = len;
-        res->offer = job->offer;
-        /* -1: the loop is gone (window closed mid-read) — drop. A DND
-         * offer in flight is then finished/destroyed by teardown (it owns
-         * the dnd_job_offer slot). */
-        if (iris_post_to_main_thread(paste_deliver, res) != 0) {
-            free(text);
-            free(res);
-        }
-    } else {
-        free(text);
-    }
-    free(job);
-    return nullptr;
-}
-
-/* Spawn the detached reader for an offer pipe's read end. Returns false on
- * failure (fd closed by caller path). */
-static bool start_offer_read(wp_platform *pl, int fd, struct wl_data_offer *offer,
-                             uint32_t timeout_ms, bool strip_crlf) {
-    wp_paste_job *job = malloc(sizeof *job);
-    if (!job)
-        return false;
-    job->pl = pl;
-    job->fd = fd;
-    job->offer = offer;
-    job->timeout_ms = timeout_ms;
-    job->strip_crlf = strip_crlf;
-    pthread_t th;
-    if (pthread_create(&th, nullptr, paste_reader_main, job) != 0) {
-        free(job);
-        return false;
-    }
-    pthread_detach(th);
-    return true;
-}
-
-static void ddev_enter(void *d, struct wl_data_device *dev, uint32_t s, struct wl_surface *su,
-                       wl_fixed_t x, wl_fixed_t y, struct wl_data_offer *o) {
-    (void)dev;
-    (void)su;
-    wp_platform *pl = d;
-    pl->dnd_inside = true;
-    pl->dnd_pos = (flux_point){wl_fixed_to_double(x), wl_fixed_to_double(y)};
-    (void)wp_emit_dnd(pl, pl->dnd_pos.x, pl->dnd_pos.y, true);
-    if (pl->dnd_offer != o) {
-        if (pl->dnd_offer)
-            wl_data_offer_destroy(pl->dnd_offer);
-        pl->dnd_offer = o;
-        pl->dnd_offer_mimes = (struct wp_offer_mimes){.offer = o};
-        if (o && pl->pending_offer_mimes.offer == o) {
-            pl->dnd_offer_mimes = pl->pending_offer_mimes;
-            pl->pending_offer_mimes = (struct wp_offer_mimes){};
-        }
-    }
-    if (o) {
-        /* Real MIME negotiation: accept only when the drag carries a text
-         * type we can read; otherwise leave the offer un-accepted and the
-         * compositor shows the not-allowed cursor. */
-        const char *mime = offer_pick_mime(&pl->dnd_offer_mimes);
-        if (mime) {
-            wl_data_offer_accept(o, s, mime);
-            wl_data_offer_set_actions(o, WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY,
-                                      WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY);
-        }
-    }
-}
-static void ddev_leave(void *d, struct wl_data_device *dev) {
-    (void)dev;
-    wp_platform *pl = d;
-    pl->dnd_inside = false;
-    (void)wp_emit_dnd(pl, pl->dnd_pos.x, pl->dnd_pos.y, false);
-    if (pl->dnd_offer) {
-        wl_data_offer_destroy(pl->dnd_offer);
-        pl->dnd_offer = nullptr;
-        pl->dnd_offer_mimes = (struct wp_offer_mimes){};
-    }
-}
-static void ddev_motion(void *d, struct wl_data_device *dev, uint32_t t, wl_fixed_t x,
-                        wl_fixed_t y) {
-    (void)dev;
-    (void)t;
-    wp_platform *pl = d;
-    pl->dnd_pos = (flux_point){wl_fixed_to_double(x), wl_fixed_to_double(y)};
-    (void)wp_emit_dnd(pl, pl->dnd_pos.x, pl->dnd_pos.y, true);
-}
-static void ddev_drop(void *d, struct wl_data_device *dev) {
-    (void)dev;
-    wp_platform *pl = d;
-    if (pl->dnd_offer) {
-        /* The read runs off the UI thread (invariant 4): hand the offer to
-         * the async job slot; delivery (paste + finish + destroy) happens
-         * in paste_deliver on the main thread when the read completes. */
-        const char *mime = offer_pick_mime(&pl->dnd_offer_mimes);
-        bool started = false;
-        if (mime && pl->ui && !pl->dnd_job_offer) {
-            int fds[2];
-            if (pipe(fds) == 0) {
-                iris_fd_open_record(fds[1], "fd_pipe_write");
-                iris_fd_open_record(fds[0], "fd_pipe_read");
-                wl_data_offer_receive(pl->dnd_offer, mime, fds[1]);
-                iris_fd_close_record(fds[1], "fd_pipe_write");
-                wl_display_flush(pl->display);
-                started = start_offer_read(pl, fds[0], pl->dnd_offer, WP_DND_READ_TIMEOUT_MS,
-                                           true /* uri-list CRLF strip */);
-                if (!started)
-                    iris_fd_close_record(fds[0], "fd_pipe_read");
-                else
-                    pl->dnd_job_offer = pl->dnd_offer;
-            }
-        }
-        if (!started) {
-            /* No usable payload or no reader: close the DND session now. */
-            wl_data_offer_finish(pl->dnd_offer);
-            wl_data_offer_destroy(pl->dnd_offer);
-        }
-        pl->dnd_offer = nullptr;
-        pl->dnd_offer_mimes = (struct wp_offer_mimes){};
-    }
-    pl->dnd_inside = false;
-}
-static const struct wl_data_device_listener data_device_listener = {
-    .data_offer = ddev_data_offer,
-    .enter = ddev_enter,
-    .leave = ddev_leave,
-    .motion = ddev_motion,
-    .drop = ddev_drop,
-    .selection = ddev_selection,
-};
-
-/* Our outgoing selection: write the stored buffer when a reader asks. */
-static void dsource_send(void *data, struct wl_data_source *src, const char *mime, int32_t fd) {
-    wp_platform *pl = data;
-    (void)src;
-    /* The compositor hands the destination's pipe write end to us; it is
-     * ours to close on every path (adopted here, released by the wrapper). */
-    iris_fd_open_record(fd, "fd_selection_write");
-    const char *p = pl->copy_buf;
-    size_t left = pl->copy_len;
-
-    if (p && mime && strcmp(mime, "text/uri-list") == 0) {
-        if (left >= 5 && strncmp(p, "copy\n", 5) == 0) {
-            p += 5;
-            left -= 5;
-        } else if (left >= 4 && strncmp(p, "cut\n", 4) == 0) {
-            p += 4;
-            left -= 4;
-        }
-    }
-
-    while (left) {
-        ssize_t w = write(fd, p, left);
-        if (w <= 0)
-            break;
-        p += w;
-        left -= (size_t)w;
-    }
-    iris_fd_close_record(fd, "fd_selection_write");
-}
-static void dsource_cancelled(void *data, struct wl_data_source *src) {
-    wp_platform *pl = data;
-    wl_data_source_destroy(src);
-    if (pl->copy_source == src)
-        pl->copy_source = nullptr;
-}
-static void dsource_target(void *d, struct wl_data_source *s, const char *m) {
-    (void)d;
-    (void)s;
-    (void)m;
-}
-/* v3 events. A selection source is never a drag source, so these cannot
- * legitimately arrive — but libwayland aborts the process when ANY event lands
- * on a NULL listener slot, and the data_device_manager is bound at v3, which
- * makes them dispatchable. No-op beats a crash on a compositor that answers
- * loosely. */
-static void dsource_dnd_drop_performed(void *d, struct wl_data_source *s) {
-    (void)d;
-    (void)s;
-}
-static void dsource_dnd_finished(void *d, struct wl_data_source *s) {
-    (void)d;
-    (void)s;
-}
-static void dsource_action(void *d, struct wl_data_source *s, uint32_t action) {
-    (void)d;
-    (void)s;
-    (void)action;
-}
-static const struct wl_data_source_listener data_source_listener = {
-    .target = dsource_target,
-    .send = dsource_send,
-    .cancelled = dsource_cancelled,
-    .dnd_drop_performed = dsource_dnd_drop_performed,
-    .dnd_finished = dsource_dnd_finished,
-    .action = dsource_action,
-};
-
-/* Outgoing Drag-and-Drop source (ADR-0086) */
-static void drag_source_cleanup(wp_platform *pl) {
-    if (pl->drag_source) {
-        wl_data_source_destroy(pl->drag_source);
-        pl->drag_source = nullptr;
-    }
-    if (pl->drag_text_buf) {
-        free(pl->drag_text_buf);
-        pl->drag_text_buf = nullptr;
-        pl->drag_text_len = 0;
-    }
-    pl->drag_active = false;
-    pl->dnd_inside = false;
-    pl->acc.down[0] = false;
-    pl->acc.released[0] = true;
-    memset(&pl->drag_info, 0, sizeof(pl->drag_info));
-}
-
-static void drag_source_send(void *data, struct wl_data_source *src, const char *mime, int32_t fd) {
-    wp_platform *pl = data;
-    (void)src;
-    iris_fd_open_record(fd, "fd_drag_write");
-    /* A host callback that owns the fd still goes through the wrapper so the
-     * row balances; ownership of the descriptor itself is unchanged. */
-    if (pl->drag_info.callbacks.provide_data) {
-        pl->drag_info.callbacks.provide_data(mime, fd, pl->drag_info.callbacks.user);
-    } else if (pl->drag_text_buf && pl->drag_text_len) {
-        const char *p = pl->drag_text_buf;
-        size_t left = pl->drag_text_len;
-        if (p && mime && strcmp(mime, "text/uri-list") == 0 && p[0] == '/') {
-            char uri[4096];
-            int n = snprintf(uri, sizeof(uri), "file://%s\r\n", p);
-            if (n > 0 && (size_t)n < sizeof(uri)) {
-                ssize_t w = write(fd, uri, (size_t)n);
-                (void)w;
-                iris_fd_close_record(fd, "fd_drag_write");
-                return;
-            }
-        }
-        while (left) {
-            ssize_t w = write(fd, p, left);
-            if (w <= 0)
-                break;
-            p += w;
-            left -= (size_t)w;
-        }
-        iris_fd_close_record(fd, "fd_drag_write");
-    } else {
-        iris_fd_close_record(fd, "fd_drag_write");
-    }
-}
-
-static void drag_source_cancelled(void *data, struct wl_data_source *src) {
-    wp_platform *pl = data;
-    (void)src;
-    if (pl->drag_info.callbacks.cancelled) {
-        pl->drag_info.callbacks.cancelled(pl->drag_info.callbacks.user);
-    }
-    drag_source_cleanup(pl);
-}
-
-static void drag_source_target(void *d, struct wl_data_source *s, const char *m) {
-    (void)d;
-    (void)s;
-    (void)m;
-}
-
-static void drag_source_dnd_drop_performed(void *data, struct wl_data_source *src) {
-    (void)data;
-    (void)src;
-}
-
-static void drag_source_dnd_finished(void *data, struct wl_data_source *src) {
-    wp_platform *pl = data;
-    (void)src;
-    if (pl->drag_info.callbacks.finished) {
-        pl->drag_info.callbacks.finished(IRIS_DND_ACTION_COPY, pl->drag_info.callbacks.user);
-    }
-    drag_source_cleanup(pl);
-}
-
-static void drag_source_action(void *data, struct wl_data_source *src, uint32_t dnd_action) {
-    (void)data;
-    (void)src;
-    (void)dnd_action;
-}
-
-static const struct wl_data_source_listener drag_source_listener = {
-    .target = drag_source_target,
-    .send = drag_source_send,
-    .cancelled = drag_source_cancelled,
-    .dnd_drop_performed = drag_source_dnd_drop_performed,
-    .dnd_finished = drag_source_dnd_finished,
-    .action = drag_source_action,
-};
-
-IRIS_API int iris_dnd_start(const iris_dnd_source *source) {
-    wp_platform *pl = g_active_pl;
-    if (!pl || !pl->data_device_mgr || !pl->data_device || !pl->surface || !source)
-        return -1;
-
-    if (pl->drag_active)
-        drag_source_cleanup(pl);
-
-    pl->drag_source = wl_data_device_manager_create_data_source(pl->data_device_mgr);
-    if (!pl->drag_source)
-        return -1;
-
-    pl->drag_info = *source;
-    pl->drag_active = true;
-
-    if (source->static_text && source->static_text_len) {
-        pl->drag_text_buf = malloc(source->static_text_len + 1);
-        if (pl->drag_text_buf) {
-            memcpy(pl->drag_text_buf, source->static_text, source->static_text_len);
-            pl->drag_text_buf[source->static_text_len] = '\0';
-            pl->drag_text_len = source->static_text_len;
-        }
-    }
-
-    wl_data_source_add_listener(pl->drag_source, &drag_source_listener, pl);
-
-    if (source->mime_count > 0 && source->mime_types) {
-        for (uint32_t i = 0; i < source->mime_count; i++) {
-            if (source->mime_types[i])
-                wl_data_source_offer(pl->drag_source, source->mime_types[i]);
-        }
-    } else {
-        const char *t = source->static_text;
-        size_t tlen = source->static_text_len;
-        if (t && tlen > 0 && t[0] == '/') {
-            wl_data_source_offer(pl->drag_source, "text/uri-list");
-        }
-        wl_data_source_offer(pl->drag_source, "text/plain;charset=utf-8");
-        wl_data_source_offer(pl->drag_source, "text/plain");
-        wl_data_source_offer(pl->drag_source, "UTF8_STRING");
-    }
-
-    uint32_t actions =
-        WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY | WL_DATA_DEVICE_MANAGER_DND_ACTION_MOVE;
-    if (wl_data_source_get_version(pl->drag_source) >= 3) {
-        wl_data_source_set_actions(pl->drag_source, actions);
-    }
-
-    wl_data_device_start_drag(pl->data_device, pl->drag_source, pl->surface, nullptr,
-                              pl->last_serial);
-    return 0;
-}
-
-IRIS_API bool iris_dnd_is_active(void) {
-    wp_platform *pl = g_active_pl;
-    return pl && pl->drag_active;
-}
-
-IRIS_API void iris_dnd_cancel(void) {
-    wp_platform *pl = g_active_pl;
-    if (pl && pl->drag_active) {
-        drag_source_cleanup(pl);
-    }
-}
-
-static void wp_maybe_create_data_device(wp_platform *pl) {
-    if (pl->data_device || !pl->data_device_mgr || !pl->seat)
-        return;
-    pl->data_device = wl_data_device_manager_get_data_device(pl->data_device_mgr, pl->seat);
-    wl_data_device_add_listener(pl->data_device, &data_device_listener, pl);
-}
-
-/* ------------------------------------------------------------------ */
-/*  Primary selection (zwp_primary_selection_unstable_v1)                */
-/* ------------------------------------------------------------------ */
-
-/* The X11-style middle-click clipboard, mirrored from clip_set_text and
- * read on middle-button press (primsel_paste, called from ptr_button).
- * Same offer/MIME machinery as the clipboard, with its own pending/bound
- * slots (primary offers are a different object type, tracked through the
- * shared wp_offer_mimes identity cookie). */
-
-static struct wp_offer_mimes *primsel_mime_slot(wp_platform *pl,
-                                                struct zwp_primary_selection_offer_v1 *off) {
-    if ((struct zwp_primary_selection_offer_v1 *)pl->primsel_pending_mimes.offer == off)
-        return &pl->primsel_pending_mimes;
-    if ((struct zwp_primary_selection_offer_v1 *)pl->primsel_offer_mimes.offer == off)
-        return &pl->primsel_offer_mimes;
-    return nullptr;
-}
-
-static void poffer_offer(void *data, struct zwp_primary_selection_offer_v1 *off, const char *mime) {
-    wp_platform *pl = data;
-    struct wp_offer_mimes *slot = primsel_mime_slot(pl, off);
-    if (!slot)
-        return;
-    if (strcmp(mime, "text/plain;charset=utf-8") == 0)
-        slot->text_utf8 = true;
-    else if (strcmp(mime, "text/plain") == 0)
-        slot->text_plain = true;
-}
-static const struct zwp_primary_selection_offer_v1_listener primary_offer_listener = {
-    .offer = poffer_offer,
-};
-
-static void pdev_data_offer(void *data, struct zwp_primary_selection_device_v1 *dev,
-                            struct zwp_primary_selection_offer_v1 *offer) {
-    wp_platform *pl = data;
-    (void)dev;
-    /* A previous offer that was announced but never bound is ours to
-     * destroy, or it leaks. */
-    if (pl->primsel_pending_mimes.offer &&
-        (struct zwp_primary_selection_offer_v1 *)pl->primsel_pending_mimes.offer != offer)
-        zwp_primary_selection_offer_v1_destroy(
-            (struct zwp_primary_selection_offer_v1 *)pl->primsel_pending_mimes.offer);
-    pl->primsel_pending_mimes = (struct wp_offer_mimes){.offer = (struct wl_data_offer *)offer};
-    zwp_primary_selection_offer_v1_add_listener(offer, &primary_offer_listener, pl);
-}
-static void pdev_selection(void *data, struct zwp_primary_selection_device_v1 *dev,
-                           struct zwp_primary_selection_offer_v1 *offer) {
-    wp_platform *pl = data;
-    (void)dev;
-    if (pl->primsel_offer && pl->primsel_offer != offer)
-        zwp_primary_selection_offer_v1_destroy(pl->primsel_offer);
-    pl->primsel_offer = offer; /* may be NULL when the selection is cleared */
-    pl->primsel_offer_mimes = (struct wp_offer_mimes){.offer = (struct wl_data_offer *)offer};
-    if (offer &&
-        (struct zwp_primary_selection_offer_v1 *)pl->primsel_pending_mimes.offer == offer) {
-        pl->primsel_offer_mimes = pl->primsel_pending_mimes;
-        pl->primsel_pending_mimes = (struct wp_offer_mimes){};
-    }
-}
-static const struct zwp_primary_selection_device_v1_listener primary_device_listener = {
-    .data_offer = pdev_data_offer,
-    .selection = pdev_selection,
-};
-
-/* Our outgoing primary selection: serves the same buffer as the clipboard
- * source (clip_set_text mirrors every copy onto both). */
-static void psource_send(void *data, struct zwp_primary_selection_source_v1 *src, const char *mime,
-                         int32_t fd) {
-    wp_platform *pl = data;
-    (void)src;
-    (void)mime;
-    const char *p = pl->copy_buf;
-    size_t left = pl->copy_len;
-    while (left) {
-        ssize_t w = write(fd, p, left);
-        if (w <= 0)
-            break;
-        p += w;
-        left -= (size_t)w;
-    }
-    iris_fd_close_record(fd, "fd_primary_write");
-}
-static void psource_cancelled(void *data, struct zwp_primary_selection_source_v1 *src) {
-    wp_platform *pl = data;
-    zwp_primary_selection_source_v1_destroy(src);
-    if (pl->primsel_source == src)
-        pl->primsel_source = nullptr;
-}
-static const struct zwp_primary_selection_source_v1_listener primary_source_listener = {
-    .send = psource_send,
-    .cancelled = psource_cancelled,
-};
-
-static void wp_maybe_create_primsel_device(wp_platform *pl) {
-    if (pl->primsel_device || !pl->primsel_mgr || !pl->seat)
-        return;
-    pl->primsel_device =
-        zwp_primary_selection_device_manager_v1_get_device(pl->primsel_mgr, pl->seat);
-    zwp_primary_selection_device_v1_add_listener(pl->primsel_device, &primary_device_listener, pl);
-}
-
-/* Middle-click paste: request the primary selection's text and deliver it
- * through the same async paste channel as the clipboard (lens_paste routes
- * it to the focused text widget, so a middle click anywhere pastes into
- * whatever holds focus — the standard desktop behaviour). */
-static void primsel_paste(wp_platform *pl) {
-    if (!pl->primsel_offer || !pl->ui)
-        return;
-
-    int fds[2];
-    if (pipe(fds) != 0)
-        return;
-    /* Text family only (no uri-list): utf-8 beats legacy text/plain; fall
-     * back to utf-8 when the offer predates our MIME tracking. */
-    const struct wp_offer_mimes *m = &pl->primsel_offer_mimes;
-    const char *mime = ((struct zwp_primary_selection_offer_v1 *)m->offer == pl->primsel_offer &&
-                        m->text_plain && !m->text_utf8)
-                           ? "text/plain"
-                           : "text/plain;charset=utf-8";
-    iris_fd_open_record(fds[1], "fd_pipe_write");
-    iris_fd_open_record(fds[0], "fd_pipe_read");
-    zwp_primary_selection_offer_v1_receive(pl->primsel_offer, mime, fds[1]);
-    iris_fd_close_record(fds[1], "fd_pipe_write");
-    wl_display_flush(pl->display);
-
-    if (!start_offer_read(pl, fds[0], nullptr, WP_PASTE_TIMEOUT_MS, false))
-        iris_fd_close_record(fds[0], "fd_pipe_read");
-}
-
-/* lens_clipboard.set_text — advertise `utf8` as the system selection, and
- * mirror it onto the primary selection (the X11-style middle-click
- * clipboard) so explicit copies are also middle-pasteable. */
-static void clip_set_text(const char *utf8, size_t len, void *user) {
-    wp_platform *pl = user;
-    if (!pl->data_device_mgr || !pl->data_device)
-        return;
-
-    char *copy = malloc(len ? len : 1);
-    if (!copy)
-        return;
-    memcpy(copy, utf8, len);
-    free(pl->copy_buf);
-    pl->copy_buf = copy;
-    pl->copy_len = len;
-
-    pl->copy_source = wl_data_device_manager_create_data_source(pl->data_device_mgr);
-    wl_data_source_add_listener(pl->copy_source, &data_source_listener, pl);
-
-    bool is_gnome_files = (len >= 5 && strncmp(copy, "copy\n", 5) == 0) ||
-                          (len >= 4 && strncmp(copy, "cut\n", 4) == 0);
-    bool is_uri_list =
-        (len >= 7 && (strncmp(copy, "file://", 7) == 0 || strncmp(copy, "http://", 7) == 0)) ||
-        (len >= 8 && strncmp(copy, "https://", 8) == 0);
-    if (is_gnome_files) {
-        wl_data_source_offer(pl->copy_source, "x-special/gnome-copied-files");
-        wl_data_source_offer(pl->copy_source, "text/uri-list");
-    } else if (is_uri_list) {
-        wl_data_source_offer(pl->copy_source, "text/uri-list");
-    }
-    wl_data_source_offer(pl->copy_source, "text/plain;charset=utf-8");
-    wl_data_source_offer(pl->copy_source, "text/plain");
-    wl_data_source_offer(pl->copy_source, "UTF8_STRING");
-    wl_data_device_set_selection(pl->data_device, pl->copy_source, pl->last_serial);
-
-    if (pl->primsel_mgr && pl->primsel_device) {
-        pl->primsel_source = zwp_primary_selection_device_manager_v1_create_source(pl->primsel_mgr);
-        zwp_primary_selection_source_v1_add_listener(pl->primsel_source, &primary_source_listener,
-                                                     pl);
-        zwp_primary_selection_source_v1_offer(pl->primsel_source, "text/plain;charset=utf-8");
-        zwp_primary_selection_source_v1_offer(pl->primsel_source, "text/plain");
-        zwp_primary_selection_device_v1_set_selection(pl->primsel_device, pl->primsel_source,
-                                                      pl->last_serial);
-    }
-}
-
-/* lens_clipboard.request_text — the lens contract is asynchronous
- * (cross-platform.md invariant 4): the answer MUST arrive later via
- * lens_paste, never synchronously inside the request. The pipe is drained
- * on a detached helper thread with a hard deadline (start_offer_read), and
- * completion is posted through iris_post_to_main_thread — which also makes
- * the self-paste case correct: the main thread keeps dispatching, so our
- * own data source can answer. */
-static void clip_request_text(void *user) {
-    wp_platform *pl = user;
-    if (!pl->selection_offer || !pl->ui)
-        return;
-
-    int fds[2];
-    if (pipe(fds) != 0)
-        return;
-    /* Negotiate against the offer's advertised types; fall back to the
-     * UTF-8 type when the offer predates our MIME tracking (harmless: the
-     * source simply refuses a type it does not have). */
-    const struct wp_offer_mimes *m = &pl->selection_offer_mimes;
-    const char *mime = offer_pick_mime(m);
-    if (!mime)
-        mime = "text/plain;charset=utf-8";
-    iris_fd_open_record(fds[1], "fd_pipe_write");
-    iris_fd_open_record(fds[0], "fd_pipe_read");
-    wl_data_offer_receive(pl->selection_offer, mime, fds[1]);
-    iris_fd_close_record(fds[1], "fd_pipe_write");
-    wl_display_flush(pl->display);
-
-    if (!start_offer_read(pl, fds[0], nullptr, WP_PASTE_TIMEOUT_MS, false))
-        iris_fd_close_record(fds[0], "fd_pipe_read");
-}
-
-static int lens_host_start_drag(const char *text, size_t len, uint32_t actions, void *user) {
-    (void)user;
-    iris_dnd_source src = {
-        .actions = actions,
-        .static_text = text,
-        .static_text_len = len,
-    };
-    return iris_dnd_start(&src);
-}
 
 /* ------------------------------------------------------------------ */
 /*  Seat                                                               */
@@ -2816,7 +1655,7 @@ static void reg_global(void *data, struct wl_registry *reg, uint32_t name, const
         wp_maybe_create_data_device(pl);
     } else if (strcmp(iface, zwp_primary_selection_device_manager_v1_interface.name) == 0) {
         /* primary-selection-unstable-v1: the X11-style middle-click
-         * clipboard (mirror of clip_set_text; read on middle press). */
+         * clipboard (mirror of wp_clip_set_text; read on middle press). */
         pl->primsel_mgr =
             wl_registry_bind(reg, name, &zwp_primary_selection_device_manager_v1_interface, 1);
         wp_maybe_create_primsel_device(pl);
@@ -2968,10 +1807,10 @@ const char *iris_wayland__foreign_handle(void) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Build one lens_input from the accumulated state                      */
+/*  Build one iris_input from the accumulated state                      */
 /* ------------------------------------------------------------------ */
 
-static void drain_input(wp_platform *pl, lens_input *in, float dt) {
+static void drain_input(wp_platform *pl, iris_input *in, float dt) {
     memset(in, 0, sizeof *in);
     in->cursor = (flux_point){(float)pl->acc.cx, (float)pl->acc.cy};
     in->display_size = (flux_point){(float)pl->width, (float)pl->height};
@@ -2981,7 +1820,7 @@ static void drain_input(wp_platform *pl, lens_input *in, float dt) {
     in->scroll_y = (float)pl->acc.scroll_y;
     in->scroll_pixels_x = (float)pl->acc.scroll_px_x;
     in->scroll_pixels_y = (float)pl->acc.scroll_px_y;
-    for (int i = 0; i < LENS_MOUSE_COUNT; i++) {
+    for (int i = 0; i < IRIS_BUTTON_COUNT; i++) {
         in->mouse_down[i] = pl->acc.down[i];
         in->mouse_pressed[i] = pl->acc.pressed[i];
         in->mouse_released[i] = pl->acc.released[i];
@@ -3008,7 +1847,7 @@ static void drain_input(wp_platform *pl, lens_input *in, float dt) {
      * axis source is per frame-group and reset at wl_pointer.frame
      * (ptr_frame); resetting again here is defense in depth for a
      * compositor that ends a group without a frame event. */
-    for (int i = 0; i < LENS_MOUSE_COUNT; i++)
+    for (int i = 0; i < IRIS_BUTTON_COUNT; i++)
         pl->acc.pressed[i] = pl->acc.released[i] = false;
     pl->acc.scroll_x = pl->acc.scroll_y = 0.0;
     pl->acc.scroll_px_x = pl->acc.scroll_px_y = 0.0;
@@ -3021,9 +1860,9 @@ static void drain_input(wp_platform *pl, lens_input *in, float dt) {
 
 /* Diagnostics go to stderr, never stdout: a consumer's stdout may be an
  * IPC wire (see flux_console_logger). */
-static void log_raw(const lens_input *in) {
-    static const char *names[LENS_MOUSE_COUNT] = {"left", "right", "middle"};
-    for (int b = 0; b < LENS_MOUSE_COUNT; b++) {
+static void log_raw(const iris_input *in) {
+    static const char *names[IRIS_BUTTON_COUNT] = {"left", "right", "middle"};
+    for (int b = 0; b < IRIS_BUTTON_COUNT; b++) {
         if (in->mouse_pressed[b])
             fprintf(stderr, "[raw] mouse press   %s\n", names[b]);
         if (in->mouse_released[b])
@@ -3137,13 +1976,6 @@ static bool pump_events(wp_platform *pl, int timeout_ms) {
     return pr > 0;
 }
 
-/* Monotonic nanoseconds, for frame pacing. */
-static long long now_ns(void) {
-    struct timespec t;
-    clock_gettime(CLOCK_MONOTONIC, &t);
-    return (long long)t.tv_sec * 1000000000LL + (long long)t.tv_nsec;
-}
-
 /* ------------------------------------------------------------------ */
 /*  Display pacing (ADR-0122)                                          */
 /* ------------------------------------------------------------------ */
@@ -3245,7 +2077,7 @@ static bool acc_has_user_input(wp_platform *pl, double *pcx, double *pcy) {
     bool edge = pl->acc.key_count != 0 || pl->acc.text[0] != '\0' || pl->acc.preedit[0] != '\0' ||
                 pl->acc.scroll_x != 0.0 || pl->acc.scroll_y != 0.0 || pl->acc.scroll_px_x != 0.0 ||
                 pl->acc.scroll_px_y != 0.0;
-    for (int i = 0; i < LENS_MOUSE_COUNT; i++)
+    for (int i = 0; i < IRIS_BUTTON_COUNT; i++)
         edge = edge || pl->acc.pressed[i] || pl->acc.released[i] || pl->acc.down[i];
     return moved || edge;
 }
@@ -3314,7 +2146,7 @@ static void im_frame_update(wp_platform *pl) {
     if (!pl->text_input || !pl->ui)
         return;
 
-    lens_text_context ctx = lens_text_context_get(pl->ui);
+    const iris_text_context ctx = pl->ui_frame.text;
     bool want = pl->kb_focused && ctx.utf8 != nullptr;
     if (want != pl->im_active) {
         if (want) {
@@ -3338,7 +2170,7 @@ static void im_frame_update(wp_platform *pl) {
 
     /* Candidate window follows the caret. */
     if (pl->im_active && pl->text_input_surface) {
-        flux_rect caret = lens_caret_rect(pl->ui);
+        flux_rect caret = ctx.caret;
         if (caret.w > 0.0f) {
             zwp_text_input_v3_set_cursor_rectangle(pl->text_input, (int32_t)caret.x,
                                                    (int32_t)caret.y, (int32_t)caret.w,
@@ -3357,7 +2189,7 @@ typedef struct wp_present_context {
     flux_device *device;
     flux_surface *surface;
     flux_canvas *canvas;
-    const iris_app_config *cfg;
+    const iris_app_opts *cfg;
 } wp_present_context;
 
 static void *wp_presenter_thread_main(void *arg) {
@@ -3398,7 +2230,7 @@ static void *wp_presenter_thread_main(void *arg) {
         if (!pkt)
             continue;
 
-        if (pkt->snapshot) {
+        if (pkt->snapshot || pkt->host_list) {
             flux_surface *target_surface = ctx->surface;
             flux_canvas *target_canvas = ctx->canvas;
 
@@ -3449,8 +2281,9 @@ static void *wp_presenter_thread_main(void *arg) {
                         drew = true;
                     }
                     if (pkt->snapshot) {
-                        drew =
-                            (lens_snapshot_submit(pkt->snapshot, target_canvas) == FLUX_OK) || drew;
+                        drew = (iris__ui_snapshot_submit(ctx->cfg->ui, pkt->snapshot,
+                                                         target_canvas) == FLUX_OK) ||
+                               drew;
                     }
                     (void)flux_canvas_end(target_canvas);
                 }
@@ -3478,8 +2311,6 @@ static void *wp_presenter_thread_main(void *arg) {
                 }
             }
         }
-
-        iris_mailbox_recycle(&pl->mailbox, pkt);
     }
     return nullptr;
 }
@@ -3488,7 +2319,7 @@ static void *wp_presenter_thread_main(void *arg) {
 /*  Run                                                                */
 /* ------------------------------------------------------------------ */
 
-int iris_app_run_wayland(const iris_app_config *cfg) {
+int iris_app_run_wayland(const iris_app_opts *cfg) {
     /* All resources declared up front and NULL/VK_NULL_HANDLE-initialized so
      * a single `fail:` cleanup block can run on every exit path (error or
      * success) without referencing out-of-scope or indeterminate pointers. */
@@ -3496,7 +2327,8 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
     VkSurfaceKHR vk_surface = VK_NULL_HANDLE;
     flux_surface *surface = nullptr;
     flux_canvas *canvas = nullptr;
-    lens *ui = nullptr;
+    const iris_ui_host *ui = nullptr; /* set once the UI host started */
+    bool ui_started = false;
     bool host_started = false;
     int rc = 1; /* pessimistic; set to 0 only on success */
 
@@ -3669,7 +2501,7 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
     }
 
     /* Swapchain is sized in *device* pixels — logical × buffer_scale —
-     * while layout and lens_input stay in logical units. */
+     * while layout and iris_input stay in logical units. */
     wl_surface_set_buffer_scale(pl.surface, pl.buffer_scale);
     wp_update_opaque_region(&pl);
     wl_surface_commit(pl.surface);
@@ -3697,22 +2529,22 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
         goto fail;
     }
 
-    if (lens_create(&(lens_desc){.device = device,
-                                 .theme = cfg->dark
-                                              ? lens_theme_dark()
-                                              : (iris_system_prefers_dark() ? lens_theme_dark()
-                                                                            : lens_theme_default()),
-                                 .scale = (float)pl.buffer_scale,
-                                 .clipboard = {.set_text = clip_set_text,
-                                               .request_text = clip_request_text,
-                                               .user = &pl},
-                                 .dnd = {.start_drag = lens_host_start_drag, .user = &pl}},
-                    &ui) != FLUX_OK) {
-        fprintf(stderr, "lens_create failed\n");
+    if (!iris__ui_start(cfg->ui, &(iris_ui_start_info){
+                                     .device = device,
+                                     .scale = (float)pl.buffer_scale,
+                                     .dark = cfg->dark || iris_system_prefers_dark(),
+                                     .services = {.clipboard_set_text = wp_clip_set_text,
+                                                  .clipboard_request_text = wp_clip_request_text,
+                                                  .start_drag = wp_start_drag,
+                                                  .user = &pl},
+                                 })) {
+        fprintf(stderr, "iris UI host start failed\n");
         goto fail;
     }
+    ui = cfg->ui;
+    ui_started = true;
 
-    if (cfg->start && !cfg->start(ui, device, cfg->user)) {
+    if (cfg->start && !cfg->start(device, cfg->user)) {
         fprintf(stderr, "iris host start callback failed\n");
         goto fail;
     }
@@ -3731,7 +2563,7 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
      * main-thread prepare pass. Recorded host content travels through the
      * mailbox as an immutable display list. */
     if (!cfg->prepare) {
-        iris_mailbox_init(&pl.mailbox);
+        iris_mailbox_init(&pl.mailbox, cfg->ui);
         sem_init(&pl.present_sem, 0, 0);
         atomic_init(&pl.presenter_running, true);
         if (pthread_create(&pl.present_thread, nullptr, wp_presenter_thread_main, &pctx) == 0)
@@ -3812,10 +2644,7 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
      * unconditionally — accessibility is not opt-in. */
     {
         iris_a11y_prefs prefs = iris_a11y_prefs_query();
-        lens_set_reduced_motion(ui, prefs.reduced_motion);
-        lens_set_text_scale(ui, prefs.text_scale);
-        if (prefs.high_contrast)
-            wp_on_a11y_prefs(&prefs, &pl);
+        iris__ui_set_a11y_prefs(ui, &prefs);
     }
     pl.a11y_prefs_watching = (iris_a11y_prefs__watch_backend(wp_on_a11y_prefs, &pl) == 0);
 
@@ -3916,7 +2745,7 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
             wl_surface_set_buffer_scale(pl.surface, pl.buffer_scale);
             wp_update_opaque_region(&pl);
             wl_surface_commit(pl.surface);
-            lens_set_scale(ui, (float)pl.buffer_scale);
+            iris__ui_set_scale(ui, (float)pl.buffer_scale);
             pl.resized = true;
         }
         if (pl.resized) {
@@ -3957,22 +2786,19 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
         }
         last_sim_ns = sim_ns;
 
-        lens_input in;
+        iris_input in;
 
         drain_input(&pl, &in, dt);
         if (cfg->log_raw)
             log_raw(&in);
 
-        lens_begin(ui, &in);
-        if (cfg->build)
-            cfg->build(ui, &in, cfg->user);
-        lens_end(ui);
+        iris__ui_frame(ui, &in, &pl.ui_frame);
 
         /* Push the live semantic tree to the accessibility bridge so screen
          * readers see the current widget names / roles / focus. No-op
          * when the bridge isn't running or when inactive (ADR-0103). */
-        if (pl.a11y_running)
-            iris_a11y_update(ui);
+        if (pl.a11y_running && ui)
+            (void)iris_a11y_update(ui);
 
         /* Cursor: an explicit host iris_set_cursor pins the cursor; while
          * it is DEFAULT, follow the semantic hint of the lens widget under
@@ -3993,13 +2819,13 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
          * is the more specific promise and outranks a stale animation request,
          * while chrome damage, a resize, and the not-yet-presented latch still
          * force a real paint because they change what is on screen. */
-        bool chrome_damaged = lens_frame_needs_repaint(ui);
+        bool chrome_damaged = pl.ui_frame.damaged;
         bool surface_forced = resized_this_frame || surface_needs_paint;
         /* A caret asks for a frame only when its phase flipped, and lens is
          * the single authority for that comparison (ADR-0151): it is the only
          * component that knows which phase reached the display. The host
          * never models a blink. */
-        const bool caret_ticking = lens_caret_clock_live(ui);
+        const bool caret_ticking = pl.ui_frame.caret_ticking;
 
         iris_pace_inputs pace_in = {
             .now_ns = now,
@@ -4016,7 +2842,7 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
             .chrome_damaged = chrome_damaged,
             .caret_ticking = caret_ticking,
             .surface_needs_paint = surface_forced,
-            .lens_animating = lens_anim_pending(ui),
+            .ui_animating = pl.ui_frame.animating,
         };
         /* The declarations are consumed here and must be re-issued every
          * frame, so a stale flag can never skip a frame the host wanted
@@ -4038,8 +2864,8 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
                  */
                 flux_display_list *host_list = iris_record_host_canvas(cfg, (float)pl.buffer_scale);
 
-                lens_scene_snapshot *snapshot = nullptr;
-                if (lens_snapshot_create(ui, &snapshot) == FLUX_OK || host_list != nullptr) {
+                iris_ui_snapshot *snapshot = nullptr;
+                if (iris__ui_snapshot_create(ui, &snapshot) == FLUX_OK || host_list != nullptr) {
                     iris_frame_packet *pkt = iris_mailbox_acquire(&pl.mailbox);
                     if (pkt) {
                         pkt->snapshot = snapshot;
@@ -4047,18 +2873,19 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
                         /* Resolve the frame's damage set on the UI thread: the
                          * presentation thread must not re-query lens, and the set
                          * has to travel with the snapshot it describes. */
-                        pkt->damage_count = lens_damage_rects(
-                            ui, &(lens_damage_opts){.rects = pkt->damage,
-                                                    .capacity = LENS_DAMAGE_RECTS_CAPACITY});
+                        pkt->damage_count =
+                            iris__ui_damage_rects(ui, pkt->damage, IRIS_DAMAGE_RECTS_CAPACITY);
                         pkt->force_paint = surface_forced;
                         pkt->has_clear = !cfg->no_clear;
-                        pkt->clear_color = lens_get_theme(ui).color_bg;
+                        pkt->clear_color = pl.ui_frame.clear_color;
                         pkt->scale = (float)pl.buffer_scale;
                         pkt->width = pl.width;
                         pkt->height = pl.height;
                         iris_mailbox_publish(&pl.mailbox, pkt);
                         sem_post(&pl.present_sem);
-                        if (snapshot && lens_snapshot_activate(ui, snapshot) == FLUX_OK) {
+                        /* Without a UI layer there is nothing to activate: the
+                         * published host content is the whole frame. */
+                        if (!ui || iris__ui_snapshot_activate(ui, snapshot) == FLUX_OK) {
                             surface_needs_paint = false;
                         }
                         if (++frame_no == 1) {
@@ -4069,9 +2896,7 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
                                 (uint32_t)(pl.height * pl.buffer_scale), pl.buffer_scale);
                         }
                     }
-                    if (snapshot) {
-                        lens_snapshot_release(snapshot);
-                    }
+                    iris__ui_snapshot_release(ui, snapshot);
                     if (host_list) {
                         flux_display_list_release(host_list);
                     }
@@ -4117,11 +2942,10 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
              * lens's chrome: the display list is submitted before snapshot
              * publication so the host's document surface lands first and
              * lens's widget layer composites on top. */
-            lens_theme th = lens_get_theme(ui);
-            flux_color clear = th.color_bg;
+            flux_color clear = pl.ui_frame.clear_color;
             flux_color *pass_clear = cfg->no_clear ? nullptr : &clear;
             bool drew = false;
-            lens_scene_snapshot *snapshot = nullptr;
+            iris_ui_snapshot *snapshot = nullptr;
             flux_display_list *host_list = iris_record_host_canvas(cfg, (float)pl.buffer_scale);
 
             /* Damage scope for this surface (ADR-0149). The set travels intact to
@@ -4132,8 +2956,8 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
             iris_frame_damage dmg = {};
             const bool localize = !surface_forced && !has_host_content;
             if (localize) {
-                dmg = iris_frame_lens_damage(ui, (float)pl.buffer_scale, (int32_t)info.width,
-                                             (int32_t)info.height, /*force_full=*/false);
+                dmg = iris_frame_ui_damage(ui, (float)pl.buffer_scale, (int32_t)info.width,
+                                           (int32_t)info.height, /*force_full=*/false);
             } else {
                 dmg.full = true;
             }
@@ -4156,8 +2980,12 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
                                                            &(flux_canvas_submit_display_list_opts){
                                                                .list = host_list}) == FLUX_OK;
                 }
-                if (lens_snapshot_create(ui, &snapshot) == FLUX_OK) {
-                    drew = (lens_snapshot_submit(snapshot, canvas) == FLUX_OK) || drew;
+                if (!ui) {
+                    /* Canvas-only host: the cleared pass plus whatever the host
+                     * recorded is the frame. */
+                    drew = true;
+                } else if (iris__ui_snapshot_create(ui, &snapshot) == FLUX_OK) {
+                    drew = (iris__ui_snapshot_submit(ui, snapshot, canvas) == FLUX_OK) || drew;
                 }
                 if (flux_canvas_end(canvas) != FLUX_OK)
                     drew = false;
@@ -4165,11 +2993,11 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
             flux_display_list_release(host_list);
 
             if (!drew) {
-                lens_snapshot_release(snapshot);
+                iris__ui_snapshot_release(ui, snapshot);
                 goto fail;
             }
             if (flux_frame_submit(frame) != FLUX_OK) {
-                lens_snapshot_release(snapshot);
+                iris__ui_snapshot_release(ui, snapshot);
                 goto fail;
             }
             /* Arm the grant before the commit it is meant to pace: the
@@ -4199,17 +3027,16 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
                 (void)flux_surface_resize(surface, (uint32_t)(pl.width * pl.buffer_scale),
                                           (uint32_t)(pl.height * pl.buffer_scale));
             } else if (r != FLUX_OK) {
-                lens_snapshot_release(snapshot);
+                iris__ui_snapshot_release(ui, snapshot);
                 goto fail;
             } else if (drew) {
-                flux_result activated = lens_snapshot_activate(ui, snapshot);
-                if (activated != FLUX_OK) {
-                    lens_snapshot_release(snapshot);
+                if (ui && iris__ui_snapshot_activate(ui, snapshot) != FLUX_OK) {
+                    iris__ui_snapshot_release(ui, snapshot);
                     goto fail;
                 }
                 surface_needs_paint = false;
             }
-            lens_snapshot_release(snapshot);
+            iris__ui_snapshot_release(ui, snapshot);
 
             if (++frame_no == 1)
                 fprintf(stderr, "first frame presented: %dx%d logical, %ux%u device (scale=%d)\n",
@@ -4233,7 +3060,7 @@ int iris_app_run_wayland(const iris_app_config *cfg) {
          * shape reallocates what it needs. */
         if (quiesced) {
             wp_cancel_pulse(&pl);
-            lens_text_compact(ui);
+            iris__ui_quiesce(ui);
         }
     }
 
@@ -4246,7 +3073,9 @@ fail:
      * Keep the active platform published during the callback so thread-affine
      * iris helpers remain valid through the host's teardown. */
     if (host_started && cfg->stop)
-        cfg->stop(ui, device, cfg->user);
+        cfg->stop(device, cfg->user);
+    if (ui_started)
+        iris__ui_stop(cfg->ui);
 
     /* Stop publishing this wp_platform to iris_set_cursor() — any host
      * call after this returns is a no-op rather than a use-after-free.
@@ -4271,8 +3100,8 @@ fail:
      * existed) doesn't dereference NULL. */
     if (device)
         flux_device_wait_idle(device);
-    if (ui)
-        lens_release(ui);
+    if (ui_started)
+        iris__ui_destroy(cfg->ui);
     pl.ui = nullptr; /* after this, queued main-thread callbacks must not touch lens */
     if (pl.theme_watching)
         iris_theme__unwatch_backend();
@@ -4315,7 +3144,7 @@ fail:
     if (pl.cursor_shape_mgr)
         wp_cursor_shape_manager_v1_destroy(pl.cursor_shape_mgr);
 
-    /* Clipboard buffers we own (clip_set_text mallocs copy_buf; the data
+    /* Clipboard buffers we own (wp_clip_set_text mallocs copy_buf; the data
      * offer / source are normally released by the compositor, but free the
      * heap buffer and any still-live offer so teardown doesn't leak). A
      * drop read still in flight owns its offer via dnd_job_offer (the

@@ -168,27 +168,21 @@ impl DataGrid {
         let cell_ptrs: Vec<*const std::os::raw::c_char> =
             cell_cstrings.iter().map(|cs| cs.as_ptr()).collect();
 
+        let mut raw_sel = *selected_row as u32;
         let raw_opts = lens_sys::lens_datagrid_opts {
+            id: id_c.as_ptr(),
+            cols: raw_cols.as_mut_ptr(),
+            col_count: raw_cols.len() as u32,
+            cell_texts: cell_ptrs.as_ptr(),
+            row_count: row_count as u32,
+            selected_row: &mut raw_sel,
             height: self.height,
             header_height: self.header_height,
             row_height: self.row_height,
             striped: self.striped,
         };
 
-        let mut raw_sel = *selected_row as u32;
-
-        let act = unsafe {
-            lens_sys::lens_datagrid(
-                frame.as_raw(),
-                id_c.as_ptr(),
-                raw_cols.as_mut_ptr(),
-                raw_cols.len() as u32,
-                cell_ptrs.as_ptr(),
-                row_count as u32,
-                &mut raw_sel,
-                &raw_opts,
-            )
-        };
+        let act = unsafe { lens_sys::lens_datagrid(frame.as_raw(), &raw_opts) };
 
         *selected_row = raw_sel as usize;
 

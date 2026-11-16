@@ -1,7 +1,7 @@
 /* platform_input.h — platform-neutral pointer button mapping.
  *
- * lens's input contract is indexed by LENS_MOUSE_LEFT / LENS_MOUSE_RIGHT /
- * LENS_MOUSE_MIDDLE (see lens/lens.h). Each backend receives native button
+ * lens's input contract is indexed by IRIS_BUTTON_LEFT / IRIS_BUTTON_RIGHT /
+ * IRIS_BUTTON_MIDDLE (see lens/lens.h). Each backend receives native button
  * codes — Linux evdev BTN_* (linux/input-event-codes.h), Win32
  * WM_xBUTTONDOWN / WM_xBUTTONUP messages, Cocoa NSEvent buttonNumber — and
  * must map them onto that contract. This header is the shared mapping
@@ -10,7 +10,7 @@
  *   1. Translate the native code to iris_pointer_button (per-backend switch;
  *      the only place linux/input-event-codes.h, windows.h button codes,
  *      or NSEvent constants may appear).
- *   2. Convert with iris_pointer_button_to_lens() to the lens index.
+ *   2. Convert with iris_pointer_button_index() to the lens index.
  *
  * Unknown/native-only buttons (X1/X2, buttonNumber ≥ 3, …) translate to
  * IRIS_POINTER_BUTTON_UNKNOWN and map to -1; backends must ignore those
@@ -23,7 +23,7 @@
 #ifndef IRIS_PLATFORM_INPUT_H
 #define IRIS_PLATFORM_INPUT_H
 
-#include <lens/lens.h>
+#include <iris/host.h>
 #include <stdint.h>
 
 typedef enum iris_pointer_button : int32_t {
@@ -33,16 +33,16 @@ typedef enum iris_pointer_button : int32_t {
     IRIS_POINTER_BUTTON_MIDDLE,
 } iris_pointer_button;
 
-/* lens_input mouse index for `button`, or -1 when the button has no lens
+/* iris_input mouse index for `button`, or -1 when the button has no lens
  * slot (caller must drop the event). */
-static inline int iris_pointer_button_to_lens(iris_pointer_button button) {
+static inline int iris_pointer_button_index(iris_pointer_button button) {
     switch (button) {
     case IRIS_POINTER_BUTTON_LEFT:
-        return LENS_MOUSE_LEFT;
+        return IRIS_BUTTON_LEFT;
     case IRIS_POINTER_BUTTON_RIGHT:
-        return LENS_MOUSE_RIGHT;
+        return IRIS_BUTTON_RIGHT;
     case IRIS_POINTER_BUTTON_MIDDLE:
-        return LENS_MOUSE_MIDDLE;
+        return IRIS_BUTTON_MIDDLE;
     case IRIS_POINTER_BUTTON_UNKNOWN:
     default:
         return -1;
@@ -60,7 +60,7 @@ static inline int iris_pointer_button_to_lens(iris_pointer_button button) {
  * steps by this constant. */
 #define IRIS_SCROLL_PIXELS_PER_NOTCH 40.0
 
-/* Which lens_input channel a scroll delta belongs on (ADR-0036): wheel
+/* Which iris_input channel a scroll delta belongs on (ADR-0036): wheel
  * steps (scroll_x/y — discrete notches, widgets scale them by their line
  * factor) or continuous pixels (scroll_pixels_x/y — touchpad finger
  * motion, widgets consume unscaled). */
@@ -108,26 +108,26 @@ static inline bool iris_scroll_source_is_continuous(uint32_t source) {
  * above). Used by backends whose platform sign differs from lens's
  * (Wayland inverts); backends whose deltas already match the lens
  * convention (Win32 vertical, Cocoa) pass their delta straight to
- * iris_scroll_accum_lens. */
-static inline double iris_scroll_lens_delta(double platform_delta) {
+ * iris_scroll_accum_delta. */
+static inline double iris_scroll_delta(double platform_delta) {
     return -platform_delta;
 }
 
 /* Apply an already-lens-space scroll delta to the accumulator channels
  * (axis 0 = vertical, 1 = horizontal). */
-static inline void iris_scroll_accum_lens(double *steps_y, double *pixels_y, double *steps_x,
-                                          double *pixels_x, uint32_t axis, double lens_delta,
-                                          bool continuous) {
+static inline void iris_scroll_accum_delta(double *steps_y, double *pixels_y, double *steps_x,
+                                           double *pixels_x, uint32_t axis, double delta,
+                                           bool continuous) {
     if (axis == 0) { /* WL_POINTER_AXIS_VERTICAL_SCROLL */
         if (continuous)
-            *pixels_y += lens_delta;
+            *pixels_y += delta;
         else
-            *steps_y += lens_delta;
+            *steps_y += delta;
     } else { /* WL_POINTER_AXIS_HORIZONTAL_SCROLL */
         if (continuous)
-            *pixels_x += lens_delta;
+            *pixels_x += delta;
         else
-            *steps_x += lens_delta;
+            *steps_x += delta;
     }
 }
 
@@ -135,8 +135,8 @@ static inline void iris_scroll_accum_lens(double *steps_y, double *pixels_y, dou
 static inline void iris_scroll_accum(double *steps_y, double *pixels_y, double *steps_x,
                                      double *pixels_x, uint32_t axis, double delta,
                                      bool continuous) {
-    iris_scroll_accum_lens(steps_y, pixels_y, steps_x, pixels_x, axis,
-                           iris_scroll_lens_delta(delta), continuous);
+    iris_scroll_accum_delta(steps_y, pixels_y, steps_x, pixels_x, axis, iris_scroll_delta(delta),
+                            continuous);
 }
 
 #endif /* IRIS_PLATFORM_INPUT_H */

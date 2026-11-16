@@ -5,6 +5,7 @@
 //! - `typography`: HarfBuzz text shaping, layout metrics, dynamic font atlas.
 //! - `ui`: Immediate-mode UI engine, Flex/Grid layout, retained store state machine.
 //! - `platform`: Native OS windowing (Wayland, Win32, Cocoa), display pacing, event pump.
+//! - `app`: The application shell that runs the `ui` engine in a `platform` window.
 //! - `materials`: Dielectric Liquid Glass, Frosted Glass, Acrylic, Mica BRDFs.
 //! - `motion`: Provable motion physics, closed-form analytic springs, and easing.
 //! - `reticle`: SVG vector document static-art compiler.
@@ -21,6 +22,9 @@ pub use lens as ui;
 
 #[cfg(feature = "platform")]
 pub use iris as platform;
+
+#[cfg(feature = "app")]
+pub use aperture as app;
 
 #[cfg(feature = "materials")]
 pub use prism as materials;

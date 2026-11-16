@@ -97,11 +97,11 @@ contracts, flat shape IR, and resource limits.
 
 ---
 
-## 5. UI Components, Window Shell & Interactions (`examples/iris/`, `examples/lens/`, `examples/transit/`)
+## 5. UI Components, Window Shell & Interactions (`examples/aperture/`, `examples/iris/`, `examples/lens/`, `examples/transit/`)
 
 These examples demonstrate user interface state management, window shell integration, and physics-based motion.
 
-### `examples/iris/widgets` & `desktop_demo` — Retained Desktop UI
+### `examples/aperture/widgets` & `desktop_demo` — Retained Desktop UI
 
 Demonstrates standard controls and multi-view window layouts using `liblens` widgets hosted in an `iris` application shell:
 - Push buttons, toggle switches, and checkboxes
@@ -111,26 +111,26 @@ Demonstrates standard controls and multi-view window layouts using `liblens` wid
 
 ```bash
 # Launch full desktop UI control gallery
-./build/examples/iris/widgets
+./build/examples/aperture/widgets
 
 # Launch multi-view desktop workspace shell
-./build/examples/iris/desktop_demo
+./build/examples/aperture/desktop_demo
 ```
 
-### `examples/iris/dnd_demo` — Native Drag and Drop
+### `examples/aperture/dnd_demo` — Native Drag and Drop
 
 Demonstrates the cross-platform drag-and-drop subsystem (ADR-0086) with Wayland data device protocol integration and visual drop indicators:
 
 ```bash
-./build/examples/iris/dnd_demo
+./build/examples/aperture/dnd_demo
 ```
 
-### `examples/iris/overlay_demo` — Modals, Popups & Tooltips
+### `examples/aperture/overlay_demo` — Modals, Popups & Tooltips
 
 Demonstrates the spatial overlay architecture (`Place` layer): non-clipping tooltips, dropdown menus, and modal dialogs escaping parent scroll viewports without hierarchy restructuring.
 
 ```bash
-./build/examples/iris/overlay_demo
+./build/examples/aperture/overlay_demo
 ```
 
 ### `examples/transit/motion_spring` — Spring Physics Dynamics
@@ -167,12 +167,12 @@ These tools run in CI or headless environments without an active GPU or display 
 | **glTF 3D Viewer** | `./build/examples/vista/gltf_viewer` | Yes (Vulkan + GLFW) |
 | **Typography** | `./build/examples/glyph/text_hello` | Yes (Vulkan + GLFW) |
 | **SVG Rasterizer** | `./build/examples/reticle/rasterize_svg out.ppm` | **No** (Headless CPU) |
-| **UI Widgets** | `./build/examples/iris/widgets` | Yes (Wayland / Win32 / Cocoa) |
-| **Desktop Shell** | `./build/examples/iris/desktop_demo` | Yes (Wayland / Win32 / Cocoa) |
-| **Drag & Drop** | `./build/examples/iris/dnd_demo` | Yes (Wayland / Win32 / Cocoa) |
-| **Popups & Menus** | `./build/examples/iris/overlay_demo` | Yes (Wayland / Win32 / Cocoa) |
-| **Damage Tracking** | `./build/examples/iris/paint_static_demo` | Yes (Wayland / Win32 / Cocoa) |
-| **Font Discovery** | `./build/examples/iris/fonts` | Yes (Wayland / Win32 / Cocoa) |
+| **UI Widgets** | `./build/examples/aperture/widgets` | Yes (Wayland / Win32 / Cocoa) |
+| **Desktop Shell** | `./build/examples/aperture/desktop_demo` | Yes (Wayland / Win32 / Cocoa) |
+| **Drag & Drop** | `./build/examples/aperture/dnd_demo` | Yes (Wayland / Win32 / Cocoa) |
+| **Popups & Menus** | `./build/examples/aperture/overlay_demo` | Yes (Wayland / Win32 / Cocoa) |
+| **Damage Tracking** | `./build/examples/aperture/paint_static_demo` | Yes (Wayland / Win32 / Cocoa) |
+| **Font Discovery** | `./build/examples/aperture/fonts` | Yes (Wayland / Win32 / Cocoa) |
 | **Spring Motion** | `./build/examples/transit/motion_spring` | Yes (Wayland / Win32 / Cocoa) |
 | **Headless UI Walk**| `./build/examples/lens/headless_demo` | **No** (Headless CPU) |
 | **A11y Tree Dump** | `./build/examples/lens/a11y_tree_demo` | **No** (Headless CPU) |

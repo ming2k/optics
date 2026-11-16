@@ -313,8 +313,13 @@ int main(void) {
         OT_EXPECT(prism_liquid_glass_filter_create(d, &glass) == FLUX_OK);
 
         flux_image *slab_target = nullptr;
-        OT_EXPECT(flux_image_create_render_target(d, W, H, FLUX_FORMAT_RGBA8_UNORM, &slab_target) ==
-                  FLUX_OK);
+        OT_EXPECT(flux_image_create(d,
+                                    &(flux_image_desc){.type = FLUX_TYPE_IMAGE_DESC,
+                                                       .width = W,
+                                                       .height = H,
+                                                       .format = FLUX_FORMAT_RGBA8_UNORM,
+                                                       .usage = FLUX_IMAGE_USAGE_RENDER_TARGET},
+                                    &slab_target) == FLUX_OK);
 
         flux_frame *frame = nullptr;
         OT_EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);

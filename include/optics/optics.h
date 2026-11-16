@@ -58,12 +58,15 @@
 #include <reticle/reticle.h>
 #endif
 
-/* Layer 3: UI State & Platform Shell */
+/* Platform shell: window, events, frame cadence (flux only) */
+#include <iris/iris.h>
+
+/* UI engine, and the application shell that runs it in an iris window */
 #if defined(OPTICS_HAVE_LENS)
 #include <lens/lens.h>
 #endif
-#if defined(OPTICS_HAVE_IRIS)
-#include <iris/iris.h>
+#if defined(OPTICS_HAVE_APERTURE)
+#include <aperture/aperture.h>
 #endif
 
 #endif /* OPTICS_H */

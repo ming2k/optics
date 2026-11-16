@@ -25,6 +25,7 @@
 typedef struct push_constants {
     uint64_t seg_buf;
     uint64_t tile_buf;
+    uint64_t row_bd_buf;
     uint64_t idx_buf;
     uint64_t cov_buf;
     uint32_t tiles_x;
@@ -83,20 +84,22 @@ int main(void) {
     uint32_t total_tiles = tx * ty;
 
     flux_tile_desc *tiles = calloc(total_tiles, sizeof(flux_tile_desc));
+    int32_t *row_bd = calloc((size_t)total_tiles * FLUX_TILE_SIZE, sizeof(int32_t));
     uint32_t total_indices = 0;
     canvas_tile_bin_segments(segs, n_segs, W, H, tiles, nullptr, 0, &total_indices);
 
     uint32_t *indices = malloc((size_t)(total_indices + 1) * sizeof(uint32_t));
-    OT_EXPECT(tiles && indices);
-    if (!tiles || !indices) {
+    OT_EXPECT(tiles && row_bd && indices);
+    if (!tiles || !row_bd || !indices) {
         free(tiles);
+        free(row_bd);
         free(indices);
         flux_device_release(d);
         return OT_REPORT();
     }
 
     canvas_tile_bin_segments(segs, n_segs, W, H, tiles, indices, total_indices, &total_indices);
-    canvas_tile_compute_backdrop(segs, n_segs, W, H, tiles);
+    canvas_tile_compute_backdrop(segs, n_segs, W, H, row_bd);
 
     /* 2. Upload Segments SSBO */
     flux_buffer *seg_buf = nullptr;
@@ -104,7 +107,7 @@ int main(void) {
               FLUX_OK);
     uint64_t seg_addr = flux_buffer_device_address(seg_buf) + sizeof(flux_tile_segment_header);
 
-    /* 3. Upload Tiles SSBO */
+    /* 3. Upload Tiles & Row-Backdrops SSBOs */
     flux_buffer_desc tile_bdesc = {
         .type = FLUX_TYPE_BUFFER_DESC,
         .size = total_tiles * sizeof(flux_tile_desc),
@@ -116,6 +119,18 @@ int main(void) {
     flux_buffer *tile_buf = nullptr;
     OT_EXPECT(flux_buffer_create(d, &tile_bdesc, &tile_buf) == FLUX_OK);
     uint64_t tile_addr = flux_buffer_device_address(tile_buf);
+
+    flux_buffer_desc bd_bdesc = {
+        .type = FLUX_TYPE_BUFFER_DESC,
+        .size = (size_t)total_tiles * FLUX_TILE_SIZE * sizeof(int32_t),
+        .usage = FLUX_BUFFER_USAGE_STORAGE,
+        .location = FLUX_BUFFER_HOST_VISIBLE,
+        .device_address = true,
+        .initial_data = row_bd,
+    };
+    flux_buffer *bd_buf = nullptr;
+    OT_EXPECT(flux_buffer_create(d, &bd_bdesc, &bd_buf) == FLUX_OK);
+    uint64_t bd_addr = flux_buffer_device_address(bd_buf);
 
     /* 4. Upload Indices SSBO */
     flux_buffer_desc idx_bdesc = {
@@ -185,6 +200,7 @@ int main(void) {
     push_constants pc = {
         .seg_buf = seg_addr,
         .tile_buf = tile_addr,
+        .row_bd_buf = bd_addr,
         .idx_buf = idx_addr,
         .cov_buf = cov_addr,
         .tiles_x = tx,
@@ -257,11 +273,14 @@ cleanup:
         flux_buffer_release(seg_buf);
     if (tile_buf)
         flux_buffer_release(tile_buf);
+    if (bd_buf)
+        flux_buffer_release(bd_buf);
     if (idx_buf)
         flux_buffer_release(idx_buf);
     if (cov_buf)
         flux_buffer_release(cov_buf);
     free(tiles);
+    free(row_bd);
     free(indices);
     flux_device_release(d);
     return OT_REPORT();

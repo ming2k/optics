@@ -8,7 +8,6 @@ light.
 You have a `flux_device *d`, a mesh-drawing frame loop like the one in
 [Record and present a frame](record-and-present-a-frame.md), and a
 `flux_mesh` whose vertices carry correct normals (`flux_vertex.normal`).
-The build must have `-Dscene=true` (default).
 
 ## Create the material
 

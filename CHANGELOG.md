@@ -15,6 +15,35 @@ silently reading a different descriptor layout.
 
 ## [Unreleased]
 
+### Breaking — library graph (ADR-0166)
+
+- **iris** no longer depends on lens. `<iris/app.h>` and `<iris/event.h>` do not include `<lens/lens.h>`; iris has its own input and accessibility vocabulary (`IRIS_KEY_*`, `IRIS_MOD_*`, `IRIS_BUTTON_*`, `iris_role`, `iris_semantics`). `iris_app_opts` loses `build`; `iris_start_fn` / `iris_stop_fn` lose their `lens *` parameter; `iris_app_config` is gone. A UI layer plugs into the frame loop through the new `<iris/host.h>` (`iris_ui_host`), and `iris_app_opts.ui == nullptr` is a window with canvas content only. `iris_a11y_update` takes the UI host.
+- **aperture** (new library): `aperture_app_run(&(aperture_app_opts){...})` runs a lens UI in an iris window and replaces the lens-flavoured `iris_app_run`. Rust: new `aperture-sys` / `aperture` crates own `Application`, `Config`, `RunError`; the `iris` crate keeps window, cursor, dialog and theme APIs and no longer depends on `lens`. The `optics` facade gains an `app` feature (default) and `platform` no longer implies `ui`.
+- **flux** has no module switches: the `canvas`, `scene`, `compute` and `effect` Meson options and the `FLUX_HAVE_CANVAS/SCENE/COMPUTE/EFFECT` defines are removed. Every libflux ships every module.
+- **examples**: lens demos moved from `examples/iris/` to `examples/aperture/`; `examples/iris/canvas_window` is a flux-only window.
+
+### Breaking — one creation path, descriptor rule enforced
+
+- **flux**: `flux_canvas_create_cpu`, `flux_canvas_create_cpu_aa`, `flux_canvas_create_cpu_ss`, `flux_canvas_antialias`, `FLUX_CANVAS_SUPERSAMPLE_MAX`, `flux_canvas_desc::{antialias, supersample}`, `flux_canvas_pass_desc::antialias`, `flux_canvas_no_stencil_desc` (`FLUX_TYPE_CANVAS_NO_STENCIL_DESC` tag 24 reserved as retired), `flux_canvas_antialias_desc`, `flux_canvas_supersample_desc`, and `reticle_rasterize_opts::supersample` are removed. Both Vulkan and CPU backends run unconditionally at 1x resolution with continuous analytic coverage; Rust `CanvasAntialias`, `CanvasPassOptions::{antialias, skip_stencil}`, `Canvas::new_cpu_supersampled`, `Canvas::new_cpu_aa`, and `RasterizeOptions::supersample` are likewise removed. Use `flux_canvas_create` with `.backend = FLUX_CANVAS_BACKEND_CPU` and explicit `width` / `height`.
+- **flux**: `flux_image_create_render_target` and `flux_image_create_compute_writable` are removed. Use `flux_image_create` with the new `flux_image_desc::usage` (`FLUX_IMAGE_USAGE_RENDER_TARGET`, `FLUX_IMAGE_USAGE_COMPUTE_WRITE`). `flux_image_usage_query` is renamed `flux_image_usage` and `flux_device_supports_image_usage` answers for render targets too.
+- **flux**: `flux_set_diagnostic` takes a `const flux_error_info *`; `flux_camera_perspective` takes a `const flux_camera_perspective_opts *`.
+- **lens**: `lens_segmented_control`, `lens_tab_strip`, `lens_datagrid`, `lens_tree_view` and `lens_popup_menu` take `(lens *ui, const <opts> *opts)`; identity, item arrays, counts and in-out selections moved into the options struct.
+- **tooling**: `tools/check_api.py` now enforces the rule on real signatures (at most four parameters, at most one descriptor, no variant suffixes; math and geometry kernels exempt). Its baseline is empty.
+
+### Fixed
+
+- **flux**: wired live GPU compute 16×16 tile binning, exclusive prefix offset scan, and exact per-pixel-row suffix winding backdrops (`canvas_tile_bin_*`, `canvas_tile_scan_*`) with deferred pass recording into `backend_vk.c`, eliminating the 4096-segment and 64M-evaluation caps (`test_tile_b3_backdrop`, `test_canvas_edge_quality`).
+- **flux**: lifted the 2048-point / 64-contour path flattening and stroking ceiling with dynamically growing scratch buffers (`canvas_flatten_path`, `geometry_stroke.c`).
+- **flux**: routed `FLUX_BRUSH_IMAGE_PATTERN` (all geometry kinds, rounded clips, and strokes) and non-pixel-aligned rectangles through 1x analytic coverage (`CANVAS_PIPE_VECTOR` with `.SampleGrad` affine UVs) while preserving batched integer axis-aligned rectangle fast paths (`submit_triangles`, `CANVAS_PIPE_IMAGE`).
+- **flux**: converged the CPU software backend (`backend_cpu.c`) to 1x continuous analytic coverage across all four blend modes and stroked meshes (`cpu_submit_cover_triangles`), fixed float32 1-ULP subband integration in `coverage_raster.c`, and switched `flux_canvas_cpu_coverage` (`reticle`, `lens/src/render/icon_mask.c`) to 1x analytic readback.
+- **iris**: the presentation mailbox could drop a packet from circulation when a consumed packet was returned while the recycle slot was occupied, degrading the triple buffer to two packets and letting the UI thread spin in acquire. It is now a classic three-role triple buffer; `iris_mailbox_recycle` is removed.
+- **aperture**: leaving high-contrast mode restores the colour scheme the theme was following rather than re-querying the system, so a forced-dark application stays dark; a preference change that does not touch contrast no longer resets an application's custom theme.
+
+### Added
+
+- **tests**: `tests/lens/test_zero_alloc.c` interposes the process allocator and requires zero heap calls across 600 steady-state frames under interaction. The invariant is restated accordingly: structural change (a node entering or leaving, the node store resizing) may allocate.
+- **tests**: `tests/aperture/test_host_binding.c` drives the lens-to-iris seam headlessly: lifecycle, input folding, snapshots, accessibility, theme policy.
+
 ### Changed
 
 - **build**: Moved the Cargo workspace root to the repository root (`Cargo.toml`, `Cargo.lock`) and deleted the nested `bindings/` workspace. Cargo commands now run from the checkout root, Git dependencies resolve, and Rust Analyzer no longer needs `linkedProjects` (ADR-0163).
@@ -37,6 +66,7 @@ silently reading a different descriptor layout.
 
 ### Removed
 
+- **flux**: removed the canvas ear-clipping tessellator (`geometry_tess.c` and `tess_cache`), stencil-then-cover fallback (`CANVAS_PIPE_STENCIL_*`, `CANVAS_PIPE_COVER_*`, CPU stencil accumulation), 4× MSAA option/attachment/pipeline sample variants, and CPU supersampling buffer.
 - `bindings/Cargo.toml` and `bindings/Cargo.lock` (relocated to the repository root).
 - The `tools/gate` runbook and all current-document references to it; the command was already absent from the tree.
 

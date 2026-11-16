@@ -118,7 +118,10 @@ int main(void) {
 
     /* 4. Camera with strong 3D perspective foreshortening */
     flux_camera cam;
-    flux_camera_perspective(&cam, 1.047f /* 60 deg */, 1.0f, 0.1f, 100.0f);
+    flux_camera_perspective(&cam, &(flux_camera_perspective_opts){.fov_y_rad = 1.047f /* 60 deg */,
+                                                                  .aspect = 1.0f,
+                                                                  .z_near = 0.1f,
+                                                                  .z_far = 100.0f});
     flux_camera_look_at(&cam, (flux_vec3){0.0f, -0.5f, 2.5f}, (flux_vec3){0.0f, 0.0f, 0.0f},
                         (flux_vec3){0.0f, 1.0f, 0.0f});
 

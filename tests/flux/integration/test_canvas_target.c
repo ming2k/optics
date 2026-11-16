@@ -47,7 +47,13 @@ int main(void) {
     OT_EXPECT(flux_canvas_create(&cd, &canvas) == FLUX_OK);
 
     flux_image *target = nullptr;
-    OT_EXPECT(flux_image_create_render_target(d, W, H, target_fmt, &target) == FLUX_OK);
+    OT_EXPECT(flux_image_create(d,
+                                &(flux_image_desc){.type = FLUX_TYPE_IMAGE_DESC,
+                                                   .width = W,
+                                                   .height = H,
+                                                   .format = target_fmt,
+                                                   .usage = FLUX_IMAGE_USAGE_RENDER_TARGET},
+                                &target) == FLUX_OK);
     OT_EXPECT(flux_image_bindless_handle(target) != FLUX_BINDLESS_INVALID);
     OT_EXPECT(flux_image_width(target) == W);
     OT_EXPECT(flux_image_height(target) == H);
@@ -67,7 +73,6 @@ int main(void) {
         flux_color teal = flux_color_rgba(17, 101, 149, 255);
         flux_canvas_pass_desc pd = FLUX_CANVAS_PASS_DESC_INIT;
         pd.clear_color = &teal;
-        pd.antialias = FLUX_CANVAS_ANTIALIAS_NONE;
         pd.frame = frame;
         pd.attachment =
             (flux_canvas_attachment){.kind = FLUX_CANVAS_ATTACHMENT_IMAGE, .image = target};
@@ -382,8 +387,13 @@ int main(void) {
     /* --- downsampled target: render small, then upscale on composite --- */
     {
         flux_image *downsampled = nullptr;
-        OT_EXPECT(flux_image_create_render_target(d, W / 2, H / 2, target_fmt, &downsampled) ==
-                  FLUX_OK);
+        OT_EXPECT(flux_image_create(d,
+                                    &(flux_image_desc){.type = FLUX_TYPE_IMAGE_DESC,
+                                                       .width = W / 2,
+                                                       .height = H / 2,
+                                                       .format = target_fmt,
+                                                       .usage = FLUX_IMAGE_USAGE_RENDER_TARGET},
+                                    &downsampled) == FLUX_OK);
         flux_frame *frame = nullptr;
         OT_EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
         flux_color red = flux_color_rgba(255, 0, 0, 255);
@@ -412,8 +422,13 @@ int main(void) {
     /* --- representative HiDPI backdrop capture stays bounded at max sigma --- */
     {
         flux_image *backdrop = nullptr;
-        OT_EXPECT(flux_image_create_render_target(d, BACKDROP_W, BACKDROP_H, target_fmt,
-                                                  &backdrop) == FLUX_OK);
+        OT_EXPECT(flux_image_create(d,
+                                    &(flux_image_desc){.type = FLUX_TYPE_IMAGE_DESC,
+                                                       .width = BACKDROP_W,
+                                                       .height = BACKDROP_H,
+                                                       .format = target_fmt,
+                                                       .usage = FLUX_IMAGE_USAGE_RENDER_TARGET},
+                                    &backdrop) == FLUX_OK);
         flux_frame *frame = nullptr;
         OT_EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
         flux_color source = flux_color_rgba(35, 70, 105, 255);
@@ -458,8 +473,13 @@ int main(void) {
         flux_format cross_fmt = target_fmt == FLUX_FORMAT_RGBA8_UNORM ? FLUX_FORMAT_BGRA8_UNORM
                                                                       : FLUX_FORMAT_RGBA8_UNORM;
         flux_image *cross_target = nullptr;
-        OT_EXPECT(flux_image_create_render_target(d, W / 2, H / 2, cross_fmt, &cross_target) ==
-                  FLUX_OK);
+        OT_EXPECT(flux_image_create(d,
+                                    &(flux_image_desc){.type = FLUX_TYPE_IMAGE_DESC,
+                                                       .width = W / 2,
+                                                       .height = H / 2,
+                                                       .format = cross_fmt,
+                                                       .usage = FLUX_IMAGE_USAGE_RENDER_TARGET},
+                                    &cross_target) == FLUX_OK);
         flux_frame *frame = nullptr;
         OT_EXPECT(flux_surface_begin_frame(s, nullptr, &frame) == FLUX_OK);
         flux_color source = flux_color_rgba(11, 22, 33, 255);

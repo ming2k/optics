@@ -1,4 +1,4 @@
-/* frame_mailbox.h — lockless triple-buffered snapshot exchange (ADR-0124).
+/* frame_mailbox.h — wait-free triple-buffered snapshot exchange (ADR-0124).
  *
  * Establishes the thread-safe handoff channel between the UI / Event thread
  * (Thread 0) and the Compositor / Presentation thread (Thread 1).
@@ -20,17 +20,17 @@
 #include <stdint.h>
 
 #include <flux/math.h>
-#include <lens/lens.h>
+#include <iris/host.h>
 
 typedef struct iris_frame_packet {
-    lens_scene_snapshot *snapshot; /* retained reference */
-    flux_display_list *host_list;  /* optional retained host recorded content (ADR-0127) */
+    iris_ui_snapshot *snapshot;   /* retained reference */
+    flux_display_list *host_list; /* optional retained host recorded content (ADR-0127) */
     uint64_t sequence;
     /* Damage as a set, not a box: the UI thread resolves the frame's regions and
      * the presentation thread consumes them without a second query (ADR-0143).
      * `damage_count == 0` means "everything" — a packet that could not describe
      * its damage must never be mistaken for "nothing changed". */
-    flux_rect damage[LENS_DAMAGE_RECTS_CAPACITY];
+    flux_rect damage[IRIS_DAMAGE_RECTS_CAPACITY];
     uint32_t damage_count;
     bool force_paint;
     bool has_clear;
@@ -56,7 +56,7 @@ typedef struct iris_frame_packet {
  * indistinguishable from "nothing changed", which is why the flag travels
  * separately rather than being encoded as a zero rectangle. */
 typedef struct iris_frame_damage {
-    flux_rect rects[LENS_DAMAGE_RECTS_CAPACITY];
+    flux_rect rects[IRIS_DAMAGE_RECTS_CAPACITY];
     uint32_t count;
     bool full; /* every pixel may have changed */
 } iris_frame_damage;
@@ -73,32 +73,52 @@ typedef struct iris_frame_damage {
  * pixel extent (as reported by `flux_surface_get_info`), because this path has no
  * packet to derive them from. `force_full` is the host's own "everything
  * changed" signal. */
-[[nodiscard]] iris_frame_damage iris_frame_lens_damage(const lens *ui, float scale, int32_t width,
-                                                       int32_t height, bool force_full);
+[[nodiscard]] iris_frame_damage iris_frame_ui_damage(const iris_ui_host *ui, float scale,
+                                                     int32_t width, int32_t height,
+                                                     bool force_full);
 
+/* A classic triple buffer. Three packets, three roles, and one atomic word:
+ *
+ *   back    owned by the UI thread — the packet it is filling.
+ *   middle  the shared slot — the newest published packet, or a spare.
+ *   front   owned by the presentation thread — the packet it is drawing.
+ *
+ * Publishing swaps `back` with `middle`; claiming swaps `front` with `middle`.
+ * Each side always owns exactly one packet and the third is always in the
+ * shared slot, so no packet can be lost, neither side can ever wait for the
+ * other, and a burst of publishes simply overwrites the middle (the newest
+ * frame wins). There is no fourth state to get wrong. */
 typedef struct iris_frame_mailbox {
-    _Atomic(iris_frame_packet *) ready;   /* published by UI, claimed by compositor */
-    _Atomic(iris_frame_packet *) recycle; /* returned by compositor, reused by UI   */
-    iris_frame_packet pool[3];            /* triple buffer backing store            */
-    iris_frame_packet *spare;             /* UI thread's local spare buffer         */
-    iris_frame_packet *spare2;            /* UI thread's secondary spare buffer     */
+    iris_frame_packet pool[3];
+    _Atomic(uint32_t) middle; /* pool index, OR'd with IRIS_MAILBOX_FRESH when unclaimed */
+    uint32_t back;            /* UI thread only           */
+    uint32_t front;           /* presentation thread only */
     _Atomic(uint64_t) sequence;
+    const iris_ui_host *ui; /* releases packet snapshots; may be null */
 } iris_frame_mailbox;
 
-void iris_mailbox_init(iris_frame_mailbox *mb);
+/* `ui` owns the snapshots travelling through the mailbox; it releases them. */
+void iris_mailbox_init(iris_frame_mailbox *mb, const iris_ui_host *ui);
+
+/* Release every reference still parked in the mailbox. Call after the
+ * presentation thread has stopped. */
 void iris_mailbox_destroy(iris_frame_mailbox *mb);
 
-/* UI Thread: acquire an idle packet from the pool or recycle bin. Never blocks. */
+/* UI thread: the packet to fill for the next frame. Never blocks, never
+ * fails. References left in it by a superseded or already-presented frame are
+ * released here, on the UI thread. */
 [[nodiscard]] iris_frame_packet *iris_mailbox_acquire(iris_frame_mailbox *mb);
 
-/* UI Thread: publish a populated packet. Retains snapshot. Never blocks. */
+/* UI thread: publish the packet returned by the last acquire. Takes its own
+ * references on the packet's snapshot and host list. Never blocks. */
 void iris_mailbox_publish(iris_frame_mailbox *mb, iris_frame_packet *pkt);
 
-/* Compositor Thread: claim the newest published packet, or returns NULL if no
- * new frame was published since the last claim. Never blocks. */
+/* Presentation thread: the newest published packet, or nullptr when nothing
+ * new was published since the last claim. The packet stays valid until the
+ * next claim. Never blocks. */
 [[nodiscard]] iris_frame_packet *iris_mailbox_claim(iris_frame_mailbox *mb);
 
-/* Compositor Thread: return a consumed packet back to the recycle queue. */
-void iris_mailbox_recycle(iris_frame_mailbox *mb, iris_frame_packet *pkt);
+/* Any thread: true while a published packet is waiting to be claimed. */
+[[nodiscard]] bool iris_mailbox_pending(const iris_frame_mailbox *mb);
 
 #endif /* IRIS_FRAME_MAILBOX_H */

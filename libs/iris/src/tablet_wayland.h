@@ -12,17 +12,17 @@
 
 #ifdef IRIS_BACKEND_WAYLAND
 
-#include <lens/lens.h>
+#include <iris/host.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <wayland-client.h>
 
 /* How the bridge writes pointer-shaped state into the host accumulator.
- * `user` is the platform. Button indices are lens's (LENS_MOUSE_*). */
+ * `user` is the platform. Button indices are IRIS_BUTTON_*. */
 typedef struct iris_tablet_host {
     void *user;
     void (*motion)(void *user, double x, double y);
-    void (*button)(void *user, int lens_button, bool down);
+    void (*button)(void *user, int button, bool down);
     void (*serial)(void *user, uint32_t serial);
 } iris_tablet_host;
 
@@ -38,7 +38,7 @@ void iris_wayland__tablet_attach_seat(struct wl_seat *seat);
 void iris_wayland__tablet_global_removed(uint32_t name);
 
 /* Fill the pen fields of `in` for this frame (size-guarded upstream). */
-void iris_wayland__tablet_fill_input(lens_input *in);
+void iris_wayland__tablet_fill_input(iris_input *in);
 
 /* Drop all tablet state (backend teardown). */
 void iris_wayland__tablet_reset(void);

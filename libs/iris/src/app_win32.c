@@ -1,4 +1,4 @@
-/* app_win32.c — native Win32 window + Vulkan (via flux) + lens_input.
+/* app_win32.c — native Win32 window + Vulkan (via flux) + iris_input.
  *
  * The Windows backend for iris, mirroring app_wayland.c's structure and
  * behaviour: one overlapped window, a MsgWaitForMultipleObjectsEx + PeekMessage
@@ -6,7 +6,7 @@
  * input, ~4 Hz idle while a caret blinks, fully event-driven when static),
  * IMM32 for IME, CF_UNICODETEXT for the clipboard, and
  * VK_KHR_win32_surface to hand flux core a VkSurfaceKHR. Pointer and
- * keyboard events are folded into one lens_input per frame (ADR-0029).
+ * keyboard events are folded into one iris_input per frame (ADR-0029).
  *
  * NOT YET VERIFIED ON A REAL WINDOWS MACHINE. Everything in this file is
  * compile-checked for x86_64-windows-gnu via tools/ci/zig-win32-check.sh only.
@@ -53,6 +53,7 @@
 #include "platform_text.h"
 #include "platform_wakeup.h"
 #include "theme_watch_internal.h"
+#include "ui_host.h"
 
 #include <iris/a11y.h>
 #include <iris/a11y_prefs.h>
@@ -116,35 +117,35 @@ void iris_a11y_prefs_win32__notify_setting_change(void);
 #define W32_WHEEL_PIXELS_PER_NOTCH 40.0
 
 /* ------------------------------------------------------------------ */
-/*  Accumulated input, drained into one lens_input per frame             */
+/*  Accumulated input, drained into one iris_input per frame             */
 /* ------------------------------------------------------------------ */
 
 typedef struct w32_accum {
-    double cx, cy;                  /* latest cursor, client logical px */
-    bool down[LENS_MOUSE_COUNT];    /* held state (persists)          */
-    bool pressed[LENS_MOUSE_COUNT]; /* edges this frame               */
-    bool released[LENS_MOUSE_COUNT];
+    double cx, cy;                   /* latest cursor, client logical px */
+    bool down[IRIS_BUTTON_COUNT];    /* held state (persists)          */
+    bool pressed[IRIS_BUTTON_COUNT]; /* edges this frame               */
+    bool released[IRIS_BUTTON_COUNT];
     double scroll_x, scroll_y;       /* wheel notches this frame       */
     double scroll_px_x, scroll_px_y; /* smooth pixel deltas this frame */
     uint32_t mods;                   /* level state (persists)         */
     char text[256];                  /* committed text this frame; must match
-                                       lens_input.text_utf8 (static_assert below) */
-    char preedit[LENS_PREEDIT_MAX];  /* IME preedit string             */
+                                       iris_input.text_utf8 (static_assert below) */
+    char preedit[IRIS_PREEDIT_MAX];  /* IME preedit string             */
     uint32_t preedit_cursor;         /* caret byte offset in preedit   */
     uint32_t preedit_sel_lo;         /* active clause, byte range      */
     uint32_t preedit_sel_hi;
-    lens_key_event keys[LENS_INPUT_MAX_KEYS];
+    iris_key_event keys[IRIS_INPUT_MAX_KEYS];
     uint32_t key_count;
 } w32_accum;
 
-/* The staging buffers feed lens_input by whole-buffer memcpy in
+/* The staging buffers feed iris_input by whole-buffer memcpy in
  * drain_input; pin the sizes so a lens-side change fails at compile time
  * instead of over-reading the accumulator (the wayland backend carries
  * the same guards). */
-static_assert(sizeof((w32_accum *)0)->text == sizeof((lens_input *)0)->text_utf8,
-              "w32_accum.text must match lens_input.text_utf8");
-static_assert(sizeof((w32_accum *)0)->preedit == sizeof((lens_input *)0)->preedit_utf8,
-              "w32_accum.preedit must match lens_input.preedit_utf8");
+static_assert(sizeof((w32_accum *)0)->text == sizeof((iris_input *)0)->text_utf8,
+              "w32_accum.text must match iris_input.text_utf8");
+static_assert(sizeof((w32_accum *)0)->preedit == sizeof((iris_input *)0)->preedit_utf8,
+              "w32_accum.preedit must match iris_input.preedit_utf8");
 
 /* ------------------------------------------------------------------ */
 /*  Platform state                                                     */
@@ -172,7 +173,8 @@ typedef struct w32_platform {
     bool theme_watching;            /* backend theme watch registered       */
     bool a11y_prefs_watching;       /* backend a11y-pref watch registered   */
     bool a11y_running;              /* a11y bridge initialised (inert stub) */
-    lens *ui;                       /* for caret/hint/paste on the loop thread */
+    const iris_ui_host *ui;         /* live UI host; null before start / after teardown */
+    iris_ui_frame ui_frame;         /* report of the most recent UI frame */
 
     iris_cursor host_cursor;      /* last iris_set_cursor value (explicit) */
     iris_cursor effective_cursor; /* what WM_SETCURSOR currently applies   */
@@ -243,9 +245,7 @@ static void w32_on_color_scheme_changed(iris_color_scheme scheme, void *user) {
     w32_platform *pl = user;
     if (!pl || !pl->ui)
         return;
-    lens_theme th =
-        (scheme == IRIS_COLOR_SCHEME_PREFER_LIGHT) ? lens_theme_default() : lens_theme_dark();
-    lens_set_theme(pl->ui, th);
+    iris__ui_set_color_scheme(pl->ui, scheme);
 }
 
 /* Accessibility-preference watcher callback (ADR-0075): delivered from the
@@ -256,20 +256,7 @@ static void w32_on_a11y_prefs(const iris_a11y_prefs *prefs, void *user) {
     w32_platform *pl = user;
     if (!pl || !pl->ui)
         return;
-    lens_set_reduced_motion(pl->ui, prefs->reduced_motion);
-    lens_set_text_scale(pl->ui, prefs->text_scale);
-    if (prefs->high_contrast) {
-        lens_theme th = lens_get_theme(pl->ui);
-        th.color_bg = flux_color_rgba(0x00, 0x00, 0x00, 0xff);
-        th.color_fg = flux_color_rgba(0xff, 0xff, 0xff, 0xff);
-        th.color_hover = flux_color_rgba(0x2a, 0x2a, 0x2a, 0xff);
-        th.color_active = flux_color_rgba(0x55, 0x55, 0x55, 0xff);
-        th.color_border = th.color_fg;
-        th.color_disabled = flux_color_rgba(0xaa, 0xaa, 0xaa, 0xff);
-        lens_set_theme(pl->ui, th);
-    } else {
-        w32_on_color_scheme_changed(iris_query_system_color_scheme(), pl);
-    }
+    iris__ui_set_a11y_prefs(pl->ui, prefs);
     /* Force a frame so the new preferences reach the screen even while the
      * loop is idle-parked. */
     pl->animation_frame_requested = true;
@@ -328,7 +315,7 @@ static bool w32_emit_button(w32_platform *pl, double x, double y, int lens_butto
     if (!iris__event_seam_emit(&ev))
         return false;
     int i = ev.button.button;
-    if (i < 0 || i >= LENS_MOUSE_COUNT)
+    if (i < 0 || i >= IRIS_BUTTON_COUNT)
         return false;
     pl->acc.cx = ev.button.x;
     pl->acc.cy = ev.button.y;
@@ -350,11 +337,13 @@ static bool w32_emit_scroll(w32_platform *pl, bool horizontal, double lens_delta
     if (!iris__event_seam_emit(&ev))
         return false;
     if (ev.scroll.dx != 0.0f)
-        iris_scroll_accum_lens(&pl->acc.scroll_y, &pl->acc.scroll_px_y, &pl->acc.scroll_x,
-                               &pl->acc.scroll_px_x, 1, (double)ev.scroll.dx, ev.scroll.continuous);
+        iris_scroll_accum_delta(&pl->acc.scroll_y, &pl->acc.scroll_px_y, &pl->acc.scroll_x,
+                                &pl->acc.scroll_px_x, 1, (double)ev.scroll.dx,
+                                ev.scroll.continuous);
     if (ev.scroll.dy != 0.0f)
-        iris_scroll_accum_lens(&pl->acc.scroll_y, &pl->acc.scroll_px_y, &pl->acc.scroll_x,
-                               &pl->acc.scroll_px_x, 0, (double)ev.scroll.dy, ev.scroll.continuous);
+        iris_scroll_accum_delta(&pl->acc.scroll_y, &pl->acc.scroll_px_y, &pl->acc.scroll_x,
+                                &pl->acc.scroll_px_x, 0, (double)ev.scroll.dy,
+                                ev.scroll.continuous);
     return true;
 }
 
@@ -363,8 +352,8 @@ static bool w32_emit_key(w32_platform *pl, int key, bool pressed, bool repeat, u
                      .keyboard = {.key = key, .pressed = pressed, .repeat = repeat, .mods = mods}};
     if (!iris__event_seam_emit(&ev))
         return false;
-    if (ev.keyboard.key != 0 && pl->acc.key_count < LENS_INPUT_MAX_KEYS)
-        pl->acc.keys[pl->acc.key_count++] = (lens_key_event){
+    if (ev.keyboard.key != 0 && pl->acc.key_count < IRIS_INPUT_MAX_KEYS)
+        pl->acc.keys[pl->acc.key_count++] = (iris_key_event){
             .key = ev.keyboard.key, .pressed = ev.keyboard.pressed, .repeat = ev.keyboard.repeat};
     return true;
 }
@@ -435,7 +424,7 @@ static void w32_emit_close(void) {
 }
 
 /* Append UTF-8 text to the per-frame commit accumulator (cap 255 + NUL,
- * matching lens_input.text_utf8; enforced by the static_assert at the
+ * matching iris_input.text_utf8; enforced by the static_assert at the
  * w32_accum definition), truncating on a code-point boundary (shared
  * helper, platform_text.h). Same cap as app_wayland.c. */
 static void accum_text_append(w32_platform *pl, const char *utf8, size_t n) {
@@ -493,62 +482,62 @@ static int mouse_index(UINT msg) {
         b = IRIS_POINTER_BUTTON_UNKNOWN;
         break;
     }
-    return iris_pointer_button_to_lens(b);
+    return iris_pointer_button_index(b);
 }
 
-/* Virtual-key code → lens key: LENS_KEY_* sentinels for the navigation set,
+/* Virtual-key code → lens key: IRIS_KEY_* sentinels for the navigation set,
  * lowercase ASCII for letters/digits/space (matching the Wayland backend's
  * unshifted xkb keysyms so Ctrl+C/V/X/A shortcuts line up), raw VK codes
  * (< 256, below the sentinel band) for everything else. Pure modifiers and
- * IME process keys return 0 = not recorded (they live in lens_input.mods). */
-static int vk_to_lens_key(WPARAM vk) {
+ * IME process keys return 0 = not recorded (they live in iris_input.mods). */
+static int vk_to_key(WPARAM vk) {
     switch (vk) {
     case VK_ESCAPE:
-        return LENS_KEY_ESCAPE;
+        return IRIS_KEY_ESCAPE;
     case VK_TAB:
-        return LENS_KEY_TAB;
+        return IRIS_KEY_TAB;
     case VK_RETURN:
-        return LENS_KEY_RETURN;
+        return IRIS_KEY_RETURN;
     case VK_BACK:
-        return LENS_KEY_BACKSPACE;
+        return IRIS_KEY_BACKSPACE;
     case VK_DELETE:
-        return LENS_KEY_DELETE;
+        return IRIS_KEY_DELETE;
     case VK_LEFT:
-        return LENS_KEY_LEFT;
+        return IRIS_KEY_LEFT;
     case VK_RIGHT:
-        return LENS_KEY_RIGHT;
+        return IRIS_KEY_RIGHT;
     case VK_UP:
-        return LENS_KEY_UP;
+        return IRIS_KEY_UP;
     case VK_DOWN:
-        return LENS_KEY_DOWN;
+        return IRIS_KEY_DOWN;
     case VK_HOME:
-        return LENS_KEY_HOME;
+        return IRIS_KEY_HOME;
     case VK_END:
-        return LENS_KEY_END;
+        return IRIS_KEY_END;
     case VK_F1:
-        return LENS_KEY_F1;
+        return IRIS_KEY_F1;
     case VK_F2:
-        return LENS_KEY_F2;
+        return IRIS_KEY_F2;
     case VK_F3:
-        return LENS_KEY_F3;
+        return IRIS_KEY_F3;
     case VK_F4:
-        return LENS_KEY_F4;
+        return IRIS_KEY_F4;
     case VK_F5:
-        return LENS_KEY_F5;
+        return IRIS_KEY_F5;
     case VK_F6:
-        return LENS_KEY_F6;
+        return IRIS_KEY_F6;
     case VK_F7:
-        return LENS_KEY_F7;
+        return IRIS_KEY_F7;
     case VK_F8:
-        return LENS_KEY_F8;
+        return IRIS_KEY_F8;
     case VK_F9:
-        return LENS_KEY_F9;
+        return IRIS_KEY_F9;
     case VK_F10:
-        return LENS_KEY_F10;
+        return IRIS_KEY_F10;
     case VK_F11:
-        return LENS_KEY_F11;
+        return IRIS_KEY_F11;
     case VK_F12:
-        return LENS_KEY_F12;
+        return IRIS_KEY_F12;
     case VK_SHIFT:
     case VK_LSHIFT:
     case VK_RSHIFT:
@@ -580,13 +569,13 @@ static int vk_to_lens_key(WPARAM vk) {
 static void update_mods(w32_platform *pl) {
     uint32_t m = 0;
     if (GetKeyState(VK_SHIFT) & 0x8000)
-        m |= LENS_MOD_SHIFT;
+        m |= IRIS_MOD_SHIFT;
     if (GetKeyState(VK_CONTROL) & 0x8000)
-        m |= LENS_MOD_CTRL;
+        m |= IRIS_MOD_CTRL;
     if (GetKeyState(VK_MENU) & 0x8000)
-        m |= LENS_MOD_ALT;
+        m |= IRIS_MOD_ALT;
     if ((GetKeyState(VK_LWIN) & 0x8000) || (GetKeyState(VK_RWIN) & 0x8000))
-        m |= LENS_MOD_SUPER;
+        m |= IRIS_MOD_SUPER;
     (void)w32_emit_modifiers(pl, m);
 }
 
@@ -596,7 +585,7 @@ static void accum_key(w32_platform *pl, int key, bool pressed, bool repeat) {
 
 static void on_key(w32_platform *pl, WPARAM vk, LPARAM lp, bool down_edge) {
     update_mods(pl);
-    int key = vk_to_lens_key(vk);
+    int key = vk_to_key(vk);
     if (!key)
         return;
     /* lParam bit 30: previous key state — 1 on auto-repeat WM_KEYDOWN. */
@@ -640,8 +629,8 @@ static void on_mouse_button(w32_platform *pl, UINT msg, bool down_edge) {
         /* Implicit grab: keep receiving moves/up outside the client area
          * while a button is held (what the Wayland seat gives us for free). */
         SetCapture(pl->hwnd);
-    } else if (!pl->acc.down[LENS_MOUSE_LEFT] && !pl->acc.down[LENS_MOUSE_RIGHT] &&
-               !pl->acc.down[LENS_MOUSE_MIDDLE]) {
+    } else if (!pl->acc.down[IRIS_BUTTON_LEFT] && !pl->acc.down[IRIS_BUTTON_RIGHT] &&
+               !pl->acc.down[IRIS_BUTTON_MIDDLE]) {
         ReleaseCapture();
     }
 }
@@ -675,7 +664,7 @@ static void on_mouse_wheel(w32_platform *pl, WPARAM wParam, bool horizontal) {
 static void ime_update_position(w32_platform *pl) {
     if (!pl->ui)
         return;
-    flux_rect caret = lens_caret_rect(pl->ui);
+    flux_rect caret = pl->ui_frame.text.caret;
     if (caret.w <= 0.0f)
         return;
     HIMC himc = ImmGetContext(pl->hwnd);
@@ -721,7 +710,7 @@ static void ime_read_composition(w32_platform *pl, LPARAM flags) {
         int n = wlen > 0 ? WideCharToMultiByte(CP_UTF8, 0, wbuf, (int)wlen, u8, (int)sizeof u8,
                                                nullptr, nullptr)
                          : 0;
-        char pre[LENS_PREEDIT_MAX];
+        char pre[IRIS_PREEDIT_MAX];
         size_t kept = iris_utf8_floor_boundary(u8, (size_t)n, sizeof pre - 1);
         memcpy(pre, u8, kept);
         pre[kept] = '\0';
@@ -1087,12 +1076,8 @@ static HRESULT STDMETHODCALLTYPE dt_Drop(IDropTarget *This, IDataObject *pDataOb
                 char *utf8 = (char *)malloc((size_t)utf8_len);
                 if (utf8) {
                     WideCharToMultiByte(CP_UTF8, 0, wstr, -1, utf8, utf8_len, nullptr, nullptr);
-                    lens_paste(impl->pl->ui,
-                               &(lens_paste_opts){.utf8 = utf8, .len = (size_t)(utf8_len - 1)});
-                    lens_deliver_drop(impl->pl->ui,
-                                      &(lens_deliver_drop_opts){.payload = utf8,
-                                                                .len = (size_t)(utf8_len - 1),
-                                                                .pos = drop_pos});
+                    iris__ui_paste(impl->pl->ui, utf8, (size_t)(utf8_len - 1));
+                    iris__ui_drop(impl->pl->ui, utf8, (size_t)(utf8_len - 1), drop_pos);
                     free(utf8);
                 }
             }
@@ -1115,14 +1100,8 @@ static HRESULT STDMETHODCALLTYPE dt_Drop(IDropTarget *This, IDataObject *pDataOb
                             if (utf8) {
                                 WideCharToMultiByte(CP_UTF8, 0, path_w, -1, utf8, utf8_len, nullptr,
                                                     nullptr);
-                                lens_paste(impl->pl->ui,
-                                           &(lens_paste_opts){.utf8 = utf8,
-                                                              .len = (size_t)(utf8_len - 1)});
-                                lens_deliver_drop(impl->pl->ui, &(lens_deliver_drop_opts){
-                                                                    .payload = utf8,
-                                                                    .len = (size_t)(utf8_len - 1),
-                                                                    .pos = drop_pos,
-                                                                });
+                                iris__ui_paste(impl->pl->ui, utf8, (size_t)(utf8_len - 1));
+                                iris__ui_drop(impl->pl->ui, utf8, (size_t)(utf8_len - 1), drop_pos);
                                 free(utf8);
                             }
                         }
@@ -1646,7 +1625,7 @@ static LRESULT CALLBACK w32_wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
         /* Asynchronous clipboard delivery (clip_request_text contract). */
         char *utf8 = (char *)lParam;
         if (pl && pl->ui && utf8)
-            lens_paste(pl->ui, &(lens_paste_opts){.utf8 = utf8, .len = strlen(utf8)});
+            iris__ui_paste(pl->ui, utf8, strlen(utf8));
         free(utf8);
         return 0;
     }
@@ -1658,10 +1637,10 @@ static LRESULT CALLBACK w32_wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
 }
 
 /* ------------------------------------------------------------------ */
-/*  Build one lens_input from the accumulated state                      */
+/*  Build one iris_input from the accumulated state                      */
 /* ------------------------------------------------------------------ */
 
-static void drain_input(w32_platform *pl, lens_input *in, float dt) {
+static void drain_input(w32_platform *pl, iris_input *in, float dt) {
     memset(in, 0, sizeof *in);
     in->cursor = (flux_point){(float)pl->acc.cx, (float)pl->acc.cy};
     in->display_size = (flux_point){(float)pl->width, (float)pl->height};
@@ -1671,7 +1650,7 @@ static void drain_input(w32_platform *pl, lens_input *in, float dt) {
     in->scroll_y = (float)pl->acc.scroll_y;
     in->scroll_pixels_x = (float)pl->acc.scroll_px_x;
     in->scroll_pixels_y = (float)pl->acc.scroll_px_y;
-    for (int i = 0; i < LENS_MOUSE_COUNT; i++) {
+    for (int i = 0; i < IRIS_BUTTON_COUNT; i++) {
         in->mouse_down[i] = pl->acc.down[i];
         in->mouse_pressed[i] = pl->acc.pressed[i];
         in->mouse_released[i] = pl->acc.released[i];
@@ -1689,7 +1668,7 @@ static void drain_input(w32_platform *pl, lens_input *in, float dt) {
 
     /* Clear per-frame edges; keep level state (down/cursor/mods/preedit —
      * the preedit persists until the IME updates or ends it). */
-    for (int i = 0; i < LENS_MOUSE_COUNT; i++)
+    for (int i = 0; i < IRIS_BUTTON_COUNT; i++)
         pl->acc.pressed[i] = pl->acc.released[i] = false;
     pl->acc.scroll_x = pl->acc.scroll_y = 0.0;
     pl->acc.scroll_px_x = pl->acc.scroll_px_y = 0.0;
@@ -1699,9 +1678,9 @@ static void drain_input(w32_platform *pl, lens_input *in, float dt) {
 
 /* Diagnostics go to stderr, never stdout: a consumer's stdout may be an
  * IPC wire (see flux_console_logger). */
-static void log_raw(const lens_input *in) {
-    static const char *names[LENS_MOUSE_COUNT] = {"left", "right", "middle"};
-    for (int b = 0; b < LENS_MOUSE_COUNT; b++) {
+static void log_raw(const iris_input *in) {
+    static const char *names[IRIS_BUTTON_COUNT] = {"left", "right", "middle"};
+    for (int b = 0; b < IRIS_BUTTON_COUNT; b++) {
         if (in->mouse_pressed[b])
             fprintf(stderr, "[raw] mouse press   %s\n", names[b]);
         if (in->mouse_released[b])
@@ -1807,7 +1786,7 @@ static bool acc_has_user_input(w32_platform *pl, double *pcx, double *pcy) {
     bool edge = pl->acc.key_count != 0 || pl->acc.text[0] != '\0' || pl->acc.preedit[0] != '\0' ||
                 pl->acc.scroll_x != 0.0 || pl->acc.scroll_y != 0.0 || pl->acc.scroll_px_x != 0.0 ||
                 pl->acc.scroll_px_y != 0.0;
-    for (int i = 0; i < LENS_MOUSE_COUNT; i++)
+    for (int i = 0; i < IRIS_BUTTON_COUNT; i++)
         edge = edge || pl->acc.pressed[i] || pl->acc.released[i] || pl->acc.down[i];
     return moved || edge;
 }
@@ -1839,7 +1818,7 @@ static void w32_destroy_vk_surface(const flux_device *device, VkSurfaceKHR vk_su
 /*  Run                                                                */
 /* ------------------------------------------------------------------ */
 
-static int lens_host_start_drag_win32(const char *text, size_t len, uint32_t actions, void *user) {
+static int w32_start_drag(const char *text, size_t len, uint32_t actions, void *user) {
     (void)user;
     iris_dnd_source src = {
         .actions = actions,
@@ -1853,7 +1832,7 @@ typedef struct w32_present_context {
     w32_platform *pl;
     flux_surface *surface;
     flux_canvas *canvas;
-    const iris_app_config *cfg;
+    const iris_app_opts *cfg;
 } w32_present_context;
 
 static DWORD WINAPI win32_presenter_thread_main(LPVOID arg) {
@@ -1880,7 +1859,7 @@ static DWORD WINAPI win32_presenter_thread_main(LPVOID arg) {
         if (!pkt)
             continue;
 
-        if (pkt->snapshot) {
+        if (pkt->snapshot || pkt->host_list) {
             uint32_t target_w = (uint32_t)ceilf(pkt->width * pkt->scale);
             uint32_t target_h = (uint32_t)ceilf(pkt->height * pkt->scale);
             flux_surface_info sinfo;
@@ -1929,8 +1908,9 @@ static DWORD WINAPI win32_presenter_thread_main(LPVOID arg) {
                         drew = true;
                     }
                     if (pkt->snapshot) {
-                        drew =
-                            (lens_snapshot_submit(pkt->snapshot, ctx->canvas) == FLUX_OK) || drew;
+                        drew = (iris__ui_snapshot_submit(ctx->cfg->ui, pkt->snapshot,
+                                                         ctx->canvas) == FLUX_OK) ||
+                               drew;
                     }
                     (void)flux_canvas_end(ctx->canvas);
                 }
@@ -1946,13 +1926,11 @@ static DWORD WINAPI win32_presenter_thread_main(LPVOID arg) {
                 }
             }
         }
-
-        iris_mailbox_recycle(&pl->mailbox, pkt);
     }
     return 0;
 }
 
-int iris_app_run_win32(const iris_app_config *cfg) {
+int iris_app_run_win32(const iris_app_opts *cfg) {
     /* All resources declared up front and NULL/VK_NULL_HANDLE-initialized so
      * a single `fail:` cleanup block can run on every exit path (error or
      * success) without referencing out-of-scope or indeterminate pointers. */
@@ -1960,7 +1938,8 @@ int iris_app_run_win32(const iris_app_config *cfg) {
     VkSurfaceKHR vk_surface = VK_NULL_HANDLE;
     flux_surface *surface = nullptr;
     flux_canvas *canvas = nullptr;
-    lens *ui = nullptr;
+    const iris_ui_host *ui = nullptr; /* set once the UI host started */
+    bool ui_started = false;
     bool host_started = false;
     int rc = 1; /* pessimistic; set to 0 only on success */
 
@@ -2083,7 +2062,7 @@ int iris_app_run_win32(const iris_app_config *cfg) {
     }
 
     /* Swapchain is sized in *device* pixels — logical × scale — while
-     * layout and lens_input stay in logical units. */
+     * layout and iris_input stay in logical units. */
     flux_surface_desc sdesc = {
         .type = FLUX_TYPE_SURFACE_DESC,
         .vk_surface_khr = vk_surface,
@@ -2107,22 +2086,22 @@ int iris_app_run_win32(const iris_app_config *cfg) {
         goto fail;
     }
 
-    if (lens_create(&(lens_desc){.device = device,
-                                 .theme = cfg->dark
-                                              ? lens_theme_dark()
-                                              : (iris_system_prefers_dark() ? lens_theme_dark()
-                                                                            : lens_theme_default()),
-                                 .scale = pl.scale,
-                                 .clipboard = {.set_text = clip_set_text,
-                                               .request_text = clip_request_text,
-                                               .user = &pl},
-                                 .dnd = {.start_drag = lens_host_start_drag_win32, .user = &pl}},
-                    &ui) != FLUX_OK) {
-        fprintf(stderr, "lens_create failed\n");
+    if (!iris__ui_start(cfg->ui, &(iris_ui_start_info){
+                                     .device = device,
+                                     .scale = pl.scale,
+                                     .dark = cfg->dark || iris_system_prefers_dark(),
+                                     .services = {.clipboard_set_text = clip_set_text,
+                                                  .clipboard_request_text = clip_request_text,
+                                                  .start_drag = w32_start_drag,
+                                                  .user = &pl},
+                                 })) {
+        fprintf(stderr, "iris UI host start failed\n");
         goto fail;
     }
+    ui = cfg->ui;
+    ui_started = true;
 
-    if (cfg->start && !cfg->start(ui, device, cfg->user)) {
+    if (cfg->start && !cfg->start(device, cfg->user)) {
         fprintf(stderr, "iris host start callback failed\n");
         goto fail;
     }
@@ -2140,7 +2119,7 @@ int iris_app_run_win32(const iris_app_config *cfg) {
      * main-thread prepare pass. Recorded host content travels through the
      * mailbox as an immutable display list. */
     if (!cfg->prepare) {
-        iris_mailbox_init(&pl.mailbox);
+        iris_mailbox_init(&pl.mailbox, cfg->ui);
         pl.present_event = CreateEventW(nullptr, FALSE, FALSE, nullptr);
         if (pl.present_event) {
             atomic_init(&pl.presenter_running, true);
@@ -2214,10 +2193,7 @@ int iris_app_run_win32(const iris_app_config *cfg) {
      * unconditionally — accessibility is not opt-in. */
     {
         iris_a11y_prefs prefs = iris_a11y_prefs_query();
-        lens_set_reduced_motion(ui, prefs.reduced_motion);
-        lens_set_text_scale(ui, prefs.text_scale);
-        if (prefs.high_contrast)
-            w32_on_a11y_prefs(&prefs, &pl);
+        iris__ui_set_a11y_prefs(ui, &prefs);
     }
     pl.a11y_prefs_watching = (iris_a11y_prefs__watch_backend(w32_on_a11y_prefs, &pl) == 0);
 
@@ -2286,7 +2262,7 @@ int iris_app_run_win32(const iris_app_config *cfg) {
         if (pl.pending_scale > 0.0f && fabsf(pl.pending_scale - pl.scale) > 0.0001f) {
             pl.scale = pl.pending_scale;
             w32_emit_scale(pl.scale);
-            lens_set_scale(ui, pl.scale);
+            iris__ui_set_scale(ui, pl.scale);
             pl.resized = true;
         }
         if (pl.resized) {
@@ -2311,20 +2287,17 @@ int iris_app_run_win32(const iris_app_config *cfg) {
         }
         last_sim_ns = sim_ns;
 
-        lens_input in;
+        iris_input in;
         drain_input(&pl, &in, dt);
         if (cfg->log_raw)
             log_raw(&in);
 
-        lens_begin(ui, &in);
-        if (cfg->build)
-            cfg->build(ui, &in, cfg->user);
-        lens_end(ui);
+        iris__ui_frame(ui, &in, &pl.ui_frame);
 
         /* Inert with a11y_stub.c; kept for a future UI Automation bridge
          * (same seam app_cocoa.m uses). */
-        if (pl.a11y_running)
-            iris_a11y_update(ui);
+        if (pl.a11y_running && ui)
+            (void)iris_a11y_update(ui);
 
         /* Keep the IME composition/candidate windows glued to the caret
          * while a composition is active (the caret moves as text commits). */
@@ -2334,27 +2307,9 @@ int iris_app_run_win32(const iris_app_config *cfg) {
         /* Cursor: an explicit host iris_set_cursor wins; while it is DEFAULT,
          * follow the semantic hint of the lens widget under the pointer
          * (I-beam over text fields, hand over clickable elements, …). */
-        lens_cursor_hint hint = lens_get_cursor_hint(ui);
         iris_cursor eff = pl.host_cursor;
-        if (eff == IRIS_CURSOR_DEFAULT) {
-            switch (hint) {
-            case LENS_CURSOR_POINTER:
-                eff = IRIS_CURSOR_POINTER;
-                break;
-            case LENS_CURSOR_TEXT:
-                eff = IRIS_CURSOR_TEXT;
-                break;
-            case LENS_CURSOR_RESIZE_EW:
-                eff = IRIS_CURSOR_RESIZE_EW;
-                break;
-            case LENS_CURSOR_RESIZE_NS:
-                eff = IRIS_CURSOR_RESIZE_NS;
-                break;
-            case LENS_CURSOR_DEFAULT:
-            default:
-                break;
-            }
-        }
+        if (eff == IRIS_CURSOR_DEFAULT)
+            eff = pl.ui_frame.cursor;
         if (eff != pl.effective_cursor) {
             pl.effective_cursor = eff;
             if (pl.cursor_inside)
@@ -2370,7 +2325,7 @@ int iris_app_run_win32(const iris_app_config *cfg) {
         }
 
         /* Cadence evaluation via iris_pacer (ADR-0122). */
-        bool chrome_damaged = lens_frame_needs_repaint(ui);
+        bool chrome_damaged = pl.ui_frame.damaged;
         bool surface_forced = resized_this_frame || surface_needs_paint;
 
         iris_pace_inputs pace_in = {
@@ -2383,9 +2338,9 @@ int iris_app_run_win32(const iris_app_config *cfg) {
             .host_static = pl.record_static,
             .has_host_content = has_host_content,
             .chrome_damaged = chrome_damaged,
-            .caret_ticking = lens_caret_clock_live(ui),
+            .caret_ticking = pl.ui_frame.caret_ticking,
             .surface_needs_paint = surface_forced,
-            .lens_animating = lens_anim_pending(ui),
+            .ui_animating = pl.ui_frame.animating,
         };
         pl.frame_skip_render = false;
         pl.record_static = false;
@@ -2403,8 +2358,8 @@ int iris_app_run_win32(const iris_app_config *cfg) {
                  */
                 flux_display_list *host_list = iris_record_host_canvas(cfg, pl.scale);
 
-                lens_scene_snapshot *snapshot = nullptr;
-                if (lens_snapshot_create(ui, &snapshot) == FLUX_OK || host_list != nullptr) {
+                iris_ui_snapshot *snapshot = nullptr;
+                if (iris__ui_snapshot_create(ui, &snapshot) == FLUX_OK || host_list != nullptr) {
                     iris_frame_packet *pkt = iris_mailbox_acquire(&pl.mailbox);
                     if (pkt) {
                         pkt->snapshot = snapshot;
@@ -2412,19 +2367,19 @@ int iris_app_run_win32(const iris_app_config *cfg) {
                         /* Resolve the frame's damage set on the UI thread: the
                          * presentation thread must not re-query lens, and the set
                          * has to travel with the snapshot it describes. */
-                        pkt->damage_count = lens_damage_rects(
-                            ui, &(lens_damage_opts){.rects = pkt->damage,
-                                                    .capacity = LENS_DAMAGE_RECTS_CAPACITY});
+                        pkt->damage_count =
+                            iris__ui_damage_rects(ui, pkt->damage, IRIS_DAMAGE_RECTS_CAPACITY);
                         pkt->force_paint = surface_forced;
-                        lens_theme th = lens_get_theme(ui);
-                        pkt->clear_color = th.color_bg;
+                        pkt->clear_color = pl.ui_frame.clear_color;
                         pkt->has_clear = !cfg->no_clear;
                         pkt->scale = pl.scale;
                         pkt->width = pl.width;
                         pkt->height = pl.height;
                         iris_mailbox_publish(&pl.mailbox, pkt);
                         SetEvent(pl.present_event);
-                        if (snapshot && lens_snapshot_activate(ui, snapshot) == FLUX_OK) {
+                        /* Without a UI layer there is nothing to activate: the
+                         * published host content is the whole frame. */
+                        if (!ui || iris__ui_snapshot_activate(ui, snapshot) == FLUX_OK) {
                             surface_needs_paint = false;
                         }
                         if (++frame_no == 1) {
@@ -2435,9 +2390,7 @@ int iris_app_run_win32(const iris_app_config *cfg) {
                                 (uint32_t)lroundf((float)pl.height * pl.scale), pl.scale);
                         }
                     }
-                    if (snapshot) {
-                        lens_snapshot_release(snapshot);
-                    }
+                    iris__ui_snapshot_release(ui, snapshot);
                     if (host_list) {
                         flux_display_list_release(host_list);
                     }
@@ -2470,11 +2423,10 @@ int iris_app_run_win32(const iris_app_config *cfg) {
 
             /* Clear to the current theme's body background; recorded host
              * content draws *under* lens's chrome. */
-            lens_theme th = lens_get_theme(ui);
-            flux_color clear = th.color_bg;
+            flux_color clear = pl.ui_frame.clear_color;
             flux_color *pass_clear = cfg->no_clear ? nullptr : &clear;
             bool drew = false;
-            lens_scene_snapshot *snapshot = nullptr;
+            iris_ui_snapshot *snapshot = nullptr;
             flux_display_list *host_list = iris_record_host_canvas(cfg, pl.scale);
 
             /* Damage scope for this surface (ADR-0149): the set travels intact to
@@ -2484,8 +2436,8 @@ int iris_app_run_win32(const iris_app_config *cfg) {
             iris_frame_damage dmg = {};
             const bool localize = !surface_forced && !has_host_content;
             if (localize) {
-                dmg = iris_frame_lens_damage(ui, pl.scale, (int32_t)info.width,
-                                             (int32_t)info.height, /*force_full=*/false);
+                dmg = iris_frame_ui_damage(ui, pl.scale, (int32_t)info.width, (int32_t)info.height,
+                                           /*force_full=*/false);
             } else {
                 dmg.full = true;
             }
@@ -2508,8 +2460,12 @@ int iris_app_run_win32(const iris_app_config *cfg) {
                                                            &(flux_canvas_submit_display_list_opts){
                                                                .list = host_list}) == FLUX_OK;
                 }
-                if (lens_snapshot_create(ui, &snapshot) == FLUX_OK) {
-                    drew = lens_snapshot_submit(snapshot, canvas) == FLUX_OK || drew;
+                if (!ui) {
+                    /* Canvas-only host: the cleared pass plus whatever the host
+                     * recorded is the frame. */
+                    drew = true;
+                } else if (iris__ui_snapshot_create(ui, &snapshot) == FLUX_OK) {
+                    drew = (iris__ui_snapshot_submit(ui, snapshot, canvas) == FLUX_OK) || drew;
                 }
                 if (flux_canvas_end(canvas) != FLUX_OK)
                     drew = false;
@@ -2517,11 +2473,11 @@ int iris_app_run_win32(const iris_app_config *cfg) {
             flux_display_list_release(host_list);
 
             if (!drew) {
-                lens_snapshot_release(snapshot);
+                iris__ui_snapshot_release(ui, snapshot);
                 goto fail;
             }
             if (flux_frame_submit(frame) != FLUX_OK) {
-                lens_snapshot_release(snapshot);
+                iris__ui_snapshot_release(ui, snapshot);
                 goto fail;
             }
             r = flux_frame_present(frame);
@@ -2529,18 +2485,17 @@ int iris_app_run_win32(const iris_app_config *cfg) {
                 (void)flux_surface_resize(surface, (uint32_t)lroundf((float)pl.width * pl.scale),
                                           (uint32_t)lroundf((float)pl.height * pl.scale));
             else if (r != FLUX_OK) {
-                lens_snapshot_release(snapshot);
+                iris__ui_snapshot_release(ui, snapshot);
                 goto fail;
             } else if (drew) {
-                flux_result activated = lens_snapshot_activate(ui, snapshot);
-                if (activated != FLUX_OK) {
-                    lens_snapshot_release(snapshot);
+                if (ui && iris__ui_snapshot_activate(ui, snapshot) != FLUX_OK) {
+                    iris__ui_snapshot_release(ui, snapshot);
                     goto fail;
                 }
                 surface_needs_paint = false;
             }
 
-            lens_snapshot_release(snapshot);
+            iris__ui_snapshot_release(ui, snapshot);
 
             if (++frame_no == 1)
                 fprintf(stderr, "first frame presented: %dx%d logical, %ux%u device (scale=%.2f)\n",
@@ -2548,7 +2503,7 @@ int iris_app_run_win32(const iris_app_config *cfg) {
         }
 
         if (quiesced) {
-            lens_text_compact(ui);
+            iris__ui_quiesce(ui);
         }
     }
 
@@ -2561,7 +2516,9 @@ fail:
      * Keep the active platform published during the callback so thread-affine
      * iris helpers remain valid through the host's teardown. */
     if (host_started && cfg->stop)
-        cfg->stop(ui, device, cfg->user);
+        cfg->stop(device, cfg->user);
+    if (ui_started)
+        iris__ui_stop(cfg->ui);
 
     /* Stop publishing this w32_platform to the context-free APIs — any host
      * call after this returns is a no-op rather than a use-after-free. */
@@ -2581,8 +2538,8 @@ fail:
     /* GPU side first: let in-flight work finish before tearing down objects. */
     if (device)
         flux_device_wait_idle(device);
-    if (ui)
-        lens_release(ui);
+    if (ui_started)
+        iris__ui_destroy(cfg->ui);
     pl.ui = nullptr; /* after this, queued main-thread callbacks must not touch lens */
     /* The Win32 theme watcher holds no thread or handle; unwatch just drops
      * the backend's internal registration (the host's public watch, if any,

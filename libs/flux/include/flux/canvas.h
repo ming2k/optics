@@ -116,23 +116,11 @@ typedef struct flux_canvas_desc {
                                          reads it to rasterise glyphs crisply at HiDPI.
                                          Change later with flux_canvas_set_scale. */
     flux_canvas_backend_kind backend; /* default AUTO */
-    uint32_t width, height;           /* CPU framebuffer size (physical px);
-                                         ignored for the GPU backend. */
+    uint32_t width, height;           /* CPU framebuffer size (physical px), both
+                                         required; ignored for the GPU backend. */
 } flux_canvas_desc;
 
 #define FLUX_CANVAS_DESC_INIT {.type = FLUX_TYPE_CANVAS_DESC}
-
-/* GPU attachment-antialiasing policy for one Canvas pass. AUTO preserves the
- * pre-v0.0.5 behaviour: a clearing pass uses 4x MSAA and a loading pass
- * renders directly into its one-sample destination. NONE always uses the
- * one-sample GPU target. MSAA_4X requires a clear colour because a
- * multisample attachment cannot load a one-sample resolve destination. The
- * CPU backend accepts the policy and retains its native software rasterizer. */
-typedef enum flux_canvas_antialias : uint32_t {
-    FLUX_CANVAS_ANTIALIAS_AUTO = 0,
-    FLUX_CANVAS_ANTIALIAS_NONE = 1,
-    FLUX_CANVAS_ANTIALIAS_MSAA_4X = 2,
-} flux_canvas_antialias;
 
 /* Destination selection is independent of recording context and pass policy.
  * DEFAULT selects the frame attachment on GPU, or the Canvas framebuffer on
@@ -175,7 +163,6 @@ typedef struct flux_canvas_pass_desc {
     flux_frame *frame; /* GPU recording context; nullptr on CPU. Borrowed until end. */
     flux_canvas_attachment attachment; /* resources retained until end */
     const flux_color *clear_color;     /* non-NULL: clear; NULL: load */
-    flux_canvas_antialias antialias;
     /* Rectangles this pass may write, in destination physical pixels. The
      * destination must already hold a complete frame outside them — a skipped
      * region is not repainted. Empty selects the full destination extent.
@@ -198,70 +185,6 @@ typedef struct flux_canvas_pass_desc {
 } flux_canvas_pass_desc;
 
 #define FLUX_CANVAS_PASS_DESC_INIT {.type = FLUX_TYPE_CANVAS_PASS_DESC}
-
-/* Optional pNext extension for an attachment-free Canvas pass. When enabled,
- * no stencil image is allocated, transitioned, cleared, or attached, and the
- * Vulkan pipelines declare VK_FORMAT_UNDEFINED for stencil. Use only for
- * draws whose semantics never require stencil (for example solid/image
- * compositor blits). A stencil-dependent path fill is dropped; checked pass
- * termination returns FLUX_ERROR_INVALID_STATE (and also records the
- * diagnostic for flux_get_last_error) instead of silently misrendering.
- *
- * Keeping this policy in a tagged extension preserves the stable size and
- * layout of flux_canvas_pass_desc for callers built against older headers. */
-typedef struct flux_canvas_no_stencil_desc {
-    flux_struct_type type; /* FLUX_TYPE_CANVAS_NO_STENCIL_DESC */
-    const void *next;
-    bool enabled;
-} flux_canvas_no_stencil_desc;
-
-#define FLUX_CANVAS_NO_STENCIL_DESC_INIT {.type = FLUX_TYPE_CANVAS_NO_STENCIL_DESC}
-
-/* Optional pNext extension on flux_canvas_desc: the create-time
- * antialiasing request for the software backend. NONE allocates a
- * 1-sample-per-pixel sample buffer (one quarter of the memory and raster
- * work of the supersampled default) at the cost of aliased coverage edges;
- * AUTO (or the absence of this extension) keeps the 4-samples-per-pixel
- * oracle default that mirrors the GPU backend's 4x MSAA. The GPU backend
- * ignores this extension: its antialiasing policy is per pass
- * (flux_canvas_pass_desc::antialias).
- *
- * Tagged-extension form for the same reason as
- * flux_canvas_no_stencil_desc: flux_canvas_desc keeps its stable size and
- * layout for callers built against older headers. */
-typedef struct flux_canvas_antialias_desc {
-    flux_struct_type type; /* FLUX_TYPE_CANVAS_ANTIALIAS_DESC */
-    const void *next;
-    flux_canvas_antialias antialias; /* AUTO / NONE / MSAA_4X */
-} flux_canvas_antialias_desc;
-
-#define FLUX_CANVAS_ANTIALIAS_DESC_INIT {.type = FLUX_TYPE_CANVAS_ANTIALIAS_DESC}
-
-/* Optional pNext extension on flux_canvas_desc: the software backend's
- * supersampling factor per axis (ss x ss samples per pixel). 0 keeps the
- * backend default (2 = 4 samples/px). This is the *coverage resolution*
- * knob: with N = ss*ss samples a pixel can carry N+1 distinct coverage
- * levels, so ss=4 (16 samples, 17 levels) already matches what a good
- * analytic rasteriser produces and ss=8 (65 levels) is effectively exact.
- *
- * It exists because coverage masks — icon/image caches baked from vector
- * geometry and then blitted 1:1 — are sampled once and reused, so their
- * banding is permanent and cannot be hidden by the display's MSAA. See
- * flux_canvas_cpu_coverage for the mask readback this pairs with.
- *
- * Upper bound FLUX_CANVAS_SUPERSAMPLE_MAX keeps sample-buffer memory
- * bounded (ss=8 costs 64 float RGBA samples per pixel); out-of-range
- * requests fail creation with FLUX_ERROR_OUT_OF_RANGE rather than
- * silently clamping, so a caller can never believe it got more fidelity
- * than the buffer holds. */
-#define FLUX_CANVAS_SUPERSAMPLE_MAX 8u
-typedef struct flux_canvas_supersample_desc {
-    flux_struct_type type; /* FLUX_TYPE_CANVAS_SUPERSAMPLE_DESC */
-    const void *next;
-    uint32_t supersample; /* 0 = backend default; 1..FLUX_CANVAS_SUPERSAMPLE_MAX */
-} flux_canvas_supersample_desc;
-
-#define FLUX_CANVAS_SUPERSAMPLE_DESC_INIT {.type = FLUX_TYPE_CANVAS_SUPERSAMPLE_DESC}
 
 /* Create a canvas on the selected backend. GPU canvases need desc->surface;
  * CPU canvases need desc->width/height (see flux/canvas_cpu.h for a convenience
@@ -653,7 +576,7 @@ typedef struct flux_glyph_run_desc {
     /* Host-resident R8 coverage atlas, the CPU-backend alternative to
      * `atlas` (ADR-0019): when non-NULL the CPU rasteriser samples
      * coverage straight from this buffer with no GPU image, so a
-     * device-less canvas (flux_canvas_create_cpu) can render glyph runs.
+     * device-less canvas (flux_canvas_create (CPU backend)) can render glyph runs.
      * Ignored when a device/atlas is present. `host_atlas_w/h` are the
      * buffer's texel extent (0 when unused).
      *
@@ -699,7 +622,7 @@ typedef struct flux_glyph_run_host_atlas_desc {
  * multiplied by each quad's premultiplied tint, blended SRC_OVER —
  * the same R8-coverage × tint contract, without per-glyph draw calls.
  *
- * On a device-less CPU canvas (flux_canvas_create_cpu) there is no
+ * On a device-less CPU canvas (flux_canvas_create (CPU backend)) there is no
  * GPU image to bind, so `atlas` is ignored and `host_coverage` is used
  * instead: a host-resident R8 coverage buffer of host_atlas_w×host_atlas_h
  * texels (ADR-0019). The CPU rasteriser samples coverage directly from it. */

@@ -158,28 +158,8 @@ test_error_info = executable('test_error_info',
 )
 test('error_info', test_error_info, suite : 'unit')
 
-# The tessellator test compiles geometry_tess.c in directly so it
-# can call signed_area / ear_clip_contour — those symbols have
-# hidden visibility in libflux.so and aren't reachable from a
-# normal link.
-test_canvas_tess = executable('test_canvas_tess',
-  'test_canvas_tess.c',
-  '../../../libs/flux/src/canvas/geometry_tess.c',
-  dependencies : [flux_unit_support_dep],
-)
-test('canvas_tess', test_canvas_tess, suite : 'unit')
-
-# Tessellation result cache: CPU-canvas pixel comparisons plus the
-# hit/miss/store counters read from struct flux_canvas via the
-# internal header. Links libflux normally (no source compiled in).
-test_canvas_tess_cache = executable('test_canvas_tess_cache',
-  'test_canvas_tess_cache.c',
-  dependencies : [flux_unit_support_dep],
-)
-test('canvas_tess_cache', test_canvas_tess_cache, suite : 'unit')
-
-# Same reasoning as test_canvas_tess: curve_flatten.c is hidden
-# in libflux.so, so we compile it into the test binary directly.
+# curve_flatten.c has hidden visibility in libflux.so, so we compile it into
+# the test binary directly.
 test_canvas_flatten = executable('test_canvas_flatten',
   'test_canvas_flatten.c',
   '../../../libs/flux/src/canvas/curve_flatten.c',

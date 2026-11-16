@@ -2,7 +2,7 @@
  *
  * This is the single interception point between iris's reification of a
  * native event and the folding of surviving events into the frame's
- * lens_input. Every backend routes each reified `iris_event` through
+ * iris_input. Every backend routes each reified `iris_event` through
  * iris__event_seam_emit() before applying it to its accumulator:
  *
  *     iris_event ev = { .type = ..., .flags = ..., .<payload> = ... };

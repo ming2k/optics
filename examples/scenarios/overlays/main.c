@@ -143,7 +143,7 @@ int main(int argc, char **argv) {
                "Esc closes open popups or exits.\n\n");
     }
 
-    return iris_app_run(&(iris_app_config){
+    return aperture_app_run(&(aperture_app_opts){
         .title = "Optics — Overlays Scenario",
         .width = 720,
         .height = 480,

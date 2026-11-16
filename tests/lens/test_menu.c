@@ -54,7 +54,9 @@ int main(void) {
     OT_EXPECT(anchor.w > 0.0f);
 
     /* Render popup menu for "file_menu" anchored to the File button */
-    int32_t act = lens_popup_menu(ui, "file_menu", anchor, file_items, 4, nullptr);
+    int32_t act = lens_popup_menu(
+        ui, &(lens_menu_opts){
+                .id = "file_menu", .anchor = anchor, .items = file_items, .item_count = 4});
     OT_EXPECT(act == -1); /* None clicked yet */
     lens_test_end(ui);
 
@@ -65,7 +67,9 @@ int main(void) {
     in.mouse_released[LENS_MOUSE_LEFT] = false;
     lens_begin(ui, &in);
     lens_menubar(ui, &mb_opts);
-    lens_popup_menu(ui, "file_menu", anchor, file_items, 4, nullptr);
+    lens_popup_menu(ui,
+                    &(lens_menu_opts){
+                        .id = "file_menu", .anchor = anchor, .items = file_items, .item_count = 4});
     lens_test_end(ui);
 
     in.mouse_down[LENS_MOUSE_LEFT] = false;
@@ -73,7 +77,9 @@ int main(void) {
     in.mouse_released[LENS_MOUSE_LEFT] = true;
     lens_begin(ui, &in);
     lens_menubar(ui, &mb_opts);
-    act = lens_popup_menu(ui, "file_menu", anchor, file_items, 4, nullptr);
+    act = lens_popup_menu(
+        ui, &(lens_menu_opts){
+                .id = "file_menu", .anchor = anchor, .items = file_items, .item_count = 4});
     OT_EXPECT(act == 1); /* "Open..." clicked! */
     lens_test_end(ui);
 
@@ -89,14 +95,18 @@ int main(void) {
     in.key_count = 1;
     in.keys[0] = (lens_key_event){.key = LENS_KEY_DOWN, .pressed = true};
     lens_begin(ui, &in);
-    act = lens_popup_menu(ui, "file_menu", anchor, file_items, 4, nullptr);
+    act = lens_popup_menu(
+        ui, &(lens_menu_opts){
+                .id = "file_menu", .anchor = anchor, .items = file_items, .item_count = 4});
     OT_EXPECT(act == -1);
     lens_test_end(ui);
 
     /* Press Return -> activates item 0 ("New") */
     in.keys[0] = (lens_key_event){.key = LENS_KEY_RETURN, .pressed = true};
     lens_begin(ui, &in);
-    act = lens_popup_menu(ui, "file_menu", anchor, file_items, 4, nullptr);
+    act = lens_popup_menu(
+        ui, &(lens_menu_opts){
+                .id = "file_menu", .anchor = anchor, .items = file_items, .item_count = 4});
     OT_EXPECT(act == 0); /* "New" activated via keyboard Return */
     lens_test_end(ui);
 

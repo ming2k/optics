@@ -68,7 +68,13 @@ static bool render_size_probe(bool interleaved, uint8_t out[W * H * 4]) {
     }
 
     flux_canvas *canvas = nullptr;
-    if (flux_canvas_create_cpu(W, H, 1.0f, &canvas) != FLUX_OK || !canvas) {
+    if (flux_canvas_create(&(flux_canvas_desc){.type = FLUX_TYPE_CANVAS_DESC,
+                                               .backend = FLUX_CANVAS_BACKEND_CPU,
+                                               .scale = 1.0f,
+                                               .width = W,
+                                               .height = H},
+                           &canvas) != FLUX_OK ||
+        !canvas) {
         glyph_release(text);
         return false;
     }
@@ -106,7 +112,12 @@ int main(void) {
     }
 
     flux_canvas *c = nullptr;
-    OT_EXPECT(flux_canvas_create_cpu(W, H, 1.0f, &c) == FLUX_OK);
+    OT_EXPECT(flux_canvas_create(&(flux_canvas_desc){.type = FLUX_TYPE_CANVAS_DESC,
+                                                     .backend = FLUX_CANVAS_BACKEND_CPU,
+                                                     .scale = 1.0f,
+                                                     .width = W,
+                                                     .height = H},
+                                 &c) == FLUX_OK);
     OT_EXPECT(c != nullptr);
 
     flux_color black = flux_color_rgba_premul(0, 0, 0, 255);

@@ -4,6 +4,17 @@
 #include "optics_test.h"
 #include <lens/patterns.h>
 
+/* The fixed arguments of every case in this file, merged into a copy of the
+ * case's options. */
+static lens_tree_action tree_view(lens *ui, const char *id, lens_tree_item *items,
+                                  uint32_t item_count, const lens_tree_opts *base) {
+    lens_tree_opts o = *base;
+    o.id = id;
+    o.items = items;
+    o.item_count = item_count;
+    return lens_tree_view(ui, &o);
+}
+
 int main(void) {
     lens *ui = nullptr;
     OT_EXPECT(lens_create(nullptr, &ui) == FLUX_OK);
@@ -25,7 +36,7 @@ int main(void) {
 
     /* Frame 1: Neutral pass to layout rows */
     lens_begin(ui, &in);
-    lens_tree_action a = lens_tree_view(ui, "my_tree", items, 4, &opts);
+    lens_tree_action a = tree_view(ui, "my_tree", items, 4, &opts);
     OT_EXPECT(a.kind == LENS_TREE_ACTION_NONE);
     lens_test_end(ui);
 
@@ -34,14 +45,14 @@ int main(void) {
     in.mouse_down[LENS_MOUSE_LEFT] = true;
     in.mouse_pressed[LENS_MOUSE_LEFT] = true;
     lens_begin(ui, &in);
-    a = lens_tree_view(ui, "my_tree", items, 4, &opts);
+    a = tree_view(ui, "my_tree", items, 4, &opts);
     lens_test_end(ui);
 
     in.mouse_down[LENS_MOUSE_LEFT] = false;
     in.mouse_pressed[LENS_MOUSE_LEFT] = false;
     in.mouse_released[LENS_MOUSE_LEFT] = true;
     lens_begin(ui, &in);
-    a = lens_tree_view(ui, "my_tree", items, 4, &opts);
+    a = tree_view(ui, "my_tree", items, 4, &opts);
     OT_EXPECT(a.kind == LENS_TREE_ACTION_TOGGLE);
     OT_EXPECT(a.index == 0);
     OT_EXPECT(items[0].expanded == true);
@@ -53,14 +64,14 @@ int main(void) {
     in.mouse_pressed[LENS_MOUSE_LEFT] = true;
     in.mouse_released[LENS_MOUSE_LEFT] = false;
     lens_begin(ui, &in);
-    a = lens_tree_view(ui, "my_tree", items, 4, &opts);
+    a = tree_view(ui, "my_tree", items, 4, &opts);
     lens_test_end(ui);
 
     in.mouse_down[LENS_MOUSE_LEFT] = false;
     in.mouse_pressed[LENS_MOUSE_LEFT] = false;
     in.mouse_released[LENS_MOUSE_LEFT] = true;
     lens_begin(ui, &in);
-    a = lens_tree_view(ui, "my_tree", items, 4, &opts);
+    a = tree_view(ui, "my_tree", items, 4, &opts);
     OT_EXPECT(a.kind == LENS_TREE_ACTION_SELECT);
     OT_EXPECT(a.index == 3);
     lens_test_end(ui);
@@ -71,7 +82,7 @@ int main(void) {
     in.key_count = 1;
     in.keys[0] = (lens_key_event){.key = LENS_KEY_UP, .pressed = true};
     lens_begin(ui, &in);
-    a = lens_tree_view(ui, "my_tree", items, 4, &opts);
+    a = tree_view(ui, "my_tree", items, 4, &opts);
     OT_EXPECT(a.kind == LENS_TREE_ACTION_SELECT);
     OT_EXPECT(a.index == 2);
     lens_test_end(ui);
@@ -79,7 +90,7 @@ int main(void) {
     /* Press Return -> activates item 2 */
     in.keys[0] = (lens_key_event){.key = LENS_KEY_RETURN, .pressed = true};
     lens_begin(ui, &in);
-    a = lens_tree_view(ui, "my_tree", items, 4, &opts);
+    a = tree_view(ui, "my_tree", items, 4, &opts);
     OT_EXPECT(a.kind == LENS_TREE_ACTION_ACTIVATE);
     OT_EXPECT(a.index == 2);
     lens_test_end(ui);

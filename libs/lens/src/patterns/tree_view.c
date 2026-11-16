@@ -9,8 +9,13 @@ typedef struct tree_view_state {
     int32_t focused_index;
 } tree_view_state;
 
-lens_tree_action lens_tree_view(lens *ui, const char *id_str, lens_tree_item *items,
-                                uint32_t item_count, const lens_tree_opts *opts) {
+lens_tree_action lens_tree_view(lens *ui, const lens_tree_opts *opts) {
+    if (!opts)
+        return (lens_tree_action){};
+    const char *id_str = opts->id;
+    lens_tree_item *items = opts->items;
+    const uint32_t item_count = opts->item_count;
+
     lens_tree_action action = {
         .kind = LENS_TREE_ACTION_NONE,
         .index = 0,

@@ -32,10 +32,12 @@ static void verify_backdrop_gate(const flux_curve_seg *curve_segs, uint32_t n_cu
     uint32_t total_tiles = tx * ty;
 
     flux_tile_desc *tiles = calloc(total_tiles, sizeof(flux_tile_desc));
+    int32_t *row_bd = calloc((size_t)total_tiles * FLUX_TILE_SIZE, sizeof(int32_t));
     uint32_t *indices = malloc(MAX_INDICES * sizeof(uint32_t));
-    OT_EXPECT(tiles && indices);
-    if (!tiles || !indices) {
+    OT_EXPECT(tiles && row_bd && indices);
+    if (!tiles || !row_bd || !indices) {
         free(tiles);
+        free(row_bd);
         free(indices);
         return;
     }
@@ -43,20 +45,22 @@ static void verify_backdrop_gate(const flux_curve_seg *curve_segs, uint32_t n_cu
     uint32_t total_indices = 0;
     OT_EXPECT(canvas_tile_bin_segments(segs, n_segs, W, H, tiles, indices, MAX_INDICES,
                                        &total_indices) == FLUX_OK);
-    OT_EXPECT(canvas_tile_compute_backdrop(segs, n_segs, W, H, tiles) == FLUX_OK);
+    OT_EXPECT(canvas_tile_compute_backdrop(segs, n_segs, W, H, row_bd) == FLUX_OK);
 
-    /* Gate B3: per-tile winding matches flux_curve_cover_winding */
+    /* Gate B3: every pixel row inside every non-boundary tile matches exact point winding */
     uint32_t checked_tiles = 0;
     for (uint32_t y = 0; y < ty; ++y) {
-        float cy = ((float)y + 0.5f) * (float)FLUX_TILE_SIZE;
         for (uint32_t x = 0; x < tx; ++x) {
             float cx = ((float)x + 0.5f) * (float)FLUX_TILE_SIZE;
             uint32_t tidx = y * tx + x;
 
-            /* Interior solid or exterior empty tiles have no intersecting segments */
             if (tiles[tidx].segment_count == 0) {
-                int32_t ref_w = flux_curve_cover_winding(cover, cx, cy);
-                OT_EXPECT(tiles[tidx].backdrop_winding == ref_w);
+                for (uint32_t ly = 0; ly < FLUX_TILE_SIZE; ++ly) {
+                    float py = (float)(y * FLUX_TILE_SIZE + ly) + 0.5f;
+                    int32_t ref_w = flux_curve_cover_winding(cover, cx, py);
+                    int32_t got_bd = row_bd[tidx * FLUX_TILE_SIZE + ly];
+                    OT_EXPECT(got_bd == ref_w * FLUX_TILE_BD_SCALE);
+                }
                 checked_tiles++;
             }
         }
@@ -64,6 +68,7 @@ static void verify_backdrop_gate(const flux_curve_seg *curve_segs, uint32_t n_cu
     OT_EXPECT(checked_tiles > 0);
 
     free(tiles);
+    free(row_bd);
     free(indices);
 }
 
@@ -148,6 +153,26 @@ int main(void) {
             t_segs[i] = (flux_tile_segment){p0.x, p0.y, p1.x, p1.y};
         }
         verify_backdrop_gate(c_segs, N, t_segs, N);
+    }
+
+    /* 5. Sub-tile-row band: occupies y in [18, 22) (ly = 2..5 in ty = 1) while
+     * missing yc = 24.5 (ly = 8). A single backdrop per tile would miss all pixels
+     * in this band; per-pixel-row backdrop gives exact row coverage. */
+    {
+        flux_point p[4] = {{48, 18}, {144, 18}, {144, 22}, {48, 22}};
+        flux_curve_seg c_segs[4] = {
+            flux_curve_seg_make(FLUX_CURVE_LINE, p[0], (flux_point){96, 18}, p[1]),
+            flux_curve_seg_make(FLUX_CURVE_LINE, p[1], (flux_point){144, 20}, p[2]),
+            flux_curve_seg_make(FLUX_CURVE_LINE, p[2], (flux_point){96, 22}, p[3]),
+            flux_curve_seg_make(FLUX_CURVE_LINE, p[3], (flux_point){48, 20}, p[0]),
+        };
+        flux_tile_segment t_segs[4] = {
+            {p[0].x, p[0].y, p[1].x, p[1].y},
+            {p[1].x, p[1].y, p[2].x, p[2].y},
+            {p[2].x, p[2].y, p[3].x, p[3].y},
+            {p[3].x, p[3].y, p[0].x, p[0].y},
+        };
+        verify_backdrop_gate(c_segs, 4, t_segs, 4);
     }
 
     return OT_REPORT();

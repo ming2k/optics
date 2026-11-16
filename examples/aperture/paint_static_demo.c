@@ -12,6 +12,7 @@
  *      $(pkg-config --cflags --libs iris lens flux) && /tmp/paint_static_demo
  */
 
+#include <aperture/aperture.h>
 #include <iris/iris.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -103,7 +104,7 @@ int main(void) {
      * absolute clock never fires (the demo silently printed nothing). */
     d.last_report = 0.0;
 
-    iris_app_config cfg = {};
+    aperture_app_opts cfg = {};
     cfg.title = "iris paint_static demo";
     cfg.app_id = "optics.paint_static_demo";
     cfg.width = 520;
@@ -116,7 +117,7 @@ int main(void) {
     /* Drive for ~8 seconds by asking the loop to stop: iris has no public
      * "quit" in this rev, so the demo relies on the runner closing the
      * window; a wrapper script can use a timeout + SIGKILL. */
-    int rc = iris_app_run(&cfg);
+    int rc = aperture_app_run(&cfg);
     report(&d);
     return rc;
 }

@@ -183,7 +183,13 @@ static void on_prepare(flux_frame *frame, flux_canvas *canvas, flux_device *devi
         flux_image_height(app->capture) != H) {
         if (app->capture)
             flux_image_release(app->capture);
-        (void)flux_image_create_render_target(device, W, H, FLUX_FORMAT_RGBA8_UNORM, &app->capture);
+        (void)flux_image_create(device,
+                                &(flux_image_desc){.type = FLUX_TYPE_IMAGE_DESC,
+                                                   .width = W,
+                                                   .height = H,
+                                                   .format = FLUX_FORMAT_RGBA8_UNORM,
+                                                   .usage = FLUX_IMAGE_USAGE_RENDER_TARGET},
+                                &app->capture);
     }
 
     /* ===== STEP 1: CAPTURE backdrop into offscreen render target ===== */
@@ -325,7 +331,7 @@ int main(int argc, char **argv) {
         printf("=================================================================\n\n");
     }
 
-    return iris_app_run(&(iris_app_opts){
+    return aperture_app_run(&(aperture_app_opts){
         .title = "Optics Prism Material Gallery (1:Raw 2:Glass 3:Frosted 4:Acrylic 5:Mica)",
         .app_id = "org.optics.showcase.material-gallery",
         .width = 1280,

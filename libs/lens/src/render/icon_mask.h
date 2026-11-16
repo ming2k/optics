@@ -9,11 +9,11 @@
  * structural, not a bug in the geometry.
  *
  * A mask fixes it at the root: rasterise the icon's geometry once, at its final
- * device size, into a device-free flux canvas supersampled 8×8 per pixel, and
- * read the resulting coverage plane (flux_canvas_cpu_coverage). That plane
- * carries 65 distinct coverage levels per pixel and is resolution-specific, so
- * blitting it back at exactly one texel per device pixel reproduces the vector
- * shape with no resampling and no reliance on the draw-time MSAA budget.
+ * device size, into a device-free 1x flux canvas with continuous analytic
+ * coverage, and read the resulting coverage plane (`flux_canvas_cpu_coverage`).
+ * That plane carries up to 256 coverage levels per pixel and is resolution-specific,
+ * so blitting it back at exactly one texel per device pixel reproduces the vector
+ * shape with no resampling.
  *
  * Blit is therefore 1:1 and must stay that way: the quad's device-pixel origin
  * and extent are integers, and the sampler is NEAREST. Anything else reintroduces

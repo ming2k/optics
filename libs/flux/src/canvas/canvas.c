@@ -32,23 +32,90 @@ void flux_canvas_free(flux_device *d, void *p) {
         free(p);
 }
 
+static bool canvas_grow_buf(flux_device *d, void **buf, uint32_t *cap, uint32_t needed,
+                            size_t elem_size) {
+    if (needed <= *cap)
+        return true;
+    uint32_t new_cap = *cap > 0 ? *cap : 64u;
+    while (new_cap < needed) {
+        if (new_cap > UINT32_MAX / 2u) {
+            new_cap = needed;
+            break;
+        }
+        new_cap *= 2u;
+    }
+    if ((size_t)new_cap > SIZE_MAX / elem_size) {
+        FLUX_FAIL(FLUX_ERROR_OUT_OF_MEMORY, "canvas scratch buffer size overflow");
+        return false;
+    }
+    void *next = flux_canvas_alloc(d, (size_t)new_cap * elem_size);
+    if (!next) {
+        FLUX_FAIL(FLUX_ERROR_OUT_OF_MEMORY, "canvas scratch buffer growth out of memory");
+        return false;
+    }
+    if (*buf && *cap > 0)
+        memcpy(next, *buf, (size_t)(*cap) * elem_size);
+    flux_canvas_free(d, *buf);
+    *buf = next;
+    *cap = new_cap;
+    return true;
+}
+
+bool canvas_ensure_pts(flux_canvas *c, uint32_t needed) {
+    return c && canvas_grow_buf(c->device, (void **)&c->scratch_pts, &c->scratch_pts_cap, needed,
+                                sizeof(*c->scratch_pts));
+}
+
+bool canvas_ensure_contours(flux_canvas *c, uint32_t needed) {
+    return c && canvas_grow_buf(c->device, (void **)&c->scratch_contours, &c->scratch_contours_cap,
+                                needed, sizeof(*c->scratch_contours));
+}
+
+bool canvas_ensure_verts(flux_canvas *c, uint32_t needed) {
+    return c && canvas_grow_buf(c->device, (void **)&c->scratch_verts, &c->scratch_verts_cap,
+                                needed, sizeof(*c->scratch_verts));
+}
+
+bool canvas_ensure_frames(flux_canvas *c, uint32_t needed) {
+    return c && canvas_grow_buf(c->device, (void **)&c->scratch_frames, &c->scratch_frames_cap,
+                                needed, sizeof(*c->scratch_frames));
+}
+
+static bool canvas_flatten_grow_cb(void *ctx, uint32_t need_pts, uint32_t need_cons,
+                                   flux_point **pts, uint32_t *pts_cap, flux_canvas_contour **cons,
+                                   uint32_t *cons_cap) {
+    flux_canvas *c = ctx;
+    if (need_pts > 0 && !canvas_ensure_pts(c, need_pts))
+        return false;
+    if (need_cons > 0 && !canvas_ensure_contours(c, need_cons))
+        return false;
+    *pts = c->scratch_pts;
+    *pts_cap = c->scratch_pts_cap;
+    *cons = c->scratch_contours;
+    *cons_cap = c->scratch_contours_cap;
+    return true;
+}
+
+flatten_multi canvas_flatten_path(flux_canvas *c, const flux_path *p, float pixel_scale) {
+    if (!c)
+        return (flatten_multi){0, 0};
+    return flatten_path_to_contours_dyn(p, pixel_scale, c->scratch_pts, c->scratch_pts_cap,
+                                        c->scratch_contours, c->scratch_contours_cap,
+                                        canvas_flatten_grow_cb, c);
+}
+
 bool flux_canvas_alloc_scratch(flux_canvas *c) {
     flux_device *d = c->device;
-    c->scratch_pts = flux_canvas_alloc(d, FLUX_CANVAS_PATH_SCRATCH_CAP * sizeof(*c->scratch_pts));
-    c->scratch_verts =
-        flux_canvas_alloc(d, FLUX_CANVAS_PATH_SCRATCH_CAP * 3 * sizeof(*c->scratch_verts));
+    c->scratch_pts_cap = FLUX_CANVAS_PATH_SCRATCH_CAP;
+    c->scratch_verts_cap = FLUX_CANVAS_PATH_SCRATCH_CAP * 3;
+    c->scratch_contours_cap = FLUX_CANVAS_MAX_CONTOURS;
+    c->scratch_frames_cap = FLUX_CANVAS_PATH_SCRATCH_CAP;
+    c->scratch_pts = flux_canvas_alloc(d, c->scratch_pts_cap * sizeof(*c->scratch_pts));
+    c->scratch_verts = flux_canvas_alloc(d, c->scratch_verts_cap * sizeof(*c->scratch_verts));
     c->scratch_contours =
-        flux_canvas_alloc(d, FLUX_CANVAS_MAX_CONTOURS * sizeof(*c->scratch_contours));
-    c->scratch_lnk_prev =
-        flux_canvas_alloc(d, FLUX_CANVAS_PATH_SCRATCH_CAP * sizeof(*c->scratch_lnk_prev));
-    c->scratch_lnk_next =
-        flux_canvas_alloc(d, FLUX_CANVAS_PATH_SCRATCH_CAP * sizeof(*c->scratch_lnk_next));
-    c->scratch_reflex =
-        flux_canvas_alloc(d, 2 * FLUX_CANVAS_PATH_SCRATCH_CAP * sizeof(*c->scratch_reflex));
-    c->scratch_frames =
-        flux_canvas_alloc(d, FLUX_CANVAS_PATH_SCRATCH_CAP * sizeof(*c->scratch_frames));
-    return c->scratch_pts && c->scratch_verts && c->scratch_contours && c->scratch_lnk_prev &&
-           c->scratch_lnk_next && c->scratch_reflex && c->scratch_frames;
+        flux_canvas_alloc(d, c->scratch_contours_cap * sizeof(*c->scratch_contours));
+    c->scratch_frames = flux_canvas_alloc(d, c->scratch_frames_cap * sizeof(*c->scratch_frames));
+    return c->scratch_pts && c->scratch_verts && c->scratch_contours && c->scratch_frames;
 }
 
 void flux_canvas_free_scratch(flux_canvas *c) {
@@ -56,9 +123,6 @@ void flux_canvas_free_scratch(flux_canvas *c) {
     flux_canvas_free(d, c->scratch_pts);
     flux_canvas_free(d, c->scratch_verts);
     flux_canvas_free(d, c->scratch_contours);
-    flux_canvas_free(d, c->scratch_lnk_prev);
-    flux_canvas_free(d, c->scratch_lnk_next);
-    flux_canvas_free(d, c->scratch_reflex);
     flux_canvas_free(d, c->scratch_frames);
 }
 
@@ -75,41 +139,8 @@ flux_result flux_canvas_create(const flux_canvas_desc *desc, flux_canvas **out) 
     flux_canvas_backend_kind kind = desc->backend;
     if (kind == FLUX_CANVAS_BACKEND_AUTO)
         kind = desc->surface ? FLUX_CANVAS_BACKEND_GPU : FLUX_CANVAS_BACKEND_CPU;
-    if (kind == FLUX_CANVAS_BACKEND_CPU) {
-        uint32_t supersample = 0;
-        const struct {
-            flux_struct_type type;
-            const void *next;
-        } *ext = desc->next;
-        while (ext) {
-            if (ext->type == FLUX_TYPE_CANVAS_ANTIALIAS_DESC) {
-                const flux_canvas_antialias_desc *aa_desc = (const void *)ext;
-                if (aa_desc->antialias != FLUX_CANVAS_ANTIALIAS_AUTO &&
-                    aa_desc->antialias != FLUX_CANVAS_ANTIALIAS_NONE &&
-                    aa_desc->antialias != FLUX_CANVAS_ANTIALIAS_MSAA_4X) {
-                    FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT,
-                              "invalid Canvas antialias extension value");
-                    return FLUX_ERROR_INVALID_ARGUMENT;
-                }
-                /* ANTIALIAS_NONE maps to 1 sample/px (aliased); AUTO/MSAA_4X keep
-                 * the 2x supersampled default (4 samples/px). */
-                if (supersample == 0)
-                    supersample = (aa_desc->antialias == FLUX_CANVAS_ANTIALIAS_NONE) ? 1u : 2u;
-            } else if (ext->type == FLUX_TYPE_CANVAS_SUPERSAMPLE_DESC) {
-                const flux_canvas_supersample_desc *ss_desc = (const void *)ext;
-                if (ss_desc->supersample > FLUX_CANVAS_SUPERSAMPLE_MAX) {
-                    FLUX_FAIL(FLUX_ERROR_OUT_OF_RANGE,
-                              "Canvas supersample factor exceeds FLUX_CANVAS_SUPERSAMPLE_MAX");
-                    return FLUX_ERROR_OUT_OF_RANGE;
-                }
-                supersample = ss_desc->supersample;
-            }
-            ext = ext->next;
-        }
-        uint32_t w = desc->width ? desc->width : 1024;
-        uint32_t h = desc->height ? desc->height : 1024;
-        return flux_canvas_create_cpu_ss(w, h, desc->scale, supersample, out);
-    }
+    if (kind == FLUX_CANVAS_BACKEND_CPU)
+        return flux_canvas_cpu_create(desc->width, desc->height, desc->scale, out);
 
     if (!desc->surface) {
         FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "GPU canvas requires a surface");
@@ -132,9 +163,9 @@ flux_result flux_canvas_create(const flux_canvas_desc *desc, flux_canvas **out) 
     c->state_top = 0;
     c->plan_node = UINT32_MAX;
 
-    /* Backend-private GPU state: pipeline-cache warm, colour/stencil formats,
-     * and the owned MSAA/stencil targets. Kept entirely inside the backend so
-     * struct flux_canvas carries no Vulkan types. */
+    /* Backend-private GPU state: pipeline-cache warm, formats, and owned
+     * working-space targets. Kept entirely inside the backend so struct
+     * flux_canvas carries no Vulkan types. */
     flux_result br = c->backend->canvas_init(c->backend, c);
     if (br != FLUX_OK) {
         flux_surface_release(c->surface);
@@ -198,16 +229,6 @@ static flux_result canvas_begin_pass_impl(flux_canvas *c, flux_frame *f, flux_im
         FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "desc->type != FLUX_TYPE_CANVAS_PASS_DESC");
         return FLUX_ERROR_INVALID_ARGUMENT;
     }
-    if (desc->antialias != FLUX_CANVAS_ANTIALIAS_AUTO &&
-        desc->antialias != FLUX_CANVAS_ANTIALIAS_NONE &&
-        desc->antialias != FLUX_CANVAS_ANTIALIAS_MSAA_4X) {
-        FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "invalid Canvas antialias mode");
-        return FLUX_ERROR_INVALID_ARGUMENT;
-    }
-    if (desc->antialias == FLUX_CANVAS_ANTIALIAS_MSAA_4X && !desc->clear_color) {
-        FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT, "4x MSAA Canvas pass requires a clear colour");
-        return FLUX_ERROR_INVALID_ARGUMENT;
-    }
     /* Only the first rectangle of the set is used as the frame's render area
      * hint; see canvas_end_pass_impl / vk_end_pass for the per-rect handling.
      * The full set lives in the config, because a pass scoped to a region must
@@ -218,10 +239,8 @@ static flux_result canvas_begin_pass_impl(flux_canvas *c, flux_frame *f, flux_im
     }
     canvas_pass_config config = {
         .clear_color = desc->clear_color,
-        .antialias = desc->antialias,
         .damage = desc->damage,
         .clear_extent = desc->clear_extent,
-        .skip_stencil = false,
     };
 
     /* ADR-0149 decision 3: an over-capacity damage set degrades to the full
@@ -292,24 +311,13 @@ static flux_result canvas_begin_pass_impl(flux_canvas *c, flux_frame *f, flux_im
      * the persistent content image. The rotation therefore cannot diverge,
      * because divergence is repaired every time an image is reacquired rather
      * than assumed absent. */
+    /* Unknown tagged extensions are ignored for forward compatibility,
+     * matching the surface descriptor pNext parser. */
     const struct {
         flux_struct_type type;
         const void *next;
     } *extension = desc->next;
-    bool saw_no_stencil = false;
     while (extension) {
-        if (extension->type == FLUX_TYPE_CANVAS_NO_STENCIL_DESC) {
-            if (saw_no_stencil) {
-                FLUX_FAIL(FLUX_ERROR_INVALID_ARGUMENT,
-                          "duplicate Canvas no-stencil pass extension");
-                return FLUX_ERROR_INVALID_ARGUMENT;
-            }
-            const flux_canvas_no_stencil_desc *no_stencil = (const void *)extension;
-            config.skip_stencil = no_stencil->enabled;
-            saw_no_stencil = true;
-        }
-        /* Unknown tagged extensions are ignored for forward compatibility,
-         * matching the surface descriptor pNext parser. */
         extension = extension->next;
     }
     if (c->recording) {
@@ -337,8 +345,6 @@ static flux_result canvas_begin_pass_impl(flux_canvas *c, flux_frame *f, flux_im
     c->frame = f;
     c->state_top = 0;
     c->states[0].transform = flux_mat3x2_scale(c->content_scale, c->content_scale);
-    c->stencil_available = false;
-    c->stencil_forbidden = false;
     c->pass_error = FLUX_OK;
     /* Blend is draw-local state. Start every pass from the public Canvas
      * default so a terminal SRC/PLUS/MULTIPLY draw in the previous pass
@@ -520,8 +526,6 @@ flux_result flux_canvas_end(flux_canvas *c) {
     c->target_pass = false;
     c->frame = nullptr;
     c->recording = false;
-    c->stencil_available = false;
-    c->stencil_forbidden = false;
     c->pass_error = FLUX_OK;
     return result;
 }
@@ -789,6 +793,22 @@ void flux_canvas_clip_rect(flux_canvas *c, flux_rect r) {
 /*  Public draws                                                      */
 /* ------------------------------------------------------------------ */
 
+static bool canvas_rect_is_pixel_aligned(const flux_canvas *c, flux_rect r) {
+    flux_mat3x2 tx = c->states[c->state_top].transform;
+    flux_point tp0 = flux_mat3x2_transform_point(tx, (flux_point){r.x, r.y});
+    flux_point tp1 = flux_mat3x2_transform_point(tx, (flux_point){r.x + r.w, r.y});
+    flux_point tp2 = flux_mat3x2_transform_point(tx, (flux_point){r.x + r.w, r.y + r.h});
+    flux_point tp3 = flux_mat3x2_transform_point(tx, (flux_point){r.x, r.y + r.h});
+    bool axis_aligned = (fabsf(tp0.y - tp1.y) < 1e-4f && fabsf(tp1.x - tp2.x) < 1e-4f &&
+                         fabsf(tp2.y - tp3.y) < 1e-4f && fabsf(tp3.x - tp0.x) < 1e-4f) ||
+                        (fabsf(tp0.x - tp1.x) < 1e-4f && fabsf(tp1.y - tp2.y) < 1e-4f &&
+                         fabsf(tp2.x - tp3.x) < 1e-4f && fabsf(tp3.y - tp0.y) < 1e-4f);
+    if (!axis_aligned)
+        return false;
+    return fabsf(tp0.x - roundf(tp0.x)) < 1e-4f && fabsf(tp0.y - roundf(tp0.y)) < 1e-4f &&
+           fabsf(tp2.x - roundf(tp2.x)) < 1e-4f && fabsf(tp2.y - roundf(tp2.y)) < 1e-4f;
+}
+
 void canvas_fill_rect_internal(flux_canvas *c, flux_rect r, const canvas_paint *paint) {
     if (!c || !c->recording)
         return;
@@ -799,6 +819,23 @@ void canvas_fill_rect_internal(flux_canvas *c, flux_rect r, const canvas_paint *
     flux_point p1 = {r.x + r.w, r.y};
     flux_point p2 = {r.x + r.w, r.y + r.h};
     flux_point p3 = {r.x, r.y + r.h};
+
+    bool is_img = paint && paint->kind == CANVAS_PAINT_IMAGE;
+    if ((is_img || !canvas_rect_is_pixel_aligned(c, r)) && c->backend && c->backend->submit_cover) {
+        flux_point quad_pts[4] = {
+            flux_mat3x2_transform_point(tx, p0),
+            flux_mat3x2_transform_point(tx, p1),
+            flux_mat3x2_transform_point(tx, p2),
+            flux_mat3x2_transform_point(tx, p3),
+        };
+        flux_canvas_contour con = {.start = 0, .count = 4, .closed = true};
+        flux_recti sc = c->states[c->state_top].scissor;
+        if (c->backend->submit_cover(c->backend, c, quad_pts, &con, 1, FLUX_FILL_NON_ZERO, paint,
+                                     sc) == FLUX_OK)
+            return;
+        if (is_img)
+            return;
+    }
 
     flux_canvas_vertex v[6];
     push_vertex(&v[0], p0, tx, vc);
@@ -1253,7 +1290,7 @@ void flux_canvas_draw_glyph_run(flux_canvas *c, const flux_glyph_run_desc *desc)
 
     /* Chunked so a run of any length works within the scratch vertex
      * buffer; each chunk is still one draw. */
-    const uint32_t max_quads = (FLUX_CANVAS_PATH_SCRATCH_CAP * 3) / 6;
+    const uint32_t max_quads = (c->scratch_verts_cap) / 6;
     for (uint32_t base = 0; base < desc->quad_count; base += max_quads) {
         uint32_t n = desc->quad_count - base;
         if (n > max_quads)
@@ -1327,14 +1364,6 @@ void canvas_fail(flux_canvas *c, flux_result result, const char *message) {
     }
 }
 
-/* Analytic rounded clipping currently supports translation and positive
- * uniform scale. Other shape transforms use the general path renderer. */
-static bool canvas_axis_uniform(const flux_canvas *c) {
-    flux_mat3x2 t = c->states[c->state_top].transform;
-    return fabsf(t.m[1]) < 0.000001f && fabsf(t.m[2]) < 0.000001f && t.m[0] > 0 &&
-           fabsf(t.m[0] - t.m[3]) < 0.000001f;
-}
-
 void flux_canvas_draw_geometry(flux_canvas *c, const flux_canvas_draw_geometry_opts *opts) {
     if (!c || !c->recording) {
         FLUX_FAIL(FLUX_ERROR_INVALID_STATE, "draw requires an active Canvas pass");
@@ -1358,62 +1387,25 @@ void flux_canvas_draw_geometry(flux_canvas *c, const flux_canvas_draw_geometry_o
     }
     float alpha_scale = b.opacity;
 
-    /* Handle Image Brush pattern */
+    canvas_paint p = canvas_paint_default();
+    p.blend = b.blend;
+    p.stroke_width = geom->stroke.width;
+    p.miter_limit = geom->stroke.miter_limit;
+    p.cap = geom->stroke.cap;
+    p.join = geom->stroke.join;
+
     if (b.kind == FLUX_BRUSH_IMAGE_PATTERN) {
         if (!b.image.image) {
             canvas_fail(c, FLUX_ERROR_INVALID_ARGUMENT, "image brush requires an image");
             return;
         }
-        if (!c->device || geom->stroke.width > 0.0f) {
-            canvas_fail(c, FLUX_ERROR_UNSUPPORTED, "image draws require GPU and no stroke");
+        if (!c->device) {
+            canvas_fail(c, FLUX_ERROR_UNSUPPORTED, "image draws require GPU canvas");
             return;
         }
         if (b.image.image->device != c->device ||
             (b.image.sampler && flux_sampler_owner(b.image.sampler) != c->device)) {
             canvas_fail(c, FLUX_ERROR_INVALID_ARGUMENT, "image/sampler device mismatch");
-            return;
-        }
-
-        flux_rect dst;
-        float radius = 0.0f;
-        bool rounded = false;
-        bool clipped = b.image.clip_rect.w > 0.0f && b.image.clip_rect.h > 0.0f;
-        if (!clipped) {
-            switch (geom->kind) {
-            case FLUX_GEOM_RECT:
-                dst = geom->rect.rect;
-                break;
-            case FLUX_GEOM_RRECT:
-                dst = geom->rrect.rect;
-                radius = geom->rrect.radius;
-                rounded = radius > 0.0f;
-                break;
-            case FLUX_GEOM_CIRCLE:
-                dst = (flux_rect){geom->circle.cx - geom->circle.radius,
-                                  geom->circle.cy - geom->circle.radius, geom->circle.radius * 2.0f,
-                                  geom->circle.radius * 2.0f};
-                radius = geom->circle.radius;
-                rounded = true;
-                break;
-            default:
-                canvas_fail(c, FLUX_ERROR_UNSUPPORTED,
-                            "image brush supports filled rect, rrect, and circle only");
-                return;
-            }
-        } else {
-            if (geom->kind != FLUX_GEOM_RECT && geom->kind != FLUX_GEOM_RRECT) {
-                canvas_fail(c, FLUX_ERROR_UNSUPPORTED,
-                            "independent image clip requires rect or rrect geometry");
-                return;
-            }
-            dst = geom->kind == FLUX_GEOM_RRECT ? geom->rrect.rect : geom->rect.rect;
-            rounded = true;
-            radius = b.image.clip_radius;
-        }
-
-        if (rounded && !canvas_axis_uniform(c)) {
-            canvas_fail(c, FLUX_ERROR_UNSUPPORTED,
-                        "rounded image clips require positive uniform scale and translation");
             return;
         }
 
@@ -1425,10 +1417,30 @@ void flux_canvas_draw_geometry(flux_canvas *c, const flux_canvas_draw_geometry_o
             return;
         }
 
+        flux_rect uv_dst;
+        switch (geom->kind) {
+        case FLUX_GEOM_RECT:
+            uv_dst = geom->rect.rect;
+            break;
+        case FLUX_GEOM_RRECT:
+            uv_dst = geom->rrect.rect;
+            break;
+        case FLUX_GEOM_SQUIRCLE:
+            uv_dst = geom->squircle.rect;
+            break;
+        case FLUX_GEOM_CIRCLE:
+            uv_dst = (flux_rect){geom->circle.cx - geom->circle.radius,
+                                 geom->circle.cy - geom->circle.radius, geom->circle.radius * 2.0f,
+                                 geom->circle.radius * 2.0f};
+            break;
+        default:
+            uv_dst =
+                (flux_rect){0.0f, 0.0f, (float)b.image.image->width, (float)b.image.image->height};
+            break;
+        }
+
         flux_bindless_handle sh = b.image.sampler ? flux_sampler_bindless_handle(b.image.sampler)
                                                   : flux_device_default_sampler_handle(c->device);
-        const flux_rect *clip = rounded ? (clipped ? &b.image.clip_rect : &dst) : nullptr;
-        uint32_t kind = b.image.opaque_only ? (rounded ? 7u : 6u) : (rounded ? 5u : 3u);
         uint32_t tint_color = b.image.tint;
         if (alpha_scale < 1.0f) {
             uint32_t a = (uint32_t)(((tint_color >> 24) & 0xFF) * alpha_scale + 0.5f);
@@ -1437,22 +1449,37 @@ void flux_canvas_draw_geometry(flux_canvas *c, const flux_canvas_draw_geometry_o
             uint32_t bl = (uint32_t)((tint_color & 0xFF) * alpha_scale + 0.5f);
             tint_color = (a << 24) | (r << 16) | (g << 8) | bl;
         }
-        draw_image_with_sampler_handle(
-            c, b.image.image, b.image.image ? b.image.image->bindless : FLUX_BINDLESS_INVALID,
-            b.image.sampler, sh, dst, src, tint_color,
-            b.image.opaque_only && !rounded ? FLUX_BLEND_SRC : b.blend, kind, clip, radius);
-        return;
-    }
 
-    /* Solid / Gradient brushes */
-    canvas_paint p = canvas_paint_default();
-    p.blend = b.blend;
-    p.stroke_width = geom->stroke.width;
-    p.miter_limit = geom->stroke.miter_limit;
-    p.cap = geom->stroke.cap;
-    p.join = geom->stroke.join;
+        bool clipped = b.image.clip_rect.w > 0.0f && b.image.clip_rect.h > 0.0f;
+        /* Fast path for unclipped, unrotated, integer-aligned filled rects. */
+        if (geom->kind == FLUX_GEOM_RECT && geom->stroke.width <= 0.0f && !clipped &&
+            canvas_rect_is_pixel_aligned(c, geom->rect.rect)) {
+            uint32_t kind = b.image.opaque_only ? 6u : 3u;
+            draw_image_with_sampler_handle(c, b.image.image, b.image.image->bindless,
+                                           b.image.sampler, sh, geom->rect.rect, src, tint_color,
+                                           b.image.opaque_only ? FLUX_BLEND_SRC : b.blend, kind,
+                                           nullptr, 0.0f);
+            return;
+        }
 
-    if (b.kind == FLUX_BRUSH_SOLID) {
+        p.kind = CANVAS_PAINT_IMAGE;
+        p.color = tint_color;
+        p.gradient.image.image = b.image.image;
+        p.gradient.image.sampler = b.image.sampler;
+        p.gradient.image.dst_rect = uv_dst;
+        p.gradient.image.src_rect = src;
+        p.gradient.image.sampler_handle = sh;
+        p.gradient.image.opaque_only = b.image.opaque_only;
+
+        if (clipped && geom->stroke.width <= 0.0f &&
+            (geom->kind == FLUX_GEOM_RECT || geom->kind == FLUX_GEOM_RRECT)) {
+            flux_path_segment segs[16];
+            flux_path path = {.segments = segs, .capacity = 16};
+            flux_path_add_round_rect(&path, b.image.clip_rect, b.image.clip_radius);
+            canvas_fill_path_internal(c, &path, &p);
+            return;
+        }
+    } else if (b.kind == FLUX_BRUSH_SOLID) {
         p.kind = CANVAS_PAINT_SOLID;
         uint32_t color = b.solid.color;
         if (alpha_scale < 1.0f) {

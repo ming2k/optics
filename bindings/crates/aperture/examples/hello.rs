@@ -1,12 +1,11 @@
-//! A real window driven entirely from Rust via iris.
+//! A real window driven entirely from Rust via aperture.
 //!
-//! Requires a Wayland compositor, a Vulkan-capable GPU, and installed
-//! libflux + liblens + libiris (../flux-new + ../lens + ../iris build &
-//! install). State lives in the closure's captured variables across frames.
+//! Requires a Wayland compositor, a Vulkan-capable GPU, and a built or
+//! installed optics tree (libflux, liblens, libiris, libaperture). State lives in the closure's captured variables across frames.
 
-use iris::{Application, Config};
+use aperture::{iris, Application, Config};
 
-fn main() -> Result<(), iris::RunError> {
+fn main() -> Result<(), aperture::RunError> {
     let mut wrap = true;
     let mut zoom = 1.5f32;
 

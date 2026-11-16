@@ -1,13 +1,4 @@
-# Windowed C demos — all use the iris_app_run entry point.
-#
-# Each demo owns no window or event loop; iris_app_run does. The build
-# callback runs once per frame inside an open lens_begin/end pair.
-
-example_deps = [iris_dep, m_dep]
-
-foreach demo : ['hello_window', 'widgets', 'fonts', 'overlay_demo', 'desktop_demo', 'paint_static_demo', 'frame_skip_demo', 'dnd_demo']
-  executable(demo, demo + '.c',
-    dependencies        : example_deps,
-    include_directories : iris_inc,
-  )
-endforeach
+# iris on its own: a window, the event stream and flux content — no UI toolkit.
+executable('canvas_window', 'canvas_window.c',
+  dependencies : [iris_dep, flux_dep, m_dep],
+)

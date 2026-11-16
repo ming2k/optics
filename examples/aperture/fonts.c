@@ -1,5 +1,6 @@
 /* fonts.c — text rendering showcase. */
 
+#include <aperture/aperture.h>
 #include <iris/app.h>
 #include <iris/window.h>
 #include <lens/lens.h>
@@ -37,6 +38,6 @@ static void build(lens *ui, const lens_input *in, void *user) {
 int main(void) {
     printf("iris fonts demo. Font via fontconfig (XDG search);\n"
            "override with $FLUX_TEXT_FONT. Esc quits.\n\n");
-    return iris_app_run(&(iris_app_config){
+    return aperture_app_run(&(aperture_app_opts){
         .title = "iris — fonts", .width = 760, .height = 460, .dark = true, .build = build});
 }

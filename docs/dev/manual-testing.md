@@ -154,10 +154,10 @@ Run the core rendering pipelines to verify path tessellation, font shaping, comp
 
 Verify desktop user interface controls, input handling, window lifecycle, and system capabilities hosted within `libs/iris` and `libs/lens`.
 
-### 5.1 Retained UI Controls (`examples/iris/widgets`)
+### 5.1 Retained UI Controls (`examples/aperture/widgets`)
 
 ```bash
-./build/examples/iris/widgets
+./build/examples/aperture/widgets
 ```
 
 | Control Under Test | Action to Perform | Expected Observable Outcome |
@@ -170,7 +170,7 @@ Verify desktop user interface controls, input handling, window lifecycle, and sy
 | **Split View** | Click and drag the central split divider. | Left and right panes resize smoothly; minimum and maximum pane widths are respected. |
 | **Scroll View** | Use mouse wheel or drag scrollbar inside content area. | Content scrolls smoothly; clipped elements outside the viewport boundary are culled cleanly. |
 
-### 5.2 Text Field, Caret, and Clipboard (`examples/iris/widgets`)
+### 5.2 Text Field, Caret, and Clipboard (`examples/aperture/widgets`)
 
 Verify retained text editing (`ADR-0036`, `ADR-0057`, `ADR-0064`):
 
@@ -203,10 +203,10 @@ Verify retained text editing (`ADR-0036`, `ADR-0057`, `ADR-0064`):
    - Open a menu near the screen edge: menu repositioning ensures it does not clip outside window boundaries.
    - Click anywhere outside the menu: menu closes immediately.
 
-### 5.4 Cross-Platform Drag and Drop (`examples/iris/dnd_demo`)
+### 5.4 Cross-Platform Drag and Drop (`examples/aperture/dnd_demo`)
 
 ```bash
-./build/examples/iris/dnd_demo
+./build/examples/aperture/dnd_demo
 ```
 
 **Verification Steps (`ADR-0086`):**
@@ -254,9 +254,9 @@ meson test -C build-release --no-suite bench --no-suite fuzz
 
 # 3. Interactive smoke pass
 ./build-release/examples/showcase/material_gallery   # Run 30s; cycle keys 1-5, D, F
-./build-release/examples/iris/widgets                # Test button, slider, text input, clipboard
+./build-release/examples/aperture/widgets                # Test button, slider, text input, clipboard
 ./build-release/examples/vista/gltf_viewer           # Verify 3D rendering and camera orbit
-./build-release/examples/iris/dnd_demo               # Verify drag-and-drop interaction
+./build-release/examples/aperture/dnd_demo               # Verify drag-and-drop interaction
 ```
 
 ### Manual Release Acceptance Sign-Off

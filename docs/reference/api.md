@@ -8,16 +8,16 @@ lookup surfaces for this checkout.
 
 | Header                | Always available | Contents                                                              |
 |-----------------------|------------------|-----------------------------------------------------------------------|
-| `<flux/flux.h>`       | Yes              | Umbrella; pulls in every enabled module.                              |
+| `<flux/flux.h>`       | Yes              | Umbrella; pulls in every flux module.                                 |
 | `<flux/core.h>`       | Yes              | Device, surface, frame, buffer, sampled image, allocator, logger, results, version. |
 | `<flux/math.h>`       | Yes              | Vector, matrix, quaternion, colour, arena. No Vulkan dependency.      |
 | `<flux/vulkan.h>`     | Yes              | Raw Vulkan handle accessors, sampler, graphics pipeline, pass.        |
-| `<flux/canvas.h>`     | Iff `-Dcanvas=true`  | 2D drawing: path, paint, image drawing, canvas.                    |
-| `<flux/canvas_cpu.h>` | Iff `-Dcanvas=true`  | Headless software (CPU) canvas: `flux_canvas_create_cpu`, pixel readback. No Vulkan. |
-| `<flux/dmabuf.h>`     | Iff `-Dcanvas=true`  | Linux dma-buf import into sampled `flux_image` objects.            |
-| `<flux/scene.h>`      | Iff `-Dscene=true`   | 3D primitives: camera, mesh, material, draw.                       |
-| `<flux/compute.h>`    | Iff `-Dcompute=true` | Compute pipeline + dispatch.                                       |
-| `<flux/effect.h>`     | Iff `-Deffect=true`  | Image-domain effects (blur, shadow). See [effect reference](effect.md). |
+| `<flux/canvas.h>`     | Yes              | 2D drawing: path, paint, image drawing, canvas.                    |
+| `<flux/canvas_cpu.h>` | Yes              | Headless software (CPU) canvas: `flux_canvas_create (CPU backend)`, pixel readback. No Vulkan. |
+| `<flux/dmabuf.h>`     | Yes (Linux-only behaviour) | Linux dma-buf import into sampled `flux_image` objects.            |
+| `<flux/scene.h>`      | Yes              | 3D primitives: camera, mesh, material, draw.                       |
+| `<flux/compute.h>`    | Yes              | Compute pipeline + dispatch.                                       |
+| `<flux/effect.h>`     | Yes              | Image-domain effects (blur, shadow). See [effect reference](effect.md). |
 | `<glyph/glyph.h>`     | Iff `-Dglyph=true`   | Sibling library: shaping, glyph atlas, text measure/draw.          |
 | `<vista/vista.h>`     | Iff `-Dvista=true`   | Sibling library: glTF/GLB loading, animation, materials.           |
 | `<reticle/reticle.h>` | Iff `-Dreticle=true` | Document compiler: SVG parse, flat shape IR, paint and CPU rasterize. |
@@ -474,7 +474,7 @@ Feature discovery is by query, not by failure.
 | Query | Answers |
 |-------|---------|
 | `flux_device_get_limits` | Image/framebuffer maxima, alignment requirements, timestamp period and validity, the applied frames-in-flight cap. |
-| `flux_device_supports_image_usage` | Whether a format supports sampled / compute-write use — mirrors `flux_image_create_compute_writable`'s acceptance policy exactly (pinned by an integration test asserting query/create agreement). |
+| `flux_device_supports_image_usage` | Whether a format supports sampled / compute-write use — mirrors `flux_image_create (FLUX_IMAGE_USAGE_COMPUTE_WRITE)`'s acceptance policy exactly (pinned by an integration test asserting query/create agreement). |
 | `flux_device_enabled_features` | Semantic features enabled on the logical device. |
 | `flux_dmabuf_supported` / `flux_dmabuf_sync_supported` | dma-buf import capability. |
 

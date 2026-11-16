@@ -93,30 +93,26 @@ test('scene_mesh', test_scene_mesh, suite : 'integration')
 
 # Mesh retire queue: churn create -> draw -> release every frame so
 # inline destruction of in-flight vertex/index buffers fails loudly.
-if opt_scene
-  test_mesh_retire = executable('test_mesh_retire',
-    'test_mesh_retire.c',
-    dependencies : [flux_test_support_dep],
-  )
-  test('mesh_retire', test_mesh_retire, suite : 'integration')
+test_mesh_retire = executable('test_mesh_retire',
+  'test_mesh_retire.c',
+  dependencies : [flux_test_support_dep],
+)
+test('mesh_retire', test_mesh_retire, suite : 'integration')
 
-  test_material_retire = executable('test_material_retire',
-    'test_material_retire.c',
-    dependencies : [flux_test_support_dep],
-  )
-  test('material_retire', test_material_retire, suite : 'integration')
-endif
+test_material_retire = executable('test_material_retire',
+  'test_material_retire.c',
+  dependencies : [flux_test_support_dep],
+)
+test('material_retire', test_material_retire, suite : 'integration')
 
 # Scene GPU rendering with pixel assertions: offscreen surface
 # (ADR-0013) + caller-owned depth. Covers depth testing and the
 # Phong lit path end-to-end.
-if opt_scene
-  test_scene_render = executable('test_scene_render',
-    'test_scene_render.c',
-    dependencies : [flux_test_support_dep],
-  )
-  test('scene_render', test_scene_render, suite : 'integration')
-endif
+test_scene_render = executable('test_scene_render',
+  'test_scene_render.c',
+  dependencies : [flux_test_support_dep],
+)
+test('scene_render', test_scene_render, suite : 'integration')
 
 test_allocator = executable('test_allocator',
   'test_allocator.c',
@@ -176,13 +172,11 @@ endif
 
 # Batched uploads: one submission for a bulk load, auto-flush at frame
 # begin, steady-state allocator accounting afterwards.
-if opt_canvas
-  test_upload_batch = executable('test_upload_batch',
-    'test_upload_batch.c',
-    dependencies : [flux_test_support_dep],
-  )
-  test('upload_batch', test_upload_batch, suite : 'integration')
-endif
+test_upload_batch = executable('test_upload_batch',
+  'test_upload_batch.c',
+  dependencies : [flux_test_support_dep],
+)
+test('upload_batch', test_upload_batch, suite : 'integration')
 
 # SDF derivative parity (ADR-0148 / INV-SDF-02): dispatch the real
 # flux_sdf.slang and compare distance + normal against <flux/sdf.h>.
@@ -234,224 +228,228 @@ test('soak', test_soak, suite : 'integration', timeout : 60)
 
 # Offscreen surface + canvas pixel assertions (ADR-0013). Needs the
 # canvas module for the drawing side of the round trip.
-if opt_canvas
-  test_offscreen = executable('test_offscreen',
-    'test_offscreen.c',
-    dependencies : [flux_test_support_dep],
+test_offscreen = executable('test_offscreen',
+  'test_offscreen.c',
+  dependencies : [flux_test_support_dep],
+)
+test('offscreen', test_offscreen, suite : 'integration')
+
+# Native frame damage ledger: epoch history, first-use Full, abandoned
+# submission retry, and scanout delta. This is the contract the compositor's
+# area-damage pipeline relies on; it must not drift back into a caller-side
+# per-image ledger.
+test_frame_damage = executable('test_frame_damage',
+  'test_frame_damage.c',
+  dependencies : [flux_test_support_dep],
+)
+test('frame_damage', test_frame_damage, suite : 'integration')
+
+if opt_glyph
+  # Canvas feature matrix on the GPU: gradients, strokes, and the
+  # hole-bridging fill (ADR-0011), asserted by read-back pixel.
+  test_canvas_render = executable('test_canvas_render',
+    'test_canvas_render.c',
+    dependencies : [flux_test_support_dep, glyph_dep],
   )
-  test('offscreen', test_offscreen, suite : 'integration')
+  test('canvas_render', test_canvas_render, suite : 'integration')
+endif
 
-  # Native frame damage ledger: epoch history, first-use Full, abandoned
-  # submission retry, and scanout delta. This is the contract the compositor's
-  # area-damage pipeline relies on; it must not drift back into a caller-side
-  # per-image ledger.
-  test_frame_damage = executable('test_frame_damage',
-    'test_frame_damage.c',
-    dependencies : [flux_test_support_dep],
+# Cross-platform consistency gate: one fixed scene rendered by the GPU
+# backend and the CPU oracle (ADR-0019), compared pixel-by-pixel. This
+# is the test that proves a Windows/macOS port renders identically.
+test_canvas_consistency = executable('test_canvas_consistency',
+  'test_canvas_consistency.c',
+  dependencies : [flux_test_support_dep],
+)
+test('canvas_consistency', test_canvas_consistency, suite : 'integration')
+
+# Coverage ceiling (ADR-0119 S3 target): measures the distinct coverage levels
+# along one oblique edge on the GPU path (4x MSAA) against the CPU coverage
+# path, so S3's motivation is a number in the suite and its completion inverts
+# the assertion rather than going unnoticed.
+test_canvas_coverage_ceiling = executable('test_canvas_coverage_ceiling',
+  'test_canvas_coverage_ceiling.c',
+  dependencies : [flux_test_support_dep],
+)
+test('canvas_coverage_ceiling', test_canvas_coverage_ceiling, suite : 'integration')
+
+# The same contract for every draw class, not only the solid source-over fill:
+# strokes and other blend modes reach the rasteriser by their own routes.
+test_canvas_edge_quality = executable('test_canvas_edge_quality',
+  'test_canvas_edge_quality.c',
+  dependencies : [flux_test_support_dep],
+)
+test('canvas_edge_quality', test_canvas_edge_quality, suite : 'integration')
+
+# Real-driver hardware assertion (ADR-0120 Phase B0 gate)
+test_device_hardware = executable('test_device_hardware',
+  'test_device_hardware.c',
+  dependencies : [flux_test_support_dep],
+)
+test('device_hardware', test_device_hardware, suite : 'integration')
+
+# Tile-compute coverage backend (ADR-0120 Phase B1 gate)
+test_tile_b1_upload = executable('test_tile_b1_upload',
+  'test_tile_b1_upload.c',
+  '../../../libs/flux/src/canvas/canvas_tile.c',
+  '../../../libs/flux/src/canvas/curve_flatten.c',
+  dependencies : [flux_test_support_dep],
+)
+test('tile_b1_upload', test_tile_b1_upload, suite : 'integration')
+
+# Tile-compute coarse raster binning (ADR-0120 Phase B2 gate)
+test_tile_b2_coarse = executable('test_tile_b2_coarse',
+  'test_tile_b2_coarse.c',
+  '../../../libs/flux/src/canvas/canvas_tile.c',
+  dependencies : [flux_test_support_dep],
+)
+test('tile_b2_coarse', test_tile_b2_coarse, suite : 'integration')
+
+# Tile-compute winding backdrop (ADR-0120 Phase B3 gate)
+test_tile_b3_backdrop = executable('test_tile_b3_backdrop',
+  'test_tile_b3_backdrop.c',
+  '../../../libs/flux/src/canvas/canvas_tile.c',
+  dependencies : [flux_test_support_dep],
+)
+test('tile_b3_backdrop', test_tile_b3_backdrop, suite : 'integration')
+
+# Tile-compute fine raster (ADR-0120 Phase B4 gate)
+test_tile_b4_fine = executable('test_tile_b4_fine',
+  'test_tile_b4_fine.c',
+  '../../../libs/flux/src/canvas/canvas_tile.c',
+  '../../../libs/flux/src/canvas/coverage_raster.c',
+  dependencies : [flux_test_support_dep],
+)
+test('tile_b4_fine', test_tile_b4_fine, suite : 'integration')
+
+# Deferred pass plan: pruning, materialization, and the in-pass contract
+# (ADR-0147). The test captures a prism material, so it is built only when
+# prism is enabled.
+if get_option('prism')
+  test_plan_prune = executable('test_plan_prune',
+    'test_plan_prune.c',
+    dependencies : [flux_test_support_dep, prism_dep],
   )
-  test('frame_damage', test_frame_damage, suite : 'integration')
+  test('plan_prune', test_plan_prune, suite : 'integration')
+endif
 
-  if opt_glyph
-    # Canvas feature matrix on the GPU: gradients, strokes, and the
-    # hole-bridging fill (ADR-0011), asserted by read-back pixel.
-    test_canvas_render = executable('test_canvas_render',
-      'test_canvas_render.c',
-      dependencies : [flux_test_support_dep, glyph_dep],
-    )
-    test('canvas_render', test_canvas_render, suite : 'integration')
-  endif
+# Tile-compute blend and clip integration (ADR-0120 Phase B5 gate)
+test_tile_b5_renderplan = executable('test_tile_b5_renderplan',
+  'test_tile_b5_renderplan.c',
+  '../../../libs/flux/src/canvas/canvas_tile.c',
+  '../../../libs/flux/src/canvas/curve_flatten.c',
+  dependencies : [flux_test_support_dep],
+)
+test('tile_b5_renderplan', test_tile_b5_renderplan, suite : 'integration')
 
-  # Cross-platform consistency gate: one fixed scene rendered by the GPU
-  # backend and the CPU oracle (ADR-0019), compared pixel-by-pixel. This
-  # is the test that proves a Windows/macOS port renders identically.
-  test_canvas_consistency = executable('test_canvas_consistency',
-    'test_canvas_consistency.c',
-    dependencies : [flux_test_support_dep],
+# Real-driver GPU Tile-Compute rasterizer execution (Phase B hardware execution)
+canvas_tile_raster_comp_spv_h = custom_target('canvas_tile_raster_comp_spv.h',
+  input   : canvas_tile_raster_comp_spv,
+  output  : 'canvas_tile_raster_comp_spv.h',
+  command : [spv2h_py, spv2h, '@INPUT@', '@OUTPUT@', 'canvas_tile_raster_comp_spv'],
+)
+test_tile_gpu_compute = executable('test_tile_gpu_compute',
+  'test_tile_gpu_compute.c',
+  '../../../libs/flux/src/canvas/canvas_tile.c',
+  canvas_tile_raster_comp_spv_h,
+  dependencies : [flux_test_support_dep],
+)
+test('tile_gpu_compute', test_tile_gpu_compute, suite : 'integration')
+
+# Perspective-correct vector coverage in scene material (ADR-0117)
+test_scene_vector = executable('test_scene_vector',
+  'test_scene_vector.c',
+  dependencies : [flux_test_support_dep],
+)
+test('scene_vector', test_scene_vector, suite : 'integration')
+
+# Colour management (ADR-0069): linear-light blending, P3 output
+# transform, LOAD seeding, and linear gradient interpolation, asserted
+# by offscreen readback against the public colour math API.
+test_color_management = executable('test_color_management',
+  'test_color_management.c',
+  dependencies : [flux_test_support_dep],
+)
+test('color_management', test_color_management, suite : 'integration')
+
+# Partial (damage-rect) passes across a rotating image set (ADR-0144): a
+# sub-rect LOAD pass may only composite onto an image known to hold a complete
+# frame, and the other slots must not present a stale one.
+test_partial_paint = executable('test_partial_paint',
+  'test_partial_paint.c',
+  dependencies : [flux_test_support_dep],
+)
+test('partial_paint', test_partial_paint, suite : 'integration')
+
+# Image retire queue: churn create -> draw -> release every frame so
+# inline destruction of in-flight images (GPU hang on i915) or a
+# missing bindless-slot recycle fails loudly.
+test_image_retire = executable('test_image_retire',
+  'test_image_retire.c',
+  dependencies : [flux_test_support_dep],
+)
+test('image_retire', test_image_retire, suite : 'integration')
+
+if opt_glyph
+  # Glyph-atlas image governance across atlas_clear: the retire loop once
+  # guarded page 0's release with `p > 0`, leaking a 16 MiB dedicated
+  # VkDeviceMemory per clear. Forces clears and asserts live allocations
+  # return to baseline.
+  test_text_atlas_leak = executable('test_text_atlas_leak',
+    'test_text_atlas_leak.c',
+    dependencies : [flux_test_support_dep, glyph_dep],
   )
-  test('canvas_consistency', test_canvas_consistency, suite : 'integration')
-
-  # Coverage ceiling (ADR-0119 S3 target): measures the distinct coverage levels
-  # along one oblique edge on the GPU path (4x MSAA) against the CPU coverage
-  # path, so S3's motivation is a number in the suite and its completion inverts
-  # the assertion rather than going unnoticed.
-  test_canvas_coverage_ceiling = executable('test_canvas_coverage_ceiling',
-    'test_canvas_coverage_ceiling.c',
-    dependencies : [flux_test_support_dep],
-  )
-  test('canvas_coverage_ceiling', test_canvas_coverage_ceiling, suite : 'integration')
-
-  # Real-driver hardware assertion (ADR-0120 Phase B0 gate)
-  test_device_hardware = executable('test_device_hardware',
-    'test_device_hardware.c',
-    dependencies : [flux_test_support_dep],
-  )
-  test('device_hardware', test_device_hardware, suite : 'integration')
-
-  # Tile-compute coverage backend (ADR-0120 Phase B1 gate)
-  test_tile_b1_upload = executable('test_tile_b1_upload',
-    'test_tile_b1_upload.c',
-    '../../../libs/flux/src/canvas/canvas_tile.c',
-    '../../../libs/flux/src/canvas/curve_flatten.c',
-    dependencies : [flux_test_support_dep],
-  )
-  test('tile_b1_upload', test_tile_b1_upload, suite : 'integration')
-
-  # Tile-compute coarse raster binning (ADR-0120 Phase B2 gate)
-  test_tile_b2_coarse = executable('test_tile_b2_coarse',
-    'test_tile_b2_coarse.c',
-    '../../../libs/flux/src/canvas/canvas_tile.c',
-    dependencies : [flux_test_support_dep],
-  )
-  test('tile_b2_coarse', test_tile_b2_coarse, suite : 'integration')
-
-  # Tile-compute winding backdrop (ADR-0120 Phase B3 gate)
-  test_tile_b3_backdrop = executable('test_tile_b3_backdrop',
-    'test_tile_b3_backdrop.c',
-    '../../../libs/flux/src/canvas/canvas_tile.c',
-    dependencies : [flux_test_support_dep],
-  )
-  test('tile_b3_backdrop', test_tile_b3_backdrop, suite : 'integration')
-
-  # Tile-compute fine raster (ADR-0120 Phase B4 gate)
-  test_tile_b4_fine = executable('test_tile_b4_fine',
-    'test_tile_b4_fine.c',
-    '../../../libs/flux/src/canvas/canvas_tile.c',
-    '../../../libs/flux/src/canvas/coverage_raster.c',
-    dependencies : [flux_test_support_dep],
-  )
-  test('tile_b4_fine', test_tile_b4_fine, suite : 'integration')
-
-  # Deferred pass plan: pruning, materialization, and the in-pass contract
-  # (ADR-0147). The test captures a prism material, so it is built only when
-  # prism is enabled.
-  if get_option('prism')
-    test_plan_prune = executable('test_plan_prune',
-      'test_plan_prune.c',
-      dependencies : [flux_test_support_dep, prism_dep],
-    )
-    test('plan_prune', test_plan_prune, suite : 'integration')
-  endif
-
-  # Tile-compute blend and clip integration (ADR-0120 Phase B5 gate)
-  test_tile_b5_renderplan = executable('test_tile_b5_renderplan',
-    'test_tile_b5_renderplan.c',
-    '../../../libs/flux/src/canvas/canvas_tile.c',
-    '../../../libs/flux/src/canvas/curve_flatten.c',
-    dependencies : [flux_test_support_dep],
-  )
-  test('tile_b5_renderplan', test_tile_b5_renderplan, suite : 'integration')
-
-  # Real-driver GPU Tile-Compute rasterizer execution (Phase B hardware execution)
-  canvas_tile_raster_comp_spv_h = custom_target('canvas_tile_raster_comp_spv.h',
-    input   : canvas_tile_raster_comp_spv,
-    output  : 'canvas_tile_raster_comp_spv.h',
-    command : [spv2h_py, spv2h, '@INPUT@', '@OUTPUT@', 'canvas_tile_raster_comp_spv'],
-  )
-  test_tile_gpu_compute = executable('test_tile_gpu_compute',
-    'test_tile_gpu_compute.c',
-    '../../../libs/flux/src/canvas/canvas_tile.c',
-    canvas_tile_raster_comp_spv_h,
-    dependencies : [flux_test_support_dep],
-  )
-  test('tile_gpu_compute', test_tile_gpu_compute, suite : 'integration')
-
-  # Perspective-correct vector coverage in scene material (ADR-0117)
-  test_scene_vector = executable('test_scene_vector',
-    'test_scene_vector.c',
-    dependencies : [flux_test_support_dep],
-  )
-  test('scene_vector', test_scene_vector, suite : 'integration')
-
-  # Colour management (ADR-0069): linear-light blending, P3 output
-  # transform, LOAD seeding, and linear gradient interpolation, asserted
-  # by offscreen readback against the public colour math API.
-  test_color_management = executable('test_color_management',
-    'test_color_management.c',
-    dependencies : [flux_test_support_dep],
-  )
-  test('color_management', test_color_management, suite : 'integration')
-
-  # Partial (damage-rect) passes across a rotating image set (ADR-0144): a
-  # sub-rect LOAD pass may only composite onto an image known to hold a complete
-  # frame, and the other slots must not present a stale one.
-  test_partial_paint = executable('test_partial_paint',
-    'test_partial_paint.c',
-    dependencies : [flux_test_support_dep],
-  )
-  test('partial_paint', test_partial_paint, suite : 'integration')
-
-  # Image retire queue: churn create -> draw -> release every frame so
-  # inline destruction of in-flight images (GPU hang on i915) or a
-  # missing bindless-slot recycle fails loudly.
-  test_image_retire = executable('test_image_retire',
-    'test_image_retire.c',
-    dependencies : [flux_test_support_dep],
-  )
-  test('image_retire', test_image_retire, suite : 'integration')
-
-  if opt_glyph
-    # Glyph-atlas image governance across atlas_clear: the retire loop once
-    # guarded page 0's release with `p > 0`, leaking a 16 MiB dedicated
-    # VkDeviceMemory per clear. Forces clears and asserts live allocations
-    # return to baseline.
-    test_text_atlas_leak = executable('test_text_atlas_leak',
-      'test_text_atlas_leak.c',
-      dependencies : [flux_test_support_dep, glyph_dep],
-    )
-    test('text_atlas_leak', test_text_atlas_leak,
-      suite       : 'integration',
-      is_parallel : false,
-    )
-  endif
-
-  # Retire-FIFO backpressure: releasing past the pending bound with a
-  # frozen watermark must force a full drain, not unbounded growth.
-  test_retire_backpressure = executable('test_retire_backpressure',
-    'test_retire_backpressure.c',
-    dependencies : [flux_test_support_dep],
-  )
-  test('retire_backpressure', test_retire_backpressure,
+  test('text_atlas_leak', test_text_atlas_leak,
     suite       : 'integration',
     is_parallel : false,
   )
 endif
 
+# Retire-FIFO backpressure: releasing past the pending bound with a
+# frozen watermark must force a full drain, not unbounded growth.
+test_retire_backpressure = executable('test_retire_backpressure',
+  'test_retire_backpressure.c',
+  dependencies : [flux_test_support_dep],
+)
+test('retire_backpressure', test_retire_backpressure,
+  suite       : 'integration',
+  is_parallel : false,
+)
+
 # Built only when the effect module is enabled.
-if opt_effect
-  test_effect_blur = executable('test_effect_blur',
-    'test_effect_blur.c',
-    dependencies : [flux_test_support_dep],
-  )
-  test('effect_blur', test_effect_blur, suite : 'integration')
+test_effect_blur = executable('test_effect_blur',
+  'test_effect_blur.c',
+  dependencies : [flux_test_support_dep],
+)
+test('effect_blur', test_effect_blur, suite : 'integration')
 
-  # ADR-0205: the transient pool is bounded by bytes, not entry count.
-  test_effect_pool = executable('test_effect_pool',
-    'test_effect_pool.c',
-    dependencies : [flux_test_support_dep],
-  )
-  test('effect_pool', test_effect_pool, suite : 'integration')
+# ADR-0205: the transient pool is bounded by bytes, not entry count.
+test_effect_pool = executable('test_effect_pool',
+  'test_effect_pool.c',
+  dependencies : [flux_test_support_dep],
+)
+test('effect_pool', test_effect_pool, suite : 'integration')
 
-  # ADR-0074: drop-shadow operator.
-  test_effect_shadow = executable('test_effect_shadow',
-    'test_effect_shadow.c',
-    dependencies : [flux_test_support_dep],
-  )
-  test('effect_shadow', test_effect_shadow, suite : 'integration')
+# ADR-0074: drop-shadow operator.
+test_effect_shadow = executable('test_effect_shadow',
+  'test_effect_shadow.c',
+  dependencies : [flux_test_support_dep],
+)
+test('effect_shadow', test_effect_shadow, suite : 'integration')
 
-  # Render-target capture (ADR-0017): capture -> blur -> composite.
-  test_canvas_target = executable('test_canvas_target',
-    'test_canvas_target.c',
-    dependencies : [flux_test_support_dep],
-  )
-  test('canvas_target', test_canvas_target, suite : 'integration')
+# Render-target capture (ADR-0017): capture -> blur -> composite.
+test_canvas_target = executable('test_canvas_target',
+  'test_canvas_target.c',
+  dependencies : [flux_test_support_dep],
+)
+test('canvas_target', test_canvas_target, suite : 'integration')
 
-  # Bucketed target-attachment pool: a size sweep must not churn allocations.
-  test_canvas_target_pool = executable('test_canvas_target_pool',
-    'test_canvas_target_pool.c',
-    dependencies : [flux_test_support_dep],
-  )
-  test('canvas_target_pool', test_canvas_target_pool, suite : 'integration')
-endif
+# Bucketed target-attachment pool: a size sweep must not churn allocations.
+test_canvas_target_pool = executable('test_canvas_target_pool',
+  'test_canvas_target_pool.c',
+  dependencies : [flux_test_support_dep],
+)
+test('canvas_target_pool', test_canvas_target_pool, suite : 'integration')
 
 test_image_update_strided = executable('test_image_update_strided',
   'test_image_update_strided.c',

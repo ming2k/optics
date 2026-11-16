@@ -2104,7 +2104,13 @@ impl Camera {
     /// Perspective projection (right-handed, depth 0..1 — Vulkan clip).
     pub fn perspective(fov_y_rad: f32, aspect: f32, z_near: f32, z_far: f32) -> Camera {
         let mut raw = sys::flux_camera::default();
-        unsafe { sys::flux_camera_perspective(&mut raw, fov_y_rad, aspect, z_near, z_far) };
+        let opts = sys::flux_camera_perspective_opts {
+            fov_y_rad,
+            aspect,
+            z_near,
+            z_far,
+        };
+        unsafe { sys::flux_camera_perspective(&mut raw, &opts) };
         Camera { raw }
     }
 
@@ -3007,33 +3013,7 @@ pub struct Canvas {
     borrowed: bool,
 }
 
-/// GPU attachment antialiasing for one [`Canvas`] pass.
-///
-/// CPU canvases accept this policy and retain their native software
-/// antialiasing.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub enum CanvasAntialias {
-    /// Preserve Flux's compatibility policy: clearing passes use 4x MSAA,
-    /// while loading passes render directly into the one-sample destination.
-    #[default]
-    Auto,
-    /// Render directly into the one-sample destination.
-    None,
-    /// Render with 4x MSAA and resolve. Requires `clear: Some(_)`.
-    Msaa4x,
-}
-
-impl CanvasAntialias {
-    fn raw(self) -> sys::flux_canvas_antialias {
-        match self {
-            Self::Auto => sys::flux_canvas_antialias::FLUX_CANVAS_ANTIALIAS_AUTO,
-            Self::None => sys::flux_canvas_antialias::FLUX_CANVAS_ANTIALIAS_NONE,
-            Self::Msaa4x => sys::flux_canvas_antialias::FLUX_CANVAS_ANTIALIAS_MSAA_4X,
-        }
-    }
-}
-
-/// Load and antialiasing policy for one [`Canvas`] pass.
+/// Load policy for one [`Canvas`] pass.
 ///
 /// Not `Copy`: the damage scope is an owned list. Cloning a pass policy should be
 /// an explicit decision rather than something a `Copy` bound does silently.
@@ -3041,7 +3021,6 @@ impl CanvasAntialias {
 pub struct CanvasPassOptions {
     /// `Some(color)` clears the destination; `None` preserves its contents.
     pub clear: Option<u32>,
-    pub antialias: CanvasAntialias,
     /// Optional damage scope: the rectangles this pass may write, in physical
     /// framebuffer pixels. Empty uses the complete destination. Clearing and
     /// drawing are both constrained to the set while pixels outside it remain
@@ -3051,14 +3030,6 @@ pub struct CanvasPassOptions {
     /// bands is nearly the whole output — collapsing to one rect destroys the
     /// localisation this exists to carry (ADR-0143, ADR-0149).
     pub damage: Vec<CanvasRenderArea>,
-    /// Open a genuine no-stencil pass for callers that emit only operations
-    /// whose semantics never require stencil (e.g. solid/image compositor
-    /// blits). No stencil image is allocated, transitioned, cleared, or bound;
-    /// Vulkan uses a separate pipeline variant with an undefined stencil
-    /// format. A stencil-dependent path is dropped with an explicit Flux error
-    /// instead of being silently misrendered; use [`Canvas::end_frame_checked`] or
-    /// [`Canvas::end_target_checked`] to receive that error.
-    pub skip_stencil: bool,
 }
 
 /// One rectangle of a pass's damage scope, in physical framebuffer pixels.
@@ -3132,10 +3103,8 @@ impl Damage {
     }
 }
 
-/// Build the stable base pass descriptor and its optional stack-owned pNext
-/// extension, then invoke `f` while every referenced value is alive. Keeping
-/// the no-stencil policy out of the base structure preserves C ABI compatibility
-/// with applications compiled against older Flux headers.
+/// Build the raw pass descriptor and invoke `f` while every referenced value is
+/// alive.
 fn with_raw_canvas_pass_desc<T>(
     options: CanvasPassOptions,
     f: impl FnOnce(&sys::flux_canvas_pass_desc) -> T,
@@ -3163,25 +3132,15 @@ fn with_raw_canvas_pass_desc<T>(
         },
         count: damage_rects.len() as u32,
     };
-    let no_stencil = sys::flux_canvas_no_stencil_desc {
-        type_: sys::flux_struct_type::FLUX_TYPE_CANVAS_NO_STENCIL_DESC,
-        next: std::ptr::null(),
-        enabled: true,
-    };
     let desc = sys::flux_canvas_pass_desc {
         type_: sys::flux_struct_type::FLUX_TYPE_CANVAS_PASS_DESC,
         frame: std::ptr::null_mut(),
         attachment: Default::default(),
-        next: if options.skip_stencil {
-            (&no_stencil as *const sys::flux_canvas_no_stencil_desc).cast()
-        } else {
-            std::ptr::null()
-        },
+        next: std::ptr::null(),
         clear_color: clear
             .as_ref()
             .map(|color| color as *const u32)
             .unwrap_or(std::ptr::null()),
-        antialias: options.antialias.raw(),
         damage,
         clear_extent: false,
     };
@@ -3210,58 +3169,19 @@ impl Canvas {
     /// [`end_frame`](Self::end_frame), then read the result with
     /// [`read_pixels`](Self::read_pixels).
     ///
-    /// Supported: solid fills, paths, rounded rects, gradients, clipping.
-    /// Image and glyph (text) draws are ignored on a CPU canvas — they need a
-    /// GPU-resident texture.
+    /// Supported: solid fills, paths, rounded rects, gradients, clipping, and
+    /// glyph runs (with host coverage). Image draws require a GPU canvas.
     pub fn new_cpu(width: u32, height: u32, scale: f32) -> Result<Canvas, Error> {
+        let desc = sys::flux_canvas_desc {
+            type_: sys::flux_struct_type::FLUX_TYPE_CANVAS_DESC,
+            backend: sys::flux_canvas_backend_kind::FLUX_CANVAS_BACKEND_CPU,
+            scale,
+            width,
+            height,
+            ..unsafe { std::mem::zeroed() }
+        };
         let mut out: *mut sys::flux_canvas = std::ptr::null_mut();
-        Error::check(unsafe { sys::flux_canvas_create_cpu(width, height, scale, &mut out) })?;
-        Ok(Canvas {
-            raw: out,
-            borrowed: false,
-        })
-    }
-
-    /// Create a headless software canvas with an explicit supersampling factor
-    /// per axis (`ss` × `ss` samples per pixel).
-    ///
-    /// `0` keeps the backend default (2 → 4 samples/pixel). Higher factors buy
-    /// grey levels — N samples resolve N+1 coverage steps, so `4` gives 17 and `8`
-    /// gives 65 — at quadratic sample-buffer cost. Use it for canvases whose only
-    /// job is to bake a coverage mask (see [`cpu_coverage`](Self::cpu_coverage));
-    /// display canvases should keep the default.
-    ///
-    /// Fails with `FLUX_ERROR_OUT_OF_RANGE` (surfaced through [`Error`]) above
-    /// `FLUX_CANVAS_SUPERSAMPLE_MAX` (8) rather than clamping.
-    pub fn new_cpu_supersampled(
-        width: u32,
-        height: u32,
-        scale: f32,
-        supersample: u32,
-    ) -> Result<Canvas, Error> {
-        let mut out: *mut sys::flux_canvas = std::ptr::null_mut();
-        Error::check(unsafe {
-            sys::flux_canvas_create_cpu_ss(width, height, scale, supersample, &mut out)
-        })?;
-        Ok(Canvas {
-            raw: out,
-            borrowed: false,
-        })
-    }
-
-    /// Create a headless software canvas with an explicit antialiasing policy
-    /// (supersampled by default; [`CanvasAntialias::None`] trades edge quality
-    /// for throughput). The CPU analogue of [`CanvasPassOptions::antialias`].
-    pub fn new_cpu_aa(
-        width: u32,
-        height: u32,
-        scale: f32,
-        antialias: CanvasAntialias,
-    ) -> Result<Canvas, Error> {
-        let mut out: *mut sys::flux_canvas = std::ptr::null_mut();
-        Error::check(unsafe {
-            sys::flux_canvas_create_cpu_aa(width, height, scale, antialias.raw(), &mut out)
-        })?;
+        Error::check(unsafe { sys::flux_canvas_create(&desc, &mut out) })?;
         Ok(Canvas {
             raw: out,
             borrowed: false,
@@ -3729,10 +3649,16 @@ impl Image {
         height: u32,
         format: Format,
     ) -> Result<Image, Error> {
+        let desc = sys::flux_image_desc {
+            type_: sys::flux_struct_type::FLUX_TYPE_IMAGE_DESC,
+            width,
+            height,
+            format: format.raw(),
+            usage: sys::flux_image_usage::FLUX_IMAGE_USAGE_RENDER_TARGET,
+            ..unsafe { std::mem::zeroed() }
+        };
         let mut out = std::ptr::null_mut();
-        Error::check(unsafe {
-            sys::flux_image_create_render_target(device.raw, width, height, format.raw(), &mut out)
-        })?;
+        Error::check(unsafe { sys::flux_image_create(device.raw, &desc, &mut out) })?;
         Ok(Image { raw: out })
     }
 
@@ -3806,6 +3732,7 @@ impl Image {
             height,
             format: format.raw(),
             initial_data: data.as_ptr() as *const std::os::raw::c_void,
+            usage: sys::flux_image_usage::FLUX_IMAGE_USAGE_SAMPLED,
         };
         let mut out: *mut sys::flux_image = std::ptr::null_mut();
         // SAFETY: desc is fully initialized; the extension and raw_space

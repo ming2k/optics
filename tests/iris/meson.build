@@ -9,8 +9,9 @@
 #   - test_platform_text UTF-8 boundary-aware truncation helpers
 #   - test_platform_input pointer button mapping + scroll-channel policy
 #
-# The windowed path (iris_app_run with a real build callback) is exercised
-# by the examples, not here — it owns an event loop and needs a live session.
+# The windowed path (iris_app_run) is exercised by the examples, not here — it
+# owns an event loop and needs a live session. Nothing in this directory links
+# lens: iris depends on flux only, and these tests are what keep it that way.
 
 src_inc = include_directories('../../libs/iris/src')
 
@@ -30,7 +31,7 @@ endforeach
 exe_a11y = executable('test_a11y_util',
   ['test_a11y_util.c', '../../libs/iris/src/a11y_util.c', '../../libs/iris/src/platform_text.c'],
   include_directories : [iris_inc, src_inc],
-  dependencies        : [lens_dep, m_dep, optics_test_dep],
+  dependencies        : [flux_dep, m_dep, optics_test_dep],
 )
 test('test_a11y_util', exe_a11y, suite : 'unit')
 
@@ -49,16 +50,16 @@ endif
 exe_prefs = executable('test_a11y_prefs',
   'test_a11y_prefs.c',
   include_directories : [iris_inc, src_inc],
-  dependencies        : [iris_dep, lens_dep, m_dep, optics_test_dep],
+  dependencies        : [iris_dep, m_dep, optics_test_dep],
 )
 test('test_a11y_prefs', exe_prefs, suite : 'unit')
 
-# test_platform_text also pins the lens_input buffer sizes the backends
-# stage into (text_utf8/preedit_utf8), so it needs the lens headers.
+# test_platform_text also pins the iris_input buffer sizes the backends
+# stage into (text_utf8/preedit_utf8).
 exe_ptext = executable('test_platform_text',
   ['test_platform_text.c', '../../libs/iris/src/platform_text.c'],
   include_directories : [iris_inc, src_inc],
-  dependencies        : [lens_dep, m_dep, optics_test_dep],
+  dependencies        : [flux_dep, m_dep, optics_test_dep],
 )
 test('test_platform_text', exe_ptext, suite : 'unit')
 
@@ -68,7 +69,7 @@ test('test_platform_text', exe_ptext, suite : 'unit')
 exe_pinput = executable('test_platform_input',
   ['test_platform_input.c'],
   include_directories : [iris_inc, src_inc],
-  dependencies        : [lens_dep, m_dep, optics_test_dep],
+  dependencies        : [flux_dep, m_dep, optics_test_dep],
 )
 test('test_platform_input', exe_pinput, suite : 'unit')
 
@@ -78,7 +79,7 @@ test('test_platform_input', exe_pinput, suite : 'unit')
 exe_event = executable('test_event',
   ['test_event.c', '../../libs/iris/src/event.c'],
   include_directories : [iris_inc, src_inc],
-  dependencies        : [lens_dep, m_dep, optics_test_dep],
+  dependencies        : [flux_dep, m_dep, optics_test_dep],
 )
 test('test_event', exe_event, suite : 'unit')
 
@@ -91,7 +92,7 @@ test('test_event', exe_event, suite : 'unit')
 exe_pacer = executable('test_display_pacer',
   ['test_display_pacer.c', '../../libs/iris/src/display_pacer.c'],
   include_directories : [iris_inc, src_inc],
-  dependencies        : [lens_dep, m_dep, optics_test_dep],
+  dependencies        : [flux_dep, m_dep, optics_test_dep],
 )
 test('test_display_pacer', exe_pacer, suite : 'unit')
 
@@ -101,6 +102,6 @@ test('test_display_pacer', exe_pacer, suite : 'unit')
 exe_mailbox = executable('test_frame_mailbox',
   ['test_frame_mailbox.c', '../../libs/iris/src/frame_mailbox.c'],
   include_directories : [iris_inc, src_inc],
-  dependencies        : [lens_dep, m_dep, optics_test_dep],
+  dependencies        : [flux_dep, m_dep, optics_test_dep],
 )
 test('test_frame_mailbox', exe_mailbox, suite : 'unit')

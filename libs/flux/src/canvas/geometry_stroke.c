@@ -85,6 +85,14 @@ stroke_frame compute_frame(flux_point prev, flux_point pt, flux_point next, floa
     return f;
 }
 
+/* Emit one triangle into canvas scratch_verts, growing dynamically on demand. */
+static void stroke_emit_tri(flux_canvas *c, uint32_t *v_count, flux_mat3x2 tx, flux_color color,
+                            flux_point a, flux_point b, flux_point e) {
+    if (*v_count + 3 > c->scratch_verts_cap && !canvas_ensure_verts(c, *v_count + 3))
+        return;
+    emit_tri(c->scratch_verts, v_count, c->scratch_verts_cap, tx, color, a, b, e);
+}
+
 /* Emit a circular arc (fan from `centre`) sweeping from start_angle
  * to end_angle (radians). Caller picks the angular step. */
 void emit_arc(flux_canvas_vertex *verts, uint32_t *count, uint32_t cap, flux_mat3x2 tx,
@@ -106,6 +114,18 @@ void emit_arc(flux_canvas_vertex *verts, uint32_t *count, uint32_t cap, flux_mat
         emit_tri(verts, count, cap, tx, color, centre, prev, cur);
         prev = cur;
     }
+}
+
+static void stroke_emit_arc(flux_canvas *c, uint32_t *v_count, flux_mat3x2 tx, flux_color color,
+                            flux_point centre, float radius, float start_angle, float sweep,
+                            uint32_t steps) {
+    if (steps == 0)
+        return;
+    uint32_t need = *v_count + steps * 3u;
+    if (need > c->scratch_verts_cap && !canvas_ensure_verts(c, need))
+        return;
+    emit_arc(c->scratch_verts, v_count, c->scratch_verts_cap, tx, color, centre, radius,
+             start_angle, sweep, steps);
 }
 
 /* Local radius of curvature of the flattened polyline at `pt`, estimated as
@@ -175,8 +195,7 @@ static void clamp_inner_offset(stroke_frame *f, flux_point pt, flux_point prev, 
 static void stroke_one_contour(flux_canvas *c, const canvas_paint *paint, flux_mat3x2 tx,
                                flux_color color, float half, float miter_limit, flux_point *pts,
                                uint32_t count, bool contour_closed, float first_x, float first_y,
-                               flux_canvas_vertex *verts, uint32_t *v_count_io,
-                               uint32_t verts_cap) {
+                               uint32_t *v_count_io) {
     uint32_t n = count;
     if (n < 2)
         return;
@@ -199,13 +218,10 @@ static void stroke_one_contour(flux_canvas *c, const canvas_paint *paint, flux_m
     uint32_t v_count = *v_count_io;
 
     /* Build per-vertex frames first so segment body can reference
-     * both endpoints' offsets. Bounded by FLUX_CANVAS_PATH_SCRATCH_CAP. */
+     * both endpoints' offsets, growing c->scratch_frames dynamically. */
+    if (!canvas_ensure_frames(c, n))
+        return;
     stroke_frame *frames = c->scratch_frames;
-    if (n > FLUX_CANVAS_PATH_SCRATCH_CAP) {
-        FLUX_FAIL(FLUX_ERROR_OUT_OF_RANGE, "stroker polyline exceeds FLUX_CANVAS_PATH_SCRATCH_CAP; "
-                                           "tail vertices dropped");
-        n = FLUX_CANVAS_PATH_SCRATCH_CAP;
-    }
     for (uint32_t i = 0; i < n; ++i) {
         bool has_prev = closed ? true : (i > 0);
         bool has_next = closed ? true : (i + 1 < n);
@@ -222,8 +238,8 @@ static void stroke_one_contour(flux_canvas *c, const canvas_paint *paint, flux_m
     for (uint32_t s = 0; s < seg_count; ++s) {
         const stroke_frame *a = &frames[s];
         const stroke_frame *b = &frames[(s + 1) % n];
-        emit_tri(verts, &v_count, verts_cap, tx, color, a->right, a->left, b->left);
-        emit_tri(verts, &v_count, verts_cap, tx, color, a->right, b->left, b->right);
+        stroke_emit_tri(c, &v_count, tx, color, a->right, a->left, b->left);
+        stroke_emit_tri(c, &v_count, tx, color, a->right, b->left, b->right);
     }
 
     /* Joins at interior vertices where miter overflowed. */
@@ -246,7 +262,7 @@ static void stroke_one_contour(flux_canvas *c, const canvas_paint *paint, flux_m
 
         switch (paint->join) {
         case FLUX_JOIN_BEVEL:
-            emit_tri(verts, &v_count, verts_cap, tx, color, pt, in_outer, out_outer);
+            stroke_emit_tri(c, &v_count, tx, color, pt, in_outer, out_outer);
             break;
         case FLUX_JOIN_MITER: {
             /* Miter — extend in_outer and out_outer to meeting point.
@@ -257,7 +273,7 @@ static void stroke_one_contour(flux_canvas *c, const canvas_paint *paint, flux_m
             flux_point bisector = pt_add(f->n_in, f->n_out);
             float bl = sqrtf(bisector.x * bisector.x + bisector.y * bisector.y);
             if (bl < 1e-6f) {
-                emit_tri(verts, &v_count, verts_cap, tx, color, pt, in_outer, out_outer);
+                stroke_emit_tri(c, &v_count, tx, color, pt, in_outer, out_outer);
                 break;
             }
             bisector = pt_scale(bisector, 1.0f / bl);
@@ -265,8 +281,8 @@ static void stroke_one_contour(flux_canvas *c, const canvas_paint *paint, flux_m
                 bisector = pt_scale(bisector, -1.0f);
             /* miter cap distance = half * miter_limit along bisector. */
             flux_point miter = pt_add(pt, pt_scale(bisector, half * miter_limit));
-            emit_tri(verts, &v_count, verts_cap, tx, color, pt, in_outer, miter);
-            emit_tri(verts, &v_count, verts_cap, tx, color, pt, miter, out_outer);
+            stroke_emit_tri(c, &v_count, tx, color, pt, in_outer, miter);
+            stroke_emit_tri(c, &v_count, tx, color, pt, miter, out_outer);
             break;
         }
         case FLUX_JOIN_ROUND: {
@@ -283,7 +299,7 @@ static void stroke_one_contour(flux_canvas *c, const canvas_paint *paint, flux_m
                 steps = 2;
             if (steps > 32)
                 steps = 32;
-            emit_arc(verts, &v_count, verts_cap, tx, color, pt, half, a0, sweep, steps);
+            stroke_emit_arc(c, &v_count, tx, color, pt, half, a0, sweep, steps);
             break;
         }
         }
@@ -308,10 +324,10 @@ static void stroke_one_contour(flux_canvas *c, const canvas_paint *paint, flux_m
             flux_point sr0 = pt_add(f0->right, pt_scale(t0, -half));
             flux_point slN = pt_add(fN->left, pt_scale(tN, +half));
             flux_point srN = pt_add(fN->right, pt_scale(tN, +half));
-            emit_tri(verts, &v_count, verts_cap, tx, color, sl0, sr0, f0->right);
-            emit_tri(verts, &v_count, verts_cap, tx, color, sl0, f0->right, f0->left);
-            emit_tri(verts, &v_count, verts_cap, tx, color, fN->left, fN->right, srN);
-            emit_tri(verts, &v_count, verts_cap, tx, color, fN->left, srN, slN);
+            stroke_emit_tri(c, &v_count, tx, color, sl0, sr0, f0->right);
+            stroke_emit_tri(c, &v_count, tx, color, sl0, f0->right, f0->left);
+            stroke_emit_tri(c, &v_count, tx, color, fN->left, fN->right, srN);
+            stroke_emit_tri(c, &v_count, tx, color, fN->left, srN, slN);
             break;
         }
         case FLUX_CAP_ROUND: {
@@ -319,10 +335,10 @@ static void stroke_one_contour(flux_canvas *c, const canvas_paint *paint, flux_m
              * the right offset to the left offset around the OUTSIDE
              * of the cap (i.e. opposite the tangent direction). */
             float a_start = atan2f(f0->right.y - p0.y, f0->right.x - p0.x);
-            emit_arc(verts, &v_count, verts_cap, tx, color, p0, half, a_start,
-                     3.14159265359f /* π half-sweep, picks outside */, 16);
+            stroke_emit_arc(c, &v_count, tx, color, p0, half, a_start,
+                            3.14159265359f /* π half-sweep, picks outside */, 16);
             float a_end = atan2f(fN->left.y - pN.y, fN->left.x - pN.x);
-            emit_arc(verts, &v_count, verts_cap, tx, color, pN, half, a_end, 3.14159265359f, 16);
+            stroke_emit_arc(c, &v_count, tx, color, pN, half, a_end, 3.14159265359f, 16);
             break;
         }
         }
@@ -345,39 +361,24 @@ void canvas_stroke_path_internal(flux_canvas *c, const flux_path *p, const canva
     const float half = paint->stroke_width * 0.5f;
     const float miter_limit = paint->miter_limit > 0.0f ? paint->miter_limit : 4.0f;
 
-    /* Cache lookup before flattening — a hit skips flatten + outline
-     * emission entirely. On a miss, stroke in path space (identity
-     * transform) so the result is cacheable; the store step re-applies
-     * `tx` before submit. */
-    if (tess_cache_lookup_submit(c, p, paint, true, pixel_scale, paint->stroke_width, miter_limit,
-                                 tx))
-        return;
-    flux_mat3x2 emit_tx = flux_mat3x2_identity();
-
-    flux_point *pts = c->scratch_pts;
-    flux_canvas_contour *cons = c->scratch_contours;
-
-    /* Flatten into every subpath (contour), not just the first — a glyph
-     * path commonly holds several (outline + interior strokes). */
-    flatten_multi fm = flatten_path_to_contours(p, pixel_scale, pts, FLUX_CANVAS_PATH_SCRATCH_CAP,
-                                                cons, FLUX_CANVAS_MAX_CONTOURS);
+    /* Flatten into every subpath (contour), growing c->scratch_pts /
+     * c->scratch_contours dynamically so arbitrary-length paths stroke intact. */
+    flatten_multi fm = canvas_flatten_path(c, p, pixel_scale);
     if (fm.contour_count == 0)
         return;
 
+    flux_point *pts = c->scratch_pts;
+    flux_canvas_contour *cons = c->scratch_contours;
     flux_color color = paint->color;
-    flux_canvas_vertex *verts = c->scratch_verts;
-    const uint32_t verts_cap = FLUX_CANVAS_PATH_SCRATCH_CAP * 3;
     uint32_t v_count = 0;
 
     for (uint32_t ci = 0; ci < fm.contour_count; ++ci) {
         flux_canvas_contour *co = &cons[ci];
         if (co->count < 2)
             continue;
-        stroke_one_contour(c, paint, emit_tx, color, half, miter_limit, pts + co->start, co->count,
-                           co->closed, co->first_x, co->first_y, verts, &v_count, verts_cap);
+        stroke_one_contour(c, paint, tx, color, half, miter_limit, pts + co->start, co->count,
+                           co->closed, co->first_x, co->first_y, &v_count);
     }
 
-    tess_cache_store_and_transform(c, p, paint, true, pixel_scale, paint->stroke_width, miter_limit,
-                                   false, verts, v_count, tx);
-    submit_triangles(c, paint, verts, v_count);
+    submit_triangles_covered(c, paint, c->scratch_verts, v_count);
 }

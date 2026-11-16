@@ -70,30 +70,21 @@ Useful feature options are defined in `meson_options.txt`:
 
 | Option | Default | Effect |
 |--------|---------|--------|
-| `canvas` | `true` | Build the 2D canvas and CPU backend. |
-| `scene` | `true` | Build 3D mesh and material primitives. |
-| `compute` | `true` | Build compute pipelines. |
-| `effect` | `true` | Build image effects; requires canvas and compute. |
 | `glyph` | `true` | Build the `glyph` text shaping library. |
 | `vista` | `true` | Build the `vista` 3D scene-graph library. |
-| `prism` | `true` | Build the `prism` material library; requires compute. |
+| `prism` | `true` | Build the `prism` material library. |
 | `transit` | `true` | Build the header-only `transit` motion vocabulary. |
 | `reticle` | `true` | Build the `reticle` SVG document compiler. |
 | `examples` | `false` | Build all available C examples. |
 | `tests` | `false` | Build C tests and benchmarks. |
 | `fuzz` | `false` | Build fuzz harnesses (libFuzzer when available). |
 
-Feature dependencies are enforced at configure time: `vista` requires `scene`,
-`prism` requires `compute`, `glyph` and `reticle` require `canvas`, and the
-`lens`/`iris` UI stack is built only when `canvas`, `glyph`, and `reticle` are
-all enabled. A flux-only build is therefore
-`-Dcanvas=false -Dscene=false -Dcompute=false -Deffect=false -Dglyph=false
--Dreticle=false -Dvista=false -Dprism=false -Dtransit=false`.
-
-The test suite currently targets the default flux module graph. For a reduced
-flux-only build (with `canvas` or `scene` disabled), configure with
-`-Dtests=false`; library and example targets are gated by the feature graph,
-but the full flux test corpus assumes the default modules.
+`flux` itself has no module switches: every libflux carries the canvas, scene,
+compute and effect modules, so its ABI is identified by its version alone. The
+options above only select which sibling libraries are built. The `lens`/`iris`
+UI stack is built only when `glyph` and `reticle` are both enabled. A flux-only
+build is `-Dglyph=false -Dreticle=false -Dvista=false -Dprism=false
+-Dtransit=false`.
 
 After changing options or installing a missing dependency, reconfigure:
 
@@ -113,7 +104,7 @@ Run representative binaries from their module directories:
 ```bash
 ./build/examples/flux/scene_cube
 ./build/examples/lens/headless_demo
-./build/examples/iris/widgets
+./build/examples/aperture/widgets
 ```
 
 The `iris` examples need a Wayland session. The `lens` examples are headless.

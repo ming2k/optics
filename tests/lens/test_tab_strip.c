@@ -7,6 +7,19 @@
 #include <stdio.h>
 #include <string.h>
 
+/* The fixed arguments of every case in this file, merged into a copy of the
+ * case's options. */
+static lens_tab_action tab_strip(lens *ui, const char *id, const lens_tab_item *tabs,
+                                 uint32_t tab_count, uint32_t active_index,
+                                 const lens_tab_strip_opts *base) {
+    lens_tab_strip_opts o = *base;
+    o.id = id;
+    o.tabs = tabs;
+    o.tab_count = tab_count;
+    o.active_index = active_index;
+    return lens_tab_strip(ui, &o);
+}
+
 /* Build a three-tab strip, returns nothing; helpers share one layout fn so
  * ids stay stable across frames. */
 static void build_strip(lens *ui, uint32_t active) {
@@ -21,7 +34,7 @@ static void build_strip(lens *ui, uint32_t active) {
                                 .show_new_button = true,
                                 .close_icon = LENS_ICON_INVALID,
                                 .new_icon = LENS_ICON_INVALID};
-    lens_tab_strip(ui, "##main-tabs", tabs, 3, active, &opts);
+    tab_strip(ui, "##main-tabs", tabs, 3, active, &opts);
 }
 
 int main(void) {
@@ -47,7 +60,7 @@ int main(void) {
     {
         lens_tab_item tabs[3] = {{.title = "Alpha"}, {.title = "Beta"}, {.title = "Gamma"}};
         lens_tab_strip_opts opts = {.min_tab_width = 80.0f, .max_tab_width = 120.0f};
-        a = lens_tab_strip(ui, "##main-tabs", tabs, 3, 0, &opts);
+        a = tab_strip(ui, "##main-tabs", tabs, 3, 0, &opts);
     }
     /* A press without release is not a select yet. */
     OT_EXPECT(a.kind == LENS_TAB_ACTION_NONE);
@@ -61,7 +74,7 @@ int main(void) {
     {
         lens_tab_item tabs[3] = {{.title = "Alpha"}, {.title = "Beta"}, {.title = "Gamma"}};
         lens_tab_strip_opts opts = {.min_tab_width = 80.0f, .max_tab_width = 120.0f};
-        a = lens_tab_strip(ui, "##main-tabs", tabs, 3, 0, &opts);
+        a = tab_strip(ui, "##main-tabs", tabs, 3, 0, &opts);
     }
     OT_EXPECT(a.kind == LENS_TAB_ACTION_NONE);
     lens_test_end(ui);
@@ -74,7 +87,7 @@ int main(void) {
     {
         lens_tab_item tabs[3] = {{.title = "Alpha"}, {.title = "Beta"}, {.title = "Gamma"}};
         lens_tab_strip_opts opts = {.min_tab_width = 80.0f, .max_tab_width = 120.0f};
-        a = lens_tab_strip(ui, "##main-tabs", tabs, 3, 0, &opts);
+        a = tab_strip(ui, "##main-tabs", tabs, 3, 0, &opts);
     }
     OT_EXPECT(a.kind == LENS_TAB_ACTION_NONE);
     lens_test_end(ui);
@@ -86,7 +99,7 @@ int main(void) {
     {
         lens_tab_item tabs[3] = {{.title = "Alpha"}, {.title = "Beta"}, {.title = "Gamma"}};
         lens_tab_strip_opts opts = {.min_tab_width = 80.0f, .max_tab_width = 120.0f};
-        a = lens_tab_strip(ui, "##main-tabs", tabs, 3, 0, &opts);
+        a = tab_strip(ui, "##main-tabs", tabs, 3, 0, &opts);
     }
     OT_EXPECT(a.kind == LENS_TAB_ACTION_MOVE);
     OT_EXPECT(a.index == 0);
@@ -104,7 +117,7 @@ int main(void) {
     {
         lens_tab_item tabs[3] = {{.title = "Alpha"}, {.title = "Beta"}, {.title = "Gamma"}};
         lens_tab_strip_opts opts = {.min_tab_width = 80.0f, .max_tab_width = 120.0f};
-        a = lens_tab_strip(ui, "##main-tabs", tabs, 3, 0, &opts);
+        a = tab_strip(ui, "##main-tabs", tabs, 3, 0, &opts);
     }
     lens_test_end(ui);
     in.mouse_down[LENS_MOUSE_LEFT] = false;
@@ -113,7 +126,7 @@ int main(void) {
     {
         lens_tab_item tabs[3] = {{.title = "Alpha"}, {.title = "Beta"}, {.title = "Gamma"}};
         lens_tab_strip_opts opts = {.min_tab_width = 80.0f, .max_tab_width = 120.0f};
-        a = lens_tab_strip(ui, "##main-tabs", tabs, 3, 0, &opts);
+        a = tab_strip(ui, "##main-tabs", tabs, 3, 0, &opts);
     }
     OT_EXPECT(a.kind == LENS_TAB_ACTION_SELECT);
     OT_EXPECT(a.index == 1);
@@ -130,7 +143,7 @@ int main(void) {
     {
         lens_tab_item tabs[3] = {{.title = "Alpha"}, {.title = "Beta"}, {.title = "Gamma"}};
         lens_tab_strip_opts opts = {.min_tab_width = 80.0f, .max_tab_width = 120.0f};
-        a = lens_tab_strip(ui, "##main-tabs", tabs, 3, 0, &opts);
+        a = tab_strip(ui, "##main-tabs", tabs, 3, 0, &opts);
     }
     lens_test_end(ui);
     in.cursor = (flux_point){10, 18};
@@ -139,7 +152,7 @@ int main(void) {
     {
         lens_tab_item tabs[3] = {{.title = "Alpha"}, {.title = "Beta"}, {.title = "Gamma"}};
         lens_tab_strip_opts opts = {.min_tab_width = 80.0f, .max_tab_width = 120.0f};
-        a = lens_tab_strip(ui, "##main-tabs", tabs, 3, 0, &opts);
+        a = tab_strip(ui, "##main-tabs", tabs, 3, 0, &opts);
     }
     OT_EXPECT(a.kind == LENS_TAB_ACTION_NONE); /* threshold crossed mid-drag */
     lens_test_end(ui);
@@ -149,7 +162,7 @@ int main(void) {
     {
         lens_tab_item tabs[3] = {{.title = "Alpha"}, {.title = "Beta"}, {.title = "Gamma"}};
         lens_tab_strip_opts opts = {.min_tab_width = 80.0f, .max_tab_width = 120.0f};
-        a = lens_tab_strip(ui, "##main-tabs", tabs, 3, 0, &opts);
+        a = tab_strip(ui, "##main-tabs", tabs, 3, 0, &opts);
     }
     OT_EXPECT(a.kind == LENS_TAB_ACTION_MOVE);
     OT_EXPECT(a.index == 2);
@@ -165,7 +178,7 @@ int main(void) {
     {
         lens_tab_item tabs[3] = {{.title = "Alpha"}, {.title = "Beta"}, {.title = "Gamma"}};
         lens_tab_strip_opts opts = {.min_tab_width = 80.0f, .max_tab_width = 120.0f};
-        a = lens_tab_strip(ui, "##main-tabs", tabs, 3, 0, &opts);
+        a = tab_strip(ui, "##main-tabs", tabs, 3, 0, &opts);
     }
     lens_test_end(ui);
     in.cursor = (flux_point){300, 18}; /* past threshold */
@@ -174,7 +187,7 @@ int main(void) {
     {
         lens_tab_item tabs[3] = {{.title = "Alpha"}, {.title = "Beta"}, {.title = "Gamma"}};
         lens_tab_strip_opts opts = {.min_tab_width = 80.0f, .max_tab_width = 120.0f};
-        a = lens_tab_strip(ui, "##main-tabs", tabs, 3, 0, &opts);
+        a = tab_strip(ui, "##main-tabs", tabs, 3, 0, &opts);
     }
     lens_test_end(ui);
     /* Model changed under the drag (a tab closed elsewhere). */
@@ -185,7 +198,7 @@ int main(void) {
         lens_tab_item tabs[4] = {
             {.title = "Alpha"}, {.title = "Beta"}, {.title = "Gamma"}, {.title = "Delta"}};
         lens_tab_strip_opts opts = {.min_tab_width = 80.0f, .max_tab_width = 120.0f};
-        a = lens_tab_strip(ui, "##main-tabs", tabs, 4, 0, &opts);
+        a = tab_strip(ui, "##main-tabs", tabs, 4, 0, &opts);
     }
     OT_EXPECT(a.kind == LENS_TAB_ACTION_NONE);
     lens_test_end(ui);
@@ -202,7 +215,7 @@ int main(void) {
                                  {.title = "Beta", .closable = true},
                                  {.title = "Gamma", .closable = true}};
         lens_tab_strip_opts opts = {.min_tab_width = 80.0f, .max_tab_width = 120.0f};
-        a = lens_tab_strip(ui, "##main-tabs", tabs, 3, 0, &opts);
+        a = tab_strip(ui, "##main-tabs", tabs, 3, 0, &opts);
     }
     OT_EXPECT(a.pressed_on_tab);
     lens_test_end(ui);
@@ -214,7 +227,7 @@ int main(void) {
                                  {.title = "Beta", .closable = true},
                                  {.title = "Gamma", .closable = true}};
         lens_tab_strip_opts opts = {.min_tab_width = 80.0f, .max_tab_width = 120.0f};
-        a = lens_tab_strip(ui, "##main-tabs", tabs, 3, 0, &opts);
+        a = tab_strip(ui, "##main-tabs", tabs, 3, 0, &opts);
     }
     OT_EXPECT(a.kind == LENS_TAB_ACTION_CLOSE);
     OT_EXPECT(a.index == 0);

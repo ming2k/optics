@@ -13,17 +13,19 @@ flux = { path = "../flux", version = "0.0.79", optional = true }
 glyph = { path = "../glyph", version = "0.0.79", optional = true }
 lens = { path = "../lens", version = "0.0.79", optional = true }
 iris = { path = "../iris", version = "0.0.79", optional = true }
+aperture = { path = "../aperture", version = "0.0.79", optional = true }
 prism = { path = "../prism", version = "0.0.79", optional = true }
 reticle = { path = "../reticle", version = "0.0.79", optional = true }
 vista = { path = "../vista", version = "0.0.79", optional = true }
 transit = { path = "../transit", version = "0.0.79", optional = true }
 
 [features]
-default = ["ui", "platform", "motion"]
+default = ["app", "motion"]
 canvas = ["dep:flux"]
 typography = ["canvas", "dep:glyph"]
 ui = ["typography", "dep:lens"]
-platform = ["ui", "dep:iris"]
+platform = ["canvas", "dep:iris"]
+app = ["ui", "platform", "dep:aperture"]
 materials = ["canvas", "dep:prism"]
 reticle = ["canvas", "dep:reticle"]
 vector = ["reticle"]

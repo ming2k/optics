@@ -14,7 +14,12 @@ static flux_result begin_target(flux_canvas *c, flux_target *target, const flux_
 
 int main(void) {
     flux_canvas *c = nullptr;
-    OT_EXPECT(flux_canvas_create_cpu(8, 8, 1, &c) == FLUX_OK);
+    OT_EXPECT(flux_canvas_create(&(flux_canvas_desc){.type = FLUX_TYPE_CANVAS_DESC,
+                                                     .backend = FLUX_CANVAS_BACKEND_CPU,
+                                                     .scale = 1,
+                                                     .width = 8,
+                                                     .height = 8},
+                                 &c) == FLUX_OK);
     flux_cpu_target_desc desc = FLUX_CPU_TARGET_DESC_INIT;
     desc.width = 32;
     desc.height = 24;

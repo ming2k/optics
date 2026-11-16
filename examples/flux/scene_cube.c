@@ -8,6 +8,7 @@
  *   - Native Iris windowing (zero GLFW, system cursor, fractional HiDPI).
  */
 
+#include <aperture/aperture.h>
 #include <flux/flux.h>
 #include <flux/scene.h>
 #include <flux/vulkan.h>
@@ -231,7 +232,10 @@ static void on_prepare(flux_frame *frame, flux_canvas *canvas, flux_device *devi
     vkCmdSetScissor(cmd, 0, 1, &sc);
 
     flux_camera cam;
-    flux_camera_perspective(&cam, 1.0f, (float)pw / (float)ph, 0.1f, 100.0f);
+    flux_camera_perspective(&cam, &(flux_camera_perspective_opts){.fov_y_rad = 1.0f,
+                                                                  .aspect = (float)pw / (float)ph,
+                                                                  .z_near = 0.1f,
+                                                                  .z_far = 100.0f});
     flux_camera_look_at(&cam, (flux_vec3){3, 2.5f, 4}, (flux_vec3){0, 0, 0}, (flux_vec3){0, 1, 0});
 
     float t = app->time;
@@ -262,7 +266,7 @@ int main(void) {
         .phong = true,
     };
     printf("flux scene_cube — native Iris 3D window (Esc to quit)\n");
-    return iris_app_run(&(iris_app_opts){
+    return aperture_app_run(&(aperture_app_opts){
         .title = "flux scene — cube",
         .app_id = "org.optics.flux.scene-cube",
         .width = 960,

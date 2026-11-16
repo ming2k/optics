@@ -40,11 +40,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* Coverage resolution for the bake. 8×8 = 64 samples/pixel = 65 coverage
- * levels, which is beyond what 8-bit output can distinguish on an edge. The
- * bake is a one-off per cache entry, so the supersample cost is paid once —
- * a 24 px icon bakes into a 192×192 sample buffer (~600 KiB float RGBA). */
-#define LENSI_ICON_MASK_SUPERSAMPLE 8u
+/* Analytical 1x coverage bake requires no supersample multiplier. */
 
 /* Bounded pool. Sized for the realistic working set: a nav rail plus toolbar
  * plus menu (well under 100 distinct icons) at two states/sizes each. Eviction
@@ -318,13 +314,17 @@ lensi_icon_mask *lensi_icon_mask_acquire(lens *ui, int32_t icon_id, uint32_t dev
     if (extent == 0 || extent > 4096u)
         return nullptr;
 
-    /* Bake at device resolution with 8x8 coverage. Content scale is 1.0 because
-     * the canvas is created at `extent` physical pixels and the geometry is
-     * placed in device pixels directly — there is no logical transform to
-     * compound, which is what makes the result exactly device-sized. */
+    /* Bake at device resolution with 1x continuous analytic coverage. Content
+     * scale is 1.0 because the canvas is created at `extent` physical pixels
+     * and the geometry is placed in device pixels directly — there is no logical
+     * transform to compound, which is what makes the result device-sized. */
     flux_canvas *canvas = nullptr;
-    if (flux_canvas_create_cpu_ss(extent, extent, 1.0f, LENSI_ICON_MASK_SUPERSAMPLE, &canvas) !=
-        FLUX_OK)
+    if (flux_canvas_create(&(flux_canvas_desc){.type = FLUX_TYPE_CANVAS_DESC,
+                                               .backend = FLUX_CANVAS_BACKEND_CPU,
+                                               .scale = 1.0f,
+                                               .width = extent,
+                                               .height = extent},
+                           &canvas) != FLUX_OK)
         return nullptr;
 
     flux_arena arena;

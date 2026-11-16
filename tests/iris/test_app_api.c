@@ -13,12 +13,11 @@
 #include "optics_test.h"
 #include <iris/iris.h>
 
-static bool host_start(lens *ui, flux_device *device, void *user) {
-    return ui != nullptr && device != nullptr && user != nullptr;
+static bool host_start(flux_device *device, void *user) {
+    return device != nullptr && user != nullptr;
 }
 
-static void host_stop(lens *ui, flux_device *device, void *user) {
-    (void)ui;
+static void host_stop(flux_device *device, void *user) {
     (void)device;
     (void)user;
 }
@@ -34,7 +33,7 @@ int main(void) {
      * Do not run this config headlessly; assigning it catches declaration
      * and function-signature regressions at compile time. */
     int user = 1;
-    iris_app_config lifecycle_config = {
+    iris_app_opts lifecycle_config = {
         .start = host_start,
         .stop = host_stop,
         .record = host_record,

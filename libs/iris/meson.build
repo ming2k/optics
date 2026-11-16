@@ -1,7 +1,8 @@
-# libiris: the cross-platform L3 toolkit surface.
+# libiris: the platform shell — native window, event pump, frame cadence.
 #
-# iris_app_run drives a windowed event loop and dispatches per-frame build
-# callbacks into lens. Theme query reads the OS colour-scheme preference at
+# iris depends on flux and nothing above it. iris_app_run drives a windowed
+# event loop and presents host canvas content plus an optional UI layer that
+# plugs in through <iris/host.h>; `aperture` binds lens to that seam. Theme query reads the OS colour-scheme preference at
 # startup and follows it live where supported. File dialogs use
 # xdg-desktop-portal on Linux. The a11y seam is a real AT-SPI bridge on
 # Linux when libsystemd is available, a no-op stub otherwise.
@@ -14,9 +15,6 @@
 # non-zero, for platform-less CI / bindgen builds. The public headers are
 # identical on every platform.
 #
-# lens_dep (which transitively pulls flux_dep) is declared by libs/lens/
-# meson.build when it is subdir()'d earlier from the root meson.build
-# (ADR-0023 monorepo layout).
 
 iris_inc = include_directories('include')
 
@@ -83,7 +81,7 @@ if host_system == 'linux'
   vulkan_dep    = dependency('vulkan',         required : false)
 
   if wl_client_dep.found() and xkb_dep.found() and vulkan_dep.found()
-    iris_sources += files('src/app_wayland.c')
+    iris_sources += files('src/app_wayland.c', 'src/wayland_data.c')
     iris_extra_deps += [wl_client_dep, xkb_dep, vulkan_dep]
     iris_c_args += '-DIRIS_BACKEND_WAYLAND=1'
 
@@ -201,7 +199,7 @@ iris_lib = library('iris',
   include_directories   : iris_inc,
   c_args                : iris_c_args,
   objc_args             : iris_objc_args,
-  dependencies          : [lens_dep, m_dep] + iris_extra_deps,
+  dependencies          : [flux_dep, m_dep] + iris_extra_deps,
   gnu_symbol_visibility : 'hidden',
   soversion             : optics_soname,
   version               : meson.project_version(),
@@ -214,6 +212,7 @@ install_headers(
   'include/iris/cursor.h',
   'include/iris/dnd.h',
   'include/iris/event.h',
+  'include/iris/host.h',
   'include/iris/theme.h',
   'include/iris/file_dialog.h',
   'include/iris/a11y.h',
@@ -225,14 +224,14 @@ install_headers(
 iris_dep = declare_dependency(
   link_with           : iris_lib,
   include_directories : iris_inc,
-  dependencies        : [lens_dep],
+  dependencies        : [flux_dep],
 )
 
 pkg.generate(
   libraries   : iris_lib,
   name        : 'iris',
   filebase    : 'iris',
-  description : 'L3 application toolkit for the flux/lens stack',
+  description : 'Platform shell: native window, event pump and frame cadence over flux',
   version     : meson.project_version(),
-  requires    : ['lens >= ' + meson.project_version()],
+  requires    : ['flux >= ' + meson.project_version()],
 )

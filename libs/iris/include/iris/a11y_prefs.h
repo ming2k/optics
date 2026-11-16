@@ -8,11 +8,11 @@
  * delivery plumbing (portal signal / WM_SETTINGCHANGE / DistributedCenter
  * notification) is shared, so they are not split per-field.
  *
- *   reduced_motion  "minimize animation" — drives lens_set_reduced_motion
+ *   reduced_motion  "minimize animation" — drives the UI layer's reduced-motion switch
  *   high_contrast   forced high-contrast theme — hosts re-theme; the iris
  *                   backends apply a raised-contrast token set to lens
  *   text_scale      OS "make text bigger" factor — drives
- *                   lens_set_text_scale (a pure font multiplier, see
+ *                   the UI layer's text scale (a pure font multiplier, see
  *                   lens.h; 1.0 = default)
  *
  * Startup query is always available. Live watching is callback-based with
