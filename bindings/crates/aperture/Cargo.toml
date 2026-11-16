@@ -10,10 +10,10 @@ rust-version.workspace = true
 links = "aperture_rs"
 
 [dependencies]
-aperture-sys = { path = "../aperture-sys", version = "0.0.79" }
-iris = { path = "../iris", version = "0.0.79" }
-lens = { path = "../lens", version = "0.0.79" }
-flux = { path = "../flux", version = "0.0.79" }
+aperture-sys = { path = "../aperture-sys", version = "0.0.80" }
+iris = { path = "../iris", version = "0.0.80" }
+lens = { path = "../lens", version = "0.0.80" }
+flux = { path = "../flux", version = "0.0.80" }
 
 [[example]]
 name = "hello"

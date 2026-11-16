@@ -64,7 +64,7 @@ provide idiomatic C23-safe abstractions:
 
 ## Version Lockstep
 
-All crates share the workspace version (`0.0.79`) declared in the root
+All crates share the workspace version (`0.0.80`) declared in the root
 `Cargo.toml`. `tools/check_versions.py` compares that version with
 `meson.build`, the umbrella header, and every library header; version drift is a
 lint failure, not a convention.

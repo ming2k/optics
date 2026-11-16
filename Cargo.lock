@@ -19,7 +19,7 @@ dependencies = [
 
 [[package]]
 name = "aperture"
-version = "0.0.79"
+version = "0.0.80"
 dependencies = [
  "aperture-sys",
  "flux",
@@ -29,7 +29,7 @@ dependencies = [
 
 [[package]]
 name = "aperture-sys"
-version = "0.0.79"
+version = "0.0.80"
 dependencies = [
  "bindgen",
  "flux-sys",
@@ -151,14 +151,14 @@ dependencies = [
 
 [[package]]
 name = "flux"
-version = "0.0.79"
+version = "0.0.80"
 dependencies = [
  "flux-sys",
 ]
 
 [[package]]
 name = "flux-sys"
-version = "0.0.79"
+version = "0.0.80"
 dependencies = [
  "bindgen",
  "pkg-config",
@@ -208,7 +208,7 @@ dependencies = [
 
 [[package]]
 name = "glyph"
-version = "0.0.79"
+version = "0.0.80"
 dependencies = [
  "flux",
  "glyph-sys",
@@ -216,7 +216,7 @@ dependencies = [
 
 [[package]]
 name = "glyph-sys"
-version = "0.0.79"
+version = "0.0.80"
 dependencies = [
  "bindgen",
  "flux-sys",
@@ -246,14 +246,14 @@ checksum = "a257582fdcde896fd96463bf2d40eefea0580021c0712a0e2b028b60b47a837a"
 
 [[package]]
 name = "iris"
-version = "0.0.79"
+version = "0.0.80"
 dependencies = [
  "iris-sys",
 ]
 
 [[package]]
 name = "iris-sys"
-version = "0.0.79"
+version = "0.0.80"
 dependencies = [
  "bindgen",
  "flux-sys",
@@ -283,7 +283,7 @@ checksum = "20870f649af7073d53e38067b2a84312175d56ea15217e1b15bc83506ec50afb"
 
 [[package]]
 name = "lens"
-version = "0.0.79"
+version = "0.0.80"
 dependencies = [
  "flux",
  "lens-sys",
@@ -291,7 +291,7 @@ dependencies = [
 
 [[package]]
 name = "lens-sys"
-version = "0.0.79"
+version = "0.0.80"
 dependencies = [
  "bindgen",
  "flux-sys",
@@ -383,7 +383,7 @@ dependencies = [
 
 [[package]]
 name = "optics"
-version = "0.0.79"
+version = "0.0.80"
 dependencies = [
  "aperture",
  "flux",
@@ -427,7 +427,7 @@ dependencies = [
 
 [[package]]
 name = "prism"
-version = "0.0.79"
+version = "0.0.80"
 dependencies = [
  "flux",
  "flux-sys",
@@ -436,7 +436,7 @@ dependencies = [
 
 [[package]]
 name = "prism-sys"
-version = "0.0.79"
+version = "0.0.80"
 dependencies = [
  "bindgen",
  "flux-sys",
@@ -498,7 +498,7 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
 name = "reticle"
-version = "0.0.79"
+version = "0.0.80"
 dependencies = [
  "flux",
  "reticle-sys",
@@ -506,7 +506,7 @@ dependencies = [
 
 [[package]]
 name = "reticle-sys"
-version = "0.0.79"
+version = "0.0.80"
 dependencies = [
  "bindgen",
  "flux-sys",
@@ -597,7 +597,7 @@ dependencies = [
 
 [[package]]
 name = "transit"
-version = "0.0.79"
+version = "0.0.80"
 
 [[package]]
 name = "unicode-ident"
@@ -607,7 +607,7 @@ checksum = "a2c754d6c33795a1c324727428e5a7dedb5b06195f9890bdbcba760d3e246563"
 
 [[package]]
 name = "vista"
-version = "0.0.79"
+version = "0.0.80"
 dependencies = [
  "flux",
  "gltf",
@@ -617,7 +617,7 @@ dependencies = [
 
 [[package]]
 name = "vista-sys"
-version = "0.0.79"
+version = "0.0.80"
 dependencies = [
  "bindgen",
  "flux-sys",

@@ -9,6 +9,6 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-prism-sys = { path = "../prism-sys", version = "0.0.79" }
-flux = { path = "../flux", version = "0.0.79" }
-flux-sys = { path = "../flux-sys", version = "0.0.79" }
+prism-sys = { path = "../prism-sys", version = "0.0.80" }
+flux = { path = "../flux", version = "0.0.80" }
+flux-sys = { path = "../flux-sys", version = "0.0.80" }
