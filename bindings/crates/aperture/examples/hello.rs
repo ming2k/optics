@@ -3,7 +3,7 @@
 //! Requires a Wayland compositor, a Vulkan-capable GPU, and a built or
 //! installed optics tree (libflux, liblens, libiris, libaperture). State lives in the closure's captured variables across frames.
 
-use aperture::{iris, Application, Config};
+use aperture::{Application, Config, iris};
 
 fn main() -> Result<(), aperture::RunError> {
     let mut wrap = true;

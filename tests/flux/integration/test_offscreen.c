@@ -499,7 +499,9 @@ int main(void) {
         OT_EXPECT(near8(px_at(px, 1, 1)[0], CLEAR_R));
         /* export still refused: the surface is deliberately not exportable */
         int fd = -1;
-        OT_EXPECT(flux_surface_export_dmabuf(rs, &fd) != FLUX_OK);
+        flux_surface_dmabuf_lease *lease = nullptr;
+        OT_EXPECT(flux_surface_export_dmabuf(rs, &fd, &lease) != FLUX_OK);
+        OT_EXPECT(lease == nullptr);
 
         flux_canvas_release(rc);
         flux_surface_release(rs);

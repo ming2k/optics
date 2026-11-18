@@ -10,7 +10,7 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-flux-sys = { path = "../flux-sys", version = "0.0.80" }
+flux-sys = { path = "../flux-sys", version = "0.0.81" }
 
 [build-dependencies]
 bindgen = "0.72"

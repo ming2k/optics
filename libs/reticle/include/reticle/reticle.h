@@ -51,7 +51,7 @@ extern "C" {
 
 #define RETICLE_VERSION_MAJOR 0
 #define RETICLE_VERSION_MINOR 0
-#define RETICLE_VERSION_PATCH 80
+#define RETICLE_VERSION_PATCH 81
 
 /* Packed integer version, monotonic — identical layout to FLUX_VERSION_NUMBER. */
 #define RETICLE_VERSION_NUMBER                                                                     \

@@ -247,7 +247,7 @@ differently:
 
 Pre-1.0, fields can be appended directly to a base desc when it makes
 sense. The pre-1.0 SONAME is the **full version string**
-(`libflux.so.0.0.80`), not `major.minor`: releases in this line have
+(`libflux.so.0.0.81`), not `major.minor`: releases in this line have
 appended descriptor fields and changed pass behavior on patch bumps, so
 `0.0.79` and `0.0.80` do not share a binary contract. A binary built against
 one release fails to load the other instead of silently reading a smaller

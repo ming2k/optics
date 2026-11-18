@@ -67,7 +67,7 @@ typedef struct flux_rect {
 
 #define FLUX_VERSION_MAJOR 0
 #define FLUX_VERSION_MINOR 0
-#define FLUX_VERSION_PATCH 80
+#define FLUX_VERSION_PATCH 81
 
 /* Packed integer version, monotonic: bits 16..23 major, 8..15 minor,
  * 0..7 patch. 0.0.1 == 0x00000001; 1.2.3 == 0x00010203. */
@@ -95,6 +95,9 @@ typedef enum flux_result : uint32_t {
     FLUX_ERROR_DEVICE_LOST = 7,
     FLUX_ERROR_SURFACE_LOST = 8,
     FLUX_ERROR_TIMEOUT = 9,
+    /* The surface ring slot cannot be reused yet: an exported image lease is
+     * still held by an external consumer. */
+    FLUX_ERROR_BUSY = 10,
 } flux_result;
 
 FLUX_NODISCARD FLUX_API const char *flux_result_string(flux_result r);
@@ -1296,20 +1299,49 @@ FLUX_API void flux_readback_release(flux_readback *readback);
  *
  * Returns FLUX_ERROR_UNSUPPORTED on a windowed or non-exportable surface,
  * FLUX_ERROR_INVALID_STATE before the first submitted frame. */
+/* An exported offscreen image lease. The surface's frame ring will not reuse
+ * the leased image slot until `flux_surface_dmabuf_lease_release` is called.
+ * A lease retains its surface; callers may release it from their page-flip
+ * completion path. Release is idempotent only in the sense that the pointer
+ * becomes invalid: call it exactly once. */
+typedef struct flux_surface_dmabuf_lease flux_surface_dmabuf_lease;
+
 FLUX_API bool flux_surface_exportable(const flux_surface *s);
 FLUX_API uint64_t flux_surface_dmabuf_modifier(const flux_surface *s);
 FLUX_API uint32_t flux_surface_dmabuf_stride(const flux_surface *s);
-FLUX_NODISCARD FLUX_API flux_result flux_surface_export_dmabuf(flux_surface *s, int *out_fd);
+
+/* Export the most recently submitted frame. The returned fd is owned by the
+ * caller and must be closed. The returned lease owns the image lifetime:
+ * until it is released, flux_surface_begin_frame for that slot returns
+ * FLUX_ERROR_BUSY. One lease may be held per submitted image. */
+FLUX_NODISCARD FLUX_API flux_result
+flux_surface_export_dmabuf(flux_surface *s, int *out_fd, flux_surface_dmabuf_lease **out_lease);
 
 /* Explicit-sync export for a submitted exportable offscreen frame. Returns a
  * dma-buf fd plus a Linux sync_file fd signalled by the same Vulkan submission
  * that released image ownership to VK_QUEUE_FAMILY_FOREIGN_EXT. Unlike
  * flux_surface_export_dmabuf, this does not wait for the GPU on the CPU.
- * Both descriptors belong to the caller on success. Requires
- * VK_KHR_external_semaphore_fd and may be called once per submitted slot. */
-FLUX_NODISCARD FLUX_API flux_result flux_surface_export_dmabuf_explicit(flux_surface *s,
-                                                                        int *out_fd,
-                                                                        int *out_sync_fd);
+ * Both descriptors and the image lease belong to the caller on success.
+ * Requires VK_KHR_external_semaphore_fd and may be called once per submitted
+ * slot. */
+FLUX_NODISCARD FLUX_API flux_result flux_surface_export_dmabuf_explicit(
+    flux_surface *s, int *out_fd, int *out_sync_fd, flux_surface_dmabuf_lease **out_lease);
+
+/* Release an exported image lease. After this returns the slot may be
+ * reacquired by flux_surface_begin_frame on the next call. */
+FLUX_API void flux_surface_dmabuf_lease_release(flux_surface_dmabuf_lease *lease);
+
+/* Persistent/pooled export for a consumer that publishes one fd per ring slot
+ * and synchronizes each use with a per-frame acquire fence (the compositor's
+ * ScreenCast slot table). No lease is returned: the host explicitly accepts
+ * that the ring may reuse the image on a later frame. The consumer must finish
+ * reading the slot before the next submission that reuses it; the per-frame
+ * explicit sync fence is the only ordering guarantee. Prefer the leased
+ * exports for KMS/one-shot external consumers. */
+FLUX_NODISCARD FLUX_API flux_result flux_surface_export_dmabuf_pooled(flux_surface *s, int *out_fd);
+FLUX_NODISCARD FLUX_API flux_result flux_surface_export_dmabuf_pooled_explicit(flux_surface *s,
+                                                                               int *out_fd,
+                                                                               int *out_sync_fd);
 
 /* Offscreen surfaces: the frame slot index of the most recently submitted
  * frame (0..frames_in_flight-1), or UINT32_MAX before the first submit.

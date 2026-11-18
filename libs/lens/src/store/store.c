@@ -211,6 +211,11 @@ lens_node *lensi_store_touch(lens *ui, lens_id id) {
         /* Stamp the build-time opacity context (lens_set_opacity): every
          * command pushed onto this node this frame bakes it in. */
         n->opacity = ui->opacity;
+        /* Likewise the scoped frame clip. A placed node carries this stamp
+         * into its band, which is what lets a chrome overlay clip absolute
+         * children that deliberately escape the parent's flow viewport. */
+        n->has_frame_clip = ui->clip_depth > 0;
+        n->frame_clip = ui->clip;
     }
     return n;
 }

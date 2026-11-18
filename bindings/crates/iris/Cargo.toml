@@ -10,4 +10,4 @@ rust-version.workspace = true
 links = "iris_rs"
 
 [dependencies]
-iris-sys = { path = "../iris-sys", version = "0.0.80" }
+iris-sys = { path = "../iris-sys", version = "0.0.81" }

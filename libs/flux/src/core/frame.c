@@ -765,6 +765,10 @@ flux_result flux_surface_begin_frame(flux_surface *s, const flux_frame_begin_des
     }
 
     uint32_t slot = s->current_frame;
+    if (s->offscreen && s->image_export_leases && s->image_export_leases[slot] > 0) {
+        FLUX_FAIL(FLUX_ERROR_BUSY, "image slot still leased by an external dma-buf consumer");
+        return FLUX_ERROR_BUSY;
+    }
     flux_per_frame *pf = &s->frames[slot];
     VkDevice vkd = s->device->device;
 
@@ -938,6 +942,7 @@ acquired:
                                     s->image_foreign_owned[image_index],
                                     s->device->graphics_family);
         s->image_layouts[image_index] = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        s->image_foreign_owned[image_index] = false;
     }
 
     /* Surface-owned frame slot. Stable pointer for the caller's

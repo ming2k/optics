@@ -15,4 +15,6 @@ fn main() {
             }
         }
     }
+    println!("cargo:rustc-link-lib=png16");
+    println!("cargo:rustc-link-lib=turbojpeg");
 }

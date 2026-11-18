@@ -73,8 +73,9 @@ error model), see [API Reference](api.md); for blocking behavior per call, see
 | `flux_surface_exportable` | Offscreen surfaces only (and only when the device had the dma-buf extensions enabled at creation): export the most recently submitted frame's image memory as a Linux dma-buf file descriptor. |
 | `flux_surface_dmabuf_modifier` |  |
 | `flux_surface_dmabuf_stride` |  |
-| `flux_surface_export_dmabuf` |  |
-| `flux_surface_export_dmabuf_explicit` | Explicit-sync export for a submitted exportable offscreen frame. |
+| `flux_surface_export_dmabuf` | Export an offscreen frame and its image lease. |
+| `flux_surface_export_dmabuf_explicit` | Explicit-sync export for a submitted exportable offscreen frame, returning its image lease. |
+| `flux_surface_dmabuf_lease_release` | Release an exported image lease and allow ring reuse. |
 | `flux_surface_last_slot` | Offscreen surfaces: the frame slot index of the most recently submitted frame (0..frames_in_flight-1), or UINT32_MAX before the first submit. |
 | `flux_surface_begin_frame` |  |
 | `flux_frame_get_state` |  |

@@ -46,7 +46,7 @@ extern "C" {
 
 #define LENS_VERSION_MAJOR 0
 #define LENS_VERSION_MINOR 0
-#define LENS_VERSION_PATCH 80
+#define LENS_VERSION_PATCH 81
 
 /* Stringify helpers used by lens_version_string(); LENS_STRINGIFY_ adds the
  * indirection level required for macro-expansion of literal tokens. */
@@ -895,6 +895,28 @@ LENS_API lens_theme lens_get_theme(const lens *ui);
 LENS_API void lens_set_opacity(lens *ui, float opacity);
 LENS_API float lens_opacity(const lens *ui);
 LENS_API float lens_dt(const lens *ui); /* frame delta, seconds */
+
+/* Scoped frame clip.
+ *
+ * Every node built between `lens_clip_begin` and `lens_clip_end` inherits
+ * `opts.rect` as a build-time stamp. The stamp clips the node's own draw
+ * commands, its children, its snapshot/hit region, and — unlike a parent
+ * container's flow clip — a placed (`LENS_PLACE_ABS`) node that escapes
+ * its ancestors. This is the clip for a chrome overlay whose children are
+ * deliberately placed outside the parent's box (a carousel strip, a
+ * floating panel with absolute labels).
+ *
+ * Nested calls intersect with the enclosing clip. The stack resets at
+ * every `lens_begin`; an unbalanced `lens_clip_end` is a no-op and a
+ * deeper-than-supported push sets `lens_overflowed` rather than dropping
+ * the matching pop. Coordinates and the input frame are output-logical
+ * pixels. */
+typedef struct lens_clip_opts {
+    flux_rect rect;
+} lens_clip_opts;
+
+LENS_API void lens_clip_begin(lens *ui, const lens_clip_opts *opts);
+LENS_API void lens_clip_end(lens *ui);
 
 /* Ghost replay — the leave-animation render surface (ADR-0078).
  *

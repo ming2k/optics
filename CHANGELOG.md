@@ -13,6 +13,19 @@ pre-1.0 release may break source or binary compatibility, so the SONAME
 carries the full version and a mismatched binary fails to load instead of
 silently reading a different descriptor layout.
 
+## [0.0.81] - 2026-11-18
+
+### Breaking — Flux dma-buf image leases (ADR-0168)
+
+- `flux_surface_export_dmabuf` and `flux_surface_export_dmabuf_explicit` now
+  return a `flux_surface_dmabuf_lease`. The ring slot returns
+  `FLUX_ERROR_BUSY` from `flux_surface_begin_frame` until
+  `flux_surface_dmabuf_lease_release` is called; resize is refused while any
+  lease is live. The Rust binding returns `ExportedDmabuf { dmabuf, lease }`.
+- `flux_result` gains `FLUX_ERROR_BUSY`.
+- `flux_surface_export_dmabuf_pooled` / `_pooled_explicit` provide the explicit
+  persistent ScreenCast slot-table contract without a lease.
+
 ## [0.0.80] - 2026-11-16
 
 ### Breaking — library graph (ADR-0166)

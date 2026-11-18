@@ -18,8 +18,8 @@ int main(void) {
     /* 1. Verify Umbrella Facade Version Macros & Lockstep Invariants */
     static_assert(OPTICS_VERSION_MAJOR == 0, "Optics major version mismatch");
     static_assert(OPTICS_VERSION_MINOR == 0, "Optics minor version mismatch");
-    static_assert(OPTICS_VERSION_PATCH == 80, "Optics patch version mismatch");
-    static_assert(OPTICS_VERSION_NUMBER == 80, "Optics version number mismatch");
+    static_assert(OPTICS_VERSION_PATCH == 81, "Optics patch version mismatch");
+    static_assert(OPTICS_VERSION_NUMBER == 81, "Optics version number mismatch");
 
     static_assert(FLUX_VERSION_MAJOR == OPTICS_VERSION_MAJOR, "Flux/Optics major mismatch");
     static_assert(FLUX_VERSION_MINOR == OPTICS_VERSION_MINOR, "Flux/Optics minor mismatch");
@@ -75,7 +75,7 @@ int main(void) {
     int iris_min = 0;
     int iris_pat = 0;
     iris_version(&iris_maj, &iris_min, &iris_pat);
-    OT_EXPECT(iris_maj == 0 && iris_min == 0 && iris_pat == 80);
+    OT_EXPECT(iris_maj == 0 && iris_min == 0 && iris_pat == 81);
 
     /* Diagnostic log must strictly go to stderr (Library Stdout Purity) */
     fprintf(stderr, "test_optics_facade: all umbrella facade checks passed.\n");

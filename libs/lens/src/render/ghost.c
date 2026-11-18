@@ -29,6 +29,8 @@ static lens_ghost_node *snapshot_node(lens *ui, lens_node *n) {
     g->scroll_gutter = n->scroll_gutter;
     g->place_bounds = n->place_bounds;
     g->has_place_bounds = n->has_place_bounds;
+    g->has_frame_clip = n->has_frame_clip;
+    g->frame_clip = n->frame_clip;
 
     if (n->cmd_count) {
         g->cmds = lensi_alloc(ui, (size_t)n->cmd_count * sizeof *g->cmds);
@@ -260,6 +262,10 @@ static flux_result compile_ghost_node(lens *ui, flux_encoder *encoder, const len
                                       flux_rect clip, float ghost_alpha) {
     flux_rect box = g->final_rect;
     if (box.w <= 0.0f || box.h <= 0.0f)
+        return FLUX_OK;
+    if (g->has_frame_clip)
+        clip = rect_intersect(clip, g->frame_clip);
+    if (clip.w <= 0.0f || clip.h <= 0.0f)
         return FLUX_OK;
     float effective_alpha = ghost_alpha * g->opacity;
     flux_result result =

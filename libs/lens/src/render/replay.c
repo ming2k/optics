@@ -141,7 +141,7 @@ bool lensi_mark_subtree_changed(lens *ui, lens_node *n) {
      * above notices. Compared against `prev_clip`, which is updated on snapshot
      * *activation* rather than here: the pixels that have to be erased are the
      * ones the last presented frame showed, not the ones this frame will. */
-    if (n->is_scroll && n->child_count > 0) {
+    if ((n->is_scroll && n->child_count > 0) || n->has_frame_clip) {
         const flux_rect clip_now = lensi_node_child_clip(n);
         if (!n->has_prev_clip || clip_now.x != n->prev_clip.x || clip_now.y != n->prev_clip.y ||
             clip_now.w != n->prev_clip.w || clip_now.h != n->prev_clip.h) {
@@ -563,6 +563,11 @@ static flux_result lensi_compile_node_body(lens *ui, flux_encoder *enc, lens_nod
 static flux_result lensi_compile_node(lens *ui, flux_encoder *enc, lens_node *n, flux_rect clip) {
     if (!n || (n->final_rect.w <= 0.0f && n->final_rect.h <= 0.0f))
         return FLUX_OK;
+    /* A scoped frame clip follows the node into its placement band, so it is
+     * applied after the caller's place/ancestor clip rather than being lost
+     * when an ABS node escapes its parent's viewport. */
+    if (n->has_frame_clip)
+        clip = lensi_rect_intersect(clip, n->frame_clip);
     if (n->cached_dl && n->cached_revision == n->visual_revision && n->cached_scale == ui->scale &&
         rect_equal(n->cached_clip, clip))
         return flux_encoder_draw_display_list(enc, n->cached_dl);
@@ -804,6 +809,11 @@ static flux_result capture_node(lens *ui, lens_scene_snapshot *s, lens_node *n, 
             if (ui->bands[band][order] == n)
                 break;
     }
+    /* The scoped clip is a build-time stamp that survives ABS placement. The
+     * snapshot's `clip` is both the hit region and the child inheritance, so
+     * intersecting it here makes rendering and hit-testing agree. */
+    if (n->has_frame_clip)
+        clip = lensi_rect_intersect(clip, n->frame_clip);
     snapshot_node *entry = &s->nodes[s->node_count++];
     *entry = (snapshot_node){
         .id = n->id,

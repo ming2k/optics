@@ -200,3 +200,5 @@ silent fallback. Its primitives have landed.
 | 0164 | [Umbrella Feature Detection Uses Distribution Flags, Not Host Header Probing](0164-umbrella-feature-detection-flags.md) | Accepted |
 | 0165 | [Single Opts Descriptor Migration by Library](0165-single-opts-descriptor-migration-by-library.md) | Accepted |
 | 0166 | [One-Way Library Graph and Enforced Invariants](0166-one-way-library-graph-and-enforced-invariants.md) | Accepted |
+| 0167 | [A scoped frame clip follows placed overlays — the clip a chrome strip needs is not a parent viewport](0167-scoped-frame-clip-follows-placed-overlays.md) | Accepted |
+| 0168 | [Exported dma-buf images carry a lease](0168-exported-dmabuf-image-leases.md) | Accepted |

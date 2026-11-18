@@ -21,7 +21,16 @@
 #include <stdatomic.h>
 #include <stddef.h>
 
-#if defined(__GLIBC__)
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define OT_HAS_ASAN 1
+#endif
+#endif
+#if defined(__SANITIZE_ADDRESS__)
+#define OT_HAS_ASAN 1
+#endif
+
+#if defined(__GLIBC__) && !defined(OT_HAS_ASAN)
 
 extern void *__libc_malloc(size_t);
 extern void *__libc_calloc(size_t, size_t);

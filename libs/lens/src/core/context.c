@@ -363,6 +363,32 @@ float lens_opacity(const lens *ui) {
     return ui ? ui->opacity : 1.0f;
 }
 
+/* Scoped frame clip — see lens.h. The stack restores the enclosing clip; a
+ * push beyond the fixed depth is counted so its matching end stays balanced
+ * instead of popping an outer scope. */
+void lens_clip_begin(lens *ui, const lens_clip_opts *opts) {
+    if (!ui || !opts)
+        return;
+    if (ui->clip_depth >= LENSI_CLIP_STACK_MAX) {
+        ui->clip_overflow++;
+        lensi_set_overflow(ui);
+        return;
+    }
+    ui->clip_stack[ui->clip_depth++] = ui->clip;
+    ui->clip = lensi_rect_intersect(ui->clip, opts->rect);
+}
+
+void lens_clip_end(lens *ui) {
+    if (!ui)
+        return;
+    if (ui->clip_overflow > 0) {
+        ui->clip_overflow--;
+        return;
+    }
+    if (ui->clip_depth > 0)
+        ui->clip = ui->clip_stack[--ui->clip_depth];
+}
+
 void lens_set_scale(lens *ui, float scale) {
     if (ui && isfinite(scale) && scale > 0.0f) {
         ui->scale = scale;
@@ -1022,6 +1048,12 @@ void lens_begin(lens *ui, const lens_input *input) {
                          * forgotten lens_pop_style cannot leak across frames */
     ui->opacity = 1.0f; /* likewise: a forgotten lens_set_opacity restore
                          * cannot dim the next frame */
+    ui->clip_depth = 0; /* frame-scoped: a forgotten lens_clip_end cannot
+                         * leak a clip into the next frame */
+    ui->clip_overflow = 0;
+    ui->clip = (ui->input.display_size.x > 0.0f && ui->input.display_size.y > 0.0f)
+                   ? (flux_rect){0, 0, ui->input.display_size.x, ui->input.display_size.y}
+                   : (flux_rect){-1e6f, -1e6f, 2e6f, 2e6f};
     ui->click_hit_focusable = false;
     ui->scroll_hot_id = 0;
     ui->cursor_hint = LENS_CURSOR_DEFAULT;

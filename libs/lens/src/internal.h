@@ -30,6 +30,7 @@
 #define LENSI_PASTE_MAX (1024u * 1024u) /* clipboard staging (ADR-0036) */
 #define LENSI_TRANSIENT_MAX 8u          /* max simultaneously-open transients (ADR-0060) */
 #define LENSI_STYLE_STACK_MAX 16u       /* style scope stack depth (ADR-0061) */
+#define LENSI_CLIP_STACK_MAX 8u         /* nested lens_clip_begin depth */
 #define LENSI_MODAL_STACK_MAX 4u        /* nested modal focus traps (ADR-0039) */
 /* Caret blink period: one full on/off cycle, so a 530 ms half-cycle — the
  * cadence X11 blink, Win32, AppKit and GTK converged on (ADR-0151). A host
@@ -195,6 +196,11 @@ struct lens_node {
     /* Build-time stamp of the context opacity (lens_set_opacity): emission
      * bakes it into every command pushed onto this node this frame. */
     float opacity;
+    /* Build-time stamp of the context frame clip (lens_clip_begin). Unlike a
+     * parent's flow viewport, this stamp follows the node into a placed band,
+     * so absolute overlays cannot escape a scoped clip. */
+    bool has_frame_clip;
+    flux_rect frame_clip;
 
     /* layout outputs */
     flux_point measured;  /* measure pass */
@@ -400,6 +406,14 @@ struct lens {
     float opacity;    /* lens_set_opacity context switch; frame-scoped
                        * (reset to 1.0 by lens_begin), stamped per node at
                        * build time. */
+    /* lens_clip_begin/end scope, frame-scoped. `clip` is the effective
+     * intersection; the stack restores the enclosing scope. `clip_overflow`
+     * counts pushes beyond LENSI_CLIP_STACK_MAX so their matching ends stay
+     * balanced instead of popping an unrelated outer scope. */
+    flux_rect clip;
+    flux_rect clip_stack[LENSI_CLIP_STACK_MAX];
+    uint32_t clip_depth;
+    uint32_t clip_overflow;
 
     lens_store store;
     lensi_icon_mask_pool icon_masks; /* baked coverage masks (ADR-0112); pool
@@ -653,6 +667,8 @@ typedef struct lens_ghost_node {
     float opacity;
     flux_rect place_bounds;
     bool has_place_bounds;
+    bool has_frame_clip;
+    flux_rect frame_clip;
     lens_ghost_cmd *cmds;
     uint32_t cmd_count;
     struct lens_ghost_node *first_child;
@@ -1037,16 +1053,26 @@ static inline flux_rect lensi_text_bounds(flux_rect rel_rect, float advance, boo
  * scrolls narrows to its padded viewport minus the scrollbar gutter; everything
  * else clips nothing of its own and reports its box, which is the "no narrower
  * clip" answer in a form that can be compared between frames. */
+static inline flux_rect lensi_rect_intersect(flux_rect a, flux_rect b) {
+    float x = a.x > b.x ? a.x : b.x;
+    float y = a.y > b.y ? a.y : b.y;
+    float right = (a.x + a.w) < (b.x + b.w) ? (a.x + a.w) : (b.x + b.w);
+    float bottom = (a.y + a.h) < (b.y + b.h) ? (a.y + a.h) : (b.y + b.h);
+    return (flux_rect){x, y, right > x ? right - x : 0.0f, bottom > y ? bottom - y : 0.0f};
+}
+
 static inline flux_rect lensi_node_child_clip(const lens_node *n) {
     if (!n)
         return (flux_rect){0, 0, 0, 0};
+    flux_rect clip = n->has_frame_clip ? n->frame_clip : n->final_rect;
     if (!n->is_scroll || !n->first_child)
-        return n->final_rect;
+        return clip;
     float viewport_w = n->final_rect.w - 2.0f * n->pad - n->scroll_gutter;
     if (viewport_w < 0.0f)
         viewport_w = 0.0f;
-    return (flux_rect){n->final_rect.x + n->pad, n->final_rect.y + n->pad, viewport_w,
-                       n->final_rect.h - 2.0f * n->pad};
+    flux_rect viewport = {n->final_rect.x + n->pad, n->final_rect.y + n->pad, viewport_w,
+                          n->final_rect.h - 2.0f * n->pad};
+    return lensi_rect_intersect(clip, viewport);
 }
 
 /* The pixels ONE command paints, in absolute coordinates, resolved against the
@@ -1155,6 +1181,8 @@ static inline flux_rect lensi_node_paint_bounds(const lens_node *n) {
             d = (flux_rect){x0, y0, x1 - x0, y1 - y0};
         }
     }
+    if (n->has_frame_clip)
+        d = lensi_rect_intersect(d, n->frame_clip);
     return d;
 }
 

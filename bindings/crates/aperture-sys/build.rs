@@ -36,7 +36,10 @@ fn main() {
         .or_else(|| env::var_os("OPTICS_BUILD_DIR"))
         .map(PathBuf::from)
         .or_else(|| checkout_root.as_ref().map(|root| root.join("build")))
-        .filter(|dir| dir.join("meson-uninstalled/aperture-uninstalled.pc").exists());
+        .filter(|dir| {
+            dir.join("meson-uninstalled/aperture-uninstalled.pc")
+                .exists()
+        });
     let source_dir = env::var_os("APERTURE_SOURCE_DIR")
         .map(PathBuf::from)
         .or_else(|| checkout_root.clone());
@@ -136,7 +139,10 @@ fn main() {
         .map(|p| format!("-I{}", p.display()))
         .collect();
     if let Some(src) = &source_dir {
-        clang_args.insert(0, format!("-I{}", src.join("libs/aperture/include").display()));
+        clang_args.insert(
+            0,
+            format!("-I{}", src.join("libs/aperture/include").display()),
+        );
         clang_args.insert(1, format!("-I{}", src.join("libs/iris/include").display()));
         clang_args.insert(2, format!("-I{}", src.join("libs/lens/include").display()));
         clang_args.insert(3, format!("-I{}", src.join("libs/flux/include").display()));
@@ -183,7 +189,8 @@ fn main() {
     if let Some(src) = &source_dir {
         println!(
             "cargo:rerun-if-changed={}",
-            src.join("libs/aperture/include/aperture/aperture.h").display()
+            src.join("libs/aperture/include/aperture/aperture.h")
+                .display()
         );
     }
 }

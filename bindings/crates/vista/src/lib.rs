@@ -8,6 +8,8 @@ pub use flux::Error;
 use flux::{Camera, Device, Format, Material, SceneLight, ScenePass};
 pub use vista_sys as sys;
 
+mod glb_json;
+mod image_codec;
 mod materials;
 
 pub(crate) fn check(rc: sys::flux_result) -> Result<(), Error> {
@@ -25,8 +27,8 @@ pub struct MaterialTarget {
 #[derive(Debug)]
 pub enum LoadError {
     Scene(Error),
-    Gltf(gltf::Error),
-    Image(image::ImageError),
+    Gltf(String),
+    Image(String),
     Flux(flux::Error),
     Unsupported(String),
 }
@@ -47,23 +49,9 @@ impl std::error::Error for LoadError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Scene(error) => Some(error),
-            Self::Gltf(error) => Some(error),
-            Self::Image(error) => Some(error),
             Self::Flux(error) => Some(error),
-            Self::Unsupported(_) => None,
+            Self::Gltf(_) | Self::Image(_) | Self::Unsupported(_) => None,
         }
-    }
-}
-
-impl From<gltf::Error> for LoadError {
-    fn from(value: gltf::Error) -> Self {
-        Self::Gltf(value)
-    }
-}
-
-impl From<image::ImageError> for LoadError {
-    fn from(value: image::ImageError) -> Self {
-        Self::Image(value)
     }
 }
 
@@ -118,8 +106,8 @@ impl Scene {
         bytes: &[u8],
         target: MaterialTarget,
     ) -> Result<Scene, LoadError> {
-        let gltf = gltf::Gltf::from_slice(bytes)?;
-        let (materials, fallback) = materials::load(device, &gltf, target)?;
+        let doc = glb_json::parse_glb(bytes).map_err(LoadError::Gltf)?;
+        let (materials, fallback) = materials::load(device, &doc, target)?;
         let scene = Self::from_glb(device, bytes)?;
         let raw_materials: Vec<*mut sys::flux_material> =
             materials.iter().map(|material| material.as_raw()).collect();

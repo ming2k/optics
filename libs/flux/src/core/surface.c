@@ -35,6 +35,7 @@ typedef struct flux_surface_image_storage {
     VkImageView *views;
     VkImageLayout *layouts;
     bool *foreign_owned;
+    uint32_t *export_leases;
     /* Content epoch each presented image is synchronised with (ADR-0149). */
     uint64_t *epochs;
     bool *sync_exported;
@@ -45,6 +46,11 @@ typedef struct flux_surface_image_storage {
      * will overwrite. FLUX_BINDLESS_INVALID while unregistered. */
     uint32_t *bindless;
 } flux_surface_image_storage;
+
+struct flux_surface_dmabuf_lease {
+    flux_surface *surface; /* retained */
+    uint32_t slot;
+};
 
 struct flux_readback {
     flux_device *device;
@@ -64,6 +70,7 @@ static void image_storage_free(flux_device *d, flux_surface_image_storage *stora
     flux_internal_free(d, storage->views);
     flux_internal_free(d, storage->layouts);
     flux_internal_free(d, storage->foreign_owned);
+    flux_internal_free(d, storage->export_leases);
     flux_internal_free(d, storage->epochs);
     flux_internal_free(d, storage->sync_exported);
     flux_internal_free(d, storage->render_finished);
@@ -92,6 +99,7 @@ static bool image_storage_alloc(flux_device *d, uint32_t count,
     storage->layouts = image_storage_alloc_array(
         d, count, sizeof(*storage->layouts)); // NOLINT(bugprone-sizeof-expression)
     storage->foreign_owned = image_storage_alloc_array(d, count, sizeof(*storage->foreign_owned));
+    storage->export_leases = image_storage_alloc_array(d, count, sizeof(*storage->export_leases));
     storage->epochs = image_storage_alloc_array(d, count, sizeof(*storage->epochs));
     storage->sync_exported = image_storage_alloc_array(
         d, count, sizeof(*storage->sync_exported)); // NOLINT(bugprone-sizeof-expression)
@@ -101,8 +109,8 @@ static bool image_storage_alloc(flux_device *d, uint32_t count,
         d, count, sizeof(*storage->allocs)); // NOLINT(bugprone-sizeof-expression)
     storage->bindless = image_storage_alloc_array(d, count, sizeof(*storage->bindless));
     if (!storage->images || !storage->views || !storage->layouts || !storage->foreign_owned ||
-        !storage->epochs || !storage->sync_exported || !storage->render_finished ||
-        !storage->allocs || !storage->bindless) {
+        !storage->export_leases || !storage->epochs || !storage->sync_exported ||
+        !storage->render_finished || !storage->allocs || !storage->bindless) {
         image_storage_free(d, storage);
         return false;
     }
@@ -122,6 +130,7 @@ static void surface_take_image_storage(flux_surface *s, flux_surface_image_stora
     s->image_views = storage->views;
     s->image_layouts = storage->layouts;
     s->image_foreign_owned = storage->foreign_owned;
+    s->image_export_leases = storage->export_leases;
     s->image_epoch = storage->epochs;
     s->image_sync_exported = storage->sync_exported;
     s->render_finished = storage->render_finished;
@@ -137,6 +146,7 @@ static void surface_free_image_storage(flux_surface *s) {
         .views = s->image_views,
         .layouts = s->image_layouts,
         .foreign_owned = s->image_foreign_owned,
+        .export_leases = s->image_export_leases,
         .epochs = s->image_epoch,
         .sync_exported = s->image_sync_exported,
         .render_finished = s->render_finished,
@@ -150,6 +160,7 @@ static void surface_free_image_storage(flux_surface *s) {
     s->image_views = nullptr;
     s->image_layouts = nullptr;
     s->image_foreign_owned = nullptr;
+    s->image_export_leases = nullptr;
     s->image_epoch = nullptr;
     s->image_sync_exported = nullptr;
     s->render_finished = nullptr;
@@ -568,6 +579,7 @@ flux_result flux_surface_create_swapchain(flux_surface *s, uint32_t want_w, uint
     for (uint32_t i = 0; i < new_count; ++i) {
         s->image_layouts[i] = VK_IMAGE_LAYOUT_UNDEFINED;
         s->image_foreign_owned[i] = false;
+        s->image_export_leases[i] = 0;
         /* A recreated swapchain hands back images the presentation engine may
          * have recycled with arbitrary contents, so no image is synchronised
          * with the content image (ADR-0149). The content image itself survives
@@ -754,6 +766,7 @@ static void offscreen_destroy_images(flux_surface *s) {
         s->images[i] = VK_NULL_HANDLE;
         s->image_layouts[i] = VK_IMAGE_LAYOUT_UNDEFINED;
         s->image_foreign_owned[i] = false;
+        s->image_export_leases[i] = 0;
         s->image_sync_exported[i] = false;
         s->render_finished[i] = VK_NULL_HANDLE;
         s->image_allocs[i] = (flux_vk_alloc){};
@@ -1222,6 +1235,7 @@ static flux_result offscreen_create_images(flux_surface *s, uint32_t w, uint32_t
         }
         s->image_layouts[i] = VK_IMAGE_LAYOUT_UNDEFINED;
         s->image_foreign_owned[i] = false;
+        s->image_export_leases[i] = 0;
         s->image_sync_exported[i] = false;
     }
     /* A new image ring has no content to preserve: every acquired image is
@@ -1264,6 +1278,7 @@ void flux_surface_destroy_swapchain(flux_surface *s) {
         s->images[i] = VK_NULL_HANDLE;
         s->image_layouts[i] = VK_IMAGE_LAYOUT_UNDEFINED;
         s->image_foreign_owned[i] = false;
+        s->image_export_leases[i] = 0;
         s->render_finished[i] = VK_NULL_HANDLE;
         s->image_bindless[i] = FLUX_BINDLESS_INVALID;
     }
@@ -1691,6 +1706,15 @@ flux_result flux_surface_resize(flux_surface *s, uint32_t w, uint32_t h) {
     if (!s)
         return FLUX_ERROR_INVALID_ARGUMENT;
 
+    if (s->image_export_leases) {
+        for (uint32_t i = 0; i < s->image_count; ++i) {
+            if (s->image_export_leases[i] > 0) {
+                FLUX_FAIL(FLUX_ERROR_BUSY,
+                          "cannot resize a surface with an exported image lease outstanding");
+                return FLUX_ERROR_BUSY;
+            }
+        }
+    }
     surface_wait_quiescent(s);
     if (s->frame_slot.state == FLUX_FRAME_STATE_RECORDING) {
         flux_frame_leave_recording(&s->frame_slot);
@@ -2188,16 +2212,46 @@ static flux_result export_surface_sync_fd(flux_surface *s, uint32_t slot, int *o
     return FLUX_OK;
 }
 
+static flux_result export_lease_acquire(flux_surface *s, uint32_t slot,
+                                        flux_surface_dmabuf_lease **out_lease) {
+    *out_lease = nullptr;
+    flux_surface_dmabuf_lease *lease = flux_internal_alloc(s->device, sizeof(*lease));
+    if (!lease) {
+        FLUX_FAIL(FLUX_ERROR_OUT_OF_MEMORY, "dma-buf image lease allocation failed");
+        return FLUX_ERROR_OUT_OF_MEMORY;
+    }
+    lease->surface = flux_surface_retain(s);
+    lease->slot = slot;
+    s->image_export_leases[slot] = 1;
+    *out_lease = lease;
+    return FLUX_OK;
+}
+
 /* Export the most recently submitted frame's image memory as a dma-buf fd.
  * The caller owns the returned fd and must close() it. Waits for the frame's
  * GPU work to complete first (same fence as flux_surface_read_pixels), so the
  * written pixels are visible. No GPU->CPU pixel copy occurs — this is a zero-
  * copy handle export. Returns FLUX_ERROR_UNSUPPORTED if the surface was not
  * created exportable. */
-flux_result flux_surface_export_dmabuf(flux_surface *s, int *out_fd) {
-    if (!s || !out_fd)
+void flux_surface_dmabuf_lease_release(flux_surface_dmabuf_lease *lease) {
+    if (!lease)
+        return;
+    flux_surface *s = lease->surface;
+    flux_device *d = s->device;
+    if (s->image_export_leases && lease->slot < s->image_count &&
+        s->image_export_leases[lease->slot] > 0) {
+        s->image_export_leases[lease->slot]--;
+    }
+    flux_internal_free(d, lease);
+    flux_surface_release(s);
+}
+
+flux_result flux_surface_export_dmabuf(flux_surface *s, int *out_fd,
+                                       flux_surface_dmabuf_lease **out_lease) {
+    if (!s || !out_fd || !out_lease)
         return FLUX_ERROR_INVALID_ARGUMENT;
     *out_fd = -1;
+    *out_lease = nullptr;
     if (!s->offscreen || !s->offscreen_exportable) {
         FLUX_FAIL(FLUX_ERROR_UNSUPPORTED,
                   "flux_surface_export_dmabuf needs an exportable offscreen surface");
@@ -2210,6 +2264,10 @@ flux_result flux_surface_export_dmabuf(flux_surface *s, int *out_fd) {
 
     flux_device *d = s->device;
     uint32_t slot = s->last_submitted_slot;
+    if (s->image_export_leases[slot] > 0) {
+        FLUX_FAIL(FLUX_ERROR_BUSY, "frame image already has an export lease");
+        return FLUX_ERROR_BUSY;
+    }
     flux_per_frame *pf = &s->frames[slot];
 
     /* Wait for the frame's GPU work to finish before handing the memory to a
@@ -2288,14 +2346,22 @@ flux_result flux_surface_export_dmabuf(flux_surface *s, int *out_fd) {
         }
         close(sync_fd);
     }
+    flux_result lease_result = export_lease_acquire(s, slot, out_lease);
+    if (lease_result != FLUX_OK) {
+        close(*out_fd);
+        *out_fd = -1;
+        return lease_result;
+    }
     return FLUX_OK;
 }
 
-flux_result flux_surface_export_dmabuf_explicit(flux_surface *s, int *out_fd, int *out_sync_fd) {
-    if (!s || !out_fd || !out_sync_fd)
+flux_result flux_surface_export_dmabuf_explicit(flux_surface *s, int *out_fd, int *out_sync_fd,
+                                                flux_surface_dmabuf_lease **out_lease) {
+    if (!s || !out_fd || !out_sync_fd || !out_lease)
         return FLUX_ERROR_INVALID_ARGUMENT;
     *out_fd = -1;
     *out_sync_fd = -1;
+    *out_lease = nullptr;
     if (!s->offscreen || !s->offscreen_exportable) {
         FLUX_FAIL(FLUX_ERROR_UNSUPPORTED,
                   "explicit dma-buf export needs an exportable offscreen surface");
@@ -2306,6 +2372,10 @@ flux_result flux_surface_export_dmabuf_explicit(flux_surface *s, int *out_fd, in
         return FLUX_ERROR_INVALID_STATE;
     }
     uint32_t slot = s->last_submitted_slot;
+    if (s->image_export_leases[slot] > 0) {
+        FLUX_FAIL(FLUX_ERROR_BUSY, "frame image already has an export lease");
+        return FLUX_ERROR_BUSY;
+    }
     if (!s->image_foreign_owned[slot]) {
         FLUX_FAIL(FLUX_ERROR_INVALID_STATE, "submitted image was not released to FOREIGN");
         return FLUX_ERROR_INVALID_STATE;
@@ -2320,10 +2390,73 @@ flux_result flux_surface_export_dmabuf_explicit(flux_surface *s, int *out_fd, in
         *out_sync_fd = -1;
         return result;
     }
+    flux_result lease_result = export_lease_acquire(s, slot, out_lease);
+    if (lease_result != FLUX_OK) {
+        close(*out_fd);
+        close(*out_sync_fd);
+        *out_fd = -1;
+        *out_sync_fd = -1;
+        return lease_result;
+    }
     return FLUX_OK;
 }
+flux_result flux_surface_export_dmabuf_pooled(flux_surface *s, int *out_fd) {
+    if (!s || !out_fd)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    flux_surface_dmabuf_lease *lease = nullptr;
+    flux_result result = flux_surface_export_dmabuf(s, out_fd, &lease);
+    if (result == FLUX_OK)
+        flux_surface_dmabuf_lease_release(lease);
+    return result;
+}
+
+flux_result flux_surface_export_dmabuf_pooled_explicit(flux_surface *s, int *out_fd,
+                                                       int *out_sync_fd) {
+    if (!s || !out_fd || !out_sync_fd)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    flux_surface_dmabuf_lease *lease = nullptr;
+    flux_result result = flux_surface_export_dmabuf_explicit(s, out_fd, out_sync_fd, &lease);
+    if (result == FLUX_OK)
+        flux_surface_dmabuf_lease_release(lease);
+    return result;
+}
+
 #else  /* !FLUX_HAVE_DMABUF */
-flux_result flux_surface_export_dmabuf(flux_surface *s, int *out_fd) {
+void flux_surface_dmabuf_lease_release(flux_surface_dmabuf_lease *lease) {
+    if (!lease)
+        return;
+    flux_surface *s = lease->surface;
+    flux_device *d = s->device;
+    if (s->image_export_leases && lease->slot < s->image_count &&
+        s->image_export_leases[lease->slot] > 0) {
+        s->image_export_leases[lease->slot]--;
+    }
+    flux_internal_free(d, lease);
+    flux_surface_release(s);
+}
+
+flux_result flux_surface_export_dmabuf(flux_surface *s, int *out_fd,
+                                       flux_surface_dmabuf_lease **out_lease) {
+    if (!s || !out_fd || !out_lease)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    *out_fd = -1;
+    *out_lease = nullptr;
+    FLUX_FAIL(FLUX_ERROR_UNSUPPORTED, "dma-buf export is only available on Linux");
+    return FLUX_ERROR_UNSUPPORTED;
+}
+
+flux_result flux_surface_export_dmabuf_explicit(flux_surface *s, int *out_fd, int *out_sync_fd,
+                                                flux_surface_dmabuf_lease **out_lease) {
+    if (!s || !out_fd || !out_sync_fd || !out_lease)
+        return FLUX_ERROR_INVALID_ARGUMENT;
+    *out_fd = -1;
+    *out_sync_fd = -1;
+    *out_lease = nullptr;
+    FLUX_FAIL(FLUX_ERROR_UNSUPPORTED, "dma-buf export is only available on Linux");
+    return FLUX_ERROR_UNSUPPORTED;
+}
+
+flux_result flux_surface_export_dmabuf_pooled(flux_surface *s, int *out_fd) {
     if (!s || !out_fd)
         return FLUX_ERROR_INVALID_ARGUMENT;
     *out_fd = -1;
@@ -2331,7 +2464,8 @@ flux_result flux_surface_export_dmabuf(flux_surface *s, int *out_fd) {
     return FLUX_ERROR_UNSUPPORTED;
 }
 
-flux_result flux_surface_export_dmabuf_explicit(flux_surface *s, int *out_fd, int *out_sync_fd) {
+flux_result flux_surface_export_dmabuf_pooled_explicit(flux_surface *s, int *out_fd,
+                                                       int *out_sync_fd) {
     if (!s || !out_fd || !out_sync_fd)
         return FLUX_ERROR_INVALID_ARGUMENT;
     *out_fd = -1;

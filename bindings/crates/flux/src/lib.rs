@@ -1086,6 +1086,37 @@ pub struct SurfaceHdr {
     pub metadata: Option<Hdr10Metadata>,
 }
 
+/// Opaque external-image lease returned by a dma-buf export. The surface's
+/// frame slot cannot be reacquired until this lease is dropped.
+#[derive(Debug)]
+pub struct DmabufLease {
+    raw: *mut sys::flux_surface_dmabuf_lease,
+}
+
+impl DmabufLease {
+    /// Release the external image lease and allow the ring slot to be reused.
+    pub fn release(self) {
+        drop(self);
+    }
+}
+
+impl Drop for DmabufLease {
+    fn drop(&mut self) {
+        if !self.raw.is_null() {
+            unsafe { sys::flux_surface_dmabuf_lease_release(self.raw) };
+            self.raw = std::ptr::null_mut();
+        }
+    }
+}
+
+/// One exported offscreen frame plus the image lease that must live until the
+/// external consumer (DRM/KMS page flip, Wayland buffer release, …) is done.
+#[derive(Debug)]
+pub struct ExportedDmabuf {
+    pub dmabuf: SurfaceDmabuf,
+    pub lease: DmabufLease,
+}
+
 impl SurfaceHdr {
     fn raw(self) -> sys::flux_surface_hdr_desc {
         let mut desc = sys::flux_surface_hdr_desc {
@@ -1640,19 +1671,87 @@ impl Surface {
     /// foreign consumer, and returns an owned dma-buf descriptor plus the
     /// metadata required to create a DRM framebuffer.
     ///
-    /// The caller must not let Flux reuse `slot` until the external consumer
-    /// has released the buffer (for DRM/KMS, after a page flip has replaced
-    /// the framebuffer). Dropping the returned fd does not itself release
-    /// external image ownership.
-    pub fn export_dmabuf(&self) -> Result<SurfaceDmabuf, Error> {
+    /// The returned `DmabufLease` owns the image lifetime. Flux refuses to
+    /// reacquire the ring slot until the lease is dropped (DRM/KMS releases it
+    /// after the page flip retires; Wayland after `wl_buffer.release`).
+    pub fn export_dmabuf(&self) -> Result<ExportedDmabuf, Error> {
         let mut fd = -1;
-        Error::check(unsafe { sys::flux_surface_export_dmabuf(self.raw, &mut fd) })?;
+        let mut lease = std::ptr::null_mut();
+        Error::check(unsafe { sys::flux_surface_export_dmabuf(self.raw, &mut fd, &mut lease) })?;
+        if fd < 0 || lease.is_null() {
+            if fd >= 0 {
+                unsafe { drop(OwnedFd::from_raw_fd(fd)) };
+            }
+            return Err(Error(sys::flux_result::FLUX_ERROR_BACKEND_FAILURE));
+        }
+        let (width, height) = self.size();
+        Ok(ExportedDmabuf {
+            dmabuf: SurfaceDmabuf {
+                // SAFETY: Flux returned ownership of a fresh descriptor on success.
+                fd: unsafe { OwnedFd::from_raw_fd(fd) },
+                acquire_fence: None,
+                width,
+                height,
+                stride: unsafe { sys::flux_surface_dmabuf_stride(self.raw) },
+                modifier: unsafe { sys::flux_surface_dmabuf_modifier(self.raw) },
+                slot: unsafe { sys::flux_surface_last_slot(self.raw) },
+            },
+            lease: DmabufLease { raw: lease },
+        })
+    }
+
+    /// Export the most recently submitted frame with an explicit acquire
+    /// fence, without waiting for the GPU on the calling CPU thread.
+    ///
+    /// The consumer must wait `acquire_fence` before reading the dma-buf. DRM
+    /// atomic clients pass it to the plane's `IN_FENCE_FD` property. This may
+    /// be called once per submitted frame slot.
+    pub fn export_dmabuf_explicit(&self) -> Result<ExportedDmabuf, Error> {
+        let mut fd = -1;
+        let mut sync_fd = -1;
+        let mut lease = std::ptr::null_mut();
+        Error::check(unsafe {
+            sys::flux_surface_export_dmabuf_explicit(self.raw, &mut fd, &mut sync_fd, &mut lease)
+        })?;
+        if fd < 0 || sync_fd < 0 || lease.is_null() {
+            if fd >= 0 {
+                unsafe { drop(OwnedFd::from_raw_fd(fd)) };
+            }
+            if sync_fd >= 0 {
+                unsafe { drop(OwnedFd::from_raw_fd(sync_fd)) };
+            }
+            if !lease.is_null() {
+                unsafe { sys::flux_surface_dmabuf_lease_release(lease) };
+            }
+            return Err(Error(sys::flux_result::FLUX_ERROR_BACKEND_FAILURE));
+        }
+        let (width, height) = self.size();
+        Ok(ExportedDmabuf {
+            dmabuf: SurfaceDmabuf {
+                // SAFETY: Flux returned ownership of both fresh descriptors.
+                fd: unsafe { OwnedFd::from_raw_fd(fd) },
+                acquire_fence: Some(unsafe { OwnedFd::from_raw_fd(sync_fd) }),
+                width,
+                height,
+                stride: unsafe { sys::flux_surface_dmabuf_stride(self.raw) },
+                modifier: unsafe { sys::flux_surface_dmabuf_modifier(self.raw) },
+                slot: unsafe { sys::flux_surface_last_slot(self.raw) },
+            },
+            lease: DmabufLease { raw: lease },
+        })
+    }
+
+    /// Persistent/pooled dma-buf export for a slot table (ScreenCast). No
+    /// image lease is returned: the ring may reuse this image on a later
+    /// frame, so the consumer must rely on the per-frame explicit fence.
+    pub fn export_dmabuf_pooled(&self) -> Result<SurfaceDmabuf, Error> {
+        let mut fd = -1;
+        Error::check(unsafe { sys::flux_surface_export_dmabuf_pooled(self.raw, &mut fd) })?;
         if fd < 0 {
             return Err(Error(sys::flux_result::FLUX_ERROR_BACKEND_FAILURE));
         }
         let (width, height) = self.size();
         Ok(SurfaceDmabuf {
-            // SAFETY: Flux returned ownership of a fresh descriptor on success.
             fd: unsafe { OwnedFd::from_raw_fd(fd) },
             acquire_fence: None,
             width,
@@ -1663,17 +1762,13 @@ impl Surface {
         })
     }
 
-    /// Export the most recently submitted frame with an explicit acquire
-    /// fence, without waiting for the GPU on the calling CPU thread.
-    ///
-    /// The consumer must wait `acquire_fence` before reading the dma-buf. DRM
-    /// atomic clients pass it to the plane's `IN_FENCE_FD` property. This may
-    /// be called once per submitted frame slot.
-    pub fn export_dmabuf_explicit(&self) -> Result<SurfaceDmabuf, Error> {
+    /// Explicit-sync pooled export. The returned fence orders this frame's
+    /// write; the ring may still reuse the image later without a lease.
+    pub fn export_dmabuf_pooled_explicit(&self) -> Result<SurfaceDmabuf, Error> {
         let mut fd = -1;
         let mut sync_fd = -1;
         Error::check(unsafe {
-            sys::flux_surface_export_dmabuf_explicit(self.raw, &mut fd, &mut sync_fd)
+            sys::flux_surface_export_dmabuf_pooled_explicit(self.raw, &mut fd, &mut sync_fd)
         })?;
         if fd < 0 || sync_fd < 0 {
             if fd >= 0 {
@@ -1686,7 +1781,6 @@ impl Surface {
         }
         let (width, height) = self.size();
         Ok(SurfaceDmabuf {
-            // SAFETY: Flux returned ownership of both fresh descriptors.
             fd: unsafe { OwnedFd::from_raw_fd(fd) },
             acquire_fence: Some(unsafe { OwnedFd::from_raw_fd(sync_fd) }),
             width,

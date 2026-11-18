@@ -162,13 +162,15 @@ int main(void) {
                 OT_EXPECT(flux_frame_present(frame) == FLUX_OK);
                 int exported = -1;
                 int sync_fd = -1;
+                flux_surface_dmabuf_lease *lease = nullptr;
                 if (flux_dmabuf_sync_supported(dd)) {
-                    OT_EXPECT(flux_surface_export_dmabuf_explicit(surface, &exported, &sync_fd) ==
-                              FLUX_OK);
+                    OT_EXPECT(flux_surface_export_dmabuf_explicit(surface, &exported, &sync_fd,
+                                                                  &lease) == FLUX_OK);
                     OT_EXPECT(fd_is_open(sync_fd));
                 } else {
-                    OT_EXPECT(flux_surface_export_dmabuf(surface, &exported) == FLUX_OK);
+                    OT_EXPECT(flux_surface_export_dmabuf(surface, &exported, &lease) == FLUX_OK);
                 }
+                OT_EXPECT(lease != nullptr);
                 OT_EXPECT(fd_is_open(exported));
 
                 uint64_t produced_modifier = flux_surface_dmabuf_modifier(surface);
@@ -217,6 +219,8 @@ int main(void) {
                                  * consumed temporary SYNC_FD payload can retire
                                  * behind the slot fence and its VkSemaphore can
                                  * be imported again from the pool. */
+                                flux_surface_dmabuf_lease_release(lease);
+                                lease = nullptr;
                                 for (uint32_t frame_index = 0; frame_index < 8; ++frame_index) {
                                     int reuse_sync_fd = -1;
                                     if (frame_index > 0 && flux_dmabuf_sync_supported(dd)) {
@@ -227,13 +231,15 @@ int main(void) {
                                         OT_EXPECT(flux_frame_submit(producer_frame) == FLUX_OK);
                                         OT_EXPECT(flux_frame_present(producer_frame) == FLUX_OK);
                                         int unused_dmabuf = -1;
+                                        flux_surface_dmabuf_lease *unused_lease = nullptr;
                                         OT_EXPECT(flux_surface_export_dmabuf_explicit(
-                                                      surface, &unused_dmabuf, &reuse_sync_fd) ==
-                                                  FLUX_OK);
+                                                      surface, &unused_dmabuf, &reuse_sync_fd,
+                                                      &unused_lease) == FLUX_OK);
                                         OT_EXPECT(fd_is_open(unused_dmabuf));
                                         OT_EXPECT(fd_is_open(reuse_sync_fd));
                                         if (unused_dmabuf >= 0)
                                             close(unused_dmabuf);
+                                        flux_surface_dmabuf_lease_release(unused_lease);
                                     }
 
                                     flux_frame *consumer_frame = nullptr;

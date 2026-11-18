@@ -637,6 +637,28 @@ impl<'frame> Frame<'frame> {
         unsafe { sys::lens_opacity(self.ui as *const sys::lens) }
     }
 
+    /// Intersect every node built until [`Frame::clip_end`] with `rect`.
+    ///
+    /// This is the scoped clip for chrome overlays whose children are placed
+    /// absolutely (and therefore escape their parent's flow viewport). The
+    /// clip is a build-time stamp: it follows a placed node into its band and
+    /// clips its paint, snapshot/hit region, and descendants. Nested calls
+    /// intersect; the stack resets at every frame. Always pair with
+    /// [`Frame::clip_end`].
+    pub fn clip_begin(&mut self, rect: Rect) {
+        let opts = sys::lens_clip_opts {
+            rect: rect.to_raw(),
+        };
+        // SAFETY: ui is live inside a frame; opts is a value type.
+        unsafe { sys::lens_clip_begin(self.ui, &opts) };
+    }
+
+    /// Pop the innermost [`Frame::clip_begin`] scope.
+    pub fn clip_end(&mut self) {
+        // SAFETY: ui is live inside a frame.
+        unsafe { sys::lens_clip_end(self.ui) };
+    }
+
     /// Set the typeface family for subsequently built widgets in this frame.
     /// Set it, build the widgets that need another voice, then set it back —
     /// the same pattern as [`Frame::set_theme`].

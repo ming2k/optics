@@ -1132,6 +1132,9 @@ struct flux_surface {
      * must not let a frame slot be reused until its external consumer has
      * released the dma-buf; begin_frame then records the matching acquire. */
     bool *image_foreign_owned;
+    /* Outstanding external image leases per ring slot. begin_frame refuses a
+     * slot while this is non-zero; release drops the count back to zero. */
+    uint32_t *image_export_leases;
     /* Content epoch the presented pixels of image `i` are up to date with
      * (ADR-0149). `FLUX_CONTENT_EPOCH_NONE` means "never synchronised": the
      * image holds nothing this surface's content image would reproduce, so the

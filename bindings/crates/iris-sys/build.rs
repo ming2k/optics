@@ -86,15 +86,13 @@ fn main() {
         // flux — it must be reachable so pkg-config does not fall back to
         // a stale system copy).
         let mut dirs = vec![dir.join("meson-uninstalled")];
-        for var in ["FLUX_BUILD_DIR"] {
-            let other = env::var_os(var)
-                .map(PathBuf::from)
-                .or_else(|| checkout_root.as_ref().map(|root| root.join("build")));
-            if let Some(other) = other {
-                let uninstalled = other.join("meson-uninstalled");
-                if uninstalled.exists() && !dirs.contains(&uninstalled) {
-                    dirs.push(uninstalled);
-                }
+        let other = env::var_os("FLUX_BUILD_DIR")
+            .map(PathBuf::from)
+            .or_else(|| checkout_root.as_ref().map(|root| root.join("build")));
+        if let Some(other) = other {
+            let uninstalled = other.join("meson-uninstalled");
+            if uninstalled.exists() && !dirs.contains(&uninstalled) {
+                dirs.push(uninstalled);
             }
         }
         set_pkg_config_path(&dirs, &os);

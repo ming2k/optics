@@ -27,6 +27,8 @@ const char *flux_result_string(flux_result r) {
         return "FLUX_ERROR_SURFACE_LOST";
     case FLUX_ERROR_TIMEOUT:
         return "FLUX_ERROR_TIMEOUT";
+    case FLUX_ERROR_BUSY:
+        return "FLUX_ERROR_BUSY";
     }
     return "FLUX_ERROR_UNKNOWN";
 }

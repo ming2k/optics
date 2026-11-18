@@ -15,6 +15,7 @@ void lensi_node_reset_frame(lens_node *n) {
 
     n->is_container = false;
     n->is_scroll = false;
+    n->has_frame_clip = false;
     n->is_grid = false;
     n->place = LENS_PLACE_FLOW;
     n->band = LENS_BAND_BASE;

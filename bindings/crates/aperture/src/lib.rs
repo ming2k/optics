@@ -455,8 +455,14 @@ mod tests {
         assert_eq!(cursor_for_hint(CursorHint::Default), iris::Cursor::Default);
         assert_eq!(cursor_for_hint(CursorHint::Pointer), iris::Cursor::Pointer);
         assert_eq!(cursor_for_hint(CursorHint::Text), iris::Cursor::Text);
-        assert_eq!(cursor_for_hint(CursorHint::ResizeEw), iris::Cursor::ResizeEw);
-        assert_eq!(cursor_for_hint(CursorHint::ResizeNs), iris::Cursor::ResizeNs);
+        assert_eq!(
+            cursor_for_hint(CursorHint::ResizeEw),
+            iris::Cursor::ResizeEw
+        );
+        assert_eq!(
+            cursor_for_hint(CursorHint::ResizeNs),
+            iris::Cursor::ResizeNs
+        );
     }
 
     #[test]

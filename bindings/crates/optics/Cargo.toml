@@ -9,15 +9,15 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-flux = { path = "../flux", version = "0.0.80", optional = true }
-glyph = { path = "../glyph", version = "0.0.80", optional = true }
-lens = { path = "../lens", version = "0.0.80", optional = true }
-iris = { path = "../iris", version = "0.0.80", optional = true }
-aperture = { path = "../aperture", version = "0.0.80", optional = true }
-prism = { path = "../prism", version = "0.0.80", optional = true }
-reticle = { path = "../reticle", version = "0.0.80", optional = true }
-vista = { path = "../vista", version = "0.0.80", optional = true }
-transit = { path = "../transit", version = "0.0.80", optional = true }
+flux = { path = "../flux", version = "0.0.81", optional = true }
+glyph = { path = "../glyph", version = "0.0.81", optional = true }
+lens = { path = "../lens", version = "0.0.81", optional = true }
+iris = { path = "../iris", version = "0.0.81", optional = true }
+aperture = { path = "../aperture", version = "0.0.81", optional = true }
+prism = { path = "../prism", version = "0.0.81", optional = true }
+reticle = { path = "../reticle", version = "0.0.81", optional = true }
+vista = { path = "../vista", version = "0.0.81", optional = true }
+transit = { path = "../transit", version = "0.0.81", optional = true }
 
 [features]
 default = ["app", "motion"]

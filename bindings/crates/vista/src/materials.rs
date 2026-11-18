@@ -1,12 +1,9 @@
-use std::io::Cursor;
-
 use flux::{
     AddressMode, Device, Filter, Format, Image, Material, MaterialAlphaMode, MaterialDesc,
     MaterialKind, MaterialOptions, MaterialTexture, Sampler, SamplerDesc,
 };
-use gltf::texture::{MagFilter, MinFilter, WrappingMode};
-use image::{ImageFormat, ImageReader, Limits};
 
+use crate::glb_json::{AlphaMode, GlbDocument, GlbImage, GlbSampler};
 use crate::{LoadError, MaterialTarget};
 
 const MAX_TEXTURE_EDGE: u32 = 8192;
@@ -15,34 +12,42 @@ const MAX_TOTAL_TEXTURE_BYTES: u64 = 512 * 1024 * 1024;
 
 pub(crate) fn load(
     device: &Device,
-    gltf: &gltf::Gltf,
+    doc: &GlbDocument<'_>,
     target: MaterialTarget,
 ) -> Result<(Vec<Material>, Material), LoadError> {
-    let document = &gltf.document;
-    let mut required_textures = vec![false; document.textures().count()];
-    for material in document.materials() {
-        if let Some(info) = material.pbr_metallic_roughness().base_color_texture() {
-            required_textures[info.texture().index()] = true;
+    let mut required_textures = vec![false; doc.textures.len()];
+    for material in &doc.materials {
+        if let Some(info) = &material.base_color_texture {
+            let tex = doc.textures.get(info.index).ok_or_else(|| {
+                LoadError::Gltf(format!("texture index {} out of bounds", info.index))
+            })?;
+            let _ = tex;
+            required_textures[info.index] = true;
         }
     }
 
     let mut images: Vec<Option<Image>> = std::iter::repeat_with(|| None)
-        .take(document.images().count())
+        .take(doc.images.len())
         .collect();
     let mut samplers: Vec<Option<Sampler>> = std::iter::repeat_with(|| None)
-        .take(document.samplers().count())
+        .take(doc.samplers.len())
         .collect();
     let mut default_sampler = None;
     let mut total_texture_bytes = 0u64;
 
-    for texture in document.textures() {
-        if !required_textures[texture.index()] {
+    for (tex_index, texture) in doc.textures.iter().enumerate() {
+        if !required_textures[tex_index] {
             continue;
         }
-        let image = texture.source();
-        let image_index = image.index();
+        let image_index = texture.source.ok_or_else(|| {
+            LoadError::Unsupported(format!("texture {tex_index} has no source image"))
+        })?;
+        let image = doc
+            .images
+            .get(image_index)
+            .ok_or_else(|| LoadError::Gltf(format!("image index {image_index} out of bounds")))?;
         if images[image_index].is_none() {
-            let decoded = decode_image(device, gltf, &image)?;
+            let decoded = decode_image(device, doc, image)?;
             let (width, height) = decoded.size();
             let bytes = u64::from(width)
                 .checked_mul(u64::from(height))
@@ -56,42 +61,44 @@ pub(crate) fn load(
                 })?;
             images[image_index] = Some(decoded);
         }
-        let sampler = texture.sampler();
-        if let Some(index) = sampler.index() {
-            if samplers[index].is_none() {
-                samplers[index] = Some(Sampler::new(device, sampler_desc(&sampler))?);
+        if let Some(sampler_index) = texture.sampler {
+            let sampler = doc.samplers.get(sampler_index).ok_or_else(|| {
+                LoadError::Gltf(format!("sampler index {sampler_index} out of bounds"))
+            })?;
+            if samplers[sampler_index].is_none() {
+                samplers[sampler_index] = Some(Sampler::new(device, sampler_desc(sampler))?);
             }
         } else if default_sampler.is_none() {
-            default_sampler = Some(Sampler::new(device, sampler_desc(&sampler))?);
+            default_sampler = Some(Sampler::new(device, sampler_desc(&GlbSampler::default()))?);
         }
     }
 
-    let mut materials = Vec::with_capacity(document.materials().count());
-    for material in document.materials() {
-        let pbr = material.pbr_metallic_roughness();
-        let texture = if let Some(info) = pbr.base_color_texture() {
-            let mut tex_coord = info.tex_coord();
+    let mut materials = Vec::with_capacity(doc.materials.len());
+    for (mat_index, material) in doc.materials.iter().enumerate() {
+        let texture = if let Some(info) = &material.base_color_texture {
+            let mut tex_coord = info.tex_coord;
             let mut uv_offset = [0.0, 0.0];
             let mut uv_scale = [1.0, 1.0];
             let mut uv_rotation = 0.0;
-            if let Some(transform) = info.texture_transform() {
-                tex_coord = transform.tex_coord().unwrap_or(tex_coord);
-                uv_offset = transform.offset();
-                uv_scale = transform.scale();
-                uv_rotation = transform.rotation();
+            if let Some(transform) = &info.transform {
+                tex_coord = transform.tex_coord.unwrap_or(tex_coord);
+                uv_offset = transform.offset;
+                uv_scale = transform.scale;
+                uv_rotation = transform.rotation;
             }
             if tex_coord != 0 {
                 return Err(LoadError::Unsupported(format!(
-                    "material {} uses TEXCOORD_{tex_coord}; only TEXCOORD_0 is uploaded",
-                    material.index().unwrap_or(0)
+                    "material {mat_index} uses TEXCOORD_{tex_coord}; only TEXCOORD_0 is uploaded"
                 )));
             }
-            let texture = info.texture();
-            let image = images[texture.source().index()]
+            let tex = &doc.textures[info.index];
+            let image_index = tex
+                .source
+                .ok_or_else(|| LoadError::Unsupported("base-colour image was not loaded".into()))?;
+            let image = images[image_index]
                 .as_ref()
                 .ok_or_else(|| LoadError::Unsupported("base-colour image was not loaded".into()))?;
-            let sampler_info = texture.sampler();
-            let sampler = match sampler_info.index() {
+            let sampler = match tex.sampler {
                 Some(index) => samplers[index].as_ref(),
                 None => default_sampler.as_ref(),
             };
@@ -106,20 +113,20 @@ pub(crate) fn load(
             None
         };
 
-        let alpha_mode = match material.alpha_mode() {
-            gltf::material::AlphaMode::Opaque => MaterialAlphaMode::Opaque,
-            gltf::material::AlphaMode::Mask => MaterialAlphaMode::Mask,
-            gltf::material::AlphaMode::Blend => MaterialAlphaMode::Blend,
+        let alpha_mode = match material.alpha_mode {
+            AlphaMode::Opaque => MaterialAlphaMode::Opaque,
+            AlphaMode::Mask => MaterialAlphaMode::Mask,
+            AlphaMode::Blend => MaterialAlphaMode::Blend,
         };
         materials.push(Material::new_with_options(
             device,
             MaterialDesc {
-                kind: if material.unlit() {
+                kind: if material.unlit {
                     MaterialKind::Unlit
                 } else {
                     MaterialKind::Phong
                 },
-                base_color: pbr.base_color_factor(),
+                base_color: material.base_color_factor,
                 color_format: target.color_format,
                 depth_format: target.depth_format,
                 shininess: 32.0,
@@ -128,8 +135,8 @@ pub(crate) fn load(
             MaterialOptions {
                 base_color_texture: texture,
                 alpha_mode,
-                alpha_cutoff: material.alpha_cutoff().unwrap_or(0.5),
-                double_sided: material.double_sided(),
+                alpha_cutoff: material.alpha_cutoff,
+                double_sided: material.double_sided,
             },
         )?);
     }
@@ -150,90 +157,88 @@ pub(crate) fn load(
 
 fn decode_image(
     device: &Device,
-    gltf: &gltf::Gltf,
-    image: &gltf::image::Image<'_>,
+    doc: &GlbDocument<'_>,
+    image: &GlbImage,
 ) -> Result<Image, LoadError> {
-    let (encoded, format) = match image.source() {
-        gltf::image::Source::View { view, mime_type } => {
-            if !matches!(view.buffer().source(), gltf::buffer::Source::Bin) {
-                return Err(LoadError::Unsupported(
-                    "base-colour image references an external buffer".into(),
-                ));
-            }
-            let blob = gltf
-                .blob
-                .as_deref()
-                .ok_or_else(|| LoadError::Unsupported("GLB has no BIN chunk".into()))?;
-            let end = view
-                .offset()
-                .checked_add(view.length())
-                .ok_or_else(|| LoadError::Unsupported("image buffer view overflows".into()))?;
-            let encoded = blob.get(view.offset()..end).ok_or_else(|| {
-                LoadError::Unsupported("image buffer view is out of bounds".into())
-            })?;
-            (encoded, image_format(mime_type)?)
+    if image.uri.is_some() {
+        return Err(LoadError::Unsupported(
+            "external image URIs are unsupported for in-memory GLB loading".into(),
+        ));
+    }
+    let view_index = image
+        .buffer_view
+        .ok_or_else(|| LoadError::Unsupported("image has neither bufferView nor URI".into()))?;
+    let view = doc
+        .buffer_views
+        .get(view_index)
+        .ok_or_else(|| LoadError::Gltf(format!("bufferView index {view_index} out of bounds")))?;
+    if view.buffer != 0 {
+        return Err(LoadError::Unsupported(
+            "base-colour image references an external buffer".into(),
+        ));
+    }
+    let blob = doc
+        .bin_chunk
+        .ok_or_else(|| LoadError::Unsupported("GLB has no BIN chunk".into()))?;
+    let end = view
+        .byte_offset
+        .checked_add(view.byte_length)
+        .ok_or_else(|| LoadError::Unsupported("image buffer view overflows".into()))?;
+    let encoded = blob
+        .get(view.byte_offset..end)
+        .ok_or_else(|| LoadError::Unsupported("image buffer view is out of bounds".into()))?;
+
+    let mime = image
+        .mime_type
+        .as_deref()
+        .ok_or_else(|| LoadError::Unsupported("image bufferView missing mimeType".into()))?;
+    let (width, height, rgba) = match mime {
+        "image/png" => {
+            crate::image_codec::decode_png_rgba(encoded, MAX_TEXTURE_EDGE, MAX_IMAGE_ALLOCATION)
+                .map_err(LoadError::Image)?
         }
-        gltf::image::Source::Uri { .. } => {
-            return Err(LoadError::Unsupported(
-                "external image URIs are unsupported for in-memory GLB loading".into(),
-            ));
+        "image/jpeg" => {
+            crate::image_codec::decode_jpeg_rgba(encoded, MAX_TEXTURE_EDGE, MAX_IMAGE_ALLOCATION)
+                .map_err(LoadError::Image)?
+        }
+        other => {
+            return Err(LoadError::Unsupported(format!(
+                "unsupported base-colour image MIME type {other}"
+            )));
         }
     };
 
-    let mut reader = ImageReader::with_format(Cursor::new(encoded), format);
-    let mut limits = Limits::default();
-    limits.max_image_width = Some(MAX_TEXTURE_EDGE);
-    limits.max_image_height = Some(MAX_TEXTURE_EDGE);
-    limits.max_alloc = Some(MAX_IMAGE_ALLOCATION);
-    reader.limits(limits);
-    let rgba = reader.decode()?.into_rgba8();
-    Image::from_bytes(
-        device,
-        rgba.width(),
-        rgba.height(),
-        Format::Rgba8Srgb,
-        rgba.as_raw(),
-    )
-    .map_err(LoadError::from)
+    Image::from_bytes(device, width, height, Format::Rgba8Srgb, &rgba).map_err(LoadError::from)
 }
 
-fn image_format(mime_type: &str) -> Result<ImageFormat, LoadError> {
-    match mime_type {
-        "image/png" => Ok(ImageFormat::Png),
-        "image/jpeg" => Ok(ImageFormat::Jpeg),
-        other => Err(LoadError::Unsupported(format!(
-            "unsupported base-colour image MIME type {other}"
-        ))),
-    }
-}
-
-fn sampler_desc(sampler: &gltf::texture::Sampler<'_>) -> SamplerDesc {
-    let (min_filter, mipmap_mode) = match sampler.min_filter() {
-        None | Some(MinFilter::Linear) => (Filter::Linear, Filter::Linear),
-        Some(MinFilter::Nearest) => (Filter::Nearest, Filter::Nearest),
-        Some(MinFilter::NearestMipmapNearest) => (Filter::Nearest, Filter::Nearest),
-        Some(MinFilter::LinearMipmapNearest) => (Filter::Linear, Filter::Nearest),
-        Some(MinFilter::NearestMipmapLinear) => (Filter::Nearest, Filter::Linear),
-        Some(MinFilter::LinearMipmapLinear) => (Filter::Linear, Filter::Linear),
+fn sampler_desc(sampler: &GlbSampler) -> SamplerDesc {
+    let (min_filter, mipmap_mode) = match sampler.min_filter {
+        None | Some(9729) => (Filter::Linear, Filter::Linear),
+        Some(9728) => (Filter::Nearest, Filter::Nearest),
+        Some(9984) => (Filter::Nearest, Filter::Nearest),
+        Some(9985) => (Filter::Linear, Filter::Nearest),
+        Some(9986) => (Filter::Nearest, Filter::Linear),
+        Some(9987) => (Filter::Linear, Filter::Linear),
+        Some(_) => (Filter::Linear, Filter::Linear),
     };
     SamplerDesc {
         min_filter,
-        mag_filter: match sampler.mag_filter() {
-            Some(MagFilter::Nearest) => Filter::Nearest,
-            None | Some(MagFilter::Linear) => Filter::Linear,
+        mag_filter: match sampler.mag_filter {
+            Some(9728) => Filter::Nearest,
+            None | Some(9729) | Some(_) => Filter::Linear,
         },
         mipmap_mode,
-        address_u: address_mode(sampler.wrap_s()),
-        address_v: address_mode(sampler.wrap_t()),
+        address_u: address_mode(sampler.wrap_s),
+        address_v: address_mode(sampler.wrap_t),
         address_w: AddressMode::Repeat,
         max_anisotropy: 1.0,
     }
 }
 
-fn address_mode(mode: WrappingMode) -> AddressMode {
+fn address_mode(mode: u32) -> AddressMode {
     match mode {
-        WrappingMode::ClampToEdge => AddressMode::ClampToEdge,
-        WrappingMode::MirroredRepeat => AddressMode::MirroredRepeat,
-        WrappingMode::Repeat => AddressMode::Repeat,
+        33071 => AddressMode::ClampToEdge,
+        33648 => AddressMode::MirroredRepeat,
+        _ => AddressMode::Repeat,
     }
 }
