@@ -19,8 +19,8 @@ Before any pull request is merged into `main`, it must clear the following verif
 │ 3. Sanitizer Gate: ASan + UBSan Cleanliness                 │
 │    Zero leaks, zero undefined behavior, zero alloc faults   │
 ├─────────────────────────────────────────────────────────────┤
-│ 4. Rust Bindings Gate: `cargo test --workspace`             │
-│    All crates under `bindings/crates/` compile and pass     │
+│ 4. Rust Crates Gate: `cargo test --workspace`               │
+│    All crates under `crates/` compile and pass              │
 └─────────────────────────────────────────────────────────────┘
 ```
 

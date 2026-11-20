@@ -1,187 +1,70 @@
 # How to run and explore interactive examples
 
-Optics ships a rich suite of interactive and headless examples demonstrating 2D canvas drawing, 3D scene rendering, GPU particle dynamics, physical glass and acrylic materials, and desktop UI workflows.
+Optics organizes its in-tree examples into two curated tiers ([ADR-0171](../adr/0171-curated-examples-taxonomy-and-showcase-design-system.md)):
 
-Use this guide to build, execute, and interact with the available examples across the monorepo.
+- **`examples/getting_started/`** — minimal, single-concept starters for learning each architectural path.
+- **`examples/showcase/`** — three flagship desktop applications sharing a unified design system (`examples/showcase/common/design.h`).
 
 ---
 
-## 1. Prerequisites and Build Configuration
+## 1. Build Configuration
 
-All examples are configured through the root Meson build. Ensure you have installed the core dependencies (Vulkan SDK / loader, GLFW, FreeType, HarfBuzz) as described in [Getting Started](../tutorials/01-getting-started.md).
-
-Enable examples during setup or reconfigure your existing build tree:
+Enable examples via Meson and compile:
 
 ```bash
-# Initial setup with examples enabled
 meson setup build -Dexamples=true
-
-# Or reconfigure an existing build tree
-meson setup --reconfigure build -Dexamples=true
-
-# Compile the entire suite
 meson compile -C build
 ```
 
-Binary executables are placed in `./build/examples/<module>/<binary>`.
+Binaries are placed under `./build/examples/getting_started/` and `./build/examples/showcase/`.
 
 ---
 
-## 2. Visual Effects & Material Showcase (`examples/showcase/`)
+## 2. Flagship Showcases (`examples/showcase/`)
 
-The showcase suite focuses on visual quality, GPU compute pipelines, and complex effect compositions built on `flux` and `prism`.
+### `widget_gallery` — Multi-Page Desktop UI Showcase
 
-### `material_gallery` — Modern UI Material Library Showcase
+Demonstrates `optics_ui`, `optics_app`, `optics_window`, `optics_text`, and `optics_motion` in a cohesive desktop shell with a resizable sidebar (`optics_ui_split_handle_v`), dark/light theme polarity toggle, text-scale selector, and reduced-motion toggle:
 
-The flagship visual comparison demo for `libs/prism` (ADR-0096 / ADR-0097). It consolidates modern desktop materials into an interactive gallery over a dynamic animated backdrop (moving radial gradients, high-contrast stripes, and geometric rings), allowing side-by-side or fullscreen inspection:
+1. **Typography** — optical type scale, Sans/Serif/Mono switching, CJK + Latin + BiDi shaping.
+2. **Controls** — button variants, checkboxes, segmented controls, sliders, IME-aware text editing.
+3. **Layout & Data** — closable TabStrip, responsive 3-column Grid cards, TreeView, sortable/resizable DataGrid.
+4. **Overlays & DnD** — anchored popup menu, centered modal dialog, native drag-and-drop source and drop zone.
+5. **Motion** — interactive closed-form spring physics playground (`<optics/motion.h>`).
 
-1. **Liquid Glass** (`<prism/liquid_glass.h>`): Physical index-of-refraction (IOR) bending, chromatic dispersion (RGB split), Fresnel specular rim highlights, and SDF focus field.
-2. **Frosted Glass** (`<prism/frosted.h>`): High-performance dual-Kawase blur with vibrancy saturation boost (macOS-style vibrancy).
-3. **Acrylic** (`<prism/acrylic.h>`): Windows Fluent-style dual-Kawase blur, luminance plate balancing (Smoke/Pearl), 1px SDF border highlight, and procedural blue-noise grain dither.
-4. **Mica & Mica Alt** (`<prism/mica.h>`): Windows 11 desktop foundation material with screen-anchored backdrop sampling, soft blur, theme plate tinting, mineral dither, and inactive fallback state.
+```bash
+./build/examples/showcase/widget_gallery
+```
 
-**Run command:**
+### `material_gallery` — Optical Surface Materials Showcase
+
+Interactive side-by-side and fullscreen comparison of `liboptics_material` over a dynamic animated backdrop:
+
+1. **Liquid Glass** — physical IOR refraction, chromatic dispersion, Fresnel rim highlights.
+2. **Frosted Glass** — dual-Kawase blur with vibrancy boost.
+3. **Acrylic** — dual-Kawase blur, luminance plate balancing, and procedural blue-noise grain.
+4. **Mica & Mica Alt** — wallpaper-anchored backdrop sampling and mineral dither.
+
 ```bash
 ./build/examples/showcase/material_gallery
 ```
 
-**Interactive Controls:**
-| Key | Action |
-| :--- | :--- |
-| `1` | **4-Up Comparison Grid** — View all 4 materials side-by-side |
-| `2` | **Liquid Glass Fullscreen** — Focus on SDF refraction and chromatic dispersion |
-| `3` | **Frosted Glass Fullscreen** — Focus on vibrant dual-Kawase blur |
-| `4` | **Acrylic Fullscreen** — Focus on noise-dithered blur and luminance plates |
-| `5` | **Mica & Mica Alt Fullscreen** — Focus on wallpaper composite and mineral dither |
-| `D` | Toggle **Dark / Light** theme plate polarity |
-| `F` | Toggle **Inactive State Fallback** on Mica |
-| `Space` | Pause / resume background animation |
+### `scene_studio` — 3D glTF 2.0 Studio Viewer
+
+Combines `liboptics_scene` and `liboptics_gfx` depth-buffered 3D rendering with a floating `optics_ui` toolbar and live camera/lighting inspector (`--file path/to/model.glb` loads custom glTF binary assets; defaults to bundled `Duck.glb`).
+
+```bash
+./build/examples/showcase/scene_studio
+```
 
 ---
 
-## 3. 2D Canvas & 3D Core Graphics (`examples/flux/`, `vista/`, `glyph/`)
+## 3. Minimal Starters (`examples/getting_started/`)
 
-These examples demonstrate the fundamental rendering primitives in `libs/flux`.
-
-| Binary | Description | Key Features Demonstrated |
+| Binary | Libraries | What it teaches |
 | :--- | :--- | :--- |
-| `build/examples/flux/canvas_hello` | 2D immediate & retained canvas | Rectangles, rounded rects, circles, paths, linear gradient brushes, stroking. |
-| `build/examples/flux/scene_cube` | 3D mesh rendering | Depth buffer management, matrix transforms, Phong lighting with transient buffer device addresses. |
-| `build/examples/flux/compute_fill` | Compute-to-canvas integration | Offscreen compute dispatch with synchronization barriers. |
-| `build/examples/flux/image_animation` | Animated texture streaming | Host-clock synchronization, strided image updates. |
-| `build/examples/vista/gltf_viewer` | glTF 2.0 3D asset viewer | Scene hierarchy traversal, PBR material evaluation, bundled `Duck.glb` rendering. |
-| `build/examples/glyph/text_hello` | Typography & text shaping | HarfBuzz shaping, dual-layer R8 glyph atlas, subpixel glyph blitting. |
-
-**Quick run:**
-```bash
-./build/examples/flux/canvas_hello
-./build/examples/flux/scene_cube
-./build/examples/vista/gltf_viewer
-./build/examples/glyph/text_hello
-```
-
----
-
-## 4. Document Compiler (`examples/reticle/`)
-
-`rasterize_svg` is a headless starter for `libreticle`: it parses an SVG
-document once and rasterizes it to a PPM file. No Vulkan device, window, or
-compositor is involved, so it runs on any build host.
-
-```bash
-./build/examples/reticle/rasterize_svg out.ppm
-```
-
-See the [reticle reference](../reference/reticle.md) for the parse/paint
-contracts, flat shape IR, and resource limits.
-
----
-
-## 5. UI Components, Window Shell & Interactions (`examples/aperture/`, `examples/iris/`, `examples/lens/`, `examples/transit/`)
-
-These examples demonstrate user interface state management, window shell integration, and physics-based motion.
-
-### `examples/aperture/widgets` & `desktop_demo` — Retained Desktop UI
-
-Demonstrates standard controls and multi-view window layouts using `liblens` widgets hosted in an `iris` application shell:
-- Push buttons, toggle switches, and checkboxes
-- Text fields with native caret selection and IME hooks
-- Sliders, progress bars, and segmented tabs
-- Split view containers and scrollable viewports
-
-```bash
-# Launch full desktop UI control gallery
-./build/examples/aperture/widgets
-
-# Launch multi-view desktop workspace shell
-./build/examples/aperture/desktop_demo
-```
-
-### `examples/aperture/dnd_demo` — Native Drag and Drop
-
-Demonstrates the cross-platform drag-and-drop subsystem (ADR-0086) with Wayland data device protocol integration and visual drop indicators:
-
-```bash
-./build/examples/aperture/dnd_demo
-```
-
-### `examples/aperture/overlay_demo` — Modals, Popups & Tooltips
-
-Demonstrates the spatial overlay architecture (`Place` layer): non-clipping tooltips, dropdown menus, and modal dialogs escaping parent scroll viewports without hierarchy restructuring.
-
-```bash
-./build/examples/aperture/overlay_demo
-```
-
-### `examples/transit/motion_spring` — Spring Physics Dynamics
-
-Demonstrates critically damped, under-damped, and over-damped analytical spring curves (ADR-0077) driving interface transformations without fixed duration timers.
-
-```bash
-./build/examples/transit/motion_spring
-```
-
-### Headless & Accessibility Verification (`examples/lens/`)
-
-These tools run in CI or headless environments without an active GPU or display server:
-
-- **`build/examples/lens/headless_demo`**: Retained scene graph construction, flexbox layout calculation, and snapshot tree walk without GPU initialization.
-- **`build/examples/lens/a11y_tree_demo`**: Constructs and dumps the semantic accessibility tree with role bindings, states, and text ranges for screen readers.
-
-```bash
-./build/examples/lens/headless_demo
-./build/examples/lens/a11y_tree_demo
-```
-
----
-
-## 6. Command Reference Cheat Sheet
-
-| Category | Command | Window / Display Required |
-| :--- | :--- | :--- |
-| **Material Showcase** | `./build/examples/showcase/material_gallery` | Yes (Vulkan + GLFW) |
-| **2D Canvas** | `./build/examples/flux/canvas_hello` | Yes (Vulkan + GLFW) |
-| **3D Cube** | `./build/examples/flux/scene_cube` | Yes (Vulkan + GLFW) |
-| **Compute Fill** | `./build/examples/flux/compute_fill` | Yes (Vulkan + GLFW) |
-| **Image Animation** | `./build/examples/flux/image_animation` | Yes (Vulkan + GLFW) |
-| **glTF 3D Viewer** | `./build/examples/vista/gltf_viewer` | Yes (Vulkan + GLFW) |
-| **Typography** | `./build/examples/glyph/text_hello` | Yes (Vulkan + GLFW) |
-| **SVG Rasterizer** | `./build/examples/reticle/rasterize_svg out.ppm` | **No** (Headless CPU) |
-| **UI Widgets** | `./build/examples/aperture/widgets` | Yes (Wayland / Win32 / Cocoa) |
-| **Desktop Shell** | `./build/examples/aperture/desktop_demo` | Yes (Wayland / Win32 / Cocoa) |
-| **Drag & Drop** | `./build/examples/aperture/dnd_demo` | Yes (Wayland / Win32 / Cocoa) |
-| **Popups & Menus** | `./build/examples/aperture/overlay_demo` | Yes (Wayland / Win32 / Cocoa) |
-| **Damage Tracking** | `./build/examples/aperture/paint_static_demo` | Yes (Wayland / Win32 / Cocoa) |
-| **Font Discovery** | `./build/examples/aperture/fonts` | Yes (Wayland / Win32 / Cocoa) |
-| **Spring Motion** | `./build/examples/transit/motion_spring` | Yes (Wayland / Win32 / Cocoa) |
-| **Headless UI Walk**| `./build/examples/lens/headless_demo` | **No** (Headless CPU) |
-| **A11y Tree Dump** | `./build/examples/lens/a11y_tree_demo` | **No** (Headless CPU) |
-| **Reactive State** | `./build/examples/lens/state_demo` | **No** (Headless CPU) |
-
----
-
-## Related Documentation
-
-- [Getting Started Tutorial](../tutorials/01-getting-started.md) — First-time build and basic app bootstrap.
-- [Prism Material Reference](../reference/prism.md) — Technical specification for physical materials.
-- [Application Architecture](../explanation/application-architecture.md) — Architectural overview of Lens UI and rendering.
+| `build/examples/getting_started/hello_app` | `app`, `ui`, `window` | Minimal windowed GUI app with immediate-mode state and theme switching. |
+| `build/examples/getting_started/canvas_window` | `window`, `gfx` | Native window drawing 2D vector geometry without linking `ui`. |
+| `build/examples/getting_started/headless_canvas` | `gfx` | GPU-free CPU canvas (`<optics/gfx/canvas_cpu.h>`) rendering to PPM. |
+| `build/examples/getting_started/headless_svg` | `svg` | GPU-free SVG parsing and rasterization (`<optics/svg.h>`) to PPM. |
+| `build/examples/getting_started/compute_pass` | `gfx` | Headless Vulkan compute shader dispatch (`Slang -> SPIR-V`) and readback. |

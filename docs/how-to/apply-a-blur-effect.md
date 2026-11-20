@@ -17,7 +17,7 @@ You have a `flux_device *d`, a `flux_image *input` in
 
 ## The minimum call
 
-    #include <flux/effect.h>
+    #include <optics/gfx/effect.h>
 
     flux_effect_blur_desc bd = FLUX_EFFECT_BLUR_DESC_INIT;
     bd.input = input;

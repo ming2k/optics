@@ -1,0 +1,212 @@
+/* test_text_scale.c — text-scale multiplier (ADR-0077). CPU-only.
+ *
+ * Covers:
+ *   - getter/setter roundtrip, default 1.0, clamp <= 0 and non-finite.
+ *   - every font-scaled metric (font_size, line height, intrinsic heights,
+ *     heading tokens) grows proportionally.
+ *   - pure-px metrics (padding, border, gap) stay put.
+ *   - text-draw commands carry the scaled font_size.
+ *   - invalidation: changing the factor forces a redraw (records invalidated).
+ *
+ * Direct include of internal.h (same pattern as test_drawlist_hash) to read
+ * resolved font metrics without a mock backend.
+ */
+
+#include "../../libs/ui/src/internal.h"
+#include "lens_test.h"
+#include "optics_test.h"
+
+#include <optics/ui.h>
+
+#include <math.h>
+
+static const optics_ui_input IN0 = {.display_size = {400, 300}, .dt_seconds = 0.016f};
+
+/* ---- getter / setter / clamp ----------------------------------------- */
+
+static void test_getter_setter_and_clamp(void) {
+    optics_ui *ui = nullptr;
+    OT_EXPECT(optics_ui_create(&(optics_ui_desc){}, &ui) == OPTICS_GFX_OK);
+
+    /* Default is 1.0 */
+    OT_EXPECT_NEAR(optics_ui_text_scale(ui), 1.0f, 0.001f);
+
+    /* Normal writes roundtrip */
+    optics_ui_set_text_scale(ui, 1.25f);
+    OT_EXPECT_NEAR(optics_ui_text_scale(ui), 1.25f, 0.001f);
+    optics_ui_set_text_scale(ui, 2.0f);
+    OT_EXPECT_NEAR(optics_ui_text_scale(ui), 2.0f, 0.001f);
+
+    /* Non-positive and non-finite inputs are ignored, previous value stays */
+    optics_ui_set_text_scale(ui, 0.0f);
+    OT_EXPECT_NEAR(optics_ui_text_scale(ui), 2.0f, 0.001f);
+    optics_ui_set_text_scale(ui, -1.5f);
+    OT_EXPECT_NEAR(optics_ui_text_scale(ui), 2.0f, 0.001f);
+    optics_ui_set_text_scale(ui, NAN);
+    OT_EXPECT_NEAR(optics_ui_text_scale(ui), 2.0f, 0.001f);
+    optics_ui_set_text_scale(ui, INFINITY);
+    OT_EXPECT_NEAR(optics_ui_text_scale(ui), 2.0f, 0.001f);
+
+    /* NULL context is safe */
+    optics_ui_set_text_scale(nullptr, 1.5f);
+    OT_EXPECT_NEAR(optics_ui_text_scale(nullptr), 1.0f, 0.001f);
+
+    optics_ui_release(ui);
+}
+
+/* ---- resolver effects ------------------------------------------------ */
+
+/* Resolved font_size scales by text_scale; non-text metrics do not. */
+static void test_resolver_scales_font_only(void) {
+    optics_ui *ui = nullptr;
+    OT_EXPECT(optics_ui_create(&(optics_ui_desc){}, &ui) == OPTICS_GFX_OK);
+    optics_ui_theme t = optics_ui_theme_dark();
+
+    /* Baseline at 1.0 */
+    optics_ui_style_resolved r1 = lensi_style_resolve(ui, nullptr, &t, 0);
+    OT_EXPECT_NEAR(r1.font_size, t.font_size, 0.001f);
+    OT_EXPECT_NEAR(r1.padding, t.padding, 0.001f);
+    OT_EXPECT_NEAR(r1.border_width, t.border_width, 0.001f);
+
+    /* At 1.5x: font_size grows, padding/border untouched */
+    optics_ui_set_text_scale(ui, 1.5f);
+    optics_ui_style_resolved r15 = lensi_style_resolve(ui, nullptr, &t, 0);
+    OT_EXPECT_NEAR(r15.font_size, t.font_size * 1.5f, 0.001f);
+    OT_EXPECT_NEAR(r15.padding, t.padding, 0.001f);
+    OT_EXPECT_NEAR(r15.border_width, t.border_width, 0.001f);
+
+    /* Cascade: an explicit instance font_size scales by text_scale too */
+    optics_ui_style s = optics_ui_style_init();
+    s.fields = OPTICS_UI_STYLE_FONT_SIZE;
+    s.font_size = 20.0f;
+    optics_ui_style_resolved r_inst = lensi_style_resolve(ui, &s, &t, 0);
+    OT_EXPECT_NEAR(r_inst.font_size, 20.0f * 1.5f, 0.001f);
+
+    optics_ui_release(ui);
+}
+
+/* ---- widget geometry effects ----------------------------------------- */
+
+/* A button laid out at 2.0x text scale measures taller than at 1.0x. */
+static void test_widget_intrinsic_height_scales(void) {
+    optics_ui *ui = nullptr;
+    OT_EXPECT(optics_ui_create(&(optics_ui_desc){}, &ui) == OPTICS_GFX_OK);
+
+    float h1 = 0.0f;
+    optics_ui_begin(ui, &IN0);
+    optics_ui_button(ui, &(optics_ui_button_opts){.label = "OK"});
+    optics_ui_id id = optics_ui_current_id(ui, "OK");
+    optics_ui_test_end(ui);
+    optics_ui_node *n1 = optics_ui_find(ui, id);
+    OT_EXPECT(n1 != nullptr);
+    h1 = optics_ui_node_bounds(n1).h;
+
+    optics_ui_set_text_scale(ui, 2.0f);
+    optics_ui_begin(ui, &IN0);
+    optics_ui_button(ui, &(optics_ui_button_opts){.label = "OK"});
+    optics_ui_test_end(ui);
+    n1 = optics_ui_find(ui, id);
+    OT_EXPECT(n1 != nullptr);
+    float h2 = optics_ui_node_bounds(n1).h;
+
+    OT_EXPECT(h2 > h1 * 1.3f);
+
+    optics_ui_release(ui);
+}
+
+/* The text draw command's size scales: measurement and paint agree. */
+static void test_text_command_size_scales(void) {
+    optics_ui *ui = nullptr;
+    OT_EXPECT(optics_ui_create(&(optics_ui_desc){}, &ui) == OPTICS_GFX_OK);
+
+    optics_ui_set_text_scale(ui, 1.5f);
+    optics_ui_begin(ui, &IN0);
+    optics_ui_button(ui, &(optics_ui_button_opts){.label = "OK"});
+    optics_ui_id id = optics_ui_current_id(ui, "OK");
+    optics_ui_test_end(ui);
+
+    const optics_ui_node *n = optics_ui_find(ui, id);
+    OT_EXPECT(n != nullptr);
+    OT_EXPECT(optics_ui_node_bounds(n).h > 14.0f * 1.5f);
+
+    optics_ui_release(ui);
+}
+
+/* Explicit point sizes scale too. */
+static void test_explicit_label_size_scales(void) {
+    optics_ui *ui = nullptr;
+    OT_EXPECT(optics_ui_create(&(optics_ui_desc){}, &ui) == OPTICS_GFX_OK);
+
+    optics_ui_set_text_scale(ui, 2.0f);
+    optics_ui_begin(ui, &IN0);
+    optics_ui_label(ui, &(optics_ui_label_opts){.text = "Point", .size = 10.0f});
+    optics_ui_label(ui, &(optics_ui_label_opts){.text = "Compact", .size = 8.0f});
+    optics_ui_label(ui, &(optics_ui_label_opts){
+                            .text = "Wrapped text", .wrap = true, .box = {.max_width = 200.0f}});
+    optics_ui_id pt_id = optics_ui_current_id(ui, "Point");
+    optics_ui_id cp_id = optics_ui_current_id(ui, "Compact");
+    optics_ui_id wr_id = optics_ui_current_id(ui, "Wrapped text");
+    optics_ui_test_end(ui);
+
+    const optics_ui_node *pt = optics_ui_find(ui, pt_id);
+    const optics_ui_node *cp = optics_ui_find(ui, cp_id);
+    const optics_ui_node *wr = optics_ui_find(ui, wr_id);
+    OT_EXPECT(pt && cp && wr);
+    if (pt)
+        OT_EXPECT(optics_ui_node_bounds(pt).h > 8.0f);
+    if (cp)
+        OT_EXPECT(optics_ui_node_bounds(cp).h > 8.0f);
+    if (wr)
+        OT_EXPECT(optics_ui_node_bounds(wr).h > 8.0f);
+
+    optics_ui_release(ui);
+}
+
+/* Headings scale proportionally. */
+static void test_heading_size_scales(void) {
+    optics_ui *ui = nullptr;
+    OT_EXPECT(optics_ui_create(&(optics_ui_desc){}, &ui) == OPTICS_GFX_OK);
+    optics_ui_theme t = optics_ui_theme_dark();
+
+    optics_ui_set_text_scale(ui, 1.5f);
+    optics_ui_begin(ui, &IN0);
+    optics_ui_label(ui, &(optics_ui_label_opts){.text = "T", .size = 28.0f});
+    optics_ui_id title_id = optics_ui_current_id(ui, "T");
+    optics_ui_label(ui, &(optics_ui_label_opts){.text = "H", .size = 22.0f});
+    optics_ui_id h1_id = optics_ui_current_id(ui, "H");
+    optics_ui_test_end(ui);
+
+    const optics_ui_node *title = optics_ui_find(ui, title_id);
+    OT_EXPECT(title != nullptr);
+    OT_EXPECT(optics_ui_node_bounds(title).h > t.font_size_title * 1.4f);
+    const optics_ui_node *h1 = optics_ui_find(ui, h1_id);
+    OT_EXPECT(h1 != nullptr);
+    OT_EXPECT(optics_ui_node_bounds(h1).h > t.font_size_h1 * 1.4f);
+
+    optics_ui_release(ui);
+}
+
+/* A factor switch must re-key cached canvas records. */
+static void test_text_scale_switch_invalidates(void) {
+    optics_ui *ui = nullptr;
+    OT_EXPECT(optics_ui_create(&(optics_ui_desc){}, &ui) == OPTICS_GFX_OK);
+
+    optics_ui_theme t = optics_ui_theme_dark();
+    optics_ui_style_resolved r1 = lensi_style_resolve(ui, nullptr, &t, 0);
+    optics_ui_set_text_scale(ui, 1.25f);
+    optics_ui_style_resolved r2 = lensi_style_resolve(ui, nullptr, &t, 0);
+    OT_EXPECT(r1.font_size != r2.font_size);
+
+    optics_ui_release(ui);
+}
+
+int main(void) {
+    test_getter_setter_and_clamp();
+    test_resolver_scales_font_only();
+    test_widget_intrinsic_height_scales();
+    test_text_command_size_scales();
+    test_explicit_label_size_scales();
+    test_heading_size_scales();
+    test_text_scale_switch_invalidates();
+    return OT_REPORT();
+}

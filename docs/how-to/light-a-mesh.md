@@ -13,7 +13,7 @@ You have a `flux_device *d`, a mesh-drawing frame loop like the one in
 
 Set `kind` to `FLUX_MATERIAL_PHONG` and pick the surface properties:
 
-    #include <flux/scene.h>
+    #include <optics/gfx/scene.h>
 
     flux_material_desc md = FLUX_MATERIAL_DESC_INIT;
     md.kind         = FLUX_MATERIAL_PHONG;
@@ -56,7 +56,7 @@ Run the cube example with lighting enabled and confirm the faces shade
 with the light direction instead of rendering flat:
 
 ```bash
-./build/examples/flux/scene_cube --phong
+./build/examples/showcase/scene_studio --phong
 ```
 
 ## Pitfalls

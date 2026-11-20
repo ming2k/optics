@@ -12,27 +12,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "aperture"
-version = "0.0.81"
-dependencies = [
- "aperture-sys",
- "flux",
- "iris",
- "lens",
-]
-
-[[package]]
-name = "aperture-sys"
-version = "0.0.81"
-dependencies = [
- "bindgen",
- "flux-sys",
- "iris-sys",
- "lens-sys",
- "pkg-config",
-]
-
-[[package]]
 name = "bindgen"
 version = "0.72.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -91,58 +70,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0e9c71c2167ca323c882b99918929403426e2373ea17242ff5653e0d5e1058be"
 
 [[package]]
-name = "flux"
-version = "0.0.81"
-dependencies = [
- "flux-sys",
-]
-
-[[package]]
-name = "flux-sys"
-version = "0.0.81"
-dependencies = [
- "bindgen",
- "pkg-config",
-]
-
-[[package]]
 name = "glob"
 version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e4eba85ea1d0a966a983acd07deee566e67395d2d96b6fb39e62b5a833f1eb0b"
-
-[[package]]
-name = "glyph"
-version = "0.0.81"
-dependencies = [
- "flux",
- "glyph-sys",
-]
-
-[[package]]
-name = "glyph-sys"
-version = "0.0.81"
-dependencies = [
- "bindgen",
- "flux-sys",
- "pkg-config",
-]
-
-[[package]]
-name = "iris"
-version = "0.0.81"
-dependencies = [
- "iris-sys",
-]
-
-[[package]]
-name = "iris-sys"
-version = "0.0.81"
-dependencies = [
- "bindgen",
- "flux-sys",
- "pkg-config",
-]
 
 [[package]]
 name = "itertools"
@@ -151,23 +82,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "413ee7dfc52ee1a4949ceeb7dbc8a33f2d6c088194d9f922fb8318faf1f01186"
 dependencies = [
  "either",
-]
-
-[[package]]
-name = "lens"
-version = "0.0.81"
-dependencies = [
- "flux",
- "lens-sys",
-]
-
-[[package]]
-name = "lens-sys"
-version = "0.0.81"
-dependencies = [
- "bindgen",
- "flux-sys",
- "pkg-config",
 ]
 
 [[package]]
@@ -216,17 +130,168 @@ dependencies = [
 
 [[package]]
 name = "optics"
-version = "0.0.81"
+version = "0.0.82"
 dependencies = [
- "aperture",
- "flux",
- "glyph",
- "iris",
- "lens",
- "prism",
- "reticle",
- "transit",
- "vista",
+ "optics-app",
+ "optics-build",
+ "optics-gfx",
+ "optics-material",
+ "optics-motion",
+ "optics-scene",
+ "optics-svg",
+ "optics-text",
+ "optics-ui",
+ "optics-window",
+]
+
+[[package]]
+name = "optics-app"
+version = "0.0.82"
+dependencies = [
+ "optics-app-sys",
+ "optics-build",
+ "optics-gfx",
+ "optics-ui",
+ "optics-window",
+]
+
+[[package]]
+name = "optics-app-sys"
+version = "0.0.82"
+dependencies = [
+ "optics-build",
+ "optics-gfx-sys",
+ "optics-ui-sys",
+ "optics-window-sys",
+]
+
+[[package]]
+name = "optics-build"
+version = "0.0.82"
+dependencies = [
+ "bindgen",
+ "pkg-config",
+]
+
+[[package]]
+name = "optics-gfx"
+version = "0.0.82"
+dependencies = [
+ "optics-build",
+ "optics-gfx-sys",
+]
+
+[[package]]
+name = "optics-gfx-sys"
+version = "0.0.82"
+dependencies = [
+ "optics-build",
+]
+
+[[package]]
+name = "optics-material"
+version = "0.0.82"
+dependencies = [
+ "optics-build",
+ "optics-gfx",
+ "optics-gfx-sys",
+ "optics-material-sys",
+]
+
+[[package]]
+name = "optics-material-sys"
+version = "0.0.82"
+dependencies = [
+ "optics-build",
+ "optics-gfx-sys",
+]
+
+[[package]]
+name = "optics-motion"
+version = "0.0.82"
+
+[[package]]
+name = "optics-scene"
+version = "0.0.82"
+dependencies = [
+ "optics-build",
+ "optics-gfx",
+ "optics-scene-sys",
+]
+
+[[package]]
+name = "optics-scene-sys"
+version = "0.0.82"
+dependencies = [
+ "optics-build",
+ "optics-gfx-sys",
+]
+
+[[package]]
+name = "optics-svg"
+version = "0.0.82"
+dependencies = [
+ "optics-build",
+ "optics-gfx",
+ "optics-svg-sys",
+]
+
+[[package]]
+name = "optics-svg-sys"
+version = "0.0.82"
+dependencies = [
+ "optics-build",
+ "optics-gfx-sys",
+]
+
+[[package]]
+name = "optics-text"
+version = "0.0.82"
+dependencies = [
+ "optics-build",
+ "optics-gfx",
+ "optics-text-sys",
+]
+
+[[package]]
+name = "optics-text-sys"
+version = "0.0.82"
+dependencies = [
+ "optics-build",
+ "optics-gfx-sys",
+]
+
+[[package]]
+name = "optics-ui"
+version = "0.0.82"
+dependencies = [
+ "optics-build",
+ "optics-gfx",
+ "optics-ui-sys",
+]
+
+[[package]]
+name = "optics-ui-sys"
+version = "0.0.82"
+dependencies = [
+ "optics-build",
+ "optics-gfx-sys",
+]
+
+[[package]]
+name = "optics-window"
+version = "0.0.82"
+dependencies = [
+ "optics-build",
+ "optics-window-sys",
+]
+
+[[package]]
+name = "optics-window-sys"
+version = "0.0.82"
+dependencies = [
+ "optics-build",
+ "optics-gfx-sys",
 ]
 
 [[package]]
@@ -243,24 +308,6 @@ checksum = "479ca8adacdd7ce8f1fb39ce9ecccbfe93a3f1344b3d0d97f20bc0196208f62b"
 dependencies = [
  "proc-macro2",
  "syn",
-]
-
-[[package]]
-name = "prism"
-version = "0.0.81"
-dependencies = [
- "flux",
- "flux-sys",
- "prism-sys",
-]
-
-[[package]]
-name = "prism-sys"
-version = "0.0.81"
-dependencies = [
- "bindgen",
- "flux-sys",
- "pkg-config",
 ]
 
 [[package]]
@@ -311,23 +358,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
-name = "reticle"
-version = "0.0.81"
-dependencies = [
- "flux",
- "reticle-sys",
-]
-
-[[package]]
-name = "reticle-sys"
-version = "0.0.81"
-dependencies = [
- "bindgen",
- "flux-sys",
- "pkg-config",
-]
-
-[[package]]
 name = "rustc-hash"
 version = "2.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -351,31 +381,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "transit"
-version = "0.0.81"
-
-[[package]]
 name = "unicode-ident"
 version = "1.0.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2c754d6c33795a1c324727428e5a7dedb5b06195f9890bdbcba760d3e246563"
-
-[[package]]
-name = "vista"
-version = "0.0.81"
-dependencies = [
- "flux",
- "vista-sys",
-]
-
-[[package]]
-name = "vista-sys"
-version = "0.0.81"
-dependencies = [
- "bindgen",
- "flux-sys",
- "pkg-config",
-]
 
 [[package]]
 name = "windows-link"

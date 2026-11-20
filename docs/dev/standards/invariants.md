@@ -44,7 +44,7 @@ The following canonical system invariants are mechanically enforced in Optics:
 | :--- | :--- | :--- | :--- |
 | `[INV-ARCH-WLSLOT]` | Wayland Listener Slots (ADR-0145) | Every event of every interface a `*_listener` table declares has a non-NULL slot; prevents fatal libwayland `abort()` crashes. | `python3 tools/check_listeners.py` (`meson test --suite lint`) + `test_listeners_guardrail.py` |
 | `[INV-ARCH-ARENA]` | Zero Heap Alloc Frame Walk | Hot frame traversal, layout passes, and render walks use only per-frame arena memory. | Arena memory tracking & integration tests |
-| `[INV-ARCH-SCOPEDRAIN]` | Scope Drain Point (ADR-0129) | A scope's live count returns to zero at its declared drain point; frame-lifetime kinds are asserted at the frame boundary. | `flux_observe_frame_drain_check` in `flux_frame_present`/`abandon` + `tests/flux/integration/test_resource_leak.c` |
+| `[INV-ARCH-SCOPEDRAIN]` | Scope Drain Point (ADR-0129) | A scope's live count returns to zero at its declared drain point; frame-lifetime kinds are asserted at the frame boundary. | `flux_observe_frame_drain_check` in `flux_frame_present`/`abandon` + `tests/gfx/integration/test_resource_leak.c` |
 
 *Note on Retired Pseudo-Invariants:* Bureaucratic tags such as `[INV-ARCH-LEDGER]` (TOML leak-lane ledgers), `[INV-ARCH-VERSION]` (manual lockstep grepping), `[INV-ARCH-SYMBOLS]` (symbols.md generation), and `[INV-DOC-ROOT]` (root file whitelists) have been formally retired. Version lockstep is now a plain lint script (`tools/check_versions.py`), not a tagged invariant. True runtime memory cleanliness is verified via standard ASan/LSan test suites, and architectural modularity is enforced natively by Meson/linker dependency boundaries.
 

@@ -4,9 +4,9 @@
 
 ```text
 .
-├── Cargo.toml          Repository-root Cargo workspace (ADR-0163)
+├── Cargo.toml          Repository-root Cargo workspace (ADR-0163, ADR-0169)
 ├── Cargo.lock          Single Rust dependency graph lockfile
-├── bindings/           Rust binding crates under crates/ (ADR-0159, ADR-0163)
+├── crates/             Rust crates (`optics`, `optics-*`, `optics-*-sys`, `optics-build`) (ADR-0169)
 ├── docs/               Tutorials, guides, reference, decisions, and dev docs
 ├── examples/           C examples per library, plus showcase/ effect demos
 ├── include/            Canonical umbrella C23 header <optics/optics.h> (ADR-0160)
@@ -28,26 +28,28 @@
 
 | Area | Public surface | Implementation | Tests | Examples |
 |------|----------------|----------------|-------|----------|
-| `flux` | `libs/flux/include/flux/` | `libs/flux/src/` | `tests/flux/` | `examples/flux/` |
-| `glyph` | `libs/glyph/include/glyph/` | `libs/glyph/src/` | `tests/glyph/` | `examples/glyph/` |
-| `vista` | `libs/vista/include/vista/` | `libs/vista/src/` | `tests/vista/` | `examples/vista/` |
-| `prism` | `libs/prism/include/prism/` | `libs/prism/src/` | `tests/prism/` | `examples/showcase/` |
-| `transit` | `libs/transit/include/transit/` | Header-only (`export.h`) | `tests/transit/` | `examples/transit/` |
-| `reticle` | `libs/reticle/include/reticle/` | `libs/reticle/src/` | `tests/reticle/` | `examples/reticle/` |
-| `lens` | `libs/lens/include/lens/` | `libs/lens/src/` | `tests/lens/` | `examples/lens/` |
-| `iris` | `libs/iris/include/iris/` | `libs/iris/src/` | `tests/iris/` | `examples/iris/` |
+| `flux` | `libs/gfx/include/flux/` | `libs/gfx/src/` | `tests/gfx/` | `examples/getting_started/` |
+| `glyph` | `libs/text/include/glyph/` | `libs/text/src/` | `tests/text/` | `examples/showcase/` |
+| `vista` | `libs/scene/include/vista/` | `libs/scene/src/` | `tests/scene/` | `examples/showcase/` |
+| `prism` | `libs/material/include/prism/` | `libs/material/src/` | `tests/material/` | `examples/showcase/` |
+| `transit` | `libs/motion/include/transit/` | Header-only (`export.h`) | `tests/motion/` | `examples/showcase/` |
+| `reticle` | `libs/svg/include/reticle/` | `libs/svg/src/` | `tests/svg/` | `examples/getting_started/` |
+| `lens` | `libs/ui/include/lens/` | `libs/ui/src/` | `tests/ui/` | `examples/showcase/` |
+| `iris` | `libs/window/include/iris/` | `libs/window/src/` | `tests/window/` | `examples/getting_started/` |
 | `optics` | `include/optics/optics.h` | Umbrella facade (`optics_dep`, ADR-0160/0164) | `tests/optics/` | — |
 
 Each library exposes a Meson dependency object to the next layer. Code in one
 library must not include another library's private `src/` headers.
 
-## Rust Bindings
+## Rust Crates
 
-The repository-root `Cargo.toml` is the single Cargo workspace. `bindings/crates/`
-holds all `-sys` crates, safe abstraction crates, and the `optics` facade crate
-with layered feature flags (ADR-0159, ADR-0163). Cargo commands run from the
-repository root. See [Rust bindings](../explanation/rust-bindings.md) for the
-crate map and development commands.
+The repository-root `Cargo.toml` is the single Cargo workspace. `crates/`
+stands symmetric with `libs/` and holds all `optics-*-sys` crates, safe
+`optics-*` wrapper crates, the shared `optics-build` helper, and the canonical
+`optics` facade crate with layered feature flags (ADR-0159, ADR-0163, ADR-0169).
+Cargo commands run from the repository root. See
+[Rust bindings](../explanation/rust-bindings.md) for the crate map and
+development commands.
 
 ## Where New Files Go
 
@@ -60,8 +62,8 @@ crate map and development commands.
   of `unit`, `integration`, or `e2e` (or a `bench`/`fuzz` lane); see
   [Testing](testing.md) and [ADR-0162](../adr/0162-layered-test-architecture-one-harness-three-layers-public-api-e2e.md).
 - Add runnable demonstrations under `examples/<library>/`.
-- Add FFI declarations and safe wrappers to the corresponding crate under
-  `bindings/crates/` in the same change as a public C API update. Cargo workspace
+- Add FFI declarations and safe wrappers to the corresponding `optics-*` crate
+  under `crates/` in the same change as a public C API update. Cargo workspace
   membership lives in the repository-root `Cargo.toml`.
 - Route documentation through the [documentation index](../index.md). Keep
   contributor procedures in `docs/dev/` and user tasks outside it.

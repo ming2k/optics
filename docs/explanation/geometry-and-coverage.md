@@ -28,19 +28,19 @@ from an exact path.
 
 | Stage | Algorithm | Location |
 |---|---|---|
-| Curve algebra (kernel) | Cubic → quadratic reduction with an exact error bound `|E|/(6·2√3)`; closed-form inflection and cusp splitting; Wang segment count; analytic parallel offset; closed-form retrograde interval; ray crossings and signed winding | `libs/flux/include/flux/curve.h`, `libs/flux/src/curve/curve.c` |
-| Path → polyline bridge | Uniform sampling at the kernel's Wang count (no recursion, no flatness search) | `libs/flux/src/canvas/curve_flatten.c` |
-| Fill tessellation | Ear clipping with hole bridging, convex fan fast path, incremental reflex candidate list, LRU tessellation cache, stencil-then-cover fallback for non-simple input | `libs/flux/src/canvas/geometry_tess.c` |
-| Stroke expansion | Per-vertex mitre frames; inner offset clamped at the local radius of curvature; miter/bevel/round joins; butt/square/round caps | `libs/flux/src/canvas/geometry_stroke.c` |
-| Path building | `MOVE`/`LINE`/`QUAD`/`CUBIC`/`CLOSE` verbs; rect / round-rect / circle constructors; squircle constructed as two cubics per corner fitted to `flux_sdf_squircle`'s zero set | `libs/flux/src/canvas/path.c` |
-| Distance fields (primitives) | Circle, rounded rect, squircle (circular↔L4 corner blend), border ring, analytic coverage | `libs/flux/include/flux/sdf.h`, `libs/flux/src/sdf/sdf.c` |
-| Distance field (device) | Rounded-rect field, border ring adjustment, one-pixel analytic coverage | `libs/flux/src/canvas/shaders/canvas_sdf.frag.slang` |
-| Distance field (host) | The same field via the shared primitive | `libs/flux/src/canvas/backend_cpu.c` (`frag_sdf`) |
-| Strategy dispatch | Which geometry class takes the analytic path and under which paint/blend/transform. Rounded rect, circle and squircle are analytic when solid + SRC_OVER + axis-uniform | `libs/flux/src/canvas/canvas.c` (`canvas_draw_geometry`, `draw_sdf_shape`) |
-| Material distance fields | Rounded-rect field via the shared snippet; squircle field local to the material | `libs/flux/include/flux/shaders/flux_sdf.slang` (included by `prism/src/shaders/frosted.comp.slang`, `liquid_glass.comp.slang`, `acrylic.comp.slang`, `mica.comp.slang`, `backdrop_frost.comp.slang`) |
-| Baked coverage (opt-in) | Device-resolution icon coverage mask, supersampled at bake time | `libs/lens/src/render/icon_mask.c` |
-| Glyph coverage | FreeType-rasterised coverage atlas (host-resident or device) | `libs/glyph/src/atlas.c` |
-| Icon vector source | SVG path parsing; elliptical arcs converted to cubic Béziers | `libs/reticle/src/path.c` |
+| Curve algebra (kernel) | Cubic → quadratic reduction with an exact error bound `|E|/(6·2√3)`; closed-form inflection and cusp splitting; Wang segment count; analytic parallel offset; closed-form retrograde interval; ray crossings and signed winding | `libs/gfx/include/flux/curve.h`, `libs/gfx/src/curve/curve.c` |
+| Path → polyline bridge | Uniform sampling at the kernel's Wang count (no recursion, no flatness search) | `libs/gfx/src/canvas/curve_flatten.c` |
+| Fill tessellation | Ear clipping with hole bridging, convex fan fast path, incremental reflex candidate list, LRU tessellation cache, stencil-then-cover fallback for non-simple input | `libs/gfx/src/canvas/geometry_tess.c` |
+| Stroke expansion | Per-vertex mitre frames; inner offset clamped at the local radius of curvature; miter/bevel/round joins; butt/square/round caps | `libs/gfx/src/canvas/geometry_stroke.c` |
+| Path building | `MOVE`/`LINE`/`QUAD`/`CUBIC`/`CLOSE` verbs; rect / round-rect / circle constructors; squircle constructed as two cubics per corner fitted to `flux_sdf_squircle`'s zero set | `libs/gfx/src/canvas/path.c` |
+| Distance fields (primitives) | Circle, rounded rect, squircle (circular↔L4 corner blend), border ring, analytic coverage | `libs/gfx/include/flux/sdf.h`, `libs/gfx/src/sdf/sdf.c` |
+| Distance field (device) | Rounded-rect field, border ring adjustment, one-pixel analytic coverage | `libs/gfx/src/canvas/shaders/canvas_sdf.frag.slang` |
+| Distance field (host) | The same field via the shared primitive | `libs/gfx/src/canvas/backend_cpu.c` (`frag_sdf`) |
+| Strategy dispatch | Which geometry class takes the analytic path and under which paint/blend/transform. Rounded rect, circle and squircle are analytic when solid + SRC_OVER + axis-uniform | `libs/gfx/src/canvas/canvas.c` (`canvas_draw_geometry`, `draw_sdf_shape`) |
+| Material distance fields | Rounded-rect field via the shared snippet; squircle field local to the material | `libs/gfx/include/flux/shaders/flux_sdf.slang` (included by `prism/src/shaders/frosted.comp.slang`, `liquid_glass.comp.slang`, `acrylic.comp.slang`, `mica.comp.slang`, `backdrop_frost.comp.slang`) |
+| Baked coverage (opt-in) | Device-resolution icon coverage mask, supersampled at bake time | `libs/ui/src/render/icon_mask.c` |
+| Glyph coverage | FreeType-rasterised coverage atlas (host-resident or device) | `libs/text/src/atlas.c` |
+| Icon vector source | SVG path parsing; elliptical arcs converted to cubic Béziers | `libs/svg/src/path.c` |
 
 ## The curve pipeline, in order
 
@@ -82,7 +82,7 @@ the mapping is exact for any similarity, rotation and uniform scale need no
 special case. Shear and anisotropic scale distort distance and so keep
 tessellating.
 
-The host backend evaluates the same primitives from `<flux/sdf.h>`, so host and
+The host backend evaluates the same primitives from `<optics/gfx/sdf.h>`, so host and
 device coverage agree by construction; `test_sdf` additionally pins the
 primitive against the shader's expression so the two cannot drift.
 
@@ -102,7 +102,7 @@ Recorded so the gaps are visible rather than inferred:
 - **Coverage backends.** The canvas still consumes triangles. Replacing that seam
   is sequenced by
   [ADR-0119](../adr/0119-coverage-seam-migration-staged-plan.md), whose first
-  stage has landed: `tests/flux/coverage_harness.c` is the independent ground
+  stage has landed: `tests/gfx/coverage_harness.c` is the independent ground
   truth (exact-area reference, supersampled reference, conformance report) and
   `test_cover_reference` verifies it. No backend work starts before that harness
   exists, so that a wrong reference cannot make every later gate meaningless.

@@ -14,9 +14,9 @@
 #include "lens_test.h"
 #include "optics_test.h"
 
-#include <flux/canvas.h>
-#include <flux/canvas_cpu.h>
-#include <lens/lens.h>
+#include <optics/gfx/canvas.h>
+#include <optics/gfx/canvas_cpu.h>
+#include <optics/ui.h>
 
 #include <string.h>
 
@@ -31,74 +31,78 @@ typedef struct app_state {
 } app_state;
 
 typedef struct session {
-    lens *ui;
+    optics_ui *ui;
     app_state state;
-    lens_response button;
-    lens_response checkbox;
-    lens_response name_field;
+    optics_ui_response button;
+    optics_ui_response checkbox;
+    optics_ui_response name_field;
     uint32_t frames;
 } session;
 
 static void build(session *s) {
-    lens_label(s->ui, &(lens_label_opts){.text = "Optics E2E session"});
-    lens_row_begin(s->ui, nullptr);
-    s->button =
-        lens_button(s->ui, &(lens_button_opts){.box = {.id = "new"}, .label = "New document"});
+    optics_ui_label(s->ui, &(optics_ui_label_opts){.text = "Optics E2E session"});
+    optics_ui_row_begin(s->ui, nullptr);
+    s->button = optics_ui_button(
+        s->ui, &(optics_ui_button_opts){.box = {.id = "new"}, .label = "New document"});
     if (s->button.clicked)
         s->state.clicks++;
-    s->checkbox = lens_checkbox(
-        s->ui,
-        &(lens_checkbox_opts){.box = {.id = "wrap"}, .label = "Wrap", .value = &s->state.wrap});
-    lens_flex(s->ui, 1.0f);
-    lens_slider(s->ui, &(lens_slider_opts){
-                           .label = "Zoom", .value = &s->state.zoom, .min = 0.5f, .max = 4.0f});
-    lens_row_end(s->ui);
+    s->checkbox = optics_ui_checkbox(s->ui, &(optics_ui_checkbox_opts){.box = {.id = "wrap"},
+                                                                       .label = "Wrap",
+                                                                       .value = &s->state.wrap});
+    optics_ui_flex(s->ui, 1.0f);
+    optics_ui_slider(s->ui,
+                     &(optics_ui_slider_opts){
+                         .label = "Zoom", .value = &s->state.zoom, .min = 0.5f, .max = 4.0f});
+    optics_ui_row_end(s->ui);
 
-    s->name_field = lens_textedit(s->ui, &(lens_textedit_opts){.box = {.id = "name"},
-                                                               .buf = s->state.name,
-                                                               .cap = sizeof s->state.name,
-                                                               .placeholder = "Document name"});
+    s->name_field =
+        optics_ui_textedit(s->ui, &(optics_ui_textedit_opts){.box = {.id = "name"},
+                                                             .buf = s->state.name,
+                                                             .cap = sizeof s->state.name,
+                                                             .placeholder = "Document name"});
 }
 
-static void frame(session *s, lens_input input) {
-    input.display_size = (flux_point){DISPLAY_W, DISPLAY_H};
+static void frame(session *s, optics_ui_input input) {
+    input.display_size = (optics_gfx_point){DISPLAY_W, DISPLAY_H};
     input.dt_seconds = 1.0f / 60.0f;
-    lens_begin(s->ui, &input);
+    optics_ui_begin(s->ui, &input);
     build(s);
-    lens_test_end(s->ui);
+    optics_ui_test_end(s->ui);
     s->frames++;
-    OT_EXPECT(!lens_overflowed(s->ui));
-    OT_EXPECT(!lens_has_duplicate_ids(s->ui));
+    OT_EXPECT(!optics_ui_overflowed(s->ui));
+    OT_EXPECT(!optics_ui_has_duplicate_ids(s->ui));
 }
 
-static flux_point centre_of(session *s, lens_id id) {
-    flux_rect rect = lens_node_bounds(lens_find(s->ui, id));
-    return (flux_point){rect.x + rect.w * 0.5f, rect.y + rect.h * 0.5f};
+static optics_gfx_point centre_of(session *s, optics_ui_id id) {
+    optics_gfx_rect rect = optics_ui_node_bounds(optics_ui_find(s->ui, id));
+    return (optics_gfx_point){rect.x + rect.w * 0.5f, rect.y + rect.h * 0.5f};
 }
 
 static void click(session *s) {
-    flux_point at = centre_of(s, s->button.id);
-    lens_input press = {
-        .cursor = at, .mouse_down[LENS_MOUSE_LEFT] = true, .mouse_pressed[LENS_MOUSE_LEFT] = true};
+    optics_gfx_point at = centre_of(s, s->button.id);
+    optics_ui_input press = {.cursor = at,
+                             .mouse_down[OPTICS_UI_MOUSE_LEFT] = true,
+                             .mouse_pressed[OPTICS_UI_MOUSE_LEFT] = true};
     frame(s, press);
 
-    lens_input release = {.cursor = at, .mouse_released[LENS_MOUSE_LEFT] = true};
+    optics_ui_input release = {.cursor = at, .mouse_released[OPTICS_UI_MOUSE_LEFT] = true};
     frame(s, release);
 }
 
 static void toggle_checkbox(session *s) {
-    flux_point at = centre_of(s, s->checkbox.id);
-    lens_input press = {
-        .cursor = at, .mouse_down[LENS_MOUSE_LEFT] = true, .mouse_pressed[LENS_MOUSE_LEFT] = true};
+    optics_gfx_point at = centre_of(s, s->checkbox.id);
+    optics_ui_input press = {.cursor = at,
+                             .mouse_down[OPTICS_UI_MOUSE_LEFT] = true,
+                             .mouse_pressed[OPTICS_UI_MOUSE_LEFT] = true};
     frame(s, press);
 
-    lens_input release = {.cursor = at, .mouse_released[LENS_MOUSE_LEFT] = true};
+    optics_ui_input release = {.cursor = at, .mouse_released[OPTICS_UI_MOUSE_LEFT] = true};
     frame(s, release);
 }
 
 static void type_name(session *s) {
-    lens_set_focus(s->ui, s->name_field.id);
-    lens_input typing = {};
+    optics_ui_set_focus(s->ui, s->name_field.id);
+    optics_ui_input typing = {};
     strncpy(typing.text_utf8, "atlas", sizeof typing.text_utf8 - 1);
     frame(s, typing);
 }
@@ -107,28 +111,29 @@ static uint32_t count_a11y = 0;
 static bool saw_button = false;
 static bool saw_text = false;
 
-static void visit(const lens_semantics *semantics, flux_rect bounds, lens_id id, lens_id parent,
-                  void *user) {
+static void visit(const optics_ui_semantics *semantics, optics_gfx_rect bounds, optics_ui_id id,
+                  optics_ui_id parent, void *user) {
     (void)bounds;
     (void)id;
     (void)parent;
     (void)user;
     count_a11y++;
-    if (semantics->role == LENS_ROLE_BUTTON && semantics->name &&
+    if (semantics->role == OPTICS_UI_ROLE_BUTTON && semantics->name &&
         strcmp(semantics->name, "New document") == 0)
         saw_button = true;
-    if (semantics->role == LENS_ROLE_TEXTFIELD && semantics->value &&
+    if (semantics->role == OPTICS_UI_ROLE_TEXTFIELD && semantics->value &&
         strcmp(semantics->value, "atlas") == 0)
         saw_text = true;
 }
 
 int main(void) {
     session s = {};
-    OT_REQUIRE(lens_create(&(lens_desc){.theme = lens_theme_dark()}, &s.ui) == FLUX_OK);
+    OT_REQUIRE(optics_ui_create(&(optics_ui_desc){.theme = optics_ui_theme_dark()}, &s.ui) ==
+               OPTICS_GFX_OK);
 
     /* Frame 0: first layout. Nothing has been clicked. */
-    frame(&s, (lens_input){});
-    flux_rect button_rect = lens_node_bounds(lens_find(s.ui, s.button.id));
+    frame(&s, (optics_ui_input){});
+    optics_gfx_rect button_rect = optics_ui_node_bounds(optics_ui_find(s.ui, s.button.id));
     OT_EXPECT(button_rect.w > 0.0f && button_rect.h > 0.0f);
     OT_EXPECT(s.state.clicks == 0);
 
@@ -141,42 +146,43 @@ int main(void) {
 
     type_name(&s);
     OT_EXPECT_STR_EQ(s.state.name, "atlas");
-    OT_EXPECT(s.name_field.state & LENS_STATE_FOCUSED);
+    OT_EXPECT(s.name_field.state & OPTICS_UI_STATE_FOCUSED);
 
     /* A stable frame must have a published, activated snapshot. */
-    const uint64_t generation = lens_generation(s.ui);
+    const uint64_t generation = optics_ui_generation(s.ui);
     OT_EXPECT(generation > 0);
-    OT_EXPECT(lens_last_presented_generation(s.ui) == generation);
+    OT_EXPECT(optics_ui_last_presented_generation(s.ui) == generation);
 
-    lens_scene_snapshot *snapshot = nullptr;
-    OT_REQUIRE(lens_snapshot_create(s.ui, &snapshot) == FLUX_OK);
-    OT_REQUIRE(lens_snapshot_display_list(snapshot) != nullptr);
-    OT_EXPECT(flux_display_list_command_count(lens_snapshot_display_list(snapshot)) > 0);
+    optics_ui_scene_snapshot *snapshot = nullptr;
+    OT_REQUIRE(optics_ui_snapshot_create(s.ui, &snapshot) == OPTICS_GFX_OK);
+    OT_REQUIRE(optics_ui_snapshot_display_list(snapshot) != nullptr);
+    OT_EXPECT(optics_gfx_display_list_command_count(optics_ui_snapshot_display_list(snapshot)) > 0);
 
     count_a11y = 0;
     saw_button = false;
     saw_text = false;
-    lens_snapshot_accessibility_walk(snapshot, visit, nullptr);
+    optics_ui_snapshot_accessibility_walk(snapshot, visit, nullptr);
     OT_EXPECT(count_a11y > 0);
     OT_EXPECT(saw_button);
     OT_EXPECT(saw_text);
 
-    flux_canvas *canvas = nullptr;
-    OT_REQUIRE(flux_canvas_create(&(flux_canvas_desc){.type = FLUX_TYPE_CANVAS_DESC,
-                                                      .backend = FLUX_CANVAS_BACKEND_CPU,
-                                                      .scale = 1.0f,
-                                                      .width = (uint32_t)DISPLAY_W,
-                                                      .height = (uint32_t)DISPLAY_H},
-                                  &canvas) == FLUX_OK);
-    flux_color clear = flux_color_rgba_premul(0, 0, 0, 255);
+    optics_gfx_canvas *canvas = nullptr;
     OT_REQUIRE(
-        flux_canvas_begin(canvas, &(flux_canvas_pass_desc){.type = FLUX_TYPE_CANVAS_PASS_DESC,
-                                                           .clear_color = &clear}) == FLUX_OK);
-    OT_EXPECT(lens_snapshot_submit(snapshot, canvas) == FLUX_OK);
-    OT_REQUIRE(flux_canvas_end(canvas) == FLUX_OK);
+        optics_gfx_canvas_create(&(optics_gfx_canvas_desc){.type = OPTICS_GFX_TYPE_CANVAS_DESC,
+                                                           .backend = OPTICS_GFX_CANVAS_BACKEND_CPU,
+                                                           .scale = 1.0f,
+                                                           .width = (uint32_t)DISPLAY_W,
+                                                           .height = (uint32_t)DISPLAY_H},
+                                 &canvas) == OPTICS_GFX_OK);
+    optics_gfx_color clear = optics_gfx_color_rgba_premul(0, 0, 0, 255);
+    OT_REQUIRE(optics_gfx_canvas_begin(
+                   canvas, &(optics_gfx_canvas_pass_desc){.type = OPTICS_GFX_TYPE_CANVAS_PASS_DESC,
+                                                          .clear_color = &clear}) == OPTICS_GFX_OK);
+    OT_EXPECT(optics_ui_snapshot_submit(snapshot, canvas) == OPTICS_GFX_OK);
+    OT_REQUIRE(optics_gfx_canvas_end(canvas) == OPTICS_GFX_OK);
 
     uint32_t width = 0, height = 0, stride = 0;
-    const uint8_t *pixels = flux_canvas_read_pixels(canvas, &width, &height, &stride);
+    const uint8_t *pixels = optics_gfx_canvas_read_pixels(canvas, &width, &height, &stride);
     OT_REQUIRE(pixels != nullptr);
     OT_EXPECT(width == (uint32_t)DISPLAY_W && height == (uint32_t)DISPLAY_H);
 
@@ -190,8 +196,8 @@ int main(void) {
     }
     OT_EXPECT(lit > 1000);
 
-    flux_canvas_release(canvas);
-    lens_snapshot_release(snapshot);
-    lens_release(s.ui);
+    optics_gfx_canvas_release(canvas);
+    optics_ui_snapshot_release(snapshot);
+    optics_ui_release(s.ui);
     return OT_REPORT();
 }

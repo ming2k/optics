@@ -22,7 +22,7 @@ A descriptor is for configuration. Operands are parameters.
 5. **Positional is correct for operands.** Scalar setters and getters
    (`flux_canvas_rotate(c, radians)`, `lens_set_scale(ui, scale)`), lifecycle
    primitives (`retain` / `release`), and value kernels — pure math and
-   geometry in `<flux/math.h>`, `<flux/curve.h>`, `<flux/sdf.h>` and the path
+   geometry in `<optics/gfx/math.h>`, `<optics/gfx/curve.h>`, `<optics/gfx/sdf.h>` and the path
    verbs — keep their arguments positional at any count. Wrapping six control
    point floats in a struct obscures the call without adding anything.
 

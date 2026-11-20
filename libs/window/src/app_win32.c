@@ -1,0 +1,2595 @@
+/* app_win32.c — native Win32 window + Vulkan (via flux) + iris_input.
+ *
+ * The Windows backend for iris, mirroring app_wayland.c's structure and
+ * behaviour: one overlapped window, a MsgWaitForMultipleObjectsEx + PeekMessage
+ * pump that carries the same frame-pacing state machine (active ~60 Hz after
+ * input, ~4 Hz idle while a caret blinks, fully event-driven when static),
+ * IMM32 for IME, CF_UNICODETEXT for the clipboard, and
+ * VK_KHR_win32_surface to hand flux core a VkSurfaceKHR. Pointer and
+ * keyboard events are folded into one iris_input per frame (ADR-0029).
+ *
+ * NOT YET VERIFIED ON A REAL WINDOWS MACHINE. Everything in this file is
+ * compile-checked for x86_64-windows-gnu via tools/ci/zig-win32-check.sh only.
+ * The parts that most need on-hardware validation:
+ *   - IMM32 composition/candidate behaviour against real IMEs (MS Pinyin,
+ *     Japanese IME, Korean IME): GCS_CURSORPOS units, ATTR target-clause
+ *     runs, candidate-window placement via CFS_POINT / CFS_CANDIDATEPOS.
+ *   - PerMonitorV2 DPI transitions (WM_DPICHANGED ordering vs WM_SIZE,
+ *     drag across mixed-DPI monitors, non-integer scales like 150 %).
+ *   - Smooth-wheel (high-resolution) mouse deltas: the steps/pixels split
+ *     documented in on_mouse_wheel.
+ *   - Fullscreen style/placement restore, and DWM interactions of
+ *     vsync=false (MAILBOX) present on a borderless-ish swapchain.
+ */
+
+#ifndef _WIN32_WINNT
+#define _WIN32_WINNT 0x0A00 /* Windows 10: PerMonitorV2 DPI, GetDpiForWindow, … */
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef UNICODE
+#define UNICODE
+#endif
+#ifndef _UNICODE
+#define _UNICODE
+#endif
+
+/* meson supplies -DIRIS_BUILDING=1 (iris_c_args) so IRIS_API spells
+ * dllexport; define it here as well so single-file compile checks
+ * (tools/ci/zig-win32-check.sh) don't see dllimport on definitions. */
+#ifndef OPTICS_WINDOW_BUILDING
+#define OPTICS_WINDOW_BUILDING 1
+#endif
+
+#include "a11y_prefs_internal.h"
+#include "display_pacer.h"
+#include "frame_mailbox.h"
+#include "platform_input.h"
+#include "platform_internal.h"
+#include "platform_text.h"
+#include "platform_wakeup.h"
+#include "theme_watch_internal.h"
+#include "ui_host.h"
+
+#include <optics/window/a11y.h>
+#include <optics/window/a11y_prefs.h>
+#include <optics/window/cursor.h>
+#include <optics/window/dnd.h>
+#include <optics/window/state.h>
+#include <optics/window/theme.h>
+
+#include <optics/gfx.h>
+#include <optics/gfx/vulkan.h>
+
+/* clang-format off */
+/* windows.h MUST precede imm.h, ole2.h, shellapi.h, and vulkan_win32.h:
+ * imm.h uses the base handle macros (DECLARE_HANDLE, HKL, UINT, DWORD,
+ * POINT, RECT) without defining them. MinGW-w64 headers tolerate the
+ * reverse order by accident; zig cc's bundled MinGW headers do not. */
+#include <windows.h>
+#include <windowsx.h>
+#include <dwmapi.h>
+#include <imm.h>
+#include <ole2.h>
+#include <shellapi.h>
+#include <shlobj.h>
+/* clang-format on */
+
+/* Win32 platform surface glue: included as the platform child header (the
+ * way app_wayland.c pulls <vulkan/vulkan_wayland.h>), after windows.h has
+ * provided the native handle types. */
+#include <vulkan/vulkan.h>
+#include <vulkan/vulkan_win32.h>
+
+#include <math.h>
+#include <stdatomic.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+/* Internal seam with theme_win32.c: called from the WndProc on
+ * WM_SETTINGCHANGE. Runs on the loop thread, so the watcher callback is
+ * invoked directly (theme.h's main-thread delivery guarantee) without
+ * detouring through the wakeup seam. */
+void optics_window_theme_win32__notify_setting_change(void);
+
+/* Internal seam with a11y_prefs_win32.c: same delivery as above, for the
+ * accessibility preference set (reduced motion / high contrast / text
+ * scale). Declared in a11y_prefs_internal.h when _WIN32 is defined; this
+ * forward declaration keeps the WndProc's call site self-describing. */
+void optics_window_a11y_prefs_win32__notify_setting_change(void);
+
+/* Backend-reserved thread/window messages (WM_APP band). WM_IRIS_WAKEUP is
+ * the wakeup-seam kick (PostThreadMessage; hwnd == NULL). WM_IRIS_PASTE_DELIVER
+ * carries an asynchronous clipboard payload (PostMessage to the window). */
+#define WM_IRIS_WAKEUP (WM_APP + 0x100)
+#define WM_IRIS_PASTE_DELIVER (WM_APP + 0x101)
+
+#define OPTICS_WINDOW_WNDCLASS_NAME L"iris_window"
+
+/* Smooth-wheel deltas below one notch are reported on lens's pixel channel
+ * at this many logical pixels per notch. 40 matches the lens-side consumer
+ * convention (slider.c divides scroll_pixels_y by 40). */
+#define W32_WHEEL_PIXELS_PER_NOTCH 40.0
+
+/* ------------------------------------------------------------------ */
+/*  Accumulated input, drained into one iris_input per frame             */
+/* ------------------------------------------------------------------ */
+
+typedef struct w32_accum {
+    double cx, cy;                            /* latest cursor, client logical px */
+    bool down[OPTICS_WINDOW_BUTTON_COUNT];    /* held state (persists)          */
+    bool pressed[OPTICS_WINDOW_BUTTON_COUNT]; /* edges this frame               */
+    bool released[OPTICS_WINDOW_BUTTON_COUNT];
+    double scroll_x, scroll_y;               /* wheel notches this frame       */
+    double scroll_px_x, scroll_px_y;         /* smooth pixel deltas this frame */
+    uint32_t mods;                           /* level state (persists)         */
+    char text[256];                          /* committed text this frame; must match
+                                               iris_input.text_utf8 (static_assert below) */
+    char preedit[OPTICS_WINDOW_PREEDIT_MAX]; /* IME preedit string             */
+    uint32_t preedit_cursor;                 /* caret byte offset in preedit   */
+    uint32_t preedit_sel_lo;                 /* active clause, byte range      */
+    uint32_t preedit_sel_hi;
+    optics_window_key_event keys[OPTICS_WINDOW_INPUT_MAX_KEYS];
+    uint32_t key_count;
+} w32_accum;
+
+/* The staging buffers feed iris_input by whole-buffer memcpy in
+ * drain_input; pin the sizes so a lens-side change fails at compile time
+ * instead of over-reading the accumulator (the wayland backend carries
+ * the same guards). */
+static_assert(sizeof((w32_accum *)0)->text == sizeof((optics_window_input *)0)->text_utf8,
+              "w32_accum.text must match iris_input.text_utf8");
+static_assert(sizeof((w32_accum *)0)->preedit == sizeof((optics_window_input *)0)->preedit_utf8,
+              "w32_accum.preedit must match iris_input.preedit_utf8");
+
+/* ------------------------------------------------------------------ */
+/*  Platform state                                                     */
+/* ------------------------------------------------------------------ */
+
+typedef struct w32_platform {
+    HINSTANCE hinstance;
+    HWND hwnd;
+    DWORD loop_thread_id; /* for the wakeup-seam kick (PostThreadMessage) */
+
+    int width, height; /* client size in *logical* pixels              */
+    int min_w, min_h;  /* size hints (logical); 0 = unset              */
+    int max_w, max_h;
+    float scale;         /* device pixels per logical pixel (dpi / 96) */
+    float pending_scale; /* from WM_DPICHANGED, applied next frame     */
+
+    bool running;
+    bool resized;                    /* size or scale changed -> resize swapchain */
+    bool minimized;                  /* SIZE_MINIMIZED: no valid render target    */
+    bool force_paint;                /* WM_PAINT asked for a real frame      */
+    bool animation_frame_requested;  /* host asked for active-rate follow-up */
+    bool record_static;              /* host declared this frame's canvas static */
+    bool frame_skip_render;          /* host asked to skip rendering but keep the active cadence */
+    int64_t refresh_ns;              /* learned display period; 0 = unknown   */
+    bool theme_watching;             /* backend theme watch registered       */
+    bool a11y_prefs_watching;        /* backend a11y-pref watch registered   */
+    bool a11y_running;               /* a11y bridge initialised (inert stub) */
+    const optics_window_ui_host *ui; /* live UI host; null before start / after teardown */
+    optics_window_ui_frame ui_frame; /* report of the most recent UI frame */
+
+    optics_window_cursor host_cursor;      /* last iris_set_cursor value (explicit) */
+    optics_window_cursor effective_cursor; /* what WM_SETCURSOR currently applies   */
+    bool cursor_inside;                    /* pointer currently over the client area */
+    bool tracking_leave;                   /* TrackMouseEvent(TME_LEAVE) armed       */
+
+    /* Fullscreen: style/placement saved on entry, restored on exit. */
+    bool fullscreen;
+    DWORD saved_style;
+    DWORD saved_ex_style;
+    WINDOWPLACEMENT saved_placement;
+
+    /* IME (IMM32). The design keeps the whole composition in w32_accum so a
+     * future TSF bridge can replace the message handlers without touching
+     * the frame loop. */
+    bool ime_composing;
+    uint32_t pending_high_surrogate; /* carried UTF-16 lead surrogate, 0 = none */
+
+    /* Drag-and-drop state (ADR-0086) */
+    optics_window_dnd_source drag_source;
+    bool drag_active;
+
+    /* Decoupled Presentation Engine (ADR-0124) */
+    optics_window_frame_mailbox mailbox;
+    HANDLE present_thread;
+    HANDLE present_event;
+    _Atomic(bool) presenter_running;
+    bool has_presenter_thread;
+
+    w32_accum acc;
+} w32_platform;
+
+static int64_t w32_query_refresh_ns(HWND hwnd);
+
+/* iris_set_cursor / iris_window_* are public, context-free APIs; they reach
+ * the active app's platform through this single static pointer. Set at the
+ * top of iris_app_run_win32, cleared before teardown. Documented as
+ * thread-affine: callers must drive them from the iris_app_run thread. */
+static w32_platform *g_active_pl = nullptr;
+
+/* Internal seam for file_dialog_win32.c: the common file dialogs take an
+ * owner HWND so they stay modal to the app window. Not a public symbol. */
+HWND optics_window_win32__dialog_owner(void) {
+    return g_active_pl ? g_active_pl->hwnd : nullptr;
+}
+
+void optics_window_request_animation_frame_win32(void) {
+    w32_platform *pl = g_active_pl;
+    if (pl)
+        pl->animation_frame_requested = true;
+}
+
+void optics_window_record_mark_static_win32(void) {
+    w32_platform *pl = g_active_pl;
+    if (pl)
+        pl->record_static = true;
+}
+
+void optics_window_request_frame_skip_render_win32(void) {
+    w32_platform *pl = g_active_pl;
+    if (pl)
+        pl->frame_skip_render = true;
+}
+
+/* Theme watcher callback: invoked on the iris main thread (from the WndProc
+ * via theme_win32.c's notify hook) when the system colour scheme flips. */
+static void w32_on_color_scheme_changed(optics_window_color_scheme scheme, void *user) {
+    w32_platform *pl = user;
+    if (!pl || !pl->ui)
+        return;
+    optics_window__ui_set_color_scheme(pl->ui, scheme);
+}
+
+/* Accessibility-preference watcher callback (ADR-0075): delivered from the
+ * WndProc's WM_SETTINGCHANGE via a11y_prefs_win32.c's notify hook — already
+ * on the iris main thread. Applies the OS accessibility preferences to
+ * lens directly (lens is headless and cannot see them itself). */
+static void w32_on_a11y_prefs(const optics_window_a11y_prefs *prefs, void *user) {
+    w32_platform *pl = user;
+    if (!pl || !pl->ui)
+        return;
+    optics_window__ui_set_a11y_prefs(pl->ui, prefs);
+    /* Force a frame so the new preferences reach the screen even while the
+     * loop is idle-parked. */
+    pl->animation_frame_requested = true;
+}
+
+/* ------------------------------------------------------------------ */
+/*  UTF-8 / UTF-16 helpers                                              */
+/* ------------------------------------------------------------------ */
+
+/* Encode one scalar value as UTF-8. Returns the byte count (1..4). Callers
+ * guarantee cp is a valid scalar (surrogates are paired before this). */
+static int utf8_encode(uint32_t cp, char out[4]) {
+    if (cp < 0x80) {
+        out[0] = (char)cp;
+        return 1;
+    }
+    if (cp < 0x800) {
+        out[0] = (char)(0xC0 | (cp >> 6));
+        out[1] = (char)(0x80 | (cp & 0x3F));
+        return 2;
+    }
+    if (cp < 0x10000) {
+        out[0] = (char)(0xE0 | (cp >> 12));
+        out[1] = (char)(0x80 | ((cp >> 6) & 0x3F));
+        out[2] = (char)(0x80 | (cp & 0x3F));
+        return 3;
+    }
+    out[0] = (char)(0xF0 | (cp >> 18));
+    out[1] = (char)(0x80 | ((cp >> 12) & 0x3F));
+    out[2] = (char)(0x80 | ((cp >> 6) & 0x3F));
+    out[3] = (char)(0x80 | (cp & 0x3F));
+    return 4;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Pre-fold event seam helpers (ADR-0107)                            */
+/* ------------------------------------------------------------------ */
+/* Every lens-facing input mutation goes through one of these: reify,
+ * run the host seam (event_internal.h), apply the surviving — possibly
+ * host-rewritten — event to the accumulator. Platform bookkeeping
+ * (capture, cursor, IME state) stays outside the seam. */
+
+static bool w32_emit_pointer(w32_platform *pl, optics_window_event_type type, double x, double y) {
+    optics_window_event ev = {.type = type, .pointer = {.x = (float)x, .y = (float)y}};
+    if (!optics_window__event_seam_emit(&ev))
+        return false;
+    pl->acc.cx = ev.pointer.x;
+    pl->acc.cy = ev.pointer.y;
+    return true;
+}
+
+static bool w32_emit_button(w32_platform *pl, double x, double y, int optics_ui_button, bool down) {
+    optics_window_event ev = {
+        .type = OPTICS_WINDOW_EVENT_POINTER_BUTTON,
+        .button = {.x = (float)x, .y = (float)y, .button = optics_ui_button, .pressed = down}};
+    if (!optics_window__event_seam_emit(&ev))
+        return false;
+    int i = ev.button.button;
+    if (i < 0 || i >= OPTICS_WINDOW_BUTTON_COUNT)
+        return false;
+    pl->acc.cx = ev.button.x;
+    pl->acc.cy = ev.button.y;
+    bool d = ev.button.pressed;
+    if (d && !pl->acc.down[i])
+        pl->acc.pressed[i] = true;
+    if (!d && pl->acc.down[i])
+        pl->acc.released[i] = true;
+    pl->acc.down[i] = d;
+    return true;
+}
+
+static bool w32_emit_scroll(w32_platform *pl, bool horizontal, double optics_ui_delta,
+                            bool continuous) {
+    optics_window_event ev = {.type = OPTICS_WINDOW_EVENT_SCROLL,
+                              .scroll = {.continuous = continuous}};
+    if (horizontal)
+        ev.scroll.dx = (float)optics_ui_delta;
+    else
+        ev.scroll.dy = (float)optics_ui_delta;
+    if (!optics_window__event_seam_emit(&ev))
+        return false;
+    if (ev.scroll.dx != 0.0f)
+        optics_window_scroll_accum_delta(&pl->acc.scroll_y, &pl->acc.scroll_px_y, &pl->acc.scroll_x,
+                                         &pl->acc.scroll_px_x, 1, (double)ev.scroll.dx,
+                                         ev.scroll.continuous);
+    if (ev.scroll.dy != 0.0f)
+        optics_window_scroll_accum_delta(&pl->acc.scroll_y, &pl->acc.scroll_px_y, &pl->acc.scroll_x,
+                                         &pl->acc.scroll_px_x, 0, (double)ev.scroll.dy,
+                                         ev.scroll.continuous);
+    return true;
+}
+
+static bool w32_emit_key(w32_platform *pl, int key, bool pressed, bool repeat, uint32_t mods) {
+    optics_window_event ev = {
+        .type = OPTICS_WINDOW_EVENT_KEY,
+        .keyboard = {.key = key, .pressed = pressed, .repeat = repeat, .mods = mods}};
+    if (!optics_window__event_seam_emit(&ev))
+        return false;
+    if (ev.keyboard.key != 0 && pl->acc.key_count < OPTICS_WINDOW_INPUT_MAX_KEYS)
+        pl->acc.keys[pl->acc.key_count++] = (optics_window_key_event){
+            .key = ev.keyboard.key, .pressed = ev.keyboard.pressed, .repeat = ev.keyboard.repeat};
+    return true;
+}
+
+static bool w32_emit_modifiers(w32_platform *pl, uint32_t mods) {
+    optics_window_event ev = {.type = OPTICS_WINDOW_EVENT_MODIFIERS, .modifiers = {.mods = mods}};
+    if (!optics_window__event_seam_emit(&ev))
+        return false;
+    pl->acc.mods = ev.modifiers.mods;
+    return true;
+}
+
+static bool w32_emit_text(w32_platform *pl, const char *utf8, size_t n) {
+    optics_window_event ev = {.type = OPTICS_WINDOW_EVENT_TEXT_COMMIT,
+                              .text = {.utf8 = utf8, .len = n}};
+    if (!optics_window__event_seam_emit(&ev))
+        return false;
+    if (ev.text.utf8 && ev.text.len)
+        optics_window_utf8_append(pl->acc.text, sizeof pl->acc.text, ev.text.utf8, ev.text.len);
+    return true;
+}
+
+static bool w32_emit_preedit(w32_platform *pl, const char *utf8, uint32_t cursor, uint32_t sel_lo,
+                             uint32_t sel_hi) {
+    optics_window_event ev = {.type = OPTICS_WINDOW_EVENT_PREEDIT,
+                              .preedit = {.utf8 = utf8,
+                                          .len = utf8 ? strlen(utf8) : 0,
+                                          .cursor = cursor,
+                                          .sel_lo = sel_lo,
+                                          .sel_hi = sel_hi}};
+    if (!optics_window__event_seam_emit(&ev))
+        return false;
+    if (ev.preedit.utf8 && ev.preedit.utf8[0]) {
+        optics_window_utf8_copy(pl->acc.preedit, sizeof pl->acc.preedit, ev.preedit.utf8);
+        uint32_t alen = (uint32_t)strlen(pl->acc.preedit);
+        pl->acc.preedit_cursor = ev.preedit.cursor > alen ? alen : ev.preedit.cursor;
+        pl->acc.preedit_sel_lo = ev.preedit.sel_lo > alen ? alen : ev.preedit.sel_lo;
+        pl->acc.preedit_sel_hi = ev.preedit.sel_hi > alen ? alen : ev.preedit.sel_hi;
+    } else {
+        pl->acc.preedit[0] = '\0';
+        pl->acc.preedit_cursor = 0;
+        pl->acc.preedit_sel_lo = pl->acc.preedit_sel_hi = 0;
+    }
+    return true;
+}
+
+/* Lifecycle events are observe-only (undroppable): iris already applied
+ * the platform state; the host may read them but the payload is not folded
+ * back. */
+static void w32_emit_resize(uint32_t w, uint32_t h) {
+    optics_window_event ev = {.type = OPTICS_WINDOW_EVENT_RESIZE,
+                              .flags = OPTICS_WINDOW_EVENT_F_UNDROPPABLE,
+                              .resize = {.width = w, .height = h}};
+    (void)optics_window__event_seam_emit(&ev);
+}
+static void w32_emit_scale(float scale) {
+    optics_window_event ev = {.type = OPTICS_WINDOW_EVENT_SCALE,
+                              .flags = OPTICS_WINDOW_EVENT_F_UNDROPPABLE,
+                              .scale = {.scale = scale}};
+    (void)optics_window__event_seam_emit(&ev);
+}
+static void w32_emit_focus(bool focused) {
+    optics_window_event ev = {.type = OPTICS_WINDOW_EVENT_FOCUS,
+                              .flags = OPTICS_WINDOW_EVENT_F_UNDROPPABLE,
+                              .focus = {.focused = focused}};
+    (void)optics_window__event_seam_emit(&ev);
+}
+static void w32_emit_close(void) {
+    optics_window_event ev = {.type = OPTICS_WINDOW_EVENT_CLOSE,
+                              .flags = OPTICS_WINDOW_EVENT_F_UNDROPPABLE};
+    (void)optics_window__event_seam_emit(&ev);
+}
+
+/* Append UTF-8 text to the per-frame commit accumulator (cap 255 + NUL,
+ * matching iris_input.text_utf8; enforced by the static_assert at the
+ * w32_accum definition), truncating on a code-point boundary (shared
+ * helper, platform_text.h). Same cap as app_wayland.c. */
+static void accum_text_append(w32_platform *pl, const char *utf8, size_t n) {
+    (void)w32_emit_text(pl, utf8, n);
+}
+
+static void accum_text_cp(w32_platform *pl, uint32_t cp) {
+    /* Control characters (Tab / Return / Backspace) travel on the key path,
+     * matching the other backends. iris_cp_is_text also rejects 0x7f:
+     * TranslateMessage delivers WM_CHAR 0x7f for Ctrl+Backspace, and the
+     * plain < 0x20 test let it through as "text". */
+    if (!optics_window_cp_is_text(cp))
+        return;
+    char buf[4];
+    int n = utf8_encode(cp, buf);
+    accum_text_append(pl, buf, (size_t)n);
+}
+
+/* UTF-8 -> freshly allocated NUL-terminated WCHAR (NULL on failure).
+ * Caller frees with free(). */
+static WCHAR *w32_wide_from_utf8(const char *utf8) {
+    int n = MultiByteToWideChar(CP_UTF8, 0, utf8, -1, nullptr, 0);
+    if (n <= 0)
+        return nullptr;
+    WCHAR *w = malloc((size_t)n * sizeof *w);
+    if (!w)
+        return nullptr;
+    MultiByteToWideChar(CP_UTF8, 0, utf8, -1, w, n);
+    return w;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Input mapping (platform_input.h contract)                         */
+/* ------------------------------------------------------------------ */
+
+/* Win32 button message → lens mouse index, via the shared iris_pointer_button
+ * layer (platform_input.h) so the Win32-only codes stay inside this file.
+ * X1/X2 (WM_XBUTTON*) and anything unknown return -1 and are ignored. */
+static int mouse_index(UINT msg) {
+    optics_window_pointer_button b;
+    switch (msg) {
+    case WM_LBUTTONDOWN:
+    case WM_LBUTTONUP:
+        b = OPTICS_WINDOW_POINTER_BUTTON_LEFT;
+        break;
+    case WM_RBUTTONDOWN:
+    case WM_RBUTTONUP:
+        b = OPTICS_WINDOW_POINTER_BUTTON_RIGHT;
+        break;
+    case WM_MBUTTONDOWN:
+    case WM_MBUTTONUP:
+        b = OPTICS_WINDOW_POINTER_BUTTON_MIDDLE;
+        break;
+    default:
+        b = OPTICS_WINDOW_POINTER_BUTTON_UNKNOWN;
+        break;
+    }
+    return optics_window_pointer_button_index(b);
+}
+
+/* Virtual-key code → lens key: IRIS_KEY_* sentinels for the navigation set,
+ * lowercase ASCII for letters/digits/space (matching the Wayland backend's
+ * unshifted xkb keysyms so Ctrl+C/V/X/A shortcuts line up), raw VK codes
+ * (< 256, below the sentinel band) for everything else. Pure modifiers and
+ * IME process keys return 0 = not recorded (they live in iris_input.mods). */
+static int vk_to_key(WPARAM vk) {
+    switch (vk) {
+    case VK_ESCAPE:
+        return OPTICS_WINDOW_KEY_ESCAPE;
+    case VK_TAB:
+        return OPTICS_WINDOW_KEY_TAB;
+    case VK_RETURN:
+        return OPTICS_WINDOW_KEY_RETURN;
+    case VK_BACK:
+        return OPTICS_WINDOW_KEY_BACKSPACE;
+    case VK_DELETE:
+        return OPTICS_WINDOW_KEY_DELETE;
+    case VK_LEFT:
+        return OPTICS_WINDOW_KEY_LEFT;
+    case VK_RIGHT:
+        return OPTICS_WINDOW_KEY_RIGHT;
+    case VK_UP:
+        return OPTICS_WINDOW_KEY_UP;
+    case VK_DOWN:
+        return OPTICS_WINDOW_KEY_DOWN;
+    case VK_HOME:
+        return OPTICS_WINDOW_KEY_HOME;
+    case VK_END:
+        return OPTICS_WINDOW_KEY_END;
+    case VK_F1:
+        return OPTICS_WINDOW_KEY_F1;
+    case VK_F2:
+        return OPTICS_WINDOW_KEY_F2;
+    case VK_F3:
+        return OPTICS_WINDOW_KEY_F3;
+    case VK_F4:
+        return OPTICS_WINDOW_KEY_F4;
+    case VK_F5:
+        return OPTICS_WINDOW_KEY_F5;
+    case VK_F6:
+        return OPTICS_WINDOW_KEY_F6;
+    case VK_F7:
+        return OPTICS_WINDOW_KEY_F7;
+    case VK_F8:
+        return OPTICS_WINDOW_KEY_F8;
+    case VK_F9:
+        return OPTICS_WINDOW_KEY_F9;
+    case VK_F10:
+        return OPTICS_WINDOW_KEY_F10;
+    case VK_F11:
+        return OPTICS_WINDOW_KEY_F11;
+    case VK_F12:
+        return OPTICS_WINDOW_KEY_F12;
+    case VK_SHIFT:
+    case VK_LSHIFT:
+    case VK_RSHIFT:
+    case VK_CONTROL:
+    case VK_LCONTROL:
+    case VK_RCONTROL:
+    case VK_MENU:
+    case VK_LMENU:
+    case VK_RMENU:
+    case VK_LWIN:
+    case VK_RWIN:
+    case VK_PROCESSKEY: /* IME-owned key; the result arrives via IME/WM_CHAR */
+        return 0;
+    default:
+        break;
+    }
+    if (vk >= 'A' && vk <= 'Z')
+        return 'a' + (int)(vk - 'A');
+    if (vk >= '0' && vk <= '9')
+        return (int)vk;
+    if (vk == VK_SPACE)
+        return ' ';
+    return (int)vk;
+}
+
+/* Modifier level state, sampled from the thread's key state. Called from the
+ * input message handlers, where GetKeyState reflects the state at the time
+ * the message was generated. */
+static void update_mods(w32_platform *pl) {
+    uint32_t m = 0;
+    if (GetKeyState(VK_SHIFT) & 0x8000)
+        m |= OPTICS_WINDOW_MOD_SHIFT;
+    if (GetKeyState(VK_CONTROL) & 0x8000)
+        m |= OPTICS_WINDOW_MOD_CTRL;
+    if (GetKeyState(VK_MENU) & 0x8000)
+        m |= OPTICS_WINDOW_MOD_ALT;
+    if ((GetKeyState(VK_LWIN) & 0x8000) || (GetKeyState(VK_RWIN) & 0x8000))
+        m |= OPTICS_WINDOW_MOD_SUPER;
+    (void)w32_emit_modifiers(pl, m);
+}
+
+static void accum_key(w32_platform *pl, int key, bool pressed, bool repeat) {
+    (void)w32_emit_key(pl, key, pressed, repeat, pl->acc.mods);
+}
+
+static void on_key(w32_platform *pl, WPARAM vk, LPARAM lp, bool down_edge) {
+    update_mods(pl);
+    int key = vk_to_key(vk);
+    if (!key)
+        return;
+    /* lParam bit 30: previous key state — 1 on auto-repeat WM_KEYDOWN. */
+    bool repeat = down_edge && (lp & (1u << 30)) != 0;
+    accum_key(pl, key, down_edge, repeat);
+}
+
+/* WM_CHAR carries a UTF-16 code unit; surrogate pairs arrive as two
+ * consecutive messages. Suppressed entirely while an IME composition is
+ * active: committed text then arrives via GCS_RESULTSTR instead, and taking
+ * both would double-insert. */
+static void on_char(w32_platform *pl, WPARAM wParam) {
+    if (pl->ime_composing)
+        return;
+    uint32_t wc = (uint32_t)(WCHAR)wParam;
+    if (pl->pending_high_surrogate) {
+        uint32_t hi = pl->pending_high_surrogate;
+        pl->pending_high_surrogate = 0;
+        if (wc >= 0xDC00 && wc <= 0xDFFF) {
+            accum_text_cp(pl, 0x10000u + ((hi - 0xD800u) << 10) + (wc - 0xDC00u));
+            return;
+        }
+        /* Lone lead surrogate: drop it, fall through with this code unit. */
+    }
+    if (wc >= 0xD800 && wc <= 0xDBFF) {
+        pl->pending_high_surrogate = wc;
+        return;
+    }
+    if (wc >= 0xDC00 && wc <= 0xDFFF)
+        return; /* lone trail surrogate */
+    accum_text_cp(pl, wc);
+}
+
+static void on_mouse_button(w32_platform *pl, UINT msg, bool down_edge) {
+    int i = mouse_index(msg);
+    if (i < 0)
+        return;
+    update_mods(pl);
+    (void)w32_emit_button(pl, pl->acc.cx, pl->acc.cy, i, down_edge);
+    if (down_edge) {
+        /* Implicit grab: keep receiving moves/up outside the client area
+         * while a button is held (what the Wayland seat gives us for free). */
+        SetCapture(pl->hwnd);
+    } else if (!pl->acc.down[OPTICS_WINDOW_BUTTON_LEFT] &&
+               !pl->acc.down[OPTICS_WINDOW_BUTTON_RIGHT] &&
+               !pl->acc.down[OPTICS_WINDOW_BUTTON_MIDDLE]) {
+        ReleaseCapture();
+    }
+}
+
+/* Wheel: WM_MOUSEWHEEL positive = wheel up (away from the user), which is
+ * lens's positive scroll_y direction, so vertical deltas pass straight
+ * through; WM_MOUSEHWHEEL positive = tilt right, which the Wayland backend
+ * reports as negative scroll_x, so horizontal is inverted. Deltas that are
+ * an exact multiple of WHEEL_DELTA go to the step channel (scroll_x/y);
+ * smaller high-resolution deltas go to the pixel channel (scroll_pixels_*).
+ * lens consumes both channels additively (slider.c, textarea.c), so a delta
+ * must land in exactly one — splitting by magnitude avoids double-counting
+ * while keeping smooth wheels smooth. */
+static void on_mouse_wheel(w32_platform *pl, WPARAM wParam, bool horizontal) {
+    int delta = GET_WHEEL_DELTA_WPARAM(wParam);
+    update_mods(pl);
+    double notch = (double)delta / (double)WHEEL_DELTA;
+    if (horizontal)
+        notch = -notch;
+    bool continuous = (delta % WHEEL_DELTA != 0);
+    double lens = continuous ? notch * W32_WHEEL_PIXELS_PER_NOTCH : notch;
+    (void)w32_emit_scroll(pl, horizontal, lens, continuous);
+}
+
+/* ------------------------------------------------------------------ */
+/*  IME (IMM32)                                                        */
+/* ------------------------------------------------------------------ */
+
+/* Point the IME's composition/candidate windows at the lens caret. The caret
+ * rect is in logical UI space; IMM32 wants physical client coordinates. */
+static void ime_update_position(w32_platform *pl) {
+    if (!pl->ui)
+        return;
+    optics_gfx_rect caret = pl->ui_frame.text.caret;
+    if (caret.w <= 0.0f)
+        return;
+    HIMC himc = ImmGetContext(pl->hwnd);
+    if (!himc)
+        return;
+    LONG cx = (LONG)lroundf(caret.x * pl->scale);
+    LONG cy = (LONG)lroundf(caret.y * pl->scale);
+    COMPOSITIONFORM cf = {CFS_POINT, {cx, cy}, {0, 0, 0, 0}};
+    ImmSetCompositionWindow(himc, &cf);
+    CANDIDATEFORM cand = {0, CFS_CANDIDATEPOS, {cx, cy}, {0, 0, 0, 0}};
+    ImmSetCandidateWindow(himc, &cand);
+    ImmReleaseContext(pl->hwnd, himc);
+}
+
+/* WM_IME_COMPOSITION: pull the composition/result strings out of the input
+ * context into the accumulator. Composition strings are read as UTF-16 and
+ * transcoded; cursor/clause offsets are WCHAR indices, converted to UTF-8
+ * byte offsets (lens's preedit contract) by re-encoding the prefix. */
+static void ime_read_composition(w32_platform *pl, LPARAM flags) {
+    HIMC himc = ImmGetContext(pl->hwnd);
+    if (!himc)
+        return;
+
+    if (flags & GCS_RESULTSTR) {
+        WCHAR wbuf[256];
+        LONG bytes = ImmGetCompositionStringW(himc, GCS_RESULTSTR, wbuf, sizeof wbuf);
+        if (bytes > 0) {
+            char u8[768]; /* 256 WCHARs fit: BMP is 1 WCHAR -> 3 bytes */
+            int n = WideCharToMultiByte(CP_UTF8, 0, wbuf, (int)(bytes / 2), u8, (int)sizeof u8,
+                                        nullptr, nullptr);
+            if (n > 0)
+                accum_text_append(pl, u8, (size_t)n);
+        }
+        /* Result committed: the composition is over, preedit clears. */
+        (void)w32_emit_preedit(pl, "", 0, 0, 0);
+    }
+
+    if (flags & (GCS_COMPSTR | GCS_CURSORPOS | GCS_COMPATTR)) {
+        WCHAR wbuf[256];
+        LONG bytes = ImmGetCompositionStringW(himc, GCS_COMPSTR, wbuf, sizeof wbuf);
+        LONG wlen = bytes > 0 ? bytes / 2 : 0;
+        char u8[768];
+        int n = wlen > 0 ? WideCharToMultiByte(CP_UTF8, 0, wbuf, (int)wlen, u8, (int)sizeof u8,
+                                               nullptr, nullptr)
+                         : 0;
+        char pre[OPTICS_WINDOW_PREEDIT_MAX];
+        size_t kept = optics_window_utf8_floor_boundary(u8, (size_t)n, sizeof pre - 1);
+        memcpy(pre, u8, kept);
+        pre[kept] = '\0';
+
+        LONG cur = ImmGetCompositionStringW(himc, GCS_CURSORPOS, nullptr, 0);
+        if (cur < 0 || cur > wlen)
+            cur = wlen;
+        int cb = cur > 0
+                     ? WideCharToMultiByte(CP_UTF8, 0, wbuf, (int)cur, nullptr, 0, nullptr, nullptr)
+                     : 0;
+        uint32_t pcursor = (uint32_t)((size_t)cb <= kept ? (size_t)cb : kept);
+
+        /* Active clause: the run of ATTR_TARGET_* bytes under conversion.
+         * IMM32 reports one attribute byte per WCHAR. */
+        uint32_t p_lo = 0, p_hi = 0;
+        if (wlen > 0) {
+            BYTE attr[256];
+            LONG abytes = ImmGetCompositionStringW(himc, GCS_COMPATTR, attr, sizeof attr);
+            LONG lo = -1, hi = -1;
+            for (LONG i = 0; i < abytes; i++) {
+                bool target =
+                    attr[i] == ATTR_TARGET_CONVERTED || attr[i] == ATTR_TARGET_NOTCONVERTED;
+                if (target && lo < 0)
+                    lo = i;
+                else if (!target && lo >= 0) {
+                    hi = i;
+                    break;
+                }
+            }
+            if (lo >= 0) {
+                if (hi < 0)
+                    hi = abytes;
+                int blo =
+                    WideCharToMultiByte(CP_UTF8, 0, wbuf, (int)lo, nullptr, 0, nullptr, nullptr);
+                int bhi =
+                    WideCharToMultiByte(CP_UTF8, 0, wbuf, (int)hi, nullptr, 0, nullptr, nullptr);
+                p_lo = (uint32_t)((size_t)blo <= kept ? (size_t)blo : kept);
+                p_hi = (uint32_t)((size_t)bhi <= kept ? (size_t)bhi : kept);
+            }
+        }
+        (void)w32_emit_preedit(pl, pre, pcursor, p_lo, p_hi);
+    }
+
+    ImmReleaseContext(pl->hwnd, himc);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Clipboard (CF_UNICODETEXT) — bridges lens_clipboard to Win32        */
+/* ------------------------------------------------------------------ */
+
+/* lens_clipboard.set_text — publish `utf8` as the system clipboard text. */
+static void clip_set_text(const char *utf8, size_t len, void *user) {
+    w32_platform *pl = user;
+    int wlen = MultiByteToWideChar(CP_UTF8, 0, utf8, (int)len, nullptr, 0);
+    if (wlen <= 0)
+        return;
+    HGLOBAL hg = GlobalAlloc(GMEM_MOVEABLE, ((SIZE_T)wlen + 1) * sizeof(WCHAR));
+    if (!hg)
+        return;
+    WCHAR *dst = GlobalLock(hg);
+    if (!dst) {
+        GlobalFree(hg);
+        return;
+    }
+    MultiByteToWideChar(CP_UTF8, 0, utf8, (int)len, dst, wlen);
+    dst[wlen] = L'\0';
+    GlobalUnlock(hg);
+
+    if (!OpenClipboard(pl->hwnd)) {
+        GlobalFree(hg);
+        return;
+    }
+    EmptyClipboard();
+    /* On success the system owns the handle; on failure we still do. */
+    if (!SetClipboardData(CF_UNICODETEXT, hg))
+        GlobalFree(hg);
+    CloseClipboard();
+}
+
+/* lens_clipboard.request_text — the lens contract is asynchronous: the
+ * answer must arrive later via lens_paste, not synchronously inside the
+ * request (Wayland's offer/read round-trip has the same shape). We read the
+ * clipboard eagerly, then PostMessage the payload to ourselves; the pump
+ * delivers it through lens_paste on the next loop iteration, outside any
+ * lens_begin/end pair. */
+static void clip_request_text(void *user) {
+    w32_platform *pl = user;
+    char *utf8 = nullptr;
+    if (OpenClipboard(pl->hwnd)) {
+        HANDLE h = GetClipboardData(CF_UNICODETEXT);
+        if (h) {
+            const WCHAR *w = GlobalLock(h);
+            if (w) {
+                int n = WideCharToMultiByte(CP_UTF8, 0, w, -1, nullptr, 0, nullptr, nullptr);
+                if (n > 1) { /* > 1: ignore the empty string */
+                    utf8 = malloc((size_t)n);
+                    if (utf8)
+                        WideCharToMultiByte(CP_UTF8, 0, w, -1, utf8, n, nullptr, nullptr);
+                }
+                GlobalUnlock(h);
+            }
+        }
+        CloseClipboard();
+    }
+    if (utf8 && !PostMessageW(pl->hwnd, WM_IRIS_PASTE_DELIVER, 0, (LPARAM)utf8))
+        free(utf8);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Cursor                                                             */
+/* ------------------------------------------------------------------ */
+
+/* iris_cursor → system cursor handle. LoadCursor(NULL, …) returns shared
+ * system cursors that must not be destroyed, so this is cheap to call
+ * per frame. */
+static HCURSOR w32_cursor_handle(optics_window_cursor c) {
+    switch (c) {
+    case OPTICS_WINDOW_CURSOR_TEXT:
+        return LoadCursorW(nullptr, IDC_IBEAM);
+    case OPTICS_WINDOW_CURSOR_POINTER:
+        return LoadCursorW(nullptr, IDC_HAND);
+    case OPTICS_WINDOW_CURSOR_BUSY:
+        return LoadCursorW(nullptr, IDC_WAIT);
+    case OPTICS_WINDOW_CURSOR_CROSSHAIR:
+        return LoadCursorW(nullptr, IDC_CROSS);
+    case OPTICS_WINDOW_CURSOR_NOT_ALLOWED:
+        return LoadCursorW(nullptr, IDC_NO);
+    case OPTICS_WINDOW_CURSOR_RESIZE_EW:
+        return LoadCursorW(nullptr, IDC_SIZEWE);
+    case OPTICS_WINDOW_CURSOR_RESIZE_NS:
+        return LoadCursorW(nullptr, IDC_SIZENS);
+    case OPTICS_WINDOW_CURSOR_DEFAULT:
+    default:
+        return LoadCursorW(nullptr, IDC_ARROW);
+    }
+}
+
+/* Public API. The host's explicit choice wins; when it is DEFAULT the
+ * per-frame lens cursor hint drives the cursor instead (see the frame loop).
+ * No-op when no app is active. */
+OPTICS_WINDOW_API void optics_window_set_cursor(optics_window_cursor cursor) {
+    w32_platform *pl = g_active_pl;
+    if (!pl)
+        return;
+    if (cursor < OPTICS_WINDOW_CURSOR_DEFAULT)
+        cursor = OPTICS_WINDOW_CURSOR_DEFAULT;
+    if (cursor == pl->host_cursor)
+        return;
+    pl->host_cursor = cursor;
+    if (cursor != OPTICS_WINDOW_CURSOR_DEFAULT) {
+        pl->effective_cursor = cursor;
+        if (pl->cursor_inside)
+            SetCursor(w32_cursor_handle(cursor));
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/*  Window state (iris/window.h)                                       */
+/* ------------------------------------------------------------------ */
+
+/* All iris_window_* APIs operate on g_active_pl — the platform the active
+ * iris_app_run call owns. They are documented as thread-affine to
+ * iris_app_run and a no-op when no app is active. */
+
+OPTICS_WINDOW_API void optics_window_minimize(void) {
+    w32_platform *pl = g_active_pl;
+    if (pl && pl->hwnd)
+        ShowWindow(pl->hwnd, SW_MINIMIZE);
+}
+
+OPTICS_WINDOW_API void optics_window_maximize(void) {
+    w32_platform *pl = g_active_pl;
+    if (pl && pl->hwnd)
+        ShowWindow(pl->hwnd, SW_MAXIMIZE);
+}
+
+OPTICS_WINDOW_API void optics_window_unmaximize(void) {
+    w32_platform *pl = g_active_pl;
+    if (pl && pl->hwnd && !pl->fullscreen)
+        ShowWindow(pl->hwnd, SW_RESTORE);
+}
+
+OPTICS_WINDOW_API void optics_window_fullscreen(void) {
+    w32_platform *pl = g_active_pl;
+    if (!pl || !pl->hwnd || pl->fullscreen)
+        return;
+    pl->saved_style = GetWindowLongW(pl->hwnd, GWL_STYLE);
+    pl->saved_ex_style = GetWindowLongW(pl->hwnd, GWL_EXSTYLE);
+    pl->saved_placement.length = sizeof pl->saved_placement;
+    GetWindowPlacement(pl->hwnd, &pl->saved_placement);
+
+    MONITORINFO mi = {};
+    mi.cbSize = sizeof mi;
+    GetMonitorInfoW(MonitorFromWindow(pl->hwnd, MONITOR_DEFAULTTONEAREST), &mi);
+    SetWindowLongW(pl->hwnd, GWL_STYLE, pl->saved_style & ~(DWORD)WS_OVERLAPPEDWINDOW);
+    SetWindowLongW(pl->hwnd, GWL_EXSTYLE, pl->saved_ex_style & ~(DWORD)WS_EX_WINDOWEDGE);
+    SetWindowPos(pl->hwnd, HWND_TOP, mi.rcMonitor.left, mi.rcMonitor.top,
+                 mi.rcMonitor.right - mi.rcMonitor.left, mi.rcMonitor.bottom - mi.rcMonitor.top,
+                 SWP_FRAMECHANGED | SWP_NOOWNERZORDER);
+    pl->fullscreen = true;
+}
+
+OPTICS_WINDOW_API void optics_window_unfullscreen(void) {
+    w32_platform *pl = g_active_pl;
+    if (!pl || !pl->hwnd || !pl->fullscreen)
+        return;
+    pl->fullscreen = false;
+    SetWindowLongW(pl->hwnd, GWL_STYLE, pl->saved_style);
+    SetWindowLongW(pl->hwnd, GWL_EXSTYLE, pl->saved_ex_style);
+    SetWindowPlacement(pl->hwnd, &pl->saved_placement); /* restores geometry + show state */
+    SetWindowPos(pl->hwnd, nullptr, 0, 0, 0, 0,
+                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+}
+
+OPTICS_WINDOW_API void optics_window_restore(void) {
+    w32_platform *pl = g_active_pl;
+    if (!pl || !pl->hwnd)
+        return;
+    if (pl->fullscreen) {
+        optics_window_unfullscreen();
+        return;
+    }
+    ShowWindow(pl->hwnd, SW_RESTORE); /* un-minimises and un-maximises */
+}
+
+OPTICS_WINDOW_API void optics_window_focus(void) {
+    w32_platform *pl = g_active_pl;
+    /* Best effort: Windows may only flash the taskbar button when the call
+     * lacks a user activation — the same policy class as Wayland refusing
+     * focus steals outright. */
+    if (pl && pl->hwnd)
+        SetForegroundWindow(pl->hwnd);
+}
+
+OPTICS_WINDOW_API void optics_window_close(void) {
+    w32_platform *pl = g_active_pl;
+    if (pl)
+        pl->running = false;
+}
+
+OPTICS_WINDOW_API void optics_window_start_move(void) {
+    w32_platform *pl = g_active_pl;
+    if (!pl || !pl->hwnd)
+        return;
+    ReleaseCapture();
+    SendMessageW(pl->hwnd, WM_SYSCOMMAND, (WPARAM)(0xF010 /* SC_MOVE + HTCAPTION */ | 0x0002), 0);
+}
+
+OPTICS_WINDOW_API void optics_window_set_min_size(const optics_window_set_min_size_opts *opts) {
+    w32_platform *pl = g_active_pl;
+    if (!pl || !opts)
+        return;
+    pl->min_w = opts->width;
+    pl->min_h = opts->height;
+}
+
+OPTICS_WINDOW_API void optics_window_set_max_size(const optics_window_set_max_size_opts *opts) {
+    w32_platform *pl = g_active_pl;
+    if (!pl || !opts)
+        return;
+    pl->max_w = opts->width;
+    pl->max_h = opts->height;
+}
+
+OPTICS_WINDOW_API bool optics_window_get_geometry(int32_t *out_width, int32_t *out_height) {
+    w32_platform *pl = g_active_pl;
+    if (!pl)
+        return false;
+    if (out_width)
+        *out_width = pl->width;
+    if (out_height)
+        *out_height = pl->height;
+    return true;
+}
+
+OPTICS_WINDOW_API int
+optics_window_create_activation_token(const optics_window_create_activation_token_opts *opts) {
+    (void)opts;
+    return -1;
+}
+
+/* ================================================================== */
+/*  OLE / COM Drag-and-Drop Subsystem (ADR-0086)                      */
+/* ================================================================== */
+
+/* --- Drop Target Implementation (Receiving drops) --- */
+
+typedef struct w32_drop_target_impl {
+    IDropTarget target;
+    LONG ref_count;
+    w32_platform *pl;
+} w32_drop_target_impl;
+
+static HRESULT STDMETHODCALLTYPE dt_QueryInterface(IDropTarget *This, REFIID riid,
+                                                   void **ppvObject) {
+    if (!ppvObject)
+        return E_POINTER;
+    if (IsEqualIID(riid, &IID_IUnknown) || IsEqualIID(riid, &IID_IDropTarget)) {
+        *ppvObject = This;
+        This->lpVtbl->AddRef(This);
+        return S_OK;
+    }
+    *ppvObject = nullptr;
+    return E_NOINTERFACE;
+}
+
+static ULONG STDMETHODCALLTYPE dt_AddRef(IDropTarget *This) {
+    w32_drop_target_impl *impl = (w32_drop_target_impl *)This;
+    return (ULONG)InterlockedIncrement(&impl->ref_count);
+}
+
+static ULONG STDMETHODCALLTYPE dt_Release(IDropTarget *This) {
+    w32_drop_target_impl *impl = (w32_drop_target_impl *)This;
+    LONG c = InterlockedDecrement(&impl->ref_count);
+    return (ULONG)(c > 0 ? c : 0);
+}
+
+static HRESULT STDMETHODCALLTYPE dt_DragEnter(IDropTarget *This, IDataObject *pDataObj,
+                                              DWORD grfKeyState, POINTL pt, DWORD *pdwEffect) {
+    (void)This;
+    (void)pDataObj;
+    (void)grfKeyState;
+    (void)pt;
+    if (pdwEffect)
+        *pdwEffect &= (DROPEFFECT_COPY | DROPEFFECT_MOVE);
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE dt_DragOver(IDropTarget *This, DWORD grfKeyState, POINTL pt,
+                                             DWORD *pdwEffect) {
+    (void)This;
+    (void)grfKeyState;
+    (void)pt;
+    if (pdwEffect)
+        *pdwEffect &= (DROPEFFECT_COPY | DROPEFFECT_MOVE);
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE dt_DragLeave(IDropTarget *This) {
+    (void)This;
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE dt_Drop(IDropTarget *This, IDataObject *pDataObj,
+                                         DWORD grfKeyState, POINTL pt, DWORD *pdwEffect) {
+    (void)grfKeyState;
+    w32_drop_target_impl *impl = (w32_drop_target_impl *)This;
+    if (!impl || !impl->pl || !impl->pl->ui || !pDataObj)
+        return E_FAIL;
+
+    POINT p = {pt.x, pt.y};
+    ScreenToClient(impl->pl->hwnd, &p);
+    float scale = (impl->pl->scale > 0.0f) ? impl->pl->scale : 1.0f;
+    optics_gfx_point drop_pos = {(float)p.x / scale, (float)p.y / scale};
+
+    FORMATETC fmt_text = {CF_UNICODETEXT, nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL};
+    STGMEDIUM med = {};
+    if (SUCCEEDED(pDataObj->lpVtbl->GetData(pDataObj, &fmt_text, &med))) {
+        const wchar_t *wstr = (const wchar_t *)GlobalLock(med.hGlobal);
+        if (wstr) {
+            int utf8_len = WideCharToMultiByte(CP_UTF8, 0, wstr, -1, nullptr, 0, nullptr, nullptr);
+            if (utf8_len > 1) {
+                char *utf8 = (char *)malloc((size_t)utf8_len);
+                if (utf8) {
+                    WideCharToMultiByte(CP_UTF8, 0, wstr, -1, utf8, utf8_len, nullptr, nullptr);
+                    optics_window__ui_paste(impl->pl->ui, utf8, (size_t)(utf8_len - 1));
+                    optics_window__ui_drop(impl->pl->ui, utf8, (size_t)(utf8_len - 1), drop_pos);
+                    free(utf8);
+                }
+            }
+            GlobalUnlock(med.hGlobal);
+        }
+        ReleaseStgMedium(&med);
+    } else {
+        FORMATETC fmt_file = {CF_HDROP, nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL};
+        if (SUCCEEDED(pDataObj->lpVtbl->GetData(pDataObj, &fmt_file, &med))) {
+            HDROP hdrop = (HDROP)GlobalLock(med.hGlobal);
+            if (hdrop) {
+                UINT count = DragQueryFileW(hdrop, 0xFFFFFFFF, nullptr, 0);
+                if (count > 0) {
+                    wchar_t path_w[MAX_PATH];
+                    if (DragQueryFileW(hdrop, 0, path_w, MAX_PATH) > 0) {
+                        int utf8_len = WideCharToMultiByte(CP_UTF8, 0, path_w, -1, nullptr, 0,
+                                                           nullptr, nullptr);
+                        if (utf8_len > 1) {
+                            char *utf8 = (char *)malloc((size_t)utf8_len);
+                            if (utf8) {
+                                WideCharToMultiByte(CP_UTF8, 0, path_w, -1, utf8, utf8_len, nullptr,
+                                                    nullptr);
+                                optics_window__ui_paste(impl->pl->ui, utf8, (size_t)(utf8_len - 1));
+                                optics_window__ui_drop(impl->pl->ui, utf8, (size_t)(utf8_len - 1),
+                                                       drop_pos);
+                                free(utf8);
+                            }
+                        }
+                    }
+                }
+                GlobalUnlock(med.hGlobal);
+            }
+            ReleaseStgMedium(&med);
+        }
+    }
+
+    if (pdwEffect)
+        *pdwEffect = DROPEFFECT_COPY;
+    return S_OK;
+}
+
+static IDropTargetVtbl g_drop_target_vtbl = {
+    .QueryInterface = dt_QueryInterface,
+    .AddRef = dt_AddRef,
+    .Release = dt_Release,
+    .DragEnter = dt_DragEnter,
+    .DragOver = dt_DragOver,
+    .DragLeave = dt_DragLeave,
+    .Drop = dt_Drop,
+};
+
+/* --- Drop Source Implementation (Initiating drag) --- */
+
+typedef struct w32_drop_source_impl {
+    IDropSource source;
+    LONG ref_count;
+} w32_drop_source_impl;
+
+static HRESULT STDMETHODCALLTYPE ds_QueryInterface(IDropSource *This, REFIID riid,
+                                                   void **ppvObject) {
+    if (!ppvObject)
+        return E_POINTER;
+    if (IsEqualIID(riid, &IID_IUnknown) || IsEqualIID(riid, &IID_IDropSource)) {
+        *ppvObject = This;
+        This->lpVtbl->AddRef(This);
+        return S_OK;
+    }
+    *ppvObject = nullptr;
+    return E_NOINTERFACE;
+}
+
+static ULONG STDMETHODCALLTYPE ds_AddRef(IDropSource *This) {
+    w32_drop_source_impl *impl = (w32_drop_source_impl *)This;
+    return (ULONG)InterlockedIncrement(&impl->ref_count);
+}
+
+static ULONG STDMETHODCALLTYPE ds_Release(IDropSource *This) {
+    w32_drop_source_impl *impl = (w32_drop_source_impl *)This;
+    LONG c = InterlockedDecrement(&impl->ref_count);
+    return (ULONG)(c > 0 ? c : 0);
+}
+
+static HRESULT STDMETHODCALLTYPE ds_QueryContinueDrag(IDropSource *This, BOOL fEscapePressed,
+                                                      DWORD grfKeyState) {
+    (void)This;
+    if (fEscapePressed)
+        return DRAGDROP_S_CANCEL;
+    if (!(grfKeyState & (MK_LBUTTON | MK_RBUTTON)))
+        return DRAGDROP_S_DROP;
+    return S_OK;
+}
+
+static HRESULT STDMETHODCALLTYPE ds_GiveFeedback(IDropSource *This, DWORD dwEffect) {
+    (void)This;
+    (void)dwEffect;
+    return DRAGDROP_S_USEDEFAULTCURSORS;
+}
+
+static IDropSourceVtbl g_drop_source_vtbl = {
+    .QueryInterface = ds_QueryInterface,
+    .AddRef = ds_AddRef,
+    .Release = ds_Release,
+    .QueryContinueDrag = ds_QueryContinueDrag,
+    .GiveFeedback = ds_GiveFeedback,
+};
+
+/* --- Data Object Implementation (Payload container) --- */
+
+typedef struct w32_data_object_impl {
+    IDataObject data_obj;
+    LONG ref_count;
+    wchar_t *text_w;
+} w32_data_object_impl;
+
+static HRESULT STDMETHODCALLTYPE do_QueryInterface(IDataObject *This, REFIID riid,
+                                                   void **ppvObject) {
+    if (!ppvObject)
+        return E_POINTER;
+    if (IsEqualIID(riid, &IID_IUnknown) || IsEqualIID(riid, &IID_IDataObject)) {
+        *ppvObject = This;
+        This->lpVtbl->AddRef(This);
+        return S_OK;
+    }
+    *ppvObject = nullptr;
+    return E_NOINTERFACE;
+}
+
+static ULONG STDMETHODCALLTYPE do_AddRef(IDataObject *This) {
+    w32_data_object_impl *impl = (w32_data_object_impl *)This;
+    return (ULONG)InterlockedIncrement(&impl->ref_count);
+}
+
+static ULONG STDMETHODCALLTYPE do_Release(IDataObject *This) {
+    w32_data_object_impl *impl = (w32_data_object_impl *)This;
+    LONG c = InterlockedDecrement(&impl->ref_count);
+    return (ULONG)(c > 0 ? c : 0);
+}
+
+static HRESULT STDMETHODCALLTYPE do_GetData(IDataObject *This, FORMATETC *pformatetcIn,
+                                            STGMEDIUM *pmedium) {
+    w32_data_object_impl *impl = (w32_data_object_impl *)This;
+    if (!pformatetcIn || !pmedium)
+        return E_POINTER;
+    if (pformatetcIn->cfFormat == CF_UNICODETEXT && (pformatetcIn->tymed & TYMED_HGLOBAL) &&
+        impl->text_w) {
+        size_t len = (wcslen(impl->text_w) + 1) * sizeof(wchar_t);
+        HGLOBAL hg = GlobalAlloc(GHND, len);
+        if (!hg)
+            return E_OUTOFMEMORY;
+        void *dst = GlobalLock(hg);
+        if (!dst) {
+            GlobalFree(hg);
+            return E_OUTOFMEMORY;
+        }
+        memcpy(dst, impl->text_w, len);
+        GlobalUnlock(hg);
+        pmedium->tymed = TYMED_HGLOBAL;
+        pmedium->hGlobal = hg;
+        pmedium->pUnkForRelease = nullptr;
+        return S_OK;
+    }
+    return DV_E_FORMATETC;
+}
+
+static HRESULT STDMETHODCALLTYPE do_GetDataHere(IDataObject *This, FORMATETC *pformatetc,
+                                                STGMEDIUM *pmedium) {
+    (void)This;
+    (void)pformatetc;
+    (void)pmedium;
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE do_QueryGetData(IDataObject *This, FORMATETC *pformatetc) {
+    w32_data_object_impl *impl = (w32_data_object_impl *)This;
+    if (!pformatetc)
+        return E_POINTER;
+    if (pformatetc->cfFormat == CF_UNICODETEXT && (pformatetc->tymed & TYMED_HGLOBAL) &&
+        impl->text_w)
+        return S_OK;
+    return DV_E_FORMATETC;
+}
+
+static HRESULT STDMETHODCALLTYPE do_GetCanonicalFormatEtc(IDataObject *This,
+                                                          FORMATETC *pformatectIn,
+                                                          FORMATETC *pformatetcOut) {
+    (void)This;
+    (void)pformatectIn;
+    (void)pformatetcOut;
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE do_SetData(IDataObject *This, FORMATETC *pformatetc,
+                                            STGMEDIUM *pmedium, BOOL fRelease) {
+    (void)This;
+    (void)pformatetc;
+    (void)pmedium;
+    (void)fRelease;
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE do_EnumFormatEtc(IDataObject *This, DWORD dwDirection,
+                                                  IEnumFORMATETC **ppenumFormatEtc) {
+    (void)This;
+    (void)dwDirection;
+    if (ppenumFormatEtc)
+        *ppenumFormatEtc = nullptr;
+    return E_NOTIMPL;
+}
+
+static HRESULT STDMETHODCALLTYPE do_DAdvise(IDataObject *This, FORMATETC *pformatetc, DWORD advf,
+                                            IAdviseSink *pAdvSink, DWORD *pdwConnection) {
+    (void)This;
+    (void)pformatetc;
+    (void)advf;
+    (void)pAdvSink;
+    (void)pdwConnection;
+    return OLE_E_ADVISENOTSUPPORTED;
+}
+
+static HRESULT STDMETHODCALLTYPE do_DUnadvise(IDataObject *This, DWORD dwConnection) {
+    (void)This;
+    (void)dwConnection;
+    return OLE_E_ADVISENOTSUPPORTED;
+}
+
+static HRESULT STDMETHODCALLTYPE do_EnumDAdvise(IDataObject *This, IEnumSTATDATA **ppenumAdvise) {
+    (void)This;
+    if (ppenumAdvise)
+        *ppenumAdvise = nullptr;
+    return OLE_E_ADVISENOTSUPPORTED;
+}
+
+static IDataObjectVtbl g_data_object_vtbl = {
+    .QueryInterface = do_QueryInterface,
+    .AddRef = do_AddRef,
+    .Release = do_Release,
+    .GetData = do_GetData,
+    .GetDataHere = do_GetDataHere,
+    .QueryGetData = do_QueryGetData,
+    .GetCanonicalFormatEtc = do_GetCanonicalFormatEtc,
+    .SetData = do_SetData,
+    .EnumFormatEtc = do_EnumFormatEtc,
+    .DAdvise = do_DAdvise,
+    .DUnadvise = do_DUnadvise,
+    .EnumDAdvise = do_EnumDAdvise,
+};
+
+OPTICS_WINDOW_API int optics_window_dnd_start(const optics_window_dnd_source *source) {
+    w32_platform *pl = g_active_pl;
+    if (!pl || !pl->hwnd || !source)
+        return -1;
+
+    pl->drag_source = *source;
+    pl->drag_active = true;
+
+    wchar_t *wstr = nullptr;
+    if (source->static_text && source->static_text_len) {
+        int wlen = MultiByteToWideChar(CP_UTF8, 0, source->static_text,
+                                       (int)source->static_text_len, nullptr, 0);
+        if (wlen > 0) {
+            wstr = (wchar_t *)malloc((size_t)(wlen + 1) * sizeof(wchar_t));
+            if (wstr) {
+                MultiByteToWideChar(CP_UTF8, 0, source->static_text, (int)source->static_text_len,
+                                    wstr, wlen);
+                wstr[wlen] = L'\0';
+            }
+        }
+    }
+
+    w32_data_object_impl data_obj = {
+        .data_obj = {.lpVtbl = &g_data_object_vtbl},
+        .ref_count = 1,
+        .text_w = wstr,
+    };
+    w32_drop_source_impl drop_src = {
+        .source = {.lpVtbl = &g_drop_source_vtbl},
+        .ref_count = 1,
+    };
+
+    DWORD effect = 0;
+    DWORD ok_effects = DROPEFFECT_COPY | DROPEFFECT_MOVE;
+    HRESULT hr =
+        DoDragDrop((IDataObject *)&data_obj, (IDropSource *)&drop_src, ok_effects, &effect);
+
+    pl->drag_active = false;
+    free(wstr);
+
+    if (hr == DRAGDROP_S_DROP) {
+        if (source->callbacks.finished)
+            source->callbacks.finished(OPTICS_WINDOW_DND_ACTION_COPY, source->callbacks.user);
+        return 0;
+    } else {
+        if (source->callbacks.cancelled)
+            source->callbacks.cancelled(source->callbacks.user);
+        return (hr == DRAGDROP_S_CANCEL) ? 0 : -1;
+    }
+}
+
+OPTICS_WINDOW_API bool optics_window_dnd_is_active(void) {
+    w32_platform *pl = g_active_pl;
+    return pl && pl->drag_active;
+}
+
+OPTICS_WINDOW_API void optics_window_dnd_cancel(void) {
+    w32_platform *pl = g_active_pl;
+    if (pl)
+        pl->drag_active = false;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Window procedure                                                   */
+/* ------------------------------------------------------------------ */
+
+static LRESULT CALLBACK w32_wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    w32_platform *pl = (w32_platform *)GetWindowLongPtrW(hwnd, GWLP_USERDATA);
+
+    switch (msg) {
+    case WM_NCCREATE:
+        /* Publish pl for every later message; lpCreateParams carries it. */
+        SetWindowLongPtrW(hwnd, GWLP_USERDATA, (LONG_PTR)((CREATESTRUCTW *)lParam)->lpCreateParams);
+        return DefWindowProcW(hwnd, msg, wParam, lParam);
+
+    case WM_CLOSE:
+        /* The window object outlives the loop; teardown destroys it. */
+        if (pl) {
+            w32_emit_close();
+            pl->running = false;
+        }
+        return 0;
+    case WM_DESTROY:
+        if (pl)
+            pl->running = false;
+        return 0;
+
+    case WM_PAINT: {
+        /* We draw through the Vulkan swapchain, not GDI — but the region
+         * must be validated or Windows keeps sending WM_PAINT and DWM marks
+         * the window unresponsive. Flag a real frame: after a restore or
+         * composition change the swapchain contents may be stale even when
+         * lens reports no damage. */
+        PAINTSTRUCT ps;
+        BeginPaint(hwnd, &ps);
+        EndPaint(hwnd, &ps);
+        if (pl)
+            pl->force_paint = true;
+        return 0;
+    }
+    case WM_ERASEBKGND:
+        return 1; /* everything is repainted by flux */
+
+    case WM_SIZE: {
+        if (!pl)
+            break;
+        if (wParam == SIZE_MINIMIZED) {
+            pl->minimized = true; /* zero-sized target: the loop sleeps */
+            return 0;
+        }
+        pl->minimized = false;
+        int pw = (int)(short)LOWORD(lParam); /* physical client pixels */
+        int ph = (int)(short)HIWORD(lParam);
+        int lw = (int)lroundf((float)pw / pl->scale);
+        int lh = (int)lroundf((float)ph / pl->scale);
+        if (lw > 0 && lh > 0 && (lw != pl->width || lh != pl->height)) {
+            pl->width = lw;
+            pl->height = lh;
+            pl->resized = true;
+            w32_emit_resize((uint32_t)lw, (uint32_t)lh);
+        }
+        return 0;
+    }
+
+    case WM_SETFOCUS:
+        if (pl)
+            w32_emit_focus(true);
+        break;
+    case WM_KILLFOCUS:
+        if (pl)
+            w32_emit_focus(false);
+        break;
+
+    case WM_DISPLAYCHANGE: {
+        if (!pl)
+            break;
+        pl->refresh_ns = w32_query_refresh_ns(hwnd);
+        pl->force_paint = true;
+        return 0;
+    }
+
+    case WM_WINDOWPOSCHANGED: {
+        if (pl) {
+            int64_t new_refresh = w32_query_refresh_ns(hwnd);
+            if (new_refresh > 0 && new_refresh != pl->refresh_ns) {
+                pl->refresh_ns = new_refresh;
+            }
+        }
+        break;
+    }
+
+    case WM_DPICHANGED: {
+        if (!pl)
+            break;
+        /* HIWORD = Y dpi; PerMonitorV2 keeps X == Y. The suggested window
+         * rect (physical) keeps the logical size across the move. WM_SIZE
+         * follows and folds the new client size into the frame loop. */
+        pl->pending_scale = (float)HIWORD(wParam) / 96.0f;
+        pl->refresh_ns = w32_query_refresh_ns(hwnd);
+        const RECT *suggested = (const RECT *)lParam;
+        SetWindowPos(hwnd, nullptr, suggested->left, suggested->top,
+                     suggested->right - suggested->left, suggested->bottom - suggested->top,
+                     SWP_NOZORDER | SWP_NOACTIVATE);
+        return 0;
+    }
+
+    case WM_GETMINMAXINFO: {
+        if (!pl)
+            break;
+        MINMAXINFO *mmi = (MINMAXINFO *)lParam;
+        UINT dpi = (UINT)lroundf(pl->scale * 96.0f);
+        DWORD style = (DWORD)GetWindowLongW(hwnd, GWL_STYLE);
+        DWORD exstyle = (DWORD)GetWindowLongW(hwnd, GWL_EXSTYLE);
+        /* Track sizes are window (not client) sizes: grow the logical
+         * client bound by the frame at the current DPI. */
+        if (pl->min_w > 0 && pl->min_h > 0) {
+            RECT r = {0, 0, (LONG)lroundf(pl->min_w * pl->scale),
+                      (LONG)lroundf(pl->min_h * pl->scale)};
+            AdjustWindowRectExForDpi(&r, style, FALSE, exstyle, dpi);
+            mmi->ptMinTrackSize.x = r.right - r.left;
+            mmi->ptMinTrackSize.y = r.bottom - r.top;
+        }
+        if (pl->max_w > 0 && pl->max_h > 0) {
+            RECT r = {0, 0, (LONG)lroundf(pl->max_w * pl->scale),
+                      (LONG)lroundf(pl->max_h * pl->scale)};
+            AdjustWindowRectExForDpi(&r, style, FALSE, exstyle, dpi);
+            mmi->ptMaxTrackSize.x = r.right - r.left;
+            mmi->ptMaxTrackSize.y = r.bottom - r.top;
+        }
+        return 0;
+    }
+
+    case WM_SETCURSOR:
+        if (LOWORD(lParam) == HTCLIENT) {
+            SetCursor(w32_cursor_handle(pl ? pl->effective_cursor : OPTICS_WINDOW_CURSOR_DEFAULT));
+            return TRUE;
+        }
+        break; /* non-client areas keep the default frame cursors */
+
+    case WM_MOUSEMOVE:
+        if (pl) {
+            (void)w32_emit_pointer(pl, OPTICS_WINDOW_EVENT_POINTER_MOVE,
+                                   (double)GET_X_LPARAM(lParam) / (double)pl->scale,
+                                   (double)GET_Y_LPARAM(lParam) / (double)pl->scale);
+            if (!pl->cursor_inside) {
+                pl->cursor_inside = true;
+                SetCursor(w32_cursor_handle(pl->effective_cursor));
+            }
+            if (!pl->tracking_leave) {
+                TRACKMOUSEEVENT tme = {sizeof tme, TME_LEAVE, hwnd, 0};
+                TrackMouseEvent(&tme);
+                pl->tracking_leave = true;
+            }
+        }
+        return 0;
+    case WM_MOUSELEAVE:
+        if (pl) {
+            pl->tracking_leave = false;
+            pl->cursor_inside = false;
+            (void)w32_emit_pointer(pl, OPTICS_WINDOW_EVENT_POINTER_LEAVE, -100000.0, -100000.0);
+        }
+        return 0;
+
+    case WM_LBUTTONDOWN:
+    case WM_RBUTTONDOWN:
+    case WM_MBUTTONDOWN:
+        if (pl)
+            on_mouse_button(pl, msg, true);
+        return 0;
+    case WM_LBUTTONUP:
+    case WM_RBUTTONUP:
+    case WM_MBUTTONUP:
+        if (pl)
+            on_mouse_button(pl, msg, false);
+        return 0;
+    case WM_XBUTTONDOWN:
+    case WM_XBUTTONUP:
+        /* X1/X2 have no lens slot (platform_input.h): dropped by mouse_index;
+         * returning TRUE for XBUTTON is the documented convention. */
+        return TRUE;
+
+    case WM_MOUSEWHEEL:
+        if (pl)
+            on_mouse_wheel(pl, wParam, false);
+        return 0;
+    case WM_MOUSEHWHEEL:
+        if (pl)
+            on_mouse_wheel(pl, wParam, true);
+        return 0;
+
+    case WM_KEYDOWN:
+    case WM_SYSKEYDOWN:
+        if (pl)
+            on_key(pl, wParam, lParam, true);
+        break; /* DefWindowProc keeps Alt+F4 / system keys working */
+    case WM_KEYUP:
+    case WM_SYSKEYUP:
+        if (pl)
+            on_key(pl, wParam, lParam, false);
+        break;
+
+    case WM_CHAR:
+        if (pl)
+            on_char(pl, wParam);
+        return 0;
+
+    case WM_IME_STARTCOMPOSITION:
+        if (pl) {
+            pl->ime_composing = true;
+            ime_update_position(pl);
+        }
+        /* lens renders the preedit itself; suppress the IME's default
+         * composition string window (the candidate list still shows). */
+        return 0;
+    case WM_IME_COMPOSITION:
+        if (pl)
+            ime_read_composition(pl, lParam);
+        return 0;
+    case WM_IME_ENDCOMPOSITION:
+        if (pl) {
+            pl->ime_composing = false;
+            (void)w32_emit_preedit(pl, "", 0, 0, 0);
+        }
+        return 0;
+
+    case WM_SETTINGCHANGE:
+        /* Theme watch: re-read AppsUseLightTheme and fire the registered
+         * callback on change (theme_win32.c owns the compare). Already on
+         * the loop thread — no wakeup-seam detour needed. */
+        optics_window_theme_win32__notify_setting_change();
+        /* Accessibility preferences: same broadcast, same thread —
+         * SPI_GETCLIENTAREAANIMATION / SPI_GETHIGHCONTRASTW / text metrics
+         * re-read and fired on change (a11y_prefs_win32.c owns the
+         * compare). */
+        optics_window_a11y_prefs_win32__notify_setting_change();
+        break;
+
+    case WM_IRIS_PASTE_DELIVER: {
+        /* Asynchronous clipboard delivery (clip_request_text contract). */
+        char *utf8 = (char *)lParam;
+        if (pl && pl->ui && utf8)
+            optics_window__ui_paste(pl->ui, utf8, strlen(utf8));
+        free(utf8);
+        return 0;
+    }
+
+    default:
+        break;
+    }
+    return DefWindowProcW(hwnd, msg, wParam, lParam);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Build one iris_input from the accumulated state                      */
+/* ------------------------------------------------------------------ */
+
+static void drain_input(w32_platform *pl, optics_window_input *in, float dt) {
+    memset(in, 0, sizeof *in);
+    in->cursor = (optics_gfx_point){(float)pl->acc.cx, (float)pl->acc.cy};
+    in->display_size = (optics_gfx_point){(float)pl->width, (float)pl->height};
+    in->dt_seconds = dt;
+    in->mods = pl->acc.mods;
+    in->scroll_x = (float)pl->acc.scroll_x;
+    in->scroll_y = (float)pl->acc.scroll_y;
+    in->scroll_pixels_x = (float)pl->acc.scroll_px_x;
+    in->scroll_pixels_y = (float)pl->acc.scroll_px_y;
+    for (int i = 0; i < OPTICS_WINDOW_BUTTON_COUNT; i++) {
+        in->mouse_down[i] = pl->acc.down[i];
+        in->mouse_pressed[i] = pl->acc.pressed[i];
+        in->mouse_released[i] = pl->acc.released[i];
+    }
+    memcpy(in->text_utf8, pl->acc.text, sizeof in->text_utf8);
+    memcpy(in->preedit_utf8, pl->acc.preedit, sizeof in->preedit_utf8);
+    in->preedit_cursor = pl->acc.preedit_cursor;
+    in->preedit_sel_lo = pl->acc.preedit_sel_lo;
+    in->preedit_sel_hi = pl->acc.preedit_sel_hi;
+    in->key_count = pl->acc.key_count;
+    for (uint32_t i = 0; i < pl->acc.key_count; i++)
+        in->keys[i] = pl->acc.keys[i];
+    /* IMM32 has no delete-surrounding concept (that is text-input-v3), so
+     * ime_delete_before/after stay zero — the memset above covers them. */
+
+    /* Clear per-frame edges; keep level state (down/cursor/mods/preedit —
+     * the preedit persists until the IME updates or ends it). */
+    for (int i = 0; i < OPTICS_WINDOW_BUTTON_COUNT; i++)
+        pl->acc.pressed[i] = pl->acc.released[i] = false;
+    pl->acc.scroll_x = pl->acc.scroll_y = 0.0;
+    pl->acc.scroll_px_x = pl->acc.scroll_px_y = 0.0;
+    pl->acc.key_count = 0;
+    pl->acc.text[0] = '\0';
+}
+
+/* Diagnostics go to stderr, never stdout: a consumer's stdout may be an
+ * IPC wire (see flux_console_logger). */
+static void log_raw(const optics_window_input *in) {
+    static const char *names[OPTICS_WINDOW_BUTTON_COUNT] = {"left", "right", "middle"};
+    for (int b = 0; b < OPTICS_WINDOW_BUTTON_COUNT; b++) {
+        if (in->mouse_pressed[b])
+            fprintf(stderr, "[raw] mouse press   %s\n", names[b]);
+        if (in->mouse_released[b])
+            fprintf(stderr, "[raw] mouse release %s\n", names[b]);
+    }
+    if (in->scroll_x != 0.0f || in->scroll_y != 0.0f)
+        fprintf(stderr, "[raw] scroll dx=%.2f dy=%.2f\n", in->scroll_x, in->scroll_y);
+    if (in->scroll_pixels_x != 0.0f || in->scroll_pixels_y != 0.0f)
+        fprintf(stderr, "[raw] scroll pixels dx=%.2f dy=%.2f\n", in->scroll_pixels_x,
+                in->scroll_pixels_y);
+    for (uint32_t k = 0; k < in->key_count; k++)
+        fprintf(stderr, "[raw] key %d %s%s\n", in->keys[k].key,
+                in->keys[k].pressed ? "down" : "up  ", in->keys[k].repeat ? " (repeat)" : "");
+}
+
+/* ------------------------------------------------------------------ */
+/*  Message pump + frame pacing                                        */
+/* ------------------------------------------------------------------ */
+
+/* Kick for the cross-thread wakeup seam (platform_wakeup.h): callable from
+ * any thread, never blocks, and wakes a loop blocked in pump_events.
+ * PostThreadMessage is thread-safe by design; coalescing in the queue is
+ * fine because the drain empties the whole callback queue. */
+static void w32_wakeup_kick(void *user) {
+    w32_platform *pl = user;
+    PostThreadMessageW(pl->loop_thread_id, WM_IRIS_WAKEUP, 0, 0);
+}
+
+/* Block (up to timeout_ms) for thread/window messages, then drain the queue.
+ * This is the Win32 form of app_wayland.c's pump_events: MsgWaitForMultipleObjectsEx
+ * plays poll(2), PeekMessage(PM_REMOVE) plays wl_display_dispatch_pending.
+ * Returns true when any message was dispatched (an event wake, as opposed to
+ * a deadline expiry), so the frame loop can tell the two apart. */
+static bool pump_events(w32_platform *pl, DWORD timeout_ms) {
+    (void)MsgWaitForMultipleObjectsEx(0, nullptr, timeout_ms, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+    bool any = false;
+    MSG msg;
+    while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
+        any = true;
+        if (msg.message == WM_QUIT) {
+            pl->running = false;
+            break;
+        }
+        /* Cross-thread wakeup: a subsystem posted a callback from its own
+         * thread. Thread messages have no HWND and must not go through
+         * DispatchMessage — drain the queue here, on the loop thread. */
+        if (msg.message == WM_IRIS_WAKEUP && msg.hwnd == nullptr) {
+            optics_window_platform_wakeup_drain();
+            continue;
+        }
+        TranslateMessage(&msg);
+        DispatchMessageW(&msg);
+    }
+    return any;
+}
+
+/* Monotonic nanoseconds, for frame pacing (QueryPerformanceCounter). */
+static long long now_ns(void) {
+    static long long freq = 0;
+    if (!freq) {
+        LARGE_INTEGER f;
+        QueryPerformanceFrequency(&f);
+        freq = f.QuadPart;
+    }
+    LARGE_INTEGER c;
+    QueryPerformanceCounter(&c);
+    return (long long)(c.QuadPart / freq) * 1000000000LL +
+           (long long)((c.QuadPart % freq) * 1000000000LL / freq);
+}
+
+/* Query display refresh rate via DWM composition timing and Win32 Monitor APIs (ADR-0122). */
+static int64_t w32_query_refresh_ns(HWND hwnd) {
+    if (hwnd) {
+        DWM_TIMING_INFO timing = {.cbSize = sizeof(DWM_TIMING_INFO)};
+        if (SUCCEEDED(DwmGetCompositionTimingInfo(hwnd, &timing)) &&
+            timing.rateRefresh.uiDenominator > 0 && timing.rateRefresh.uiNumerator > 0) {
+            return (int64_t)(1000000000ULL * (uint64_t)timing.rateRefresh.uiDenominator /
+                             (uint64_t)timing.rateRefresh.uiNumerator);
+        }
+        HMONITOR hmon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+        MONITORINFOEXW mi = {.cbSize = sizeof(mi)};
+        if (GetMonitorInfoW(hmon, (LPMONITORINFO)&mi)) {
+            DEVMODEW dm = {.dmSize = sizeof(dm)};
+            if (EnumDisplaySettingsW(mi.szDevice, ENUM_CURRENT_SETTINGS, &dm) &&
+                dm.dmDisplayFrequency > 1)
+                return 1000000000LL / (int64_t)dm.dmDisplayFrequency;
+        }
+    }
+    DEVMODEW dm = {.dmSize = sizeof(dm)};
+    if (EnumDisplaySettingsW(nullptr, ENUM_CURRENT_SETTINGS, &dm) && dm.dmDisplayFrequency > 1)
+        return 1000000000LL / (int64_t)dm.dmDisplayFrequency;
+    return OPTICS_WINDOW_PACE_DEFAULT_REFRESH_NS;
+}
+
+/* True if the input accumulator holds genuine user activity (pointer motion,
+ * buttons, scroll, keys, or text/IME) since the last check. Same role as in
+ * app_wayland.c: it is what lets the loop drop to a low idle rate when the
+ * user is idle. `*pcx`/`*pcy` carry the previous cursor position. */
+static bool acc_has_user_input(w32_platform *pl, double *pcx, double *pcy) {
+    bool moved = (pl->acc.cx != *pcx) || (pl->acc.cy != *pcy);
+    *pcx = pl->acc.cx;
+    *pcy = pl->acc.cy;
+    bool edge = pl->acc.key_count != 0 || pl->acc.text[0] != '\0' || pl->acc.preedit[0] != '\0' ||
+                pl->acc.scroll_x != 0.0 || pl->acc.scroll_y != 0.0 || pl->acc.scroll_px_x != 0.0 ||
+                pl->acc.scroll_px_y != 0.0;
+    for (int i = 0; i < OPTICS_WINDOW_BUTTON_COUNT; i++)
+        edge = edge || pl->acc.pressed[i] || pl->acc.released[i] || pl->acc.down[i];
+    return moved || edge;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Vulkan surface helpers (platform-specific)                        */
+/* ------------------------------------------------------------------ */
+
+static VkSurfaceKHR w32_create_vk_surface(const optics_gfx_device *device, HINSTANCE hinstance,
+                                          HWND hwnd) {
+    VkWin32SurfaceCreateInfoKHR ci = {
+        .sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR,
+        .hinstance = hinstance,
+        .hwnd = hwnd,
+    };
+    VkSurfaceKHR vk_surface = VK_NULL_HANDLE;
+    if (vkCreateWin32SurfaceKHR(optics_gfx_device_vk_instance(device), &ci, nullptr, &vk_surface) !=
+        VK_SUCCESS)
+        return VK_NULL_HANDLE;
+    return vk_surface;
+}
+
+static void w32_destroy_vk_surface(const optics_gfx_device *device, VkSurfaceKHR vk_surface) {
+    if (vk_surface && device)
+        vkDestroySurfaceKHR(optics_gfx_device_vk_instance(device), vk_surface, nullptr);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Run                                                                */
+/* ------------------------------------------------------------------ */
+
+static int w32_start_drag(const char *text, size_t len, uint32_t actions, void *user) {
+    (void)user;
+    optics_window_dnd_source src = {
+        .actions = actions,
+        .static_text = text,
+        .static_text_len = len,
+    };
+    return optics_window_dnd_start(&src);
+}
+
+typedef struct w32_present_context {
+    w32_platform *pl;
+    optics_gfx_surface *surface;
+    optics_gfx_canvas *canvas;
+    const optics_window_opts *cfg;
+} w32_present_context;
+
+static DWORD WINAPI win32_presenter_thread_main(LPVOID arg) {
+    w32_present_context *ctx = (w32_present_context *)arg;
+    w32_platform *pl = ctx->pl;
+
+    /* Elevate presentation worker thread priority so display pacing
+     * is not starved by background compilation or user-space compute tasks. */
+    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
+
+    while (atomic_load_explicit(&pl->presenter_running, memory_order_acquire)) {
+        DWORD wait_ms = (pl->refresh_ns > 0) ? (DWORD)((pl->refresh_ns * 15) / 10000000) : 40;
+        if (wait_ms < 10)
+            wait_ms = 10;
+        if (wait_ms > 50)
+            wait_ms = 50;
+
+        (void)WaitForSingleObject(pl->present_event, wait_ms);
+
+        if (!atomic_load_explicit(&pl->presenter_running, memory_order_acquire))
+            break;
+
+        optics_window_frame_packet *pkt = optics_window_mailbox_claim(&pl->mailbox);
+        if (!pkt)
+            continue;
+
+        if (pkt->snapshot || pkt->host_list) {
+            uint32_t target_w = (uint32_t)ceilf(pkt->width * pkt->scale);
+            uint32_t target_h = (uint32_t)ceilf(pkt->height * pkt->scale);
+            optics_gfx_surface_info sinfo;
+            optics_gfx_surface_get_info(ctx->surface, &sinfo);
+            if (target_w > 0 && target_h > 0 &&
+                (sinfo.width != target_w || sinfo.height != target_h)) {
+                (void)optics_gfx_surface_resize(ctx->surface, target_w, target_h);
+            }
+
+            optics_gfx_frame *frame = nullptr;
+            optics_gfx_result r = optics_gfx_surface_begin_frame(ctx->surface, nullptr, &frame);
+            if (r == OPTICS_GFX_ERROR_SURFACE_LOST && target_w > 0 && target_h > 0) {
+                if (optics_gfx_surface_resize(ctx->surface, target_w, target_h) == OPTICS_GFX_OK) {
+                    r = optics_gfx_surface_begin_frame(ctx->surface, nullptr, &frame);
+                }
+            }
+            if (r == OPTICS_GFX_OK) {
+                optics_gfx_color theme_clear = pkt->clear_color;
+                optics_gfx_color *pass_clear = pkt->has_clear ? &theme_clear : nullptr;
+
+                /* The packet's damage set travels to the pass unchanged
+                 * (ADR-0149). DWM composites from a fresh flip-chain buffer per
+                 * frame, so the whole buffer must reach the DWM even for a
+                 * scoped frame; flux's present-time content copy does exactly
+                 * that, restricted to what this frame wrote. */
+                optics_window_frame_damage dmg = optics_window_frame_packet_damage(pkt);
+
+                optics_gfx_canvas_pass_desc pass_desc = {
+                    .type = OPTICS_GFX_TYPE_CANVAS_PASS_DESC,
+                    .frame = frame,
+                    .clear_color = pass_clear,
+                    .damage =
+                        {
+                            .rects = dmg.full ? nullptr : dmg.rects,
+                            .count = dmg.full ? 0 : dmg.count,
+                        },
+                    .clear_extent = dmg.full,
+                };
+
+                bool drew = false;
+                if (optics_gfx_canvas_begin(ctx->canvas, &pass_desc) == OPTICS_GFX_OK) {
+                    if (pkt->host_list) {
+                        (void)optics_gfx_canvas_submit_display_list(
+                            ctx->canvas,
+                            &(optics_gfx_canvas_submit_display_list_opts){.list = pkt->host_list});
+                        drew = true;
+                    }
+                    if (pkt->snapshot) {
+                        drew = (optics_window__ui_snapshot_submit(ctx->cfg->ui, pkt->snapshot,
+                                                                  ctx->canvas) == OPTICS_GFX_OK) ||
+                               drew;
+                    }
+                    (void)optics_gfx_canvas_end(ctx->canvas);
+                }
+
+                if (drew && optics_gfx_frame_submit(frame) == OPTICS_GFX_OK) {
+                    optics_gfx_result pr = optics_gfx_frame_present(frame);
+                    if (pr == OPTICS_GFX_ERROR_SURFACE_LOST && target_w > 0 && target_h > 0) {
+                        (void)optics_gfx_surface_resize(ctx->surface, target_w, target_h);
+                    } else if (pr == OPTICS_GFX_OK) {
+                        /* Synchronize with hardware DWM VBlank cycle */
+                        (void)DwmFlush();
+                    }
+                }
+            }
+        }
+    }
+    return 0;
+}
+
+int optics_window_run_win32(const optics_window_opts *cfg) {
+    /* All resources declared up front and NULL/VK_NULL_HANDLE-initialized so
+     * a single `fail:` cleanup block can run on every exit path (error or
+     * success) without referencing out-of-scope or indeterminate pointers. */
+    optics_gfx_device *device = nullptr;
+    VkSurfaceKHR vk_surface = VK_NULL_HANDLE;
+    optics_gfx_surface *surface = nullptr;
+    optics_gfx_canvas *canvas = nullptr;
+    const optics_window_ui_host *ui = nullptr; /* set once the UI host started */
+    bool ui_started = false;
+    bool host_started = false;
+    int rc = 1; /* pessimistic; set to 0 only on success */
+
+    w32_platform pl = {
+        .running = true,
+        .width = cfg->width > 0 ? cfg->width : 960,
+        .height = cfg->height > 0 ? cfg->height : 720,
+        .scale = 1.0f,
+        .pending_scale = 1.0f,
+        .host_cursor = OPTICS_WINDOW_CURSOR_DEFAULT,
+        .effective_cursor = OPTICS_WINDOW_CURSOR_DEFAULT,
+        .acc = {.cx = -100000.0, .cy = -100000.0}, /* outside until first move */
+    };
+
+    /* Publish `pl` as the active app instance so the context-free
+     * iris_set_cursor() / iris_window_*() can reach it. Cleared on the way
+     * out (success or fail). */
+    g_active_pl = &pl;
+
+    OleInitialize(nullptr);
+
+    w32_drop_target_impl drop_target = {
+        .target = {.lpVtbl = &g_drop_target_vtbl},
+        .ref_count = 1,
+        .pl = &pl,
+    };
+
+    /* Per-monitor DPI awareness must be opted into before any window exists
+     * (a process manifest would be stronger still, but iris is a library and
+     * cannot ship one for the host). Failure on pre-1607 Windows is ignored:
+     * the app simply stays system-DPI-scaled by DWM. */
+    SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+
+    pl.hinstance = GetModuleHandleW(nullptr);
+    pl.loop_thread_id = GetCurrentThreadId();
+
+    /* Cross-thread wakeup seam: the kick posts WM_IRIS_WAKEUP to this
+     * thread's message queue; pump_events drains the callback queue when it
+     * retrieves one. Registered before any subsystem can post. */
+    optics_window_platform_wakeup_set_kick(w32_wakeup_kick, &pl);
+
+    /* --- Window class + window ------------------------------------- */
+    WNDCLASSEXW wc = {
+        .cbSize = sizeof wc,
+        .style = CS_HREDRAW | CS_VREDRAW,
+        .lpfnWndProc = w32_wnd_proc,
+        .hInstance = pl.hinstance,
+        .hCursor = LoadCursorW(nullptr, IDC_ARROW),
+        .hbrBackground = nullptr, /* no GDI background: WM_ERASEBKGND returns 1 */
+        .lpszClassName = OPTICS_WINDOW_WNDCLASS_NAME,
+    };
+    (void)RegisterClassExW(&wc); /* ERROR_CLASS_ALREADY_EXISTS is fine */
+
+    /* Initial scale: the system DPI (primary display). If the window lands
+     * on a different-DPI monitor it is corrected right after creation. */
+    UINT sys_dpi = GetDpiForSystem();
+    if (sys_dpi == 0)
+        sys_dpi = 96;
+    pl.scale = pl.pending_scale = (float)sys_dpi / 96.0f;
+
+    const DWORD style = WS_OVERLAPPEDWINDOW;
+    const DWORD exstyle = WS_EX_APPWINDOW; /* guarantee a taskbar button */
+    RECT want = {0, 0, (LONG)lroundf((float)pl.width * pl.scale),
+                 (LONG)lroundf((float)pl.height * pl.scale)};
+    AdjustWindowRectExForDpi(&want, style, FALSE, exstyle, sys_dpi);
+
+    WCHAR *title_w = w32_wide_from_utf8(cfg->title ? cfg->title : "iris");
+    pl.hwnd = CreateWindowExW(exstyle, OPTICS_WINDOW_WNDCLASS_NAME, title_w ? title_w : L"iris",
+                              style, CW_USEDEFAULT, CW_USEDEFAULT, want.right - want.left,
+                              want.bottom - want.top, nullptr, nullptr, pl.hinstance, &pl);
+    free(title_w);
+    if (!pl.hwnd) {
+        fprintf(stderr, "CreateWindowExW failed (%lu)\n", GetLastError());
+        goto fail;
+    }
+
+    RegisterDragDrop(pl.hwnd, (IDropTarget *)&drop_target);
+
+    /* The window may have been created on a monitor whose DPI differs from
+     * the system DPI: re-derive the scale and resize the window so the
+     * client area keeps the host-requested logical size. */
+    UINT wnd_dpi = GetDpiForWindow(pl.hwnd);
+    if (wnd_dpi == 0)
+        wnd_dpi = sys_dpi;
+    pl.scale = pl.pending_scale = (float)wnd_dpi / 96.0f;
+    if (wnd_dpi != sys_dpi) {
+        RECT r = {0, 0, (LONG)lroundf((float)pl.width * pl.scale),
+                  (LONG)lroundf((float)pl.height * pl.scale)};
+        AdjustWindowRectExForDpi(&r, style, FALSE, exstyle, wnd_dpi);
+        SetWindowPos(pl.hwnd, nullptr, 0, 0, r.right - r.left, r.bottom - r.top,
+                     SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+    }
+
+    /* --- Vulkan instance via flux (Win32 WSI extensions) ------------ */
+    const char *inst_exts[] = {
+        VK_KHR_SURFACE_EXTENSION_NAME,
+        VK_KHR_WIN32_SURFACE_EXTENSION_NAME,
+    };
+    const char *dev_exts[] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
+    optics_gfx_device_desc ddesc = {
+        .type = OPTICS_GFX_TYPE_DEVICE_DESC,
+        .log = optics_gfx_console_logger,
+        .validation = OPTICS_GFX_VALIDATION_AUTO,
+        .required_instance_extensions = inst_exts,
+        .required_instance_extension_count = sizeof inst_exts / sizeof *inst_exts,
+        .required_device_extensions = dev_exts,
+        .required_device_extension_count = sizeof dev_exts / sizeof *dev_exts,
+        .frames_in_flight = 2,
+    };
+    if (optics_gfx_device_create(&ddesc, &device) != OPTICS_GFX_OK) {
+        fprintf(stderr, "flux_device_create failed\n");
+        goto fail;
+    }
+
+    /* --- Vulkan surface + flux surface/canvas ----------------------- */
+    vk_surface = w32_create_vk_surface(device, pl.hinstance, pl.hwnd);
+    if (!vk_surface) {
+        fprintf(stderr, "vkCreateWin32SurfaceKHR failed\n");
+        goto fail;
+    }
+
+    /* Swapchain is sized in *device* pixels — logical × scale — while
+     * layout and iris_input stay in logical units. */
+    optics_gfx_surface_desc sdesc = {
+        .type = OPTICS_GFX_TYPE_SURFACE_DESC,
+        .vk_surface_khr = vk_surface,
+        .width = (uint32_t)lroundf((float)pl.width * pl.scale),
+        .height = (uint32_t)lroundf((float)pl.height * pl.scale),
+        /* Non-blocking present (MAILBOX, or IMMEDIATE as fallback — see
+         * pick_present_mode in flux). A FIFO/vsync present blocks the main
+         * thread in vkAcquireNextImageKHR, freezing input handling and
+         * time-based UI between frames; the frame loop paces itself
+         * instead (see below). */
+        .vsync = false,
+    };
+    if (optics_gfx_surface_create(device, &sdesc, &surface) != OPTICS_GFX_OK) {
+        fprintf(stderr, "flux_surface_create failed\n");
+        goto fail;
+    }
+
+    if (optics_gfx_canvas_create(
+            &(optics_gfx_canvas_desc){.type = OPTICS_GFX_TYPE_CANVAS_DESC, .surface = surface},
+            &canvas) != OPTICS_GFX_OK) {
+        fprintf(stderr, "flux_canvas_create failed\n");
+        goto fail;
+    }
+
+    if (!optics_window__ui_start(cfg->ui,
+                                 &(optics_window_ui_start_info){
+                                     .device = device,
+                                     .scale = pl.scale,
+                                     .dark = cfg->dark || optics_window_system_prefers_dark(),
+                                     .services = {.clipboard_set_text = clip_set_text,
+                                                  .clipboard_request_text = clip_request_text,
+                                                  .start_drag = w32_start_drag,
+                                                  .user = &pl},
+                                 })) {
+        fprintf(stderr, "iris UI host start failed\n");
+        goto fail;
+    }
+    ui = cfg->ui;
+    ui_started = true;
+
+    if (cfg->start && !cfg->start(device, cfg->user)) {
+        fprintf(stderr, "iris host start callback failed\n");
+        goto fail;
+    }
+    host_started = true;
+
+    w32_present_context pctx = {
+        .pl = &pl,
+        .surface = surface,
+        .canvas = canvas,
+        .cfg = cfg,
+    };
+
+    /* Decoupled Presentation Engine (ADR-0124): launch the dedicated
+     * presentation worker thread for every host that does not need a
+     * main-thread prepare pass. Recorded host content travels through the
+     * mailbox as an immutable display list. */
+    if (!cfg->prepare) {
+        optics_window_mailbox_init(&pl.mailbox, cfg->ui);
+        pl.present_event = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+        if (pl.present_event) {
+            atomic_init(&pl.presenter_running, true);
+            pl.present_thread =
+                CreateThread(nullptr, 0, win32_presenter_thread_main, &pctx, 0, nullptr);
+            if (pl.present_thread) {
+                pl.has_presenter_thread = true;
+            } else {
+                CloseHandle(pl.present_event);
+                pl.present_event = nullptr;
+                optics_window_mailbox_destroy(&pl.mailbox);
+            }
+        } else {
+            optics_window_mailbox_destroy(&pl.mailbox);
+        }
+    }
+
+    ShowWindow(pl.hwnd, SW_SHOW);
+
+    /* --- Frame loop --------------------------------------------------
+     * Presentation is paced by the display pacer (display_pacer.h, ADR-0122),
+     * not by ad-hoc client timer arithmetic.
+     *
+     * The surface presents non-blocking (Mailbox / Immediate) so acquiring an
+     * image never freezes input handling. The cadence state machine
+     * (iris_pacer) owns the whole decision: paint, skip, or quiesce — plus
+     * the poll budget:
+     *
+     *   - The display refresh rate is queried dynamically from Windows GDI /
+     *     EnumDisplaySettings (w32_query_refresh_ns), unlocking 120/144/240 Hz
+     *     displays rather than clamping to 60 Hz (INV-PACE-02).
+     *   - Zero-render skips (iris_request_frame_skip_render) advance the
+     *     scheduling baseline cleanly, eliminating the 100% CPU spin bug
+     *     (INV-PACE-03).
+     *   - Time-based UI advances on the simulation clock rather than render
+     *     timestamps (INV-PACE-04).
+     *
+     * A lens-only host reaches full quiescence (quiesced = true, blocking in
+     * pump_events with INFINITE); a host with cfg->record keeps the low idle
+     * tick alive so its cfg->build can observe state changes. */
+    optics_window_pacer pacer;
+    optics_window_pacer_init(&pacer);
+    pl.refresh_ns = w32_query_refresh_ns(pl.hwnd);
+    optics_window_pacer_set_refresh(&pacer, pl.refresh_ns);
+
+    int frame_no = 0;
+    /* Sticky until a frame containing the latest lens build is actually
+     * presented (see app_wayland.c for the acquire-timeout rationale). */
+    bool surface_needs_paint = true;
+    bool quiesced = false;
+    long long wait_ns = 0;
+    long long last_sim_ns = 0;
+    double prev_cx = pl.acc.cx, prev_cy = pl.acc.cy;
+    const bool has_host_content = (cfg->prepare != nullptr || cfg->record != nullptr);
+
+    pl.ui = ui;
+
+    /* Live colour-scheme watching: only when not forcing dark. On Win32 the
+     * change signal (WM_SETTINGCHANGE) already arrives on this thread, so
+     * the watcher is registration-only (theme_win32.c); the callback flips
+     * the lens theme in place and the next frame renders the new palette.
+     * The backend registers on its reserved internal slot
+     * (theme_watch_internal.h), never the host's public watch slot. */
+    pl.theme_watching = false;
+    if (!cfg->dark)
+        pl.theme_watching =
+            (optics_window_theme__watch_backend(w32_on_color_scheme_changed, &pl) == 0);
+
+    /* Accessibility preferences (ADR-0075): apply the OS's reduced-motion /
+     * high-contrast / text-scale preferences to lens at startup, then watch
+     * via WM_SETTINGCHANGE (backend slot, a11y_prefs_internal.h). Applied
+     * unconditionally — accessibility is not opt-in. */
+    {
+        optics_window_a11y_prefs prefs = optics_window_a11y_prefs_query();
+        optics_window__ui_set_a11y_prefs(ui, &prefs);
+    }
+    pl.a11y_prefs_watching = (optics_window_a11y_prefs__watch_backend(w32_on_a11y_prefs, &pl) == 0);
+
+    /* Accessibility: the Win32 build links a11y_stub.c today, so all three
+     * calls are inert no-ops (iris_a11y_init reports the bridge unavailable
+     * and a11y_running stays false). The call sites deliberately mirror
+     * app_cocoa.m so a future UI Automation bridge plugs in behind the same
+     * public seam without backend changes. */
+    pl.a11y_running = (optics_window_a11y_init() == 0);
+
+    while (pl.running) {
+        /* While minimised there is no valid render target (a zero-size
+         * swapchain is invalid): sleep until a message (restore/close)
+         * wakes us. WM_SIZE clears the flag and marks the resize. */
+        if (pl.minimized) {
+            (void)pump_events(&pl, INFINITE);
+            continue;
+        }
+
+        /* Sleep (inside MsgWaitForMultipleObjectsEx) until the next frame
+         * deadline, or wake immediately on incoming messages. The poll budget
+         * is governed by iris_pacer (ADR-0122) and is `>= 1 ns` whenever
+         * active, preventing busy polling. */
+        const DWORD POLL_CAP_MS = 200;
+        DWORD timeout_ms;
+        if (quiesced)
+            timeout_ms = INFINITE;
+        else if (wait_ns <= 0)
+            timeout_ms = 0;
+        else {
+            long long ms = wait_ns / 1000000LL;
+            if (ms < 1)
+                ms = 1;
+            if (ms > POLL_CAP_MS)
+                ms = POLL_CAP_MS;
+            timeout_ms = (DWORD)ms;
+        }
+        bool woke_on_event = pump_events(&pl, timeout_ms);
+
+        long long now = now_ns();
+        bool input_active = acc_has_user_input(&pl, &prev_cx, &prev_cy);
+
+        /* Quiescent fast-path: when completely idle with no pending events or
+         * input, evaluate idle pacer tick and sleep until external message. */
+        if (quiesced && !input_active && !woke_on_event) {
+            optics_window_pace_inputs idle_in = {
+                .now_ns = now,
+                .refresh_ns = pl.refresh_ns,
+                .have_pulse_source = false,
+                .has_host_content = has_host_content,
+            };
+            optics_window_pace_decision idle_d = optics_window_pacer_tick(&pacer, &idle_in);
+            quiesced = (idle_d.action == OPTICS_WINDOW_PACE_QUIESCE);
+            wait_ns = idle_d.wait_timeout_ns;
+            continue;
+        }
+
+        bool host_animating = pl.animation_frame_requested;
+        pl.animation_frame_requested = false;
+
+        /* DPI change (window dragged to a mixed-DPI monitor): apply the new
+         * scale, resize the swapchain in device pixels, and tell lens so its
+         * replay transform matches. The first frame after a resize/scale must
+         * always paint (the swapchain contents were discarded). */
+        bool resized_this_frame = false;
+        if (pl.pending_scale > 0.0f && fabsf(pl.pending_scale - pl.scale) > 0.0001f) {
+            pl.scale = pl.pending_scale;
+            w32_emit_scale(pl.scale);
+            optics_window__ui_set_scale(ui, pl.scale);
+            pl.resized = true;
+        }
+        if (pl.resized) {
+            if (!pl.has_presenter_thread) {
+                (void)optics_gfx_surface_resize(surface,
+                                                (uint32_t)lroundf((float)pl.width * pl.scale),
+                                                (uint32_t)lroundf((float)pl.height * pl.scale));
+            }
+            pl.resized = false;
+            resized_this_frame = true;
+        }
+
+        /* Simulation clock (INV-PACE-04): evaluate animation and physics on
+         * predictable display refresh intervals rather than execution noise. */
+        long long sim_ns = now;
+        float dt = (float)((double)(pl.refresh_ns > 0 ? pl.refresh_ns
+                                                      : OPTICS_WINDOW_PACE_DEFAULT_REFRESH_NS) *
+                           1e-9);
+        if (last_sim_ns > 0 && sim_ns > last_sim_ns) {
+            dt = (float)((double)(sim_ns - last_sim_ns) * 1e-9);
+            if (dt > 0.25f)
+                dt = 0.25f;
+        }
+        last_sim_ns = sim_ns;
+
+        optics_window_input in;
+        drain_input(&pl, &in, dt);
+        if (cfg->log_raw)
+            log_raw(&in);
+
+        optics_window__ui_frame(ui, &in, &pl.ui_frame);
+
+        /* Inert with a11y_stub.c; kept for a future UI Automation bridge
+         * (same seam app_cocoa.m uses). */
+        if (pl.a11y_running && ui)
+            (void)optics_window_a11y_update(ui);
+
+        /* Keep the IME composition/candidate windows glued to the caret
+         * while a composition is active (the caret moves as text commits). */
+        if (pl.ime_composing)
+            ime_update_position(&pl);
+
+        /* Cursor: an explicit host iris_set_cursor wins; while it is DEFAULT,
+         * follow the semantic hint of the lens widget under the pointer
+         * (I-beam over text fields, hand over clickable elements, …). */
+        optics_window_cursor eff = pl.host_cursor;
+        if (eff == OPTICS_WINDOW_CURSOR_DEFAULT)
+            eff = pl.ui_frame.cursor;
+        if (eff != pl.effective_cursor) {
+            pl.effective_cursor = eff;
+            if (pl.cursor_inside)
+                SetCursor(w32_cursor_handle(eff));
+        }
+
+        /* A WM_PAINT since the last frame (restore, DWM composition change):
+         * the swapchain contents may be stale even when lens sees no damage,
+         * so latch a repaint like a resize would. */
+        if (pl.force_paint) {
+            pl.force_paint = false;
+            surface_needs_paint = true;
+        }
+
+        /* Cadence evaluation via iris_pacer (ADR-0122). */
+        bool chrome_damaged = pl.ui_frame.damaged;
+        bool surface_forced = resized_this_frame || surface_needs_paint;
+
+        optics_window_pace_inputs pace_in = {
+            .now_ns = now,
+            .refresh_ns = pl.refresh_ns,
+            .have_pulse_source = false,
+            .input_active = input_active,
+            .host_animating = host_animating,
+            .host_skip_render = pl.frame_skip_render,
+            .host_static = pl.record_static,
+            .has_host_content = has_host_content,
+            .chrome_damaged = chrome_damaged,
+            .caret_ticking = pl.ui_frame.caret_ticking,
+            .surface_needs_paint = surface_forced,
+            .ui_animating = pl.ui_frame.animating,
+        };
+        pl.frame_skip_render = false;
+        pl.record_static = false;
+
+        optics_window_pace_decision d = optics_window_pacer_tick(&pacer, &pace_in);
+        quiesced = (d.action == OPTICS_WINDOW_PACE_QUIESCE);
+        wait_ns = d.wait_timeout_ns;
+
+        if (d.action == OPTICS_WINDOW_PACE_PAINT) {
+            surface_needs_paint = true;
+
+            if (pl.has_presenter_thread) {
+                /* Decoupled Presentation Engine (ADR-0124 & ADR-0127): hand off immutable snapshot
+                 * and optional host recorded display list to dedicated presentation worker thread.
+                 */
+                optics_gfx_display_list *host_list =
+                    optics_window_record_host_canvas(cfg, pl.scale);
+
+                optics_window_ui_snapshot *snapshot = nullptr;
+                if (optics_window__ui_snapshot_create(ui, &snapshot) == OPTICS_GFX_OK ||
+                    host_list != nullptr) {
+                    optics_window_frame_packet *pkt = optics_window_mailbox_acquire(&pl.mailbox);
+                    if (pkt) {
+                        pkt->snapshot = snapshot;
+                        pkt->host_list = host_list;
+                        /* Resolve the frame's damage set on the UI thread: the
+                         * presentation thread must not re-query lens, and the set
+                         * has to travel with the snapshot it describes. */
+                        pkt->damage_count = optics_window__ui_damage_rects(
+                            ui, pkt->damage, OPTICS_WINDOW_DAMAGE_RECTS_CAPACITY);
+                        pkt->force_paint = surface_forced;
+                        pkt->clear_color = pl.ui_frame.clear_color;
+                        pkt->has_clear = !cfg->no_clear;
+                        pkt->scale = pl.scale;
+                        pkt->width = pl.width;
+                        pkt->height = pl.height;
+                        optics_window_mailbox_publish(&pl.mailbox, pkt);
+                        SetEvent(pl.present_event);
+                        /* Without a UI layer there is nothing to activate: the
+                         * published host content is the whole frame. */
+                        if (!ui ||
+                            optics_window__ui_snapshot_activate(ui, snapshot) == OPTICS_GFX_OK) {
+                            surface_needs_paint = false;
+                        }
+                        if (++frame_no == 1) {
+                            fprintf(
+                                stderr,
+                                "first frame presented: %dx%d logical, %ux%u device (scale=%.2f)\n",
+                                pl.width, pl.height, (uint32_t)lroundf((float)pl.width * pl.scale),
+                                (uint32_t)lroundf((float)pl.height * pl.scale), pl.scale);
+                        }
+                    }
+                    optics_window__ui_snapshot_release(ui, snapshot);
+                    if (host_list) {
+                        optics_gfx_display_list_release(host_list);
+                    }
+                }
+                continue;
+            }
+
+            optics_gfx_frame *frame = nullptr;
+            optics_gfx_result r = optics_gfx_surface_begin_frame(surface, nullptr, &frame);
+            if (r == OPTICS_GFX_ERROR_SURFACE_LOST) {
+                (void)optics_gfx_surface_resize(surface,
+                                                (uint32_t)lroundf((float)pl.width * pl.scale),
+                                                (uint32_t)lroundf((float)pl.height * pl.scale));
+                continue;
+            }
+            if (r == OPTICS_GFX_ERROR_INVALID_STATE)
+                continue;
+            /* Acquire timeout (display asleep or window occluded): not an
+             * error — no swapchain image was consumed, so skip this frame and
+             * retry on the next deadline instead of exiting the loop. */
+            if (r == OPTICS_GFX_ERROR_TIMEOUT)
+                continue;
+            if (r != OPTICS_GFX_OK)
+                break;
+
+            optics_gfx_surface_info info;
+            optics_gfx_surface_get_info(surface, &info);
+
+            if (cfg->prepare)
+                cfg->prepare(frame, canvas, device, pl.scale, cfg->user);
+
+            /* Clear to the current theme's body background; recorded host
+             * content draws *under* lens's chrome. */
+            optics_gfx_color clear = pl.ui_frame.clear_color;
+            optics_gfx_color *pass_clear = cfg->no_clear ? nullptr : &clear;
+            bool drew = false;
+            optics_window_ui_snapshot *snapshot = nullptr;
+            optics_gfx_display_list *host_list = optics_window_record_host_canvas(cfg, pl.scale);
+
+            /* Damage scope for this surface (ADR-0149): the set travels intact to
+             * the pass. A host with opaque canvas content (or a forced repaint)
+             * asks for the full extent instead — its own content is not something
+             * lens can localise. */
+            optics_window_frame_damage dmg = {};
+            const bool localize = !surface_forced && !has_host_content;
+            if (localize) {
+                dmg = optics_window_frame_ui_damage(ui, pl.scale, (int32_t)info.width,
+                                                    (int32_t)info.height,
+                                                    /*force_full=*/false);
+            } else {
+                dmg.full = true;
+            }
+
+            optics_gfx_canvas_pass_desc pass_desc = {
+                .type = OPTICS_GFX_TYPE_CANVAS_PASS_DESC,
+                .frame = frame,
+                .clear_color = pass_clear,
+                .damage =
+                    {
+                        .rects = dmg.full ? nullptr : dmg.rects,
+                        .count = dmg.full ? 0 : dmg.count,
+                    },
+                .clear_extent = dmg.full,
+            };
+
+            if (optics_gfx_canvas_begin(canvas, &pass_desc) == OPTICS_GFX_OK) {
+                if (host_list) {
+                    drew = optics_gfx_canvas_submit_display_list(
+                               canvas, &(optics_gfx_canvas_submit_display_list_opts){
+                                           .list = host_list}) == OPTICS_GFX_OK;
+                }
+                if (!ui) {
+                    /* Canvas-only host: the cleared pass plus whatever the host
+                     * recorded is the frame. */
+                    drew = true;
+                } else if (optics_window__ui_snapshot_create(ui, &snapshot) == OPTICS_GFX_OK) {
+                    drew = (optics_window__ui_snapshot_submit(ui, snapshot, canvas) ==
+                            OPTICS_GFX_OK) ||
+                           drew;
+                }
+                if (optics_gfx_canvas_end(canvas) != OPTICS_GFX_OK)
+                    drew = false;
+            }
+            optics_gfx_display_list_release(host_list);
+
+            if (!drew) {
+                optics_window__ui_snapshot_release(ui, snapshot);
+                goto fail;
+            }
+            if (optics_gfx_frame_submit(frame) != OPTICS_GFX_OK) {
+                optics_window__ui_snapshot_release(ui, snapshot);
+                goto fail;
+            }
+            r = optics_gfx_frame_present(frame);
+            if (r == OPTICS_GFX_ERROR_SURFACE_LOST)
+                (void)optics_gfx_surface_resize(surface,
+                                                (uint32_t)lroundf((float)pl.width * pl.scale),
+                                                (uint32_t)lroundf((float)pl.height * pl.scale));
+            else if (r != OPTICS_GFX_OK) {
+                optics_window__ui_snapshot_release(ui, snapshot);
+                goto fail;
+            } else if (drew) {
+                if (ui && optics_window__ui_snapshot_activate(ui, snapshot) != OPTICS_GFX_OK) {
+                    optics_window__ui_snapshot_release(ui, snapshot);
+                    goto fail;
+                }
+                surface_needs_paint = false;
+            }
+
+            optics_window__ui_snapshot_release(ui, snapshot);
+
+            if (++frame_no == 1)
+                fprintf(stderr, "first frame presented: %dx%d logical, %ux%u device (scale=%.2f)\n",
+                        pl.width, pl.height, info.width, info.height, (double)pl.scale);
+        }
+
+        if (quiesced) {
+            optics_window__ui_quiesce(ui);
+        }
+    }
+
+    rc = 0; /* success — fall through to the unified cleanup below */
+
+    /* --- Cleanup (shared by the success path and every `goto fail`) --- */
+fail:
+    /* Let the host release every resource created from iris's borrowed
+     * device before that device, the lens context, or the canvas disappears.
+     * Keep the active platform published during the callback so thread-affine
+     * iris helpers remain valid through the host's teardown. */
+    if (host_started && cfg->stop)
+        cfg->stop(device, cfg->user);
+    if (ui_started)
+        optics_window__ui_stop(cfg->ui);
+
+    /* Stop publishing this w32_platform to the context-free APIs — any host
+     * call after this returns is a no-op rather than a use-after-free. */
+    g_active_pl = nullptr;
+
+    /* Stop decoupled presenter thread before teardown (ADR-0124, INV-THREAD-04) */
+    if (pl.has_presenter_thread) {
+        atomic_store_explicit(&pl.presenter_running, false, memory_order_release);
+        SetEvent(pl.present_event);
+        WaitForSingleObject(pl.present_thread, INFINITE);
+        CloseHandle(pl.present_thread);
+        CloseHandle(pl.present_event);
+        optics_window_mailbox_destroy(&pl.mailbox);
+        pl.has_presenter_thread = false;
+    }
+
+    /* GPU side first: let in-flight work finish before tearing down objects. */
+    if (device)
+        optics_gfx_device_wait_idle(device);
+    if (ui_started)
+        optics_window__ui_destroy(cfg->ui);
+    pl.ui = nullptr; /* after this, queued main-thread callbacks must not touch lens */
+    /* The Win32 theme watcher holds no thread or handle; unwatch just drops
+     * the backend's internal registration (the host's public watch, if any,
+     * is untouched). */
+    if (pl.theme_watching)
+        optics_window_theme__unwatch_backend();
+    if (pl.a11y_prefs_watching)
+        optics_window_a11y_prefs__unwatch_backend();
+    /* Inert with a11y_stub.c; mirrors app_cocoa.m. */
+    if (pl.a11y_running)
+        optics_window_a11y_shutdown();
+    /* Wakeup seam teardown: nothing can post after the unregistrations
+     * above (Win32 has no watcher thread), except detached subsystem
+     * threads — unregister the kick first so late posts fail cleanly, then
+     * drain whatever was legitimately queued. */
+    optics_window_platform_wakeup_set_kick(nullptr, nullptr);
+    optics_window_platform_wakeup_drain();
+    if (canvas)
+        optics_gfx_canvas_release(canvas);
+    if (surface)
+        optics_gfx_surface_release(surface);
+    if (vk_surface)
+        w32_destroy_vk_surface(device, vk_surface);
+    if (device)
+        optics_gfx_device_release(device);
+    if (pl.hwnd) {
+        RevokeDragDrop(pl.hwnd);
+        DestroyWindow(pl.hwnd);
+    }
+    OleUninitialize();
+    return rc;
+}

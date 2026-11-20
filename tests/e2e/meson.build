@@ -18,9 +18,9 @@ test_e2e_flux_version = executable('test_e2e_flux_version',
   'test_e2e_flux_version.c',
   dependencies : e2e_common_deps,
 )
-test('e2e_flux_version', test_e2e_flux_version, suite : 'e2e')
+test('e2e_gfx_version', test_e2e_flux_version, suite : 'e2e')
 
-if opt_lens
+if opt_ui
   test_e2e_public_api = executable('test_e2e_public_api',
     'test_e2e_public_api.c',
     dependencies : e2e_common_deps,
@@ -33,7 +33,7 @@ if opt_lens
   )
   test('e2e_interaction_session', test_e2e_interaction_session, suite : 'e2e')
 
-  if opt_reticle
+  if opt_svg
     test_e2e_document_pipeline = executable('test_e2e_document_pipeline',
       'test_e2e_document_pipeline.c',
       dependencies : e2e_common_deps,

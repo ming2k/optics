@@ -7,43 +7,44 @@
 #include <math.h>
 
 const backdrop_info g_backdrops[BACKDROP_COUNT] = {
-    {BACKDROP_BOUNCING_TV, "Bouncing TV", LENS_ICON_TV},
-    {BACKDROP_SPATIAL_GRID, "Spatial Grid", LENS_ICON_GRID},
-    {BACKDROP_BLACK, "Pure Black", LENS_ICON_MOON},
-    {BACKDROP_WHITE, "Pure White", LENS_ICON_SUN},
+    {BACKDROP_BOUNCING_TV, "Bouncing TV", OPTICS_UI_ICON_TV},
+    {BACKDROP_SPATIAL_GRID, "Spatial Grid", OPTICS_UI_ICON_GRID},
+    {BACKDROP_BLACK, "Pure Black", OPTICS_UI_ICON_MOON},
+    {BACKDROP_WHITE, "Pure White", OPTICS_UI_ICON_SUN},
 };
 
-static void draw_bouncing_tv(flux_canvas *c, flux_arena *arena, float W, float H,
+static void draw_bouncing_tv(optics_gfx_canvas *c, optics_gfx_arena *arena, float W, float H,
                              gallery_app *app) {
     /* 1. Base deep atmospheric gradient */
     {
-        flux_gradient_stop bg_stops[3] = {
-            {0.0f, flux_color_rgba_premul(12, 14, 22, 255)},
-            {0.5f, flux_color_rgba_premul(18, 22, 34, 255)},
-            {1.0f, flux_color_rgba_premul(10, 12, 20, 255)},
+        optics_gfx_gradient_stop bg_stops[3] = {
+            {0.0f, optics_gfx_color_rgba_premul(12, 14, 22, 255)},
+            {0.5f, optics_gfx_color_rgba_premul(18, 22, 34, 255)},
+            {1.0f, optics_gfx_color_rgba_premul(10, 12, 20, 255)},
         };
-        flux_brush bg =
-            flux_brush_linear_gradient((flux_point){0, 0}, (flux_point){W, H}, bg_stops, 3);
-        flux_canvas_fill_rect(c, (flux_rect){0, 0, W, H}, &bg);
+        optics_gfx_brush bg = optics_gfx_brush_linear_gradient(
+            (optics_gfx_point){0, 0}, (optics_gfx_point){W, H}, bg_stops, 3);
+        optics_gfx_canvas_fill_rect(c, (optics_gfx_rect){0, 0, W, H}, &bg);
     }
 
     /* 2. Soft background coordinate reference grid (subtle 64px grid lines) */
     {
-        flux_path *grid = nullptr;
-        (void)flux_path_create(&grid, arena);
+        optics_gfx_path *grid = nullptr;
+        (void)optics_gfx_path_create(&grid, arena);
         if (grid) {
             float step = 64.0f;
             for (float x = 0; x <= W; x += step) {
-                flux_path_move_to(grid, x, 0);
-                flux_path_line_to(grid, x, H);
+                optics_gfx_path_move_to(grid, x, 0);
+                optics_gfx_path_line_to(grid, x, H);
             }
             for (float y = 0; y <= H; y += step) {
-                flux_path_move_to(grid, 0, y);
-                flux_path_line_to(grid, W, y);
+                optics_gfx_path_move_to(grid, 0, y);
+                optics_gfx_path_line_to(grid, W, y);
             }
-            flux_brush gb = flux_brush_solid(flux_color_rgba_premul(255, 255, 255, 12));
-            flux_stroke_style gst = {.width = 1.0f};
-            flux_canvas_stroke_path(c, grid, &gst, &gb);
+            optics_gfx_brush gb =
+                optics_gfx_brush_solid(optics_gfx_color_rgba_premul(255, 255, 255, 12));
+            optics_gfx_stroke_style gst = {.width = 1.0f};
+            optics_gfx_canvas_stroke_path(c, grid, &gst, &gb);
         }
     }
 
@@ -93,75 +94,90 @@ static void draw_bouncing_tv(flux_canvas *c, flux_arena *arena, float W, float H
 
     /* Glowing ambient halo */
     {
-        flux_color glow_c;
+        optics_gfx_color glow_c;
         switch (app->dvd_bounce_count % 4) {
         case 0:
-            glow_c = flux_color_rgba_premul(249, 115, 22, 90);
+            glow_c = optics_gfx_color_rgba_premul(249, 115, 22, 90);
             break; /* Coral / Amber */
         case 1:
-            glow_c = flux_color_rgba_premul(14, 165, 233, 90);
+            glow_c = optics_gfx_color_rgba_premul(14, 165, 233, 90);
             break; /* Sky Cyan */
         case 2:
-            glow_c = flux_color_rgba_premul(168, 85, 247, 90);
+            glow_c = optics_gfx_color_rgba_premul(168, 85, 247, 90);
             break; /* Purple / Violet */
         case 3:
         default:
-            glow_c = flux_color_rgba_premul(34, 197, 94, 90);
+            glow_c = optics_gfx_color_rgba_premul(34, 197, 94, 90);
             break; /* Emerald */
         }
-        flux_brush shadow_b = flux_brush_solid(glow_c);
-        flux_geometry g_shadow = flux_geom_rrect(
-            (flux_rect){bx - 12.0f, by - 8.0f, box_w + 24.0f, box_h + 20.0f}, 28.0f * app->scale);
-        flux_canvas_draw_geometry(
-            c, &(flux_canvas_draw_geometry_opts){.geom = &g_shadow, .brush = &shadow_b});
+        optics_gfx_brush shadow_b = optics_gfx_brush_solid(glow_c);
+        optics_gfx_geometry g_shadow = optics_gfx_geom_rrect(
+            (optics_gfx_rect){bx - 12.0f, by - 8.0f, box_w + 24.0f, box_h + 20.0f},
+            28.0f * app->scale);
+        optics_gfx_canvas_draw_geometry(
+            c, &(optics_gfx_canvas_draw_geometry_opts){.geom = &g_shadow, .brush = &shadow_b});
     }
 
     /* Bouncing TV body: vibrant linear gradient */
     {
-        flux_gradient_stop box_stops[3];
+        optics_gfx_gradient_stop box_stops[3];
         switch (app->dvd_bounce_count % 4) {
         case 0: /* Sunrise Flare */
-            box_stops[0] = (flux_gradient_stop){0.0f, flux_color_rgba_premul(244, 63, 94, 255)};
-            box_stops[1] = (flux_gradient_stop){0.5f, flux_color_rgba_premul(249, 115, 22, 255)};
-            box_stops[2] = (flux_gradient_stop){1.0f, flux_color_rgba_premul(234, 179, 8, 255)};
+            box_stops[0] =
+                (optics_gfx_gradient_stop){0.0f, optics_gfx_color_rgba_premul(244, 63, 94, 255)};
+            box_stops[1] =
+                (optics_gfx_gradient_stop){0.5f, optics_gfx_color_rgba_premul(249, 115, 22, 255)};
+            box_stops[2] =
+                (optics_gfx_gradient_stop){1.0f, optics_gfx_color_rgba_premul(234, 179, 8, 255)};
             break;
         case 1: /* Cyber Cyan */
-            box_stops[0] = (flux_gradient_stop){0.0f, flux_color_rgba_premul(6, 182, 212, 255)};
-            box_stops[1] = (flux_gradient_stop){0.5f, flux_color_rgba_premul(59, 130, 246, 255)};
-            box_stops[2] = (flux_gradient_stop){1.0f, flux_color_rgba_premul(147, 51, 234, 255)};
+            box_stops[0] =
+                (optics_gfx_gradient_stop){0.0f, optics_gfx_color_rgba_premul(6, 182, 212, 255)};
+            box_stops[1] =
+                (optics_gfx_gradient_stop){0.5f, optics_gfx_color_rgba_premul(59, 130, 246, 255)};
+            box_stops[2] =
+                (optics_gfx_gradient_stop){1.0f, optics_gfx_color_rgba_premul(147, 51, 234, 255)};
             break;
         case 2: /* Neon Violet */
-            box_stops[0] = (flux_gradient_stop){0.0f, flux_color_rgba_premul(168, 85, 247, 255)};
-            box_stops[1] = (flux_gradient_stop){0.5f, flux_color_rgba_premul(236, 72, 153, 255)};
-            box_stops[2] = (flux_gradient_stop){1.0f, flux_color_rgba_premul(244, 63, 94, 255)};
+            box_stops[0] =
+                (optics_gfx_gradient_stop){0.0f, optics_gfx_color_rgba_premul(168, 85, 247, 255)};
+            box_stops[1] =
+                (optics_gfx_gradient_stop){0.5f, optics_gfx_color_rgba_premul(236, 72, 153, 255)};
+            box_stops[2] =
+                (optics_gfx_gradient_stop){1.0f, optics_gfx_color_rgba_premul(244, 63, 94, 255)};
             break;
         case 3:
         default: /* Emerald Aurora */
-            box_stops[0] = (flux_gradient_stop){0.0f, flux_color_rgba_premul(16, 185, 129, 255)};
-            box_stops[1] = (flux_gradient_stop){0.5f, flux_color_rgba_premul(14, 165, 233, 255)};
-            box_stops[2] = (flux_gradient_stop){1.0f, flux_color_rgba_premul(99, 102, 241, 255)};
+            box_stops[0] =
+                (optics_gfx_gradient_stop){0.0f, optics_gfx_color_rgba_premul(16, 185, 129, 255)};
+            box_stops[1] =
+                (optics_gfx_gradient_stop){0.5f, optics_gfx_color_rgba_premul(14, 165, 233, 255)};
+            box_stops[2] =
+                (optics_gfx_gradient_stop){1.0f, optics_gfx_color_rgba_premul(99, 102, 241, 255)};
             break;
         }
-        flux_brush tv_b = flux_brush_linear_gradient(
-            (flux_point){bx, by}, (flux_point){bx + box_w, by + box_h}, box_stops, 3);
-        flux_geometry g_tv = flux_geom_rrect((flux_rect){bx, by, box_w, box_h}, 18.0f * app->scale);
-        flux_canvas_draw_geometry(c,
-                                  &(flux_canvas_draw_geometry_opts){.geom = &g_tv, .brush = &tv_b});
+        optics_gfx_brush tv_b = optics_gfx_brush_linear_gradient(
+            (optics_gfx_point){bx, by}, (optics_gfx_point){bx + box_w, by + box_h}, box_stops, 3);
+        optics_gfx_geometry g_tv =
+            optics_gfx_geom_rrect((optics_gfx_rect){bx, by, box_w, box_h}, 18.0f * app->scale);
+        optics_gfx_canvas_draw_geometry(
+            c, &(optics_gfx_canvas_draw_geometry_opts){.geom = &g_tv, .brush = &tv_b});
 
         /* Crisp specular outline */
-        flux_brush border_b = flux_brush_solid(flux_color_rgba_premul(255, 255, 255, 220));
-        flux_geometry g_tv_border =
-            flux_geom_rrect((flux_rect){bx, by, box_w, box_h}, 18.0f * app->scale);
+        optics_gfx_brush border_b =
+            optics_gfx_brush_solid(optics_gfx_color_rgba_premul(255, 255, 255, 220));
+        optics_gfx_geometry g_tv_border =
+            optics_gfx_geom_rrect((optics_gfx_rect){bx, by, box_w, box_h}, 18.0f * app->scale);
         g_tv_border.stroke.width = 2.0f;
-        flux_canvas_draw_geometry(
-            c, &(flux_canvas_draw_geometry_opts){.geom = &g_tv_border, .brush = &border_b});
+        optics_gfx_canvas_draw_geometry(
+            c, &(optics_gfx_canvas_draw_geometry_opts){.geom = &g_tv_border, .brush = &border_b});
     }
 
     /* High-contrast test geometry inside the TV box for optical refraction & dispersion analysis */
     {
         /* Diagonal calibration stripes */
-        flux_path *tv_stripes = nullptr;
-        (void)flux_path_create(&tv_stripes, arena);
+        optics_gfx_path *tv_stripes = nullptr;
+        (void)optics_gfx_path_create(&tv_stripes, arena);
         if (tv_stripes) {
             float step = 22.0f * app->scale;
             for (float d = -box_h; d < box_w + box_h; d += step) {
@@ -178,71 +194,73 @@ static void draw_bouncing_tv(flux_canvas *c, flux_arena *arena, float W, float H
                     ex = bx + box_w;
                 }
                 if (sx < bx + box_w && ey > by) {
-                    flux_path_move_to(tv_stripes, sx, sy);
-                    flux_path_line_to(tv_stripes, ex, ey);
+                    optics_gfx_path_move_to(tv_stripes, sx, sy);
+                    optics_gfx_path_line_to(tv_stripes, ex, ey);
                 }
             }
-            flux_brush sb = flux_brush_solid(flux_color_rgba_premul(255, 255, 255, 110));
-            flux_stroke_style sst = {.width = 3.0f * app->scale};
-            flux_canvas_stroke_path(c, tv_stripes, &sst, &sb);
+            optics_gfx_brush sb =
+                optics_gfx_brush_solid(optics_gfx_color_rgba_premul(255, 255, 255, 110));
+            optics_gfx_stroke_style sst = {.width = 3.0f * app->scale};
+            optics_gfx_canvas_stroke_path(c, tv_stripes, &sst, &sb);
         }
 
         /* Center calibration disc */
-        flux_canvas_fill_circle(c, bx + box_w * 0.5f, by + box_h * 0.5f, 22.0f * app->scale,
-                                flux_color_rgba_premul(255, 255, 255, 240));
-        flux_canvas_fill_circle(c, bx + box_w * 0.5f, by + box_h * 0.5f, 12.0f * app->scale,
-                                flux_color_rgba_premul(20, 20, 30, 255));
+        optics_gfx_canvas_fill_circle(c, bx + box_w * 0.5f, by + box_h * 0.5f, 22.0f * app->scale,
+                                      optics_gfx_color_rgba_premul(255, 255, 255, 240));
+        optics_gfx_canvas_fill_circle(c, bx + box_w * 0.5f, by + box_h * 0.5f, 12.0f * app->scale,
+                                      optics_gfx_color_rgba_premul(20, 20, 30, 255));
     }
 }
 
-static void draw_spatial_grid(flux_canvas *c, flux_arena *arena, float W, float H) {
+static void draw_spatial_grid(optics_gfx_canvas *c, optics_gfx_arena *arena, float W, float H) {
     /* Base deep dark slate background gradient */
     {
-        flux_gradient_stop stops[3] = {
-            {0.0f, flux_color_rgba_premul(18, 22, 34, 255)},
-            {0.5f, flux_color_rgba_premul(28, 36, 54, 255)},
-            {1.0f, flux_color_rgba_premul(14, 20, 32, 255)},
+        optics_gfx_gradient_stop stops[3] = {
+            {0.0f, optics_gfx_color_rgba_premul(18, 22, 34, 255)},
+            {0.5f, optics_gfx_color_rgba_premul(28, 36, 54, 255)},
+            {1.0f, optics_gfx_color_rgba_premul(14, 20, 32, 255)},
         };
-        flux_brush bg =
-            flux_brush_linear_gradient((flux_point){0, 0}, (flux_point){W, H}, stops, 3);
-        flux_canvas_fill_rect(c, (flux_rect){0, 0, W, H}, &bg);
+        optics_gfx_brush bg = optics_gfx_brush_linear_gradient((optics_gfx_point){0, 0},
+                                                               (optics_gfx_point){W, H}, stops, 3);
+        optics_gfx_canvas_fill_rect(c, (optics_gfx_rect){0, 0, W, H}, &bg);
     }
 
     /* Static high-contrast diagonal zebra stripes for refraction and distortion analysis */
     {
-        flux_path *stripes = nullptr;
-        (void)flux_path_create(&stripes, arena);
+        optics_gfx_path *stripes = nullptr;
+        (void)optics_gfx_path_create(&stripes, arena);
         if (stripes) {
             float spacing = 48.0f;
             for (float x = -H; x < W + H; x += spacing) {
-                flux_path_move_to(stripes, x, 0);
-                flux_path_line_to(stripes, x + H, H);
+                optics_gfx_path_move_to(stripes, x, 0);
+                optics_gfx_path_line_to(stripes, x + H, H);
             }
-            flux_brush stripe_brush = flux_brush_solid(flux_color_rgba_premul(255, 255, 255, 55));
-            flux_stroke_style st = {.width = 6.0f, .cap = FLUX_CAP_ROUND};
-            flux_canvas_stroke_path(c, stripes, &st, &stripe_brush);
+            optics_gfx_brush stripe_brush =
+                optics_gfx_brush_solid(optics_gfx_color_rgba_premul(255, 255, 255, 55));
+            optics_gfx_stroke_style st = {.width = 6.0f, .cap = OPTICS_GFX_CAP_ROUND};
+            optics_gfx_canvas_stroke_path(c, stripes, &st, &stripe_brush);
         }
     }
 
     /* Static concentric calibration circles in the center */
     {
-        flux_brush ring_brush =
-            flux_brush_solid(flux_color_rgba_premul(56, 189, 248, 140)); /* Sky cyan */
-        flux_stroke_style ring_st = {.width = 3.0f};
-        flux_path *rings = nullptr;
-        (void)flux_path_create(&rings, arena);
+        optics_gfx_brush ring_brush =
+            optics_gfx_brush_solid(optics_gfx_color_rgba_premul(56, 189, 248, 140)); /* Sky cyan */
+        optics_gfx_stroke_style ring_st = {.width = 3.0f};
+        optics_gfx_path *rings = nullptr;
+        (void)optics_gfx_path_create(&rings, arena);
         if (rings) {
             float cx = W * 0.5f;
             float cy = H * 0.5f;
-            flux_path_add_circle(rings, cx, cy, 60.0f);
-            flux_path_add_circle(rings, cx, cy, 120.0f);
-            flux_path_add_circle(rings, cx, cy, 180.0f);
-            flux_canvas_stroke_path(c, rings, &ring_st, &ring_brush);
+            optics_gfx_path_add_circle(rings, cx, cy, 60.0f);
+            optics_gfx_path_add_circle(rings, cx, cy, 120.0f);
+            optics_gfx_path_add_circle(rings, cx, cy, 180.0f);
+            optics_gfx_canvas_stroke_path(c, rings, &ring_st, &ring_brush);
         }
     }
 }
 
-void gallery_backdrop_render(gallery_app *app, flux_canvas *canvas, float W, float H) {
+void gallery_backdrop_render(gallery_app *app, optics_gfx_canvas *canvas, float W, float H) {
     if (app->backdrop == BACKDROP_BOUNCING_TV) {
         draw_bouncing_tv(canvas, &app->arena, W, H, app);
     } else if (app->backdrop == BACKDROP_SPATIAL_GRID) {

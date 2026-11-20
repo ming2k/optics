@@ -4,81 +4,82 @@
 
 #include "gallery.h"
 
-static bool on_start(lens *ui, flux_device *device, void *user) {
+static bool on_start(optics_ui *ui, optics_gfx_device *device, void *user) {
     gallery_app *app = user;
     gallery_apply_theme(app, ui);
-    if (flux_arena_init(&app->arena, 1024 * 1024, nullptr) != FLUX_OK)
+    if (optics_gfx_arena_init(&app->arena, 1024 * 1024, nullptr) != OPTICS_GFX_OK)
         return false;
 
-    if (flux_blur_filter_create(device, &app->blur_filter) != FLUX_OK)
+    if (optics_gfx_blur_filter_create(device, &app->blur_filter) != OPTICS_GFX_OK)
         return false;
-    if (prism_liquid_glass_filter_create(device, &app->glass_filter) != FLUX_OK)
+    if (optics_material_liquid_glass_filter_create(device, &app->glass_filter) != OPTICS_GFX_OK)
         return false;
-    if (prism_frosted_filter_create(device, &app->frosted_filter) != FLUX_OK)
+    if (optics_material_frosted_filter_create(device, &app->frosted_filter) != OPTICS_GFX_OK)
         return false;
-    if (prism_acrylic_filter_create(device, &app->acrylic_filter) != FLUX_OK)
+    if (optics_material_acrylic_filter_create(device, &app->acrylic_filter) != OPTICS_GFX_OK)
         return false;
-    if (prism_mica_filter_create(device, &app->mica_filter) != FLUX_OK)
+    if (optics_material_mica_filter_create(device, &app->mica_filter) != OPTICS_GFX_OK)
         return false;
 
     /* Pre-warm material compute pipelines and buffers to eliminate cold-start hitches (ADR-0141) */
-    (void)prism_liquid_glass_filter_warmup(app->glass_filter, nullptr);
-    (void)prism_frosted_filter_warmup(app->frosted_filter, nullptr);
-    (void)prism_acrylic_filter_warmup(app->acrylic_filter, nullptr);
-    (void)prism_mica_filter_warmup(app->mica_filter, nullptr);
+    (void)optics_material_liquid_glass_filter_warmup(app->glass_filter, nullptr);
+    (void)optics_material_frosted_filter_warmup(app->frosted_filter, nullptr);
+    (void)optics_material_acrylic_filter_warmup(app->acrylic_filter, nullptr);
+    (void)optics_material_mica_filter_warmup(app->mica_filter, nullptr);
 
     return true;
 }
 
-static void on_stop(lens *ui, flux_device *device, void *user) {
+static void on_stop(optics_ui *ui, optics_gfx_device *device, void *user) {
     (void)ui;
     (void)device;
     gallery_app *app = user;
 
     if (app->capture) {
-        flux_image_release(app->capture);
+        optics_gfx_image_release(app->capture);
         app->capture = nullptr;
     }
-    prism_mica_filter_release(app->mica_filter);
-    prism_acrylic_filter_release(app->acrylic_filter);
-    prism_frosted_filter_release(app->frosted_filter);
-    prism_liquid_glass_filter_release(app->glass_filter);
-    flux_blur_filter_release(app->blur_filter);
-    flux_arena_deinit(&app->arena);
+    optics_material_mica_filter_release(app->mica_filter);
+    optics_material_acrylic_filter_release(app->acrylic_filter);
+    optics_material_frosted_filter_release(app->frosted_filter);
+    optics_material_liquid_glass_filter_release(app->glass_filter);
+    optics_gfx_blur_filter_release(app->blur_filter);
+    optics_gfx_arena_deinit(&app->arena);
 }
 
-static void on_build(lens *ui, const lens_input *in, void *user) {
+static void on_build(optics_ui *ui, const optics_ui_input *in, void *user) {
     gallery_app *app = user;
     if (app->smoke_mode) {
         app->smoke_frames++;
         if (app->smoke_frames >= 3) {
-            iris_window_close();
+            optics_window_close();
             return;
         }
     }
     gallery_ui_build(app, ui, in);
 }
 
-void gallery_emit_output(gallery_app *app, const prism_material_output *out) {
+void gallery_emit_output(gallery_app *app, const optics_material_output *out) {
     if (!app || !out || !out->image)
         return;
     if (app->output_count < GALLERY_MAX_OUTPUTS)
         app->outputs[app->output_count++] = *out;
 }
 
-void gallery_render_frosted(gallery_app *app, flux_frame *frame, flux_image *blurred,
-                            flux_rect bounds, float corner_radius, float saturation) {
+void gallery_render_frosted(gallery_app *app, optics_gfx_frame *frame, optics_gfx_image *blurred,
+                            optics_gfx_rect bounds, float corner_radius, float saturation) {
     if (!app || !frame || !blurred)
         return;
-    lens_material_recipe r = lens_material_recipe_default(LENS_MATERIAL_FROSTED, app->dark_mode);
-    prism_frosted_group group = PRISM_FROSTED_GROUP_INIT;
-    group.shape = (prism_frosted_shape){.bounds = bounds, .corner_radius = corner_radius};
+    optics_ui_material_recipe r =
+        optics_ui_material_recipe_default(OPTICS_UI_MATERIAL_FROSTED, app->dark_mode);
+    optics_material_frosted_group group = OPTICS_MATERIAL_FROSTED_GROUP_INIT;
+    group.shape = (optics_material_frosted_shape){.bounds = bounds, .corner_radius = corner_radius};
     group.tint_color = r.tint & 0x00FFFFFFu;
     group.shadow_alpha = r.shadow_alpha;
     group.shadow_blur = r.shadow_blur * app->scale;
     group.shadow_offset_y = 6.0f * app->scale;
 
-    prism_frosted_desc desc = PRISM_FROSTED_DESC_INIT;
+    optics_material_frosted_desc desc = OPTICS_MATERIAL_FROSTED_DESC_INIT;
     desc.input = app->capture;
     desc.blurred_input = blurred;
     desc.groups = &group;
@@ -86,27 +87,28 @@ void gallery_render_frosted(gallery_app *app, flux_frame *frame, flux_image *blu
     desc.saturation = saturation;
     desc.tint_strength = r.tint_opacity;
 
-    prism_material_output out = {};
-    if (prism_frosted_filter_apply(app->frosted_filter,
-                                   &(prism_frosted_filter_apply_opts){
-                                       .frame = frame, .desc = &desc, .out = &out}) == FLUX_OK)
+    optics_material_output out = {};
+    if (optics_material_frosted_filter_apply(
+            app->frosted_filter, &(optics_material_frosted_filter_apply_opts){
+                                     .frame = frame, .desc = &desc, .out = &out}) == OPTICS_GFX_OK)
         gallery_emit_output(app, &out);
 }
 
-void gallery_render_acrylic(gallery_app *app, flux_frame *frame, flux_image *blurred,
-                            flux_rect bounds, float corner_radius, float polarity,
+void gallery_render_acrylic(gallery_app *app, optics_gfx_frame *frame, optics_gfx_image *blurred,
+                            optics_gfx_rect bounds, float corner_radius, float polarity,
                             float noise_intensity, float border_width) {
     if (!app || !frame || !blurred)
         return;
-    lens_material_recipe r = lens_material_recipe_default(LENS_MATERIAL_ACRYLIC, app->dark_mode);
-    prism_acrylic_group group = PRISM_ACRYLIC_GROUP_INIT;
-    group.shape = (prism_acrylic_shape){.bounds = bounds, .corner_radius = corner_radius};
+    optics_ui_material_recipe r =
+        optics_ui_material_recipe_default(OPTICS_UI_MATERIAL_ACRYLIC, app->dark_mode);
+    optics_material_acrylic_group group = OPTICS_MATERIAL_ACRYLIC_GROUP_INIT;
+    group.shape = (optics_material_acrylic_shape){.bounds = bounds, .corner_radius = corner_radius};
     group.tint_color = r.tint & 0x00FFFFFFu;
     group.shadow_alpha = r.shadow_alpha;
     group.shadow_blur = r.shadow_blur * app->scale;
     group.shadow_offset_y = 6.0f * app->scale;
 
-    prism_acrylic_desc desc = PRISM_ACRYLIC_DESC_INIT;
+    optics_material_acrylic_desc desc = OPTICS_MATERIAL_ACRYLIC_DESC_INIT;
     desc.input = app->capture;
     desc.blurred_input = blurred;
     desc.groups = &group;
@@ -117,26 +119,28 @@ void gallery_render_acrylic(gallery_app *app, flux_frame *frame, flux_image *blu
     desc.border_width = border_width;
     desc.border_alpha = r.border_highlight;
 
-    prism_material_output out = {};
-    if (prism_acrylic_filter_apply(app->acrylic_filter,
-                                   &(prism_acrylic_filter_apply_opts){
-                                       .frame = frame, .desc = &desc, .out = &out}) == FLUX_OK)
+    optics_material_output out = {};
+    if (optics_material_acrylic_filter_apply(
+            app->acrylic_filter, &(optics_material_acrylic_filter_apply_opts){
+                                     .frame = frame, .desc = &desc, .out = &out}) == OPTICS_GFX_OK)
         gallery_emit_output(app, &out);
 }
 
-void gallery_render_mica(gallery_app *app, flux_frame *frame, flux_image *blurred, flux_rect bounds,
-                         float corner_radius, prism_mica_kind kind, float polarity, bool inactive) {
+void gallery_render_mica(gallery_app *app, optics_gfx_frame *frame, optics_gfx_image *blurred,
+                         optics_gfx_rect bounds, float corner_radius,
+                         optics_material_mica_kind kind, float polarity, bool inactive) {
     if (!app || !frame || !blurred)
         return;
-    lens_material_recipe r = lens_material_recipe_default(
-        kind == PRISM_MICA_ALT ? LENS_MATERIAL_MICA_ALT : LENS_MATERIAL_MICA, app->dark_mode);
-    prism_mica_group group = PRISM_MICA_GROUP_INIT;
-    group.shape = (prism_mica_shape){.bounds = bounds, .corner_radius = corner_radius};
+    optics_ui_material_recipe r = optics_ui_material_recipe_default(
+        kind == OPTICS_MATERIAL_MICA_ALT ? OPTICS_UI_MATERIAL_MICA_ALT : OPTICS_UI_MATERIAL_MICA,
+        app->dark_mode);
+    optics_material_mica_group group = OPTICS_MATERIAL_MICA_GROUP_INIT;
+    group.shape = (optics_material_mica_shape){.bounds = bounds, .corner_radius = corner_radius};
     group.shadow_alpha = r.shadow_alpha;
     group.shadow_blur = r.shadow_blur * app->scale;
     group.shadow_offset_y = 6.0f * app->scale;
 
-    prism_mica_desc desc = PRISM_MICA_DESC_INIT;
+    optics_material_mica_desc desc = OPTICS_MATERIAL_MICA_DESC_INIT;
     desc.wallpaper = app->capture;
     desc.blurred_wallpaper = blurred;
     desc.groups = &group;
@@ -149,22 +153,22 @@ void gallery_render_mica(gallery_app *app, flux_frame *frame, flux_image *blurre
     desc.fallback_color = r.fallback & 0x00FFFFFFu;
     desc.fallback_weight = inactive ? 1.0f : 0.0f;
 
-    prism_material_output out = {};
-    if (prism_mica_filter_apply(
-            app->mica_filter,
-            &(prism_mica_filter_apply_opts){.frame = frame, .desc = &desc, .out = &out}) == FLUX_OK)
+    optics_material_output out = {};
+    if (optics_material_mica_filter_apply(
+            app->mica_filter, &(optics_material_mica_filter_apply_opts){
+                                  .frame = frame, .desc = &desc, .out = &out}) == OPTICS_GFX_OK)
         gallery_emit_output(app, &out);
 }
 
-static void on_prepare(flux_frame *frame, flux_canvas *canvas, flux_device *device, float scale,
-                       void *user) {
+static void on_prepare(optics_gfx_frame *frame, optics_gfx_canvas *canvas,
+                       optics_gfx_device *device, float scale, void *user) {
     gallery_app *app = user;
 
     if (app->animating)
         app->time += 0.016f;
 
     int32_t log_w = 0, log_h = 0;
-    if (!iris_window_get_geometry(&log_w, &log_h) || log_w <= 0 || log_h <= 0) {
+    if (!optics_window_get_geometry(&log_w, &log_h) || log_w <= 0 || log_h <= 0) {
         log_w = 1280;
         log_h = 800;
     }
@@ -179,52 +183,54 @@ static void on_prepare(flux_frame *frame, flux_canvas *canvas, flux_device *devi
     app->scale = scale;
 
     /* Reallocate capture target on resize or scale change */
-    if (!app->capture || flux_image_width(app->capture) != W ||
-        flux_image_height(app->capture) != H) {
+    if (!app->capture || optics_gfx_image_width(app->capture) != W ||
+        optics_gfx_image_height(app->capture) != H) {
         if (app->capture)
-            flux_image_release(app->capture);
-        (void)flux_image_create(device,
-                                &(flux_image_desc){.type = FLUX_TYPE_IMAGE_DESC,
-                                                   .width = W,
-                                                   .height = H,
-                                                   .format = FLUX_FORMAT_RGBA8_UNORM,
-                                                   .usage = FLUX_IMAGE_USAGE_RENDER_TARGET},
-                                &app->capture);
+            optics_gfx_image_release(app->capture);
+        (void)optics_gfx_image_create(
+            device,
+            &(optics_gfx_image_desc){.type = OPTICS_GFX_TYPE_IMAGE_DESC,
+                                     .width = W,
+                                     .height = H,
+                                     .format = OPTICS_GFX_FORMAT_RGBA8_UNORM,
+                                     .usage = OPTICS_GFX_IMAGE_USAGE_RENDER_TARGET},
+            &app->capture);
     }
 
     /* ===== STEP 1: CAPTURE backdrop into offscreen render target ===== */
     {
-        flux_color clear_bg = flux_color_rgba(15, 12, 24, 255);
+        optics_gfx_color clear_bg = optics_gfx_color_rgba(15, 12, 24, 255);
         if (app->backdrop == BACKDROP_BLACK) {
-            clear_bg = flux_color_rgba(0, 0, 0, 255);
+            clear_bg = optics_gfx_color_rgba(0, 0, 0, 255);
         } else if (app->backdrop == BACKDROP_WHITE) {
-            clear_bg = flux_color_rgba(255, 255, 255, 255);
+            clear_bg = optics_gfx_color_rgba(255, 255, 255, 255);
         }
 
-        (void)flux_canvas_begin(
-            canvas, &(flux_canvas_pass_desc){
-                        .type = FLUX_TYPE_CANVAS_PASS_DESC,
-                        .frame = frame,
-                        .attachment = {.kind = FLUX_CANVAS_ATTACHMENT_IMAGE, .image = app->capture},
-                        .clear_color = &clear_bg});
+        (void)optics_gfx_canvas_begin(
+            canvas,
+            &(optics_gfx_canvas_pass_desc){
+                .type = OPTICS_GFX_TYPE_CANVAS_PASS_DESC,
+                .frame = frame,
+                .attachment = {.kind = OPTICS_GFX_CANVAS_ATTACHMENT_IMAGE, .image = app->capture},
+                .clear_color = &clear_bg});
 
         gallery_backdrop_render(app, canvas, (float)W, (float)H);
-        flux_arena_reset(&app->arena);
-        (void)flux_canvas_end(canvas);
+        optics_gfx_arena_reset(&app->arena);
+        (void)optics_gfx_canvas_end(canvas);
     }
 
     /* ===== STEP 2: BLUR backdrop for optical materials ===== */
     /* Unconditional on purpose: the engine prunes it when nothing samples it
      * (ADR-0147), so the host does not need a view-dependent guard here. The
      * host still keeps `blurred` as the handle to hand to the material. */
-    flux_image *blurred = nullptr;
+    optics_gfx_image *blurred = nullptr;
     {
-        flux_effect_blur_desc bd = FLUX_EFFECT_BLUR_DESC_INIT;
+        optics_gfx_effect_blur_desc bd = OPTICS_GFX_EFFECT_BLUR_DESC_INIT;
         bd.input = app->capture;
         bd.sigma = 10.0f * scale;
-        (void)flux_blur_filter_apply(
+        (void)optics_gfx_blur_filter_apply(
             app->blur_filter,
-            &(flux_blur_filter_apply_opts){.frame = frame, .desc = &bd, .out = &blurred});
+            &(optics_gfx_blur_filter_apply_opts){.frame = frame, .desc = &bd, .out = &blurred});
     }
 
     /* ===== STEP 3: APPLY MATERIALS ACCORDING TO VIEW MODE ===== */
@@ -260,19 +266,19 @@ static void on_prepare(flux_frame *frame, flux_canvas *canvas, flux_device *devi
     }
 }
 
-static void record_image(flux_encoder *enc, flux_image *image, flux_rect dst) {
-    flux_geometry geom = flux_geom_rect(dst);
-    flux_brush brush = {
-        .kind = FLUX_BRUSH_IMAGE_PATTERN,
-        .blend = FLUX_BLEND_SRC_OVER,
+static void record_image(optics_gfx_encoder *enc, optics_gfx_image *image, optics_gfx_rect dst) {
+    optics_gfx_geometry geom = optics_gfx_geom_rect(dst);
+    optics_gfx_brush brush = {
+        .kind = OPTICS_GFX_BRUSH_IMAGE_PATTERN,
+        .blend = OPTICS_GFX_BLEND_SRC_OVER,
         .opacity = 1.0f,
-        .image = {.image = image, .tint = flux_color_rgba_premul(255, 255, 255, 255)},
+        .image = {.image = image, .tint = optics_gfx_color_rgba_premul(255, 255, 255, 255)},
     };
-    flux_encoder_draw_geometry(enc,
-                               &(flux_encoder_draw_geometry_opts){.geom = &geom, .brush = &brush});
+    optics_gfx_encoder_draw_geometry(
+        enc, &(optics_gfx_encoder_draw_geometry_opts){.geom = &geom, .brush = &brush});
 }
 
-static void on_record(flux_encoder *enc, float scale, void *user) {
+static void on_record(optics_gfx_encoder *enc, float scale, void *user) {
     (void)scale;
     gallery_app *app = user;
 
@@ -283,15 +289,15 @@ static void on_record(flux_encoder *enc, float scale, void *user) {
 
     /* 1. Draw the sharp captured backdrop */
     if (app->capture)
-        record_image(enc, app->capture, (flux_rect){0, 0, W, H});
+        record_image(enc, app->capture, (optics_gfx_rect){0, 0, W, H});
 
     /* 2. Composite active material layers in declaration order */
     for (uint32_t i = 0; i < app->output_count; ++i) {
-        const prism_material_output *out = &app->outputs[i];
+        const optics_material_output *out = &app->outputs[i];
         if (out->image)
-            record_image(
-                enc, out->image,
-                (flux_rect){out->origin_x, out->origin_y, (float)out->width, (float)out->height});
+            record_image(enc, out->image,
+                         (optics_gfx_rect){out->origin_x, out->origin_y, (float)out->width,
+                                           (float)out->height});
     }
 }
 
@@ -331,7 +337,7 @@ int main(int argc, char **argv) {
         printf("=================================================================\n\n");
     }
 
-    return aperture_app_run(&(aperture_app_opts){
+    return optics_app_run(&(optics_app_opts){
         .title = "Optics Prism Material Gallery (1:Raw 2:Glass 3:Frosted 4:Acrylic 5:Mica)",
         .app_id = "org.optics.showcase.material-gallery",
         .width = 1280,

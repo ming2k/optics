@@ -7,7 +7,7 @@ canvas) and the per-frame call sequence.
 
 ## Step 1 — Start from a Known-good Skeleton
 
-Open `examples/flux/canvas_hello.c` on a disposable branch. We will trim the
+Open `examples/getting_started/canvas_window.c` on a disposable branch. We will trim the
 known-good example instead of starting from a blank file. The full version
 draws gradients, paths, strokes, and images; you will strip those out, then
 add them back.
@@ -23,7 +23,7 @@ except this:
 
 Build:
 
-    meson compile -C build && ./build/examples/flux/canvas_hello
+    meson compile -C build && ./build/examples/getting_started/canvas_window
 
 A blue rectangle appears on a dark background. That is the whole shape
 of a flux-canvas frame.
@@ -80,7 +80,7 @@ The circle now spins around its own centre.
 
 ## Step 5 — handle surface loss on resize
 
-The frame loop in `examples/flux/canvas_hello.c` already shows the pattern:
+The frame loop in `examples/getting_started/canvas_window.c` already shows the pattern:
 
     flux_frame *frame = nullptr;
     flux_result r = flux_surface_begin_frame(surface, nullptr, &frame);
@@ -121,4 +121,4 @@ this frame, and try again on the next iteration.
 |-----------------------------------------|----------------------------------------------------|
 | Build a 3D app                          | [03 — Your first 3D scene application](03-first-3d-app.md) |
 | Understand the frame lifecycle          | [How to record and present a frame](../how-to/record-and-present-a-frame.md) |
-| See every canvas method                 | [`libs/flux/include/flux/canvas.h`](../../libs/flux/include/flux/canvas.h) |
+| See every canvas method                 | [`libs/gfx/include/flux/canvas.h`](../../libs/gfx/include/optics/gfx/canvas.h) |

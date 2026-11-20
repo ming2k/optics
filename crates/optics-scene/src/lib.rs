@@ -1,0 +1,254 @@
+//! Safe Rust bindings for **vista** — 3D scene hierarchy and glTF 2.0 asset runtime (ADR-0016, ADR-0106).
+
+#![deny(rust_2018_idioms)]
+
+use std::fmt;
+
+pub use optics_gfx::Error;
+use optics_gfx::{Camera, Device, Format, Material, SceneLight, ScenePass};
+pub use optics_scene_sys as sys;
+
+mod glb_json;
+mod image_codec;
+mod materials;
+
+pub(crate) fn check(rc: sys::optics_gfx_result) -> Result<(), Error> {
+    Error::check_raw(rc)
+}
+
+/// Render-target formats used to construct a GLB's per-primitive materials.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MaterialTarget {
+    pub color_format: Format,
+    pub depth_format: Format,
+}
+
+/// Failure while validating a GLB or constructing its GPU material resources.
+#[derive(Debug)]
+pub enum LoadError {
+    Scene(Error),
+    Gltf(String),
+    Image(String),
+    Flux(optics_gfx::Error),
+    Unsupported(String),
+}
+
+impl fmt::Display for LoadError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Scene(error) => error.fmt(f),
+            Self::Gltf(error) => write!(f, "invalid glTF: {error}"),
+            Self::Image(error) => write!(f, "failed to decode glTF image: {error}"),
+            Self::Flux(error) => error.fmt(f),
+            Self::Unsupported(message) => write!(f, "unsupported glTF material: {message}"),
+        }
+    }
+}
+
+impl std::error::Error for LoadError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Scene(error) => Some(error),
+            Self::Flux(error) => Some(error),
+            Self::Gltf(_) | Self::Image(_) | Self::Unsupported(_) => None,
+        }
+    }
+}
+
+impl From<optics_gfx::Error> for LoadError {
+    fn from(value: optics_gfx::Error) -> Self {
+        Self::Flux(value)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Bounds {
+    pub min: [f32; 3],
+    pub max: [f32; 3],
+}
+
+impl Bounds {
+    pub fn center(self) -> [f32; 3] {
+        [
+            (self.min[0] + self.max[0]) * 0.5,
+            (self.min[1] + self.max[1]) * 0.5,
+            (self.min[2] + self.max[2]) * 0.5,
+        ]
+    }
+
+    pub fn half_diagonal(self) -> f32 {
+        let dx = self.max[0] - self.min[0];
+        let dy = self.max[1] - self.min[1];
+        let dz = self.max[2] - self.min[2];
+        (dx * dx + dy * dy + dz * dz).sqrt() * 0.5
+    }
+}
+
+pub struct Scene {
+    raw: *mut sys::optics_scene,
+}
+
+impl Scene {
+    pub fn from_glb(device: &Device, bytes: &[u8]) -> Result<Scene, Error> {
+        let mut raw = std::ptr::null_mut();
+        let opts = sys::optics_scene_load_glb_opts {
+            bytes: bytes.as_ptr().cast(),
+            byte_count: bytes.len(),
+            out: &mut raw,
+        };
+        check(unsafe { sys::optics_scene_load_glb(device.as_raw(), &opts) })?;
+        Ok(Scene { raw })
+    }
+
+    /// Load a GLB together with its base-colour textures and per-primitive materials.
+    pub fn from_glb_with_materials(
+        device: &Device,
+        bytes: &[u8],
+        target: MaterialTarget,
+    ) -> Result<Scene, LoadError> {
+        let doc = glb_json::parse_glb(bytes).map_err(LoadError::Gltf)?;
+        let (materials, fallback) = materials::load(device, &doc, target)?;
+        let scene = Self::from_glb(device, bytes)?;
+        let raw_materials: Vec<*mut sys::optics_gfx_material> =
+            materials.iter().map(|material| material.as_raw()).collect();
+        let opts = sys::optics_scene_set_materials_opts {
+            materials: if raw_materials.is_empty() {
+                std::ptr::null()
+            } else {
+                raw_materials.as_ptr()
+            },
+            material_count: raw_materials.len() as u32,
+            fallback: fallback.as_raw(),
+        };
+        check(unsafe { sys::optics_scene_set_materials(scene.raw, &opts) })?;
+        Ok(scene)
+    }
+
+    pub fn primitive_count(&self) -> u32 {
+        unsafe { sys::optics_scene_primitive_count(self.raw) }
+    }
+
+    pub fn bounds(&self) -> Option<Bounds> {
+        let mut min = sys::optics_gfx_vec3::default();
+        let mut max = sys::optics_gfx_vec3::default();
+        let opts = sys::optics_scene_bounds_opts {
+            out_min: &mut min,
+            out_max: &mut max,
+        };
+        if unsafe { sys::optics_scene_bounds(self.raw, &opts) } {
+            Some(Bounds {
+                min: [min.x, min.y, min.z],
+                max: [max.x, max.y, max.z],
+            })
+        } else {
+            None
+        }
+    }
+
+    pub fn humanoid_bone_position(&self, bone_name: &str) -> Option<[f32; 3]> {
+        let bone_name = std::ffi::CString::new(bone_name).ok()?;
+        let mut position = sys::optics_gfx_vec3::default();
+        let opts = sys::optics_scene_humanoid_bone_position_opts {
+            bone_name: bone_name.as_ptr(),
+            out_position: &mut position,
+        };
+        unsafe { sys::optics_scene_humanoid_bone_position(self.raw, &opts) }
+            .then_some([position.x, position.y, position.z])
+    }
+
+    pub fn animation_from_glb(&self, bytes: &[u8]) -> Result<Animation, Error> {
+        let mut raw = std::ptr::null_mut();
+        let opts = sys::optics_scene_load_animation_glb_opts {
+            bytes: bytes.as_ptr().cast(),
+            byte_count: bytes.len(),
+            out: &mut raw,
+        };
+        check(unsafe { sys::optics_scene_load_animation_glb(self.raw, &opts) })?;
+        Ok(Animation { raw })
+    }
+
+    pub fn apply_animation(
+        &mut self,
+        animation: &Animation,
+        time_seconds: f32,
+        looping: bool,
+    ) -> Result<(), Error> {
+        let opts = sys::optics_scene_apply_animation_opts {
+            animation: animation.raw,
+            time_seconds,
+            loop_: looping,
+        };
+        check(unsafe { sys::optics_scene_apply_animation(self.raw, &opts) })
+    }
+
+    pub fn reset_pose(&mut self) {
+        unsafe { sys::optics_scene_reset_pose(self.raw) };
+    }
+
+    pub fn draw(
+        &self,
+        pass: &ScenePass<'_, '_>,
+        camera: &Camera,
+        material: &Material,
+        light: Option<&SceneLight>,
+    ) {
+        let raw_light = light.map(SceneLight::as_raw);
+        let opts = sys::optics_scene_draw_opts {
+            camera: camera.as_raw(),
+            scene: self.raw,
+            material: material.as_raw(),
+            light: raw_light
+                .as_ref()
+                .map(|value| value as *const _)
+                .unwrap_or(std::ptr::null()),
+        };
+        unsafe { sys::optics_scene_draw(pass.as_raw(), &opts) };
+    }
+
+    pub fn draw_materials(
+        &self,
+        pass: &ScenePass<'_, '_>,
+        camera: &Camera,
+        light: Option<&SceneLight>,
+    ) {
+        let raw_light = light.map(SceneLight::as_raw);
+        let opts = sys::optics_scene_draw_opts {
+            camera: camera.as_raw(),
+            scene: self.raw,
+            material: std::ptr::null_mut(),
+            light: raw_light
+                .as_ref()
+                .map(|value| value as *const _)
+                .unwrap_or(std::ptr::null()),
+        };
+        unsafe { sys::optics_scene_draw(pass.as_raw(), &opts) };
+    }
+}
+
+pub struct Animation {
+    raw: *mut sys::optics_scene_animation,
+}
+
+impl Animation {
+    #[must_use]
+    pub fn duration(&self) -> f32 {
+        unsafe { sys::optics_scene_animation_duration(self.raw) }
+    }
+
+    #[must_use]
+    pub fn channel_count(&self) -> u32 {
+        unsafe { sys::optics_scene_animation_channel_count(self.raw) }
+    }
+}
+
+impl Drop for Animation {
+    fn drop(&mut self) {
+        unsafe { sys::optics_scene_animation_release(self.raw) };
+    }
+}
+
+impl Drop for Scene {
+    fn drop(&mut self) {
+        unsafe { sys::optics_scene_release(self.raw) };
+    }
+}

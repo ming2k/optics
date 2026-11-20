@@ -10,11 +10,11 @@ a device nor a surface. See [ADR-0019](../adr/0019-canvas-backend-seam-and-cpu-b
 
 ## Create a CPU canvas
 
-Include `<flux/canvas_cpu.h>` and give a framebuffer size (physical pixels)
+Include `<optics/gfx/canvas_cpu.h>` and give a framebuffer size (physical pixels)
 and content scale:
 
-    #include <flux/canvas.h>
-    #include <flux/canvas_cpu.h>
+    #include <optics/gfx/canvas.h>
+    #include <optics/gfx/canvas_cpu.h>
 
     flux_canvas *c = nullptr;
     flux_canvas_desc d = FLUX_CANVAS_DESC_INIT;

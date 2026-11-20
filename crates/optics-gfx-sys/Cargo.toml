@@ -1,0 +1,13 @@
+[package]
+name = "optics-gfx-sys"
+description = "Raw FFI bindings to flux (libflux), generated from the flux public headers incl. <flux/vulkan.h>"
+publish = false
+links = "optics_gfx"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[build-dependencies]
+optics-build = { workspace = true }

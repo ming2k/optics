@@ -9,7 +9,7 @@ Optics targets three desktop platforms from one source tree:
 | iris backend | Wayland (`app_wayland.c`) | Win32 (`app_win32.c`) | Cocoa (`app_cocoa.m`) |
 | lens | platform-neutral, unchanged everywhere | | |
 
-Backend selection is compile-time (ADR-0044); `iris_app_run` is the only
+Backend selection is compile-time (ADR-0044); `optics_window_run` is the only
 entry point and never exposes the backend. Non-Linux builds without a
 backend still link via `IRIS_BUILD_NO_BACKEND`.
 
@@ -30,7 +30,7 @@ backend still link via `IRIS_BUILD_NO_BACKEND`.
   driver advertises them. Homebrew LLVM or Xcode 16+ clang; without
   `#embed` support the generated-header fallback is used. Cocoa backend
   requires Objective-C (`add_languages('objc')` is handled inside
-  `libs/iris/meson.build`).
+  `libs/window/meson.build`).
 - **Linux**: unchanged (gcc ≥ 15 or clang ≥ 19, wayland-client, xkbcommon).
 
 The dma-buf subsystem (`flux/dmabuf.h`, zero-copy import/export) is
@@ -46,8 +46,8 @@ MinGW-w64 headers using `zig cc -target x86_64-windows-gnu` (C23, including
 headers never leak into the check:
 
 ```bash
-tools/zig-win32-check.sh -Ilibs/flux/include -Ilibs/lens/include \
-    -Ilibs/iris/include libs/iris/src/app_win32.c
+tools/zig-win32-check.sh -Ilibs/gfx/include -Ilibs/ui/include \
+    -Ilibs/window/include libs/window/src/app_win32.c
 ```
 
 Every `*_win32.c` / `*_directwrite.c` file is checked this way in CI
@@ -117,11 +117,11 @@ platform code must preserve them:
    repeat exactly like a press. The authoritative statement lives in
    `src/platform_internal.h`.
 8. **Event seam (ADR-0107).** Every backend reifies each native event into
-   an `iris_event` (`<iris/event.h>`) and routes it through
+   an `iris_event` (`<optics/window/event.h>`) and routes it through
    `iris__event_seam_emit` (`src/event_internal.h`) *before* folding
    survivors into `iris_input`. No backend writes the input accumulator
    directly for lens-facing input. The host may observe, drop, or rewrite
-   each event at the single pre-fold seam (`iris_app_opts.on_event`).
+   each event at the single pre-fold seam (`optics_window_opts.on_event`).
    Lifecycle events (CLOSE / RESIZE / SCALE / FOCUS) carry
    `IRIS_EVENT_F_UNDROPPABLE` and are observe-only. Platform bookkeeping
    (input serials, cursor shape, IME session, pointer capture) stays

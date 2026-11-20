@@ -1,0 +1,18 @@
+[package]
+name = "optics-ui-sys"
+description = "Raw FFI bindings to lens (liblens), generated from <lens/lens.h>"
+publish = false
+links = "optics_ui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# optics-gfx-sys is re-exported so the flux types lens speaks (flux_canvas,
+# flux_device, flux_image, ...) have ONE Rust definition across the stack.
+optics-gfx-sys = { workspace = true }
+
+[build-dependencies]
+optics-build = { workspace = true }

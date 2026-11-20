@@ -1,10 +1,11 @@
 # Changelog
 
 All notable, user-visible changes to the C libraries in this monorepo
-(`libflux`, `libglyph`, `libvista`, `libprism`, `libreticle`, `liblens`,
-`libiris`, and the header-only `transit`) are documented in this file. The Rust
-binding crates under `bindings/crates/` share the repository-root Cargo workspace
-and its version.
+(`liboptics_gfx`, `liboptics_text`, `liboptics_scene`, `liboptics_material`,
+`liboptics_svg`, `liboptics_ui`, `liboptics_window`, `liboptics_app`, and the
+header-only `<optics/motion.h>`) are documented in this file. The Rust binding
+crates under `crates/` share the repository-root Cargo workspace and its
+version.
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [semver](https://semver.org/) with the pre-1.0 allowances
@@ -12,6 +13,34 @@ documented in [docs/reference/api.md](docs/reference/api.md) — **any**
 pre-1.0 release may break source or binary compatibility, so the SONAME
 carries the full version and a mismatched binary fails to load instead of
 silently reading a different descriptor layout.
+
+## [0.0.82] - 2026-11-20
+
+### Breaking — Semantic Module Naming & Unified `optics_` Namespace (ADR-0169, ADR-0170)
+
+- **C libraries, headers, symbols, and pkg-config**: Every library moved from codename directories to canonical semantic names under `libs/<mod>/` with unified `<optics/...>` headers, `optics_<mod>_` public C symbols, `liboptics_<mod>` library names, and `optics-<mod>.pc` pkg-config files:
+  - `flux` → `gfx` (`liboptics_gfx`, `<optics/gfx.h>`, `optics_gfx_*`)
+  - `glyph` → `text` (`liboptics_text`, `<optics/text.h>`, `optics_text_*`)
+  - `reticle` → `svg` (`liboptics_svg`, `<optics/svg.h>`, `optics_svg_*`)
+  - `vista` → `scene` (`liboptics_scene`, `<optics/scene.h>`, `optics_scene_*`)
+  - `prism` → `material` (`liboptics_material`, `<optics/material.h>`, `optics_material_*`)
+  - `transit` → `motion` (`<optics/motion.h>`, `optics_motion_*`)
+  - `iris` → `window` (`liboptics_window`, `<optics/window.h>`, `optics_window_*`)
+  - `lens` → `ui` (`liboptics_ui`, `<optics/ui.h>`, `optics_ui_*`)
+  - `aperture` → `app` (`liboptics_app`, `<optics/app.h>`, `optics_app_*`)
+- **Meson feature options & umbrella flags**: Feature options renamed to `-Dtext`, `-Dscene`, `-Dmaterial`, `-Dmotion`, `-Dsvg`. Umbrella `<optics/optics.h>` feature macros renamed to `OPTICS_HAVE_TEXT`, `OPTICS_HAVE_SCENE`, `OPTICS_HAVE_MATERIAL`, `OPTICS_HAVE_MOTION`, `OPTICS_HAVE_SVG`, `OPTICS_HAVE_UI`, `OPTICS_HAVE_APP`.
+- **Rust workspace layout & crates**: Crates moved from `bindings/crates/` to repository-root `crates/` under `optics-<mod>` / `optics-<mod>-sys` names with shared `optics-build` script helper; `optics` facade features renamed to `gfx`, `text`, `svg`, `material`, `scene`, `motion`, `window`, `ui`, `app`.
+- **Zero-stutter API & window/app boundary (ADR-0172)**: Eliminated redundant module stutter across public symbols and finalized the `window`/`ui`/`app` seam (`<optics/window/host.h>`).
+- **Environment variables & runtime log prefixes**: Renamed legacy environment variables (`FLUX_GPU_PREFERENCE` → `OPTICS_GFX_GPU_PREFERENCE`, `FLUX_TEXT_FONT` → `OPTICS_TEXT_FONT`, `IRIS_A11Y_FORCE` → `OPTICS_WINDOW_A11Y_FORCE`, `FLUX_ALLOW_SOFTWARE_DEVICE` → `OPTICS_GFX_ALLOW_SOFTWARE_DEVICE`, `PRISM_GOLDEN_SRC`/`UPDATE` → `OPTICS_MATERIAL_GOLDEN_SRC`/`UPDATE`) and console log prefix (`[flux ...]` → `[optics_gfx ...]`).
+
+### Changed
+
+- **Examples & probes (ADR-0171)**: Reorganized examples into `examples/getting_started/` (`headless_canvas`, `headless_svg`, `compute_pass`, `canvas_window`, `hello_app`) and `examples/showcase/` (`widget_gallery`, `material_gallery`, `scene_studio`); moved developer pacing probes (`frame_skip_demo.c`, `paint_static_demo.c`) to `tools/probes/`.
+- **Tooling**: Added `tools/check_naming.py` (`semantic_naming` lint gate + `naming_guardrail_selftest`) to enforce the ADR-0170 semantic naming contract.
+
+### Fixed
+
+- **Build**: Eliminated remaining `-Wsign-compare` and `-Wunused-variable` warnings in `tests/gfx/integration/test_graphics_pipeline.c` and `tests/ui/test_widgets.c` so the full tree builds cleanly under `-Dwerror=true`.
 
 ## [0.0.81] - 2026-11-18
 

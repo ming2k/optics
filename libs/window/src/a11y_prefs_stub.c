@@ -1,0 +1,27 @@
+/* a11y_prefs_stub.c — fallback when no platform watcher backend exists:
+ * the libsystemd-less Linux build (no portal pump to ride). The startup
+ * query itself still works (a11y_prefs_linux.c shells gsettings/kreadconfig
+ * and needs no D-Bus client library), so only watch reports unavailable. */
+
+#include "a11y_prefs_internal.h"
+
+#ifndef OPTICS_WINDOW_HAVE_PORTAL_WATCH
+
+OPTICS_WINDOW_API int optics_window_a11y_prefs_watch(optics_window_a11y_prefs_changed_fn cb,
+                                                     void *user) {
+    (void)cb;
+    (void)user;
+    return -1;
+}
+
+OPTICS_WINDOW_API void optics_window_a11y_prefs_unwatch(void) { /* no-op */ }
+
+int optics_window_a11y_prefs__watch_backend(optics_window_a11y_prefs_changed_fn cb, void *user) {
+    (void)cb;
+    (void)user;
+    return -1;
+}
+
+void optics_window_a11y_prefs__unwatch_backend(void) { /* no-op */ }
+
+#endif /* !IRIS_HAVE_PORTAL_WATCH */

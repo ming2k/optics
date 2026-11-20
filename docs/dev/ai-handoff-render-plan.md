@@ -18,7 +18,7 @@ serialization work; do not revert it.
 - **ADR-0157**: versioned DisplayList wire protocol, serializer/deserializer,
   resource ID callbacks, fuzz harness + corpus, ci-fuzz matrix entry.
 - **ADR-0089 1A**: `flux_render_plan` IR, target contract, pure validator
-  (`libs/flux/src/core/render_plan.{h,c}`, `tests/flux/unit/test_render_plan.c`).
+  (`libs/gfx/src/core/render_plan.{h,c}`, `tests/gfx/unit/test_render_plan.c`).
 - **ADR-0089 1B-1**: `flux_canvas_begin` compiles its pass into the frame's
   RenderPlan (target contract, write access, damage region, sequential pass
   dependency) and validates before opening the backend pass.
@@ -34,18 +34,18 @@ serialization work; do not revert it.
 
 ## Key files
 
-- `libs/flux/src/core/render_plan.h/.c` — IR, validator, last-writer lookup,
+- `libs/gfx/src/core/render_plan.h/.c` — IR, validator, last-writer lookup,
   node access/dependency append.
-- `libs/flux/src/core/plan.h/.c` — deferred-effect execution over RenderPlan,
+- `libs/gfx/src/core/plan.h/.c` — deferred-effect execution over RenderPlan,
   `flux_frame_plan_upload`.
-- `libs/flux/src/core/frame.c` — frame begin/current-frame stack, presentation
+- `libs/gfx/src/core/frame.c` — frame begin/current-frame stack, presentation
   `OUTPUT` node, submit.
-- `libs/flux/src/core/surface.c` — resize/release leave the current-frame stack.
-- `libs/flux/src/core/oneshot.c` — upload records its node before the copy.
-- `libs/flux/src/canvas/canvas.c` — Canvas pass compile gate, sampled-image
+- `libs/gfx/src/core/surface.c` — resize/release leave the current-frame stack.
+- `libs/gfx/src/core/oneshot.c` — upload records its node before the copy.
+- `libs/gfx/src/canvas/canvas.c` — Canvas pass compile gate, sampled-image
   reads, per-pass node lifetime.
-- `libs/flux/src/effect/effect.c` — `flux_frame_register_pass` consumers.
-- `libs/flux/src/core/internal.h` — `flux_frame` owns `render_plan` and `plan`.
+- `libs/gfx/src/effect/effect.c` — `flux_frame_register_pass` consumers.
+- `libs/gfx/src/core/internal.h` — `flux_frame` owns `render_plan` and `plan`.
 - `docs/dev/render-plan-1b2a.md` — 1B-2A design/deletion gate.
 - `docs/dev/render-plan-1b2b.md` — 1B-2B design/deletion gate.
 - `docs/dev/architecture-implementation-status.md` — ADR status matrix.
@@ -124,12 +124,12 @@ meson test -C build --suite lint --suite tooling      # tree-level gates
 
 # DisplayList wire fuzz. The default `build/` uses the standalone driver:
 # one seed file per invocation (or stdin).
-./build/tests/flux/fuzz/fuzz_display_list_deserialize \
-  tests/flux/fuzz/corpus/display_list_deserialize/bad_flags.bin
+./build/tests/gfx/fuzz/fuzz_display_list_deserialize \
+  tests/gfx/fuzz/corpus/display_list_deserialize/bad_flags.bin
 
 # A libFuzzer build (CI fuzz lane) takes the corpus directory:
-./build/tests/flux/fuzz/fuzz_display_list_deserialize -runs=0 \
-  tests/flux/fuzz/corpus/display_list_deserialize
+./build/tests/gfx/fuzz/fuzz_display_list_deserialize -runs=0 \
+  tests/gfx/fuzz/corpus/display_list_deserialize
 ```
 
 `bench` may fail locally because the Tracy toolchain is absent from `/tmp`;

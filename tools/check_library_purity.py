@@ -26,12 +26,13 @@ STDOUT_RE = re.compile(
     r"|fwrite\s*\([^;]+,\s*stdout\b"
 )
 MATERIAL_RE = re.compile(
-    r"\bprism_[A-Za-z0-9_]*"
+    r"\boptics_material_[A-Za-z0-9_]*"
+    r"|\bprism_[A-Za-z0-9_]*"
     r"|\bliquid_glass\b"
     r"|\bfrosted_glass\b"
     r"|\bacrylic_[A-Za-z0-9_]*"
     r"|\bmica_[A-Za-z0-9_]*"
-    r"|#\s*include\s*<prism/"
+    r"|#\s*include\s*<optics/material(?:\.h|/)"
 )
 
 
@@ -118,8 +119,8 @@ def main() -> int:
     for path in sorted((ROOT / "libs").glob("*/src/**/*.c")):
         errors += check_file(path, STDOUT_RE, "shared library writes to stdout")
 
-    for path in sorted((ROOT / "libs" / "flux").glob("**/*.[ch]")):
-        errors += check_file(path, MATERIAL_RE, "flux references a named material")
+    for path in sorted((ROOT / "libs" / "gfx").glob("**/*.[ch]")):
+        errors += check_file(path, MATERIAL_RE, "gfx references a named material")
 
     if errors:
         sys.stderr.write("library purity failed:\n")
@@ -127,7 +128,7 @@ def main() -> int:
             sys.stderr.write(f"  - {error}\n")
         return 1
 
-    print("library purity ok: no stdout in libs, no material references in flux")
+    print("library purity ok: no stdout in libs, no material references in gfx")
     return 0
 
 

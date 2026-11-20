@@ -18,15 +18,15 @@ optics_test_dep = declare_dependency(
   include_directories : include_directories('.'),
 )
 
-flux_test_lib = static_library(
-  'flux_test',
-  'flux_test.c',
-  dependencies : [flux_dep, m_dep, vulkan_dep],
+gfx_test_lib = static_library(
+  'gfx_test',
+  'gfx_test.c',
+  dependencies : [gfx_dep, m_dep, vulkan_dep],
   install      : false,
 )
 
-flux_test_dep = declare_dependency(
-  link_with           : flux_test_lib,
+gfx_test_dep = declare_dependency(
+  link_with           : gfx_test_lib,
   include_directories : include_directories('.'),
-  dependencies        : [flux_dep, m_dep, vulkan_dep],
+  dependencies        : [gfx_dep, m_dep, vulkan_dep],
 )

@@ -92,10 +92,10 @@ When inspecting materials, check for the following visual artifacts:
 
 Run the core rendering pipelines to verify path tessellation, font shaping, compute barriers, and 3D scene execution.
 
-### 4.1 2D Canvas Pipeline (`examples/flux/canvas_hello`)
+### 4.1 2D Canvas Pipeline (`examples/getting_started/canvas_window`)
 
 ```bash
-./build/examples/flux/canvas_hello
+./build/examples/getting_started/canvas_window
 ```
 
 **Verification Steps:**
@@ -105,10 +105,10 @@ Run the core rendering pipelines to verify path tessellation, font shaping, comp
 4. Resize the window repeatedly: verify canvas viewport adjusts dynamically without stretching or aspect-ratio distortion.
 5. At the default window size, inspect the small icons (14–24 px) in the control row: their diagonal and curved strokes must show a graded edge, not a two-tone staircase. Icon edges come from baked device-resolution coverage masks (ADR-0112), so a staircase here means the bake fell back to the vector path — check the log for a mask allocation failure before assuming a rasteriser regression.
 
-### 4.2 3D Lighting & Transform Pipeline (`examples/flux/scene_cube`)
+### 4.2 3D Lighting & Transform Pipeline (`examples/showcase/scene_studio`)
 
 ```bash
-./build/examples/flux/scene_cube
+./build/examples/showcase/scene_studio
 ```
 
 **Verification Steps:**
@@ -116,10 +116,10 @@ Run the core rendering pipelines to verify path tessellation, font shaping, comp
 2. Inspect Phong specular highlights across the cube faces: light reflectance calculates smoothly without vertex-clamping jumps.
 3. Observe transient uniform buffer updates: frame rate remains solid 60/120 FPS without stutter or GPU memory pressure warnings.
 
-### 4.3 3D glTF PBR Asset Viewer (`examples/vista/gltf_viewer`)
+### 4.3 3D glTF PBR Asset Viewer (`examples/showcase/scene_studio`)
 
 ```bash
-./build/examples/vista/gltf_viewer
+./build/examples/showcase/scene_studio
 ```
 
 **Verification Steps:**
@@ -127,10 +127,10 @@ Run the core rendering pipelines to verify path tessellation, font shaping, comp
 2. Click and drag the left mouse button to orbit the camera: geometry rotates smoothly around the center of mass.
 3. Verify PBR surface textures (base color, roughness, ambient occlusion) render accurately without inverted normals or missing mipmaps.
 
-### 4.4 Typography and Text Shaping (`examples/glyph/text_hello`)
+### 4.4 Typography and Text Shaping (`examples/showcase/widget_gallery`)
 
 ```bash
-./build/examples/glyph/text_hello
+./build/examples/showcase/widget_gallery
 ```
 
 **Verification Steps:**
@@ -138,10 +138,10 @@ Run the core rendering pipelines to verify path tessellation, font shaping, comp
 2. Check glyph edge rendering: subpixel positioning and dual-layer R8 atlas blitting must not introduce blurry halos or clipped ascenders/descenders.
 3. Toggle display DPI or move between displays: text re-shapes cleanly without font rasterization fuzziness.
 
-### 4.5 Compute Pipeline Synchronization (`examples/flux/compute_fill`)
+### 4.5 Compute Pipeline Synchronization (`examples/getting_started/compute_pass`)
 
 ```bash
-./build/examples/flux/compute_fill
+./build/examples/getting_started/compute_pass
 ```
 
 **Verification Steps:**
@@ -154,10 +154,10 @@ Run the core rendering pipelines to verify path tessellation, font shaping, comp
 
 Verify desktop user interface controls, input handling, window lifecycle, and system capabilities hosted within `libs/iris` and `libs/lens`.
 
-### 5.1 Retained UI Controls (`examples/aperture/widgets`)
+### 5.1 Retained UI Controls (`examples/showcase/widget_gallery`)
 
 ```bash
-./build/examples/aperture/widgets
+./build/examples/showcase/widget_gallery
 ```
 
 | Control Under Test | Action to Perform | Expected Observable Outcome |
@@ -170,7 +170,7 @@ Verify desktop user interface controls, input handling, window lifecycle, and sy
 | **Split View** | Click and drag the central split divider. | Left and right panes resize smoothly; minimum and maximum pane widths are respected. |
 | **Scroll View** | Use mouse wheel or drag scrollbar inside content area. | Content scrolls smoothly; clipped elements outside the viewport boundary are culled cleanly. |
 
-### 5.2 Text Field, Caret, and Clipboard (`examples/aperture/widgets`)
+### 5.2 Text Field, Caret, and Clipboard (`examples/showcase/widget_gallery`)
 
 Verify retained text editing (`ADR-0036`, `ADR-0057`, `ADR-0064`):
 
@@ -187,10 +187,10 @@ Verify retained text editing (`ADR-0036`, `ADR-0057`, `ADR-0064`):
    - Paste clipboard text into an external text editor (e.g., terminal or VS Code): text matches.
    - Copy text from an external application and press `Ctrl+V`: text pastes into the text field at the caret position.
 
-### 5.3 Overlays, Modals, and Z-Bands (`examples/scenarios/overlays`)
+### 5.3 Overlays, Modals, and Z-Bands (`examples/showcase/overlays`)
 
 ```bash
-./build/examples/scenarios/overlays/scenario_overlays
+./build/examples/showcase/widget_gallery/scenario_overlays
 ```
 
 **Verification Steps:**
@@ -203,10 +203,10 @@ Verify retained text editing (`ADR-0036`, `ADR-0057`, `ADR-0064`):
    - Open a menu near the screen edge: menu repositioning ensures it does not clip outside window boundaries.
    - Click anywhere outside the menu: menu closes immediately.
 
-### 5.4 Cross-Platform Drag and Drop (`examples/aperture/dnd_demo`)
+### 5.4 Cross-Platform Drag and Drop (`examples/showcase/widget_gallery`)
 
 ```bash
-./build/examples/aperture/dnd_demo
+./build/examples/showcase/widget_gallery
 ```
 
 **Verification Steps (`ADR-0086`):**
@@ -254,9 +254,9 @@ meson test -C build-release --no-suite bench --no-suite fuzz
 
 # 3. Interactive smoke pass
 ./build-release/examples/showcase/material_gallery   # Run 30s; cycle keys 1-5, D, F
-./build-release/examples/aperture/widgets                # Test button, slider, text input, clipboard
-./build-release/examples/vista/gltf_viewer           # Verify 3D rendering and camera orbit
-./build-release/examples/aperture/dnd_demo               # Verify drag-and-drop interaction
+./build-release/examples/showcase/widget_gallery                # Test button, slider, text input, clipboard
+./build-release/examples/showcase/scene_studio           # Verify 3D rendering and camera orbit
+./build-release/examples/showcase/widget_gallery               # Verify drag-and-drop interaction
 ```
 
 ### Manual Release Acceptance Sign-Off

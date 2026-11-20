@@ -1,0 +1,13 @@
+[package]
+name = "optics-build"
+description = "Shared build-script plumbing for Optics Rust -sys and wrapper crates"
+publish = false
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+bindgen = { workspace = true }
+pkg-config = { workspace = true }

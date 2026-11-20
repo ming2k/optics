@@ -1,11 +1,11 @@
 project('optics', ['c'],
-  version : '0.0.81',
+  version : '0.0.82',
   license : 'MIT',
   meson_version : '>=1.8.0',
   default_options : [
     'c_std=c23',
     'warning_level=3',
-    'default_library=shared',
+    'default_library=both',
     'b_ndebug=if-release',
   ],
 )
@@ -59,59 +59,59 @@ else
   tracy_dep = declare_dependency()
 endif
 
-opt_glyph = get_option('glyph')
-opt_vista = get_option('vista')
-opt_transit = get_option('transit')
-opt_reticle = get_option('reticle')
-opt_prism = get_option('prism')
+opt_text = get_option('text')
+opt_scene = get_option('scene')
+opt_motion = get_option('motion')
+opt_svg = get_option('svg')
+opt_material = get_option('material')
 # lens consumes glyph and reticle. The feature graph is explicit here so a
 # disabled dependency cannot turn into a late undefined reference.
-opt_lens = opt_glyph and opt_reticle
+opt_ui = opt_text and opt_svg
 
-subdir('libs/flux')
+subdir('libs/gfx')
 
-if opt_glyph
-  subdir('libs/glyph')
+if opt_text
+  subdir('libs/text')
 else
-  glyph_dep = declare_dependency()
+  text_dep = declare_dependency()
 endif
 
-if opt_vista
-  subdir('libs/vista')
+if opt_scene
+  subdir('libs/scene')
 else
-  vista_dep = declare_dependency()
+  scene_dep = declare_dependency()
 endif
 
-if opt_transit
-  subdir('libs/transit')
+if opt_motion
+  subdir('libs/motion')
 else
-  transit_dep = declare_dependency()
+  motion_dep = declare_dependency()
 endif
 
-if opt_reticle
-  subdir('libs/reticle')
+if opt_svg
+  subdir('libs/svg')
 else
-  reticle_dep = declare_dependency()
+  svg_dep = declare_dependency()
 endif
 
-if opt_prism
-  subdir('libs/prism')
+if opt_material
+  subdir('libs/material')
 else
   # Always defined so tests/examples can reference it unconditionally; empty
   # when the library is off.
-  prism_dep = declare_dependency()
+  material_dep = declare_dependency()
 endif
 
 # iris is the platform shell and needs flux only. lens is the UI engine and
 # needs glyph + reticle. aperture is the one library that links both.
-subdir('libs/iris')
+subdir('libs/window')
 
-if opt_lens
-  subdir('libs/lens')
-  subdir('libs/aperture')
+if opt_ui
+  subdir('libs/ui')
+  subdir('libs/app')
 else
-  lens_dep = declare_dependency()
-  aperture_dep = declare_dependency()
+  ui_dep = declare_dependency()
+  app_dep = declare_dependency()
 endif
 
 # ====================================================================
@@ -119,43 +119,43 @@ endif
 # ====================================================================
 optics_inc = include_directories('include')
 
-optics_deps = [flux_dep, iris_dep]
-optics_requires = ['flux = ' + meson.project_version(), 'iris = ' + meson.project_version()]
+optics_deps = [gfx_dep, window_dep]
+optics_requires = ['optics-gfx = ' + meson.project_version(), 'optics-window = ' + meson.project_version()]
 optics_compile_args = []
 
-if opt_transit
-  optics_deps += [transit_dep]
-  optics_requires += ['transit = ' + meson.project_version()]
-  optics_compile_args += '-DOPTICS_HAVE_TRANSIT=1'
+if opt_motion
+  optics_deps += [motion_dep]
+  optics_requires += ['optics-motion = ' + meson.project_version()]
+  optics_compile_args += '-DOPTICS_HAVE_MOTION=1'
 endif
 
-if opt_glyph
-  optics_deps += [glyph_dep]
-  optics_requires += ['glyph = ' + meson.project_version()]
-  optics_compile_args += '-DOPTICS_HAVE_GLYPH=1'
+if opt_text
+  optics_deps += [text_dep]
+  optics_requires += ['optics-text = ' + meson.project_version()]
+  optics_compile_args += '-DOPTICS_HAVE_TEXT=1'
 endif
-if opt_vista
-  optics_deps += [vista_dep]
-  optics_requires += ['vista = ' + meson.project_version()]
-  optics_compile_args += '-DOPTICS_HAVE_VISTA=1'
+if opt_scene
+  optics_deps += [scene_dep]
+  optics_requires += ['optics-scene = ' + meson.project_version()]
+  optics_compile_args += '-DOPTICS_HAVE_SCENE=1'
 endif
-if opt_reticle
-  optics_deps += [reticle_dep]
-  optics_requires += ['reticle = ' + meson.project_version()]
-  optics_compile_args += '-DOPTICS_HAVE_RETICLE=1'
+if opt_svg
+  optics_deps += [svg_dep]
+  optics_requires += ['optics-svg = ' + meson.project_version()]
+  optics_compile_args += '-DOPTICS_HAVE_SVG=1'
 endif
-if opt_prism
-  optics_deps += [prism_dep]
-  optics_requires += ['prism = ' + meson.project_version()]
-  optics_compile_args += '-DOPTICS_HAVE_PRISM=1'
+if opt_material
+  optics_deps += [material_dep]
+  optics_requires += ['optics-material = ' + meson.project_version()]
+  optics_compile_args += '-DOPTICS_HAVE_MATERIAL=1'
 endif
-if opt_lens
-  optics_deps += [lens_dep, aperture_dep]
+if opt_ui
+  optics_deps += [ui_dep, app_dep]
   optics_requires += [
-    'lens = ' + meson.project_version(),
-    'aperture = ' + meson.project_version(),
+    'optics-ui = ' + meson.project_version(),
+    'optics-app = ' + meson.project_version(),
   ]
-  optics_compile_args += ['-DOPTICS_HAVE_LENS=1', '-DOPTICS_HAVE_APERTURE=1']
+  optics_compile_args += ['-DOPTICS_HAVE_UI=1', '-DOPTICS_HAVE_APP=1']
 endif
 
 install_headers('include/optics/optics.h', subdir : 'optics')
@@ -177,28 +177,8 @@ pkg.generate(
 )
 
 if get_option('examples')
-  subdir('examples/flux')
-  subdir('examples/iris')
-  if opt_lens and opt_prism
-    subdir('examples/showcase')
-  endif
-  if opt_lens and opt_glyph
-    subdir('examples/glyph')
-  endif
-  if opt_lens and opt_vista
-    subdir('examples/vista')
-  endif
-  if opt_lens and opt_transit
-    subdir('examples/transit')
-  endif
-  if opt_reticle
-    subdir('examples/reticle')
-  endif
-  if opt_lens
-    subdir('examples/lens')
-    subdir('examples/aperture')
-    subdir('examples/scenarios')
-  endif
+  subdir('examples/getting_started')
+  subdir('examples/showcase')
 endif
 
 if get_option('fuzz')

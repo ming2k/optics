@@ -32,7 +32,7 @@ error model), see [API Reference](api.md); for blocking behavior per call, see
 | `flux_image_create (FLUX_IMAGE_USAGE_RENDER_TARGET)` | Create a COLOR_ATTACHMENT \| SAMPLED image with undefined initial contents. |
 | `flux_frame_prepare_image_target` |  |
 | `flux_frame_finish_image_target` |  |
-| `flux_image_create (FLUX_IMAGE_USAGE_COMPUTE_WRITE)` | Create a STORAGE \| SAMPLED image with undefined initial contents, in VK_IMAGE_LAYOUT_GENERAL, registered into both the sampled and the storage bindless slots (read them via flux_image_bindless_handle and flux_image_bindless_storage_handle in <flux/vulkan.h>). |
+| `flux_image_create (FLUX_IMAGE_USAGE_COMPUTE_WRITE)` | Create a STORAGE \| SAMPLED image with undefined initial contents, in VK_IMAGE_LAYOUT_GENERAL, registered into both the sampled and the storage bindless slots (read them via flux_image_bindless_handle and flux_image_bindless_storage_handle in <optics/gfx/vulkan.h>). |
 | `flux_device_supports_image_usage` |  |
 | `flux_image_update_region` | Upload pixels (packed, strided, or premultiplied RGBA8) into an in-bounds sub-region. |
 | `flux_device_log` | Emit a printf-style diagnostic through a device's logger (if any). |
@@ -647,19 +647,19 @@ error model), see [API Reference](api.md); for blocking behavior per call, see
 
 | Symbol | Description |
 |--------|-------------|
-| `iris_window_minimize` | Minimize (iconify) the active window. |
-| `iris_window_maximize` | Ask the compositor to maximise the active window. |
-| `iris_window_unmaximize` | Ask the compositor to un-maximise the active window. |
-| `iris_window_fullscreen` | Enter fullscreen on the output the active window is currently on. |
-| `iris_window_unfullscreen` | Leave fullscreen. |
-| `iris_window_restore` | Restore the window from minimised / maximised state (when allowed). |
-| `iris_window_focus` | Request keyboard focus (raise / activate). |
-| `iris_window_close` | Request the compositor to close the active window. |
-| `iris_window_start_move` | Request the compositor / window manager to start an interactive move of the active window (e.g. |
-| `iris_window_set_min_size` | Configure the minimum and maximum logical window size the compositor should respect. |
-| `iris_window_set_max_size` |  |
-| `iris_window_get_geometry` | Snapshot of the active window's logical geometry. |
-| `iris_window_create_activation_token` | Request a window activation token (xdg-activation-v1 on Wayland) to pass to an external or child process for seamless focus handoff. |
+| `optics_window_minimize` | Minimize (iconify) the active window. |
+| `optics_window_maximize` | Ask the compositor to maximise the active window. |
+| `optics_window_unmaximize` | Ask the compositor to un-maximise the active window. |
+| `optics_window_fullscreen` | Enter fullscreen on the output the active window is currently on. |
+| `optics_window_unfullscreen` | Leave fullscreen. |
+| `optics_window_restore` | Restore the window from minimised / maximised state (when allowed). |
+| `optics_window_focus` | Request keyboard focus (raise / activate). |
+| `optics_window_close` | Request the compositor to close the active window. |
+| `optics_window_start_move` | Request the compositor / window manager to start an interactive move of the active window (e.g. |
+| `optics_window_set_min_size` | Configure the minimum and maximum logical window size the compositor should respect. |
+| `optics_window_set_max_size` |  |
+| `optics_window_get_geometry` | Snapshot of the active window's logical geometry. |
+| `optics_window_create_activation_token` | Request a window activation token (xdg-activation-v1 on Wayland) to pass to an external or child process for seamless focus handoff. |
 
 ### `iris/cursor.h`
 

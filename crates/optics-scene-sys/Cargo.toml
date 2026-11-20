@@ -1,0 +1,16 @@
+[package]
+name = "optics-scene-sys"
+description = "Raw FFI bindings to vista (libvista), generated from <vista/vista.h>"
+publish = false
+links = "optics_scene"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+optics-gfx-sys = { workspace = true }
+
+[build-dependencies]
+optics-build = { workspace = true }

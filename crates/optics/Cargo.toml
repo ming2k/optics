@@ -1,0 +1,35 @@
+[package]
+name = "optics"
+description = "High-performance modern C23 graphics and UI engine for Rust"
+publish = false
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+optics-gfx = { workspace = true, optional = true }
+optics-text = { workspace = true, optional = true }
+optics-svg = { workspace = true, optional = true }
+optics-material = { workspace = true, optional = true }
+optics-scene = { workspace = true, optional = true }
+optics-motion = { workspace = true, optional = true }
+optics-window = { workspace = true, optional = true }
+optics-ui = { workspace = true, optional = true }
+optics-app = { workspace = true, optional = true }
+
+[build-dependencies]
+optics-build = { workspace = true }
+
+[features]
+default = ["app", "motion"]
+gfx = ["dep:optics-gfx"]
+text = ["gfx", "dep:optics-text"]
+svg = ["gfx", "dep:optics-svg"]
+material = ["gfx", "dep:optics-material"]
+scene = ["gfx", "dep:optics-scene"]
+motion = ["dep:optics-motion"]
+window = ["gfx", "dep:optics-window"]
+ui = ["text", "svg", "dep:optics-ui"]
+app = ["ui", "window", "dep:optics-app"]

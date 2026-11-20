@@ -1,0 +1,11 @@
+[package]
+name = "optics-motion"
+description = "Safe Rust implementation of transit — closed-form analytic springs and motion vocabulary"
+publish = false
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]

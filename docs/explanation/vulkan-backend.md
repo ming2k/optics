@@ -208,7 +208,7 @@ ddesc.pipeline_cache_userdata = &cache;
 
 Leave all three NULL and the cache lives only for the device lifetime
 — the default. The callback signatures and hooks are declared in
-[`libs/flux/include/flux/core.h`](../../libs/flux/include/flux/core.h);
+[`libs/gfx/include/flux/core.h`](../../libs/gfx/include/optics/gfx/core.h);
 the consumer persists while flux provides the in/out hooks. This restores
 the contract ADR-0001 set out: *"the consumer persists; flux provides the in/out
 hooks."*

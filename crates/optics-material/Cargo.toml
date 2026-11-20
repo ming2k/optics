@@ -1,0 +1,18 @@
+[package]
+name = "optics-material"
+description = "Safe Rust bindings to prism: liquid-glass materials on the flux effect runtime"
+publish = false
+links = "optics_material_rs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+optics-material-sys = { workspace = true }
+optics-gfx = { workspace = true }
+optics-gfx-sys = { workspace = true }
+
+[build-dependencies]
+optics-build = { workspace = true }

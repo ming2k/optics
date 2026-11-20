@@ -3,8 +3,8 @@
 ## Scope
 
 The root Meson build owns all C tests for the libraries under `libs/`.
-The Rust bindings live in the repository-root Cargo workspace and their crates
-stay under `bindings/crates/` (ADR-0159, ADR-0163). Windowed examples remain
+The Rust crates live at repository-root `crates/` under the root Cargo
+workspace (ADR-0159, ADR-0163, ADR-0169). Windowed examples remain
 manual checks because they need a compositor and GPU surface.
 
 The test system is a three-layer pyramid with orthogonal quality lanes
@@ -62,7 +62,7 @@ to pass on every platform's Vulkan driver (MoltenVK >= 1.3 on macOS). See
 [Cross-platform](cross-platform.md).
 
 When the integration suite runs on a software Vulkan ICD (Lavapipe), set
-`FLUX_ALLOW_SOFTWARE_DEVICE=1`. The `device_hardware` Phase B0 gate otherwise
+`OPTICS_GFX_ALLOW_SOFTWARE_DEVICE=1`. The `device_hardware` Phase B0 gate otherwise
 fails by design on llvmpipe; with the variable set it still reports the detected
 device and asserts the compute prerequisites.
 
@@ -80,10 +80,10 @@ Current E2E scenarios:
 
 | Test | Chain under assertion |
 |------|-----------------------|
-| `e2e_flux_version` | Umbrella version → flux runtime version, with no lens/canvas requirement |
-| `e2e_public_api` | Umbrella version lockstep → lens frame → snapshot → CPU pixels |
+| `e2e_gfx_version` | Umbrella version → `gfx` runtime version, with no UI/canvas requirement |
+| `e2e_public_api` | Umbrella version lockstep → UI frame → snapshot → CPU pixels |
 | `e2e_interaction_session` | Pointer press/release → checkbox toggle → focused text input → accessibility walk → snapshot replay |
-| `e2e_document_pipeline` | SVG → reticle raster; SVG → runtime icon → lens snapshot → immutable `DisplayList` → serialize/deserialize → byte-identical pixels |
+| `e2e_document_pipeline` | SVG → `svg` raster; SVG → runtime icon → UI snapshot → immutable `DisplayList` → serialize/deserialize → byte-identical pixels |
 
 ## One Harness, One Fixture Layer
 
@@ -117,16 +117,16 @@ int main(void) {
 Diagnostics go to `stderr`. The harness never writes `stdout`; `stdout` belongs
 to the program under test and to benchmarks.
 
-Vulkan fixtures live in `tests/support/flux_test.h`, separately from assertions:
+Vulkan fixtures live in `tests/support/gfx_test.h`, separately from assertions:
 
 ```c
-flux_device *d = flux_test_make_headless_device();
+optics_gfx_device *d = gfx_test_make_headless_device();
 if (!d)
     OT_SKIP("no Vulkan device");
 ```
 
 The split is intentional: a CPU-only unit test links `optics_test` alone, while
-`flux_test` is the one place that owns ICD pinning, validation-layer probing, and
+`gfx_test` is the one place that owns ICD pinning, validation-layer probing, and
 memory-type selection.
 
 ## Topology and Registration
@@ -136,15 +136,16 @@ memory-type selection.
 ```text
 tests/
 ├── meson.build          topology: support first, then each layer
-├── support/             optics_test + flux_test + lens_test
-├── flux/                unit/, integration/, bench/, fuzz/
-├── glyph/               unit/, integration/
-├── prism/               unit/, integration/
-├── transit/
-├── vista/
-├── reticle/
-├── lens/
-├── iris/
+├── support/             optics_test + gfx_test + lens_test
+├── gfx/                 unit/, integration/, bench/, fuzz/
+├── text/                unit/, integration/
+├── material/            unit/, integration/
+├── motion/
+├── scene/
+├── svg/
+├── ui/
+├── window/
+├── app/
 ├── optics/              façade, version lockstep, lint, tooling
 └── e2e/                 public-API scenarios
 ```
@@ -201,7 +202,7 @@ On a software Vulkan ICD:
 
 ```bash
 VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json \
-FLUX_ALLOW_SOFTWARE_DEVICE=1 \
+OPTICS_GFX_ALLOW_SOFTWARE_DEVICE=1 \
   meson test -C build --suite integration
 ```
 
@@ -240,11 +241,11 @@ pass.
 
 | Symptom | Inspect first |
 |---------|---------------|
-| `flux` unit failure | The matching file in `tests/flux/unit/` and its source module. |
+| `flux` unit failure | The matching file in `tests/gfx/unit/` and its source module. |
 | Vulkan test skips | Vulkan 1.3 device discovery, ICD selection, and required extensions. |
-| Vulkan validation error | The integration test's frame/resource lifetime and `libs/flux/src/`. |
-| `lens` widget or layout failure | The same-named test in `tests/lens/` and `libs/lens/src/`. |
-| `iris` theme or API failure | `libs/iris/src/theme_linux.c` or `libs/iris/src/app.c`. |
+| Vulkan validation error | The integration test's frame/resource lifetime and `libs/gfx/src/`. |
+| `lens` widget or layout failure | The same-named test in `tests/ui/` and `libs/ui/src/`. |
+| `iris` theme or API failure | `libs/window/src/theme_linux.c` or `libs/window/src/app.c`. |
 | E2E pixel mismatch | Start at the first failing layer in the chain: reticle raster, lens snapshot, display-list serialization, or CPU replay. |
 | Layer guardrail failure | `tools/check_test_layers.py` output; the test's Meson registration and `tests/e2e/` include discipline. |
 | Window is blank or examples fail to start | Wayland/GLFW setup and the relevant example; this path is not covered by headless tests. |
@@ -319,8 +320,8 @@ layer guardrail, and run the exact layer you touched.
 
 ## Golden References
 
-`tests/prism/golden/liquid_glass_default.pam` is a tolerance golden: a
-rendered reference that `tests/prism/integration/test_prism_golden.c`
+`tests/material/golden/liquid_glass_default.pam` is a tolerance golden: a
+rendered reference that `tests/material/integration/test_prism_golden.c`
 compares against with a per-channel tolerance (12/255) and a small
 outlier allowance, layered over driver-independent hard invariants
 (exact silhouette, edge-direction preservation, rim-brightness
@@ -343,8 +344,8 @@ Driver validity, and its limits:
 - Regenerate deliberately, never casually:
 
 ```bash
-PRISM_GOLDEN_UPDATE=1 ./build/tests/prism/integration/test_prism_golden
-git diff tests/prism/golden/   # the reference must be part of the change
+OPTICS_MATERIAL_GOLDEN_UPDATE=1 ./build/tests/material/integration/test_prism_golden
+git diff tests/material/golden/   # the reference must be part of the change
 ```
 
 A golden commit whose diff shows the reference but not the recipe (or
@@ -356,9 +357,9 @@ commit.
 Build examples with `-Dexamples=true`, then run the smallest relevant program:
 
 ```bash
-./build/examples/flux/canvas_hello
-./build/examples/lens/headless_demo
-./build/examples/aperture/hello_window
+./build/examples/getting_started/canvas_window
+./build/examples/showcase/headless_demo
+./build/examples/getting_started/hello_app
 ```
 
 Record the compositor, driver, and GPU when reporting a visual or

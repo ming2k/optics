@@ -52,9 +52,9 @@ class Fixture:
 
     def __init__(self, tmp: Path, source: str = COMPLETE, contract: str = CONTRACT):
         self.root = tmp
-        (tmp / "libs" / "iris" / "src").mkdir(parents=True)
+        (tmp / "libs" / "window" / "src").mkdir(parents=True)
         (tmp / "tools" / "config").mkdir(parents=True)
-        (tmp / "libs" / "iris" / "src" / "app_wayland.c").write_text(textwrap.dedent(source))
+        (tmp / "libs" / "window" / "src" / "app_wayland.c").write_text(textwrap.dedent(source))
         if contract is not None:
             (tmp / "tools" / "config" / "wayland-listeners.toml").write_text(
                 textwrap.dedent(contract)
@@ -186,8 +186,8 @@ class TestFailsClosed(Base):
     def test_tree_without_wayland_backend_is_skipped(self):
         tmp = Path(tempfile.mkdtemp())
         self.addCleanup(lambda: __import__("shutil").rmtree(tmp, ignore_errors=True))
-        (tmp / "libs" / "flux" / "src").mkdir(parents=True)
-        (tmp / "libs" / "flux" / "src" / "canvas.c").write_text("int x;\n")
+        (tmp / "libs" / "gfx" / "src").mkdir(parents=True)
+        (tmp / "libs" / "gfx" / "src" / "canvas.c").write_text("int x;\n")
         self.assertEqual(listeners.check_listeners(tmp), [])
 
 

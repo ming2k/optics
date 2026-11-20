@@ -38,7 +38,7 @@ However, packaging ~490 lines of stateless scalar math as an independent dynamic
 Transform `libs/transit` from a dynamic shared library into a **pure C23 single-header vocabulary** with zero backward-compatibility shims:
 
 1. **Header-Only Inlining**:
-   All public functions in [`include/transit/transit.h`](../../libs/transit/include/transit/transit.h) are declared and defined `static inline` via `TRANSIT_API`. Calling translation units compile the closed-form math directly into their own binary.
+   All public functions in [`include/transit/transit.h`](../../libs/motion/include/optics/motion.h) are declared and defined `static inline` via `TRANSIT_API`. Calling translation units compile the closed-form math directly into their own binary.
 2. **Elimination of `libtransit.so`**:
    Excise `libs/transit/src/transit.c` and remove `library('transit', ...)` from `libs/transit/meson.build`. `transit_dep` is re-declared as a pure header-only interface dependency (`declare_dependency(include_directories: transit_inc, dependencies: [m_dep])`). The build graph produces no `libtransit.so`.
 3. **Rust Motion Implementation**:

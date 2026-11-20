@@ -1,0 +1,20 @@
+[package]
+name = "optics-app-sys"
+description = "Raw FFI bindings to aperture (libaperture), generated from <aperture/aperture.h>"
+publish = false
+links = "optics_app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# The types aperture's API speaks are owned by these crates and re-exported,
+# so each has ONE Rust definition across the stack.
+optics-gfx-sys = { workspace = true }
+optics-window-sys = { workspace = true }
+optics-ui-sys = { workspace = true }
+
+[build-dependencies]
+optics-build = { workspace = true }

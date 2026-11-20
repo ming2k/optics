@@ -13,20 +13,21 @@
 #include <string.h>
 
 int main(void) {
-    static_assert(OPTICS_VERSION_MAJOR == FLUX_VERSION_MAJOR,
+    static_assert(OPTICS_VERSION_MAJOR == OPTICS_GFX_VERSION_MAJOR,
                   "umbrella and flux major versions diverge");
-    static_assert(OPTICS_VERSION_MINOR == FLUX_VERSION_MINOR,
+    static_assert(OPTICS_VERSION_MINOR == OPTICS_GFX_VERSION_MINOR,
                   "umbrella and flux minor versions diverge");
-    static_assert(OPTICS_VERSION_PATCH == FLUX_VERSION_PATCH,
+    static_assert(OPTICS_VERSION_PATCH == OPTICS_GFX_VERSION_PATCH,
                   "umbrella and flux patch versions diverge");
-    static_assert(OPTICS_VERSION_NUMBER == FLUX_VERSION_NUMBER,
+    static_assert(OPTICS_VERSION_NUMBER == OPTICS_GFX_VERSION_NUMBER,
                   "umbrella and flux packed versions diverge");
 
-    OT_EXPECT(flux_version_number() == FLUX_VERSION_NUMBER);
-    OT_EXPECT(flux_version_check(OPTICS_VERSION_MAJOR, OPTICS_VERSION_MINOR, OPTICS_VERSION_PATCH));
+    OT_EXPECT(optics_gfx_version_number() == OPTICS_GFX_VERSION_NUMBER);
+    OT_EXPECT(
+        optics_gfx_version_check(OPTICS_VERSION_MAJOR, OPTICS_VERSION_MINOR, OPTICS_VERSION_PATCH));
 
     int major = -1, minor = -1, patch = -1;
-    flux_version(&major, &minor, &patch);
+    optics_gfx_version(&major, &minor, &patch);
     OT_EXPECT(major == OPTICS_VERSION_MAJOR);
     OT_EXPECT(minor == OPTICS_VERSION_MINOR);
     OT_EXPECT(patch == OPTICS_VERSION_PATCH);
@@ -34,7 +35,7 @@ int main(void) {
     char expected[32];
     snprintf(expected, sizeof expected, "%d.%d.%d", OPTICS_VERSION_MAJOR, OPTICS_VERSION_MINOR,
              OPTICS_VERSION_PATCH);
-    OT_EXPECT_STR_EQ(flux_version_string(), expected);
+    OT_EXPECT_STR_EQ(optics_gfx_version_string(), expected);
 
     return OT_REPORT();
 }

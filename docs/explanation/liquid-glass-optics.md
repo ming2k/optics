@@ -1,6 +1,6 @@
 # Liquid Glass Optical Architecture & Physical Rendering Paradigm
 
-This document formalises the optical foundation, shader mathematics, contrast-preservation architecture, and automated verification methodology of **Prism Liquid Glass** (`<prism/liquid_glass.h>`, `liquid_glass.comp.slang`). It details how Optics achieves physical dielectric glass realism for desktop and spatial user interfaces without ray tracing, adhering to [ADR-0100](../adr/0100-liquid-glass-dual-rim-and-screen-space-environmental-optics.md).
+This document formalises the optical foundation, shader mathematics, contrast-preservation architecture, and automated verification methodology of **Prism Liquid Glass** (`<optics/material/liquid_glass.h>`, `liquid_glass.comp.slang`). It details how Optics achieves physical dielectric glass realism for desktop and spatial user interfaces without ray tracing, adhering to [ADR-0100](../adr/0100-liquid-glass-dual-rim-and-screen-space-environmental-optics.md).
 
 ---
 
@@ -109,7 +109,7 @@ Real-time shader algorithms cannot be verified reliably by manual inspection alo
    - `max_delta <= 12` per channel for allowable rounding variance;
    - `outliers <= total * 0.08%` for boundary rasterization antialiasing tolerances;
    - Structural regressions immediately trigger test failures.
-4. **Automated Golden Reference Update:** Reference images (`tests/prism/golden/liquid_glass_default.pam`) are committed to version control and updated via explicit `PRISM_GOLDEN_UPDATE=1` invocation upon intentional shader upgrades.
+4. **Automated Golden Reference Update:** Reference images (`tests/material/golden/liquid_glass_default.pam`) are committed to version control and updated via explicit `PRISM_GOLDEN_UPDATE=1` invocation upon intentional shader upgrades.
 5. **Compiler Header Isolation:** To prevent stale shader object cache hits (e.g. GCC 16 C23 `#embed` failing to emit depfile entries), shader bytecode is embedded via explicit Ninja-tracked header targets (`liquid_glass_spv.h`), ensuring every shader modification rebuilds dependent libraries deterministically.
 
 ---

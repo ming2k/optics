@@ -31,16 +31,16 @@ MAX_PARAMS = 4
 
 SUFFIX = re.compile(r"_(?:ex|wrapped|sized|primary|subtle|vertical)$")
 DECL = re.compile(
-    r"\b[A-Z]+_API\b[^;{]*?\b([a-z][a-z0-9_]*)\s*\(([^;{]*?)\)\s*;", re.DOTALL
+    r"\b[A-Z0-9_]+_API\b[^;{]*?\b([a-z][a-z0-9_]*)\s*\(([^;{]*?)\)\s*;", re.DOTALL
 )
 DESCRIPTOR = re.compile(r"_(?:opts|desc)\s*\*")
 
 # Headers whose functions are value kernels: operands, not configuration.
-KERNEL_HEADERS = {"flux/math.h", "flux/curve.h", "flux/sdf.h"}
+KERNEL_HEADERS = {"gfx/math.h", "gfx/curve.h", "gfx/sdf.h"}
 # Path verbs take their control points positionally, like every 2D API.
-# flux_console_logger is an implementation of the flux_log_fn callback type:
+# optics_gfx_console_logger is an implementation of the optics_gfx_log_fn callback type:
 # its parameter list is that typedef's, not a choice made at the declaration.
-KERNEL_FUNCTIONS = re.compile(r"^(?:flux_path_(?:quad|cubic)_to|flux_console_logger)$")
+KERNEL_FUNCTIONS = re.compile(r"^(?:optics_gfx_path_(?:quad|cubic)_to|optics_gfx_console_logger)$")
 
 
 def strip_comments(text: str) -> str:

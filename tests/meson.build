@@ -13,20 +13,20 @@
 
 subdir('support')
 
-subdir('flux')
-if get_option('glyph')
-  subdir('glyph')
+subdir('gfx')
+if get_option('text')
+  subdir('text')
 endif
-subdir('prism')
-subdir('transit')
-subdir('vista')
-if get_option('reticle')
-  subdir('reticle')
+subdir('material')
+subdir('motion')
+subdir('scene')
+if get_option('svg')
+  subdir('svg')
 endif
-subdir('iris')
-if opt_lens
-  subdir('lens')
-  subdir('aperture')
+subdir('window')
+if opt_ui
+  subdir('ui')
+  subdir('app')
 endif
 subdir('optics')
 subdir('e2e')

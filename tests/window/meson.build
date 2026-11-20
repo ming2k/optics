@@ -1,0 +1,107 @@
+# Headless C tests for libiris.
+#
+# Every test here runs without a Wayland compositor or GPU surface:
+#   - test_version       iris_version_string / version macros
+#   - test_app_api       iris_app_run / iris_pick_file argument validation
+#   - test_theme         colour-scheme query (GTK_THEME branch; gsettings shadowed)
+#   - test_uri           file:// URI → path decoding for dialog results
+#   - test_a11y_util     AT-SPI role/state maps, value parser, tree diff
+#   - test_platform_text UTF-8 boundary-aware truncation helpers
+#   - test_platform_input pointer button mapping + scroll-channel policy
+#
+# The windowed path (iris_app_run) is exercised by the examples, not here — it
+# owns an event loop and needs a live session. Nothing in this directory links
+# lens: iris depends on flux only, and these tests are what keep it that way.
+
+src_inc = include_directories('../../libs/window/src')
+
+tests = ['test_version', 'test_app_api', 'test_uri', 'test_capability']
+
+foreach t : tests
+  exe = executable(t, t + '.c',
+    dependencies        : [window_dep, m_dep, optics_test_dep],
+    include_directories : window_inc,
+  )
+  test(t, exe, suite : 'unit')
+endforeach
+
+# test_a11y_util compiles a11y_util.c (+ its platform_text.c dependency)
+# directly (the helpers are internal / hidden-visibility, so they are not
+# exported from libiris.so).
+exe_a11y = executable('test_a11y_util',
+  ['test_a11y_util.c', '../../libs/window/src/a11y_util.c', '../../libs/window/src/platform_text.c'],
+  include_directories : [window_inc, src_inc],
+  dependencies        : [gfx_dep, m_dep, optics_test_dep],
+)
+test('test_a11y_util', exe_a11y, suite : 'unit')
+
+# test_theme pins the Linux theme_linux.c GTK_THEME/gsettings branch; the
+# Cocoa and Win32 backends answer from the OS instead.
+if host_machine.system() == 'linux'
+  exe_theme = executable('test_theme', 'test_theme.c',
+    dependencies : [window_dep, m_dep, optics_test_dep],
+  )
+  test('test_theme', exe_theme, suite : 'unit')
+endif
+
+# test_a11y_prefs: the public preference API against libiris (query always
+# links; watch may be the stub on libsystemd-less builds — both paths are
+# contract-valid, the test pins both).
+exe_prefs = executable('test_a11y_prefs',
+  'test_a11y_prefs.c',
+  include_directories : [window_inc, src_inc],
+  dependencies        : [window_dep, m_dep, optics_test_dep],
+)
+test('test_a11y_prefs', exe_prefs, suite : 'unit')
+
+# test_platform_text also pins the iris_input buffer sizes the backends
+# stage into (text_utf8/preedit_utf8).
+exe_ptext = executable('test_platform_text',
+  ['test_platform_text.c', '../../libs/window/src/platform_text.c'],
+  include_directories : [window_inc, src_inc],
+  dependencies        : [gfx_dep, m_dep, optics_test_dep],
+)
+test('test_platform_text', exe_ptext, suite : 'unit')
+
+# test_platform_input pins the shared pointer-button mapping and the
+# scroll-channel classification policy (header-only, so nothing to compile
+# in beyond the test itself).
+exe_pinput = executable('test_platform_input',
+  ['test_platform_input.c'],
+  include_directories : [window_inc, src_inc],
+  dependencies        : [gfx_dep, m_dep, optics_test_dep],
+)
+test('test_platform_input', exe_pinput, suite : 'unit')
+
+# test_event pins the pre-fold event seam (ADR-0107): sequence stamping,
+# PASS/DROP dispositions, host rewrites, and the undroppable rule. event.c
+# is compiled directly because the seam helper has hidden visibility.
+exe_event = executable('test_event',
+  ['test_event.c', '../../libs/window/src/event.c'],
+  include_directories : [window_inc, src_inc],
+  dependencies        : [gfx_dep, m_dep, optics_test_dep],
+)
+test('test_event', exe_event, suite : 'unit')
+
+# test_display_pacer pins the ADR-0122 cadence contract: display-driven
+# pacing, no client-hardcoded period, and the INV-PACE-03 no-spin guarantee
+# (a zero-render skip can never produce a non-positive poll budget).
+# display_pacer.c is compiled directly: it is internal, with hidden
+# visibility, and deliberately free of platform dependencies so the whole
+# policy is testable headlessly.
+exe_pacer = executable('test_display_pacer',
+  ['test_display_pacer.c', '../../libs/window/src/display_pacer.c'],
+  include_directories : [window_inc, src_inc],
+  dependencies        : [gfx_dep, m_dep, optics_test_dep],
+)
+test('test_display_pacer', exe_pacer, suite : 'unit')
+
+# test_frame_mailbox pins the ADR-0124 lockless triple-buffered snapshot
+# handoff contract: wait-free atomic exchange, monotonic sequence ordering,
+# fast-producer superseding, and multithreaded producer-consumer integrity.
+exe_mailbox = executable('test_frame_mailbox',
+  ['test_frame_mailbox.c', '../../libs/window/src/frame_mailbox.c'],
+  include_directories : [window_inc, src_inc],
+  dependencies        : [gfx_dep, m_dep, optics_test_dep],
+)
+test('test_frame_mailbox', exe_mailbox, suite : 'unit')

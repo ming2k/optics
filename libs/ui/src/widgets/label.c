@@ -1,0 +1,250 @@
+/* label.c — unified label widget (text rendering, sizing, wrapping) */
+
+#include "../internal.h"
+#include <string.h>
+
+static bool ascii_wrap_space(unsigned char c) {
+    return c == ' ' || c == '\t' || c == '\r';
+}
+
+static bool middle_dot_at(const char *text, size_t len, size_t pos) {
+    return pos + 1 < len && (unsigned char)text[pos] == 0xc2 &&
+           (unsigned char)text[pos + 1] == 0xb7;
+}
+
+static size_t utf8_next_boundary(const char *text, size_t len, size_t pos) {
+    if (pos >= len)
+        return len;
+    unsigned char lead = (unsigned char)text[pos];
+    size_t width = lead < 0x80 ? 1 : lead < 0xe0 ? 2 : lead < 0xf0 ? 3 : 4;
+    if (width > len - pos)
+        width = 1;
+    return pos + width;
+}
+
+static size_t utf8_prev_boundary(const char *text, size_t pos) {
+    if (pos == 0)
+        return 0;
+    pos--;
+    while (pos > 0 && ((unsigned char)text[pos] & 0xc0) == 0x80)
+        pos--;
+    return pos;
+}
+
+static optics_text_metrics measure_slice(optics_ui *ui, const char *text, size_t len, float size) {
+    return optics_text_measure(
+        ui->text, &(optics_text_measure_opts){
+                      .utf8 = text,
+                      .len = len,
+                      .style = &(optics_text_style){.size_px = size,
+                                                    .weight = 0.0f,
+                                                    .family = (optics_text_family)ui->text_family},
+                  });
+}
+
+static size_t wrapped_line_end(optics_ui *ui, const char *text, size_t len, size_t start,
+                               float size, float max_width, size_t *next) {
+    size_t segment_end = start;
+    while (segment_end < len && text[segment_end] != '\n')
+        segment_end++;
+
+    if (segment_end == start) {
+        *next = segment_end < len ? segment_end + 1 : segment_end;
+        return start;
+    }
+
+    if (measure_slice(ui, text + start, segment_end - start, size).width <= max_width) {
+        *next = segment_end < len ? segment_end + 1 : segment_end;
+        return segment_end;
+    }
+
+    const char *segment = text + start;
+    size_t segment_len = segment_end - start;
+    const optics_text_style style = {
+        .size_px = size, .weight = 0.0f, .family = (optics_text_family)ui->text_family};
+    size_t cut = optics_text_byte_for_x(
+        ui->text, &(optics_text_byte_for_x_opts){
+                      .utf8 = segment, .len = segment_len, .local_x = max_width, .style = &style});
+    if (cut > segment_len)
+        cut = segment_len;
+    while (cut > 0 &&
+           optics_text_x_for_byte(
+               ui->text,
+               &(optics_text_x_for_byte_opts){
+                   .utf8 = segment, .len = segment_len, .byte = cut, .style = &style}) > max_width)
+        cut = utf8_prev_boundary(segment, cut);
+    if (cut == 0)
+        cut = utf8_next_boundary(segment, segment_len, 0);
+
+    size_t word_break = cut;
+    while (word_break > 0) {
+        size_t previous = utf8_prev_boundary(segment, word_break);
+        if (word_break - previous == 1 && ascii_wrap_space((unsigned char)segment[previous])) {
+            size_t line_end = previous;
+            while (line_end > 0 && ascii_wrap_space((unsigned char)segment[line_end - 1]))
+                line_end--;
+            if (line_end >= 2 && middle_dot_at(segment, segment_len, line_end - 2)) {
+                line_end -= 2;
+                while (line_end > 0 && ascii_wrap_space((unsigned char)segment[line_end - 1]))
+                    line_end--;
+            }
+            size_t resume = word_break;
+            while (resume < segment_len && ascii_wrap_space((unsigned char)segment[resume]))
+                resume++;
+            if (middle_dot_at(segment, segment_len, resume)) {
+                resume += 2;
+                while (resume < segment_len && ascii_wrap_space((unsigned char)segment[resume]))
+                    resume++;
+            }
+            if (line_end > 0) {
+                *next = start + resume;
+                return start + line_end;
+            }
+            break;
+        }
+        word_break = previous;
+    }
+
+    *next = start + cut;
+    return start + cut;
+}
+
+static void push_line_slice(optics_ui *ui, optics_ui_text_line **lines, int *count, int *cap,
+                            const char *text, size_t len, float x, float y, float advance) {
+    if (len == 0)
+        return;
+    if (*count == *cap) {
+        int nc = *cap ? *cap * 2 : 8;
+        optics_ui_text_line *na = optics_gfx_arena_alloc(&ui->arena, (size_t)nc * sizeof *na);
+        if (!na) {
+            lensi_set_overflow(ui);
+            return;
+        }
+        if (*lines)
+            memcpy(na, *lines, (size_t)*count * sizeof *na);
+        *lines = na;
+        *cap = nc;
+    }
+    char *line = optics_gfx_arena_alloc(&ui->arena, len + 1);
+    if (!line) {
+        lensi_set_overflow(ui);
+        return;
+    }
+    memcpy(line, text, len);
+    line[len] = '\0';
+    (*lines)[*count] = (optics_ui_text_line){.text = line, .x = x, .y = y, .advance = advance};
+    (*count)++;
+}
+
+optics_ui_response optics_ui_label(optics_ui *ui, const optics_ui_label_opts *opts) {
+    optics_ui_label_opts default_opts = {};
+    if (!opts)
+        opts = &default_opts;
+
+    lensi_apply_box(ui, opts->box);
+    optics_ui_style eff = lensi_style_effective(ui);
+    const char *text = opts->text ? opts->text : "";
+
+    float size = opts->size;
+    if (size <= 0.0f)
+        size = lensi_style_font_size(ui, &eff, &ui->theme);
+    else
+        size = lensi_font_px(ui, size);
+
+    float padding = (eff.fields & OPTICS_UI_STYLE_PADDING) ? eff.padding : 0.0f;
+    optics_ui_style_resolved rs = lensi_style_resolve(ui, &eff, &ui->theme, 0);
+    if (!(eff.fields & OPTICS_UI_STYLE_PADDING))
+        rs.padding = 0.0f;
+
+    optics_ui_id id =
+        opts->box.id ? lensi_gen_widget_id(ui, opts->box.id) : lensi_gen_widget_id(ui, text);
+    optics_ui_node *n = lensi_store_touch(ui, id);
+    if (!n)
+        return (optics_ui_response){};
+
+    lensi_link_child(ui, n);
+    lensi_node_box(ui, n, &opts->box);
+    n->is_container = false;
+
+    optics_ui_text_metrics intrinsic = lensi_text_measure_label(ui, text, size, opts->weight);
+    float max_w = opts->box.max_width;
+    bool wrap = opts->wrap || max_w > 0.0f;
+
+    float w = 0.0f;
+    float h = 0.0f;
+    optics_ui_text_line *lines = nullptr;
+    int line_count = 0;
+
+    if (wrap && max_w > 0.0f) {
+        float requested_width = max_w;
+        w = n->fixed_w > 0.0f ? n->fixed_w
+                              : fminf(intrinsic.width + 2.0f * padding, requested_width);
+        float content_width = fmaxf(w - 2.0f * padding, 1.0f);
+        optics_text_metrics line_metrics = measure_slice(ui, "Ag", 2, size);
+        float line_height = line_metrics.height > 0.0f ? line_metrics.height : size;
+        float line_gap = fmaxf(size * 0.25f, 2.0f);
+
+        int line_cap = 0;
+        int logical_lines = 0;
+        size_t len = strlen(text);
+        size_t start = 0;
+        do {
+            size_t next = start;
+            size_t end = wrapped_line_end(ui, text, len, start, size, content_width, &next);
+            float line_x = padding;
+            if (opts->align == OPTICS_UI_CENTER || opts->align == OPTICS_UI_END) {
+                optics_text_metrics lm = measure_slice(ui, text + start, end - start, size);
+                if (opts->align == OPTICS_UI_CENTER)
+                    line_x = padding + fmaxf((content_width - lm.width) * 0.5f, 0.0f);
+                else
+                    line_x = padding + fmaxf(content_width - lm.width, 0.0f);
+            }
+            /* The slice is measured once, here, so the emitted slice carries its
+             * own advance rather than making replay measure it again. */
+            const optics_text_metrics slice_metrics =
+                measure_slice(ui, text + start, end - start, size);
+            push_line_slice(ui, &lines, &line_count, &line_cap, text + start, end - start, line_x,
+                            padding + (float)logical_lines * (line_height + line_gap),
+                            slice_metrics.width);
+            logical_lines++;
+            if (next <= start)
+                break;
+            start = next;
+        } while (start < len);
+
+        float content_height = (float)logical_lines * line_height;
+        if (logical_lines > 1)
+            content_height += (float)(logical_lines - 1) * line_gap;
+        h = n->fixed_h > 0.0f ? n->fixed_h : content_height + 2.0f * padding;
+    } else {
+        w = (n->fixed_w > 0) ? n->fixed_w : intrinsic.width + 2.0f * padding;
+        h = (n->fixed_h > 0) ? n->fixed_h : intrinsic.height + 2.0f * padding;
+    }
+    n->measured = (optics_gfx_point){w, h};
+
+    lensi_node_semantics(ui, n, OPTICS_UI_ROLE_LABEL, text, nullptr, 0);
+
+    lensi_skin_emit(ui, n,
+                    &(optics_ui_widget_record){
+                        .kind = OPTICS_UI_WIDGET_LABEL,
+                        .state = 0,
+                        .bounds = {0, 0, w, h},
+                        .last_bounds = n->prev_rect,
+                        .style = rs,
+                        .style_fields = eff.fields,
+                        .content =
+                            {
+                                .label = text,
+                                .text = intrinsic,
+                                .text_size = size,
+                                .text_weight = opts->weight,
+                                .align = opts->align,
+                                .lines = lines,
+                                .line_count = line_count,
+                            },
+                    });
+
+    optics_ui_response r = (optics_ui_response){.id = id, .rect = n->prev_rect};
+    ui->last_response = r;
+    return r;
+}

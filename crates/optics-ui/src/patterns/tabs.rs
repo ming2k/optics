@@ -1,0 +1,157 @@
+//! Tab strip pattern.
+
+use crate::Frame;
+use std::ffi::CString;
+
+/// Tab item description.
+#[derive(Clone, Debug)]
+pub struct TabItem {
+    pub title: String,
+    pub icon: optics_ui_sys::optics_ui_icon_id,
+    pub closable: bool,
+}
+
+impl TabItem {
+    pub fn new(title: impl Into<String>) -> Self {
+        Self {
+            title: title.into(),
+            icon: optics_ui_sys::optics_ui_icon_id(u32::MAX),
+            closable: true,
+        }
+    }
+
+    pub fn icon(mut self, icon: optics_ui_sys::optics_ui_icon_id) -> Self {
+        self.icon = icon;
+        self
+    }
+
+    pub fn closable(mut self, closable: bool) -> Self {
+        self.closable = closable;
+        self
+    }
+}
+
+/// Action resulting from tab strip interaction.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TabAction {
+    None,
+    Select(usize),
+    Close(usize),
+    NewTab,
+    /// Move the tab at `.0` (pre-move index) to the slot `.1`, expressed in
+    /// post-removal coordinates: remove the source first, then insert at
+    /// `to`. Delivered on the release frame of a drag that crossed the
+    /// 14 px threshold.
+    Move(usize, usize),
+    /// A pointer press landed on an interactive strip element (tab, close
+    /// or new button) this frame. CSD hosts must suppress the window-move
+    /// grab for this frame so tab drags are not swallowed by it.
+    PressedOnTab,
+}
+
+/// Builder for tab strip presentation.
+#[derive(Clone, Debug)]
+pub struct TabStrip {
+    id: String,
+    height: f32,
+    min_tab_width: f32,
+    max_tab_width: f32,
+    show_new_button: bool,
+    close_icon: optics_ui_sys::optics_ui_icon_id,
+    new_icon: optics_ui_sys::optics_ui_icon_id,
+}
+
+impl TabStrip {
+    pub fn new(id: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            height: 36.0,
+            min_tab_width: 80.0,
+            max_tab_width: 200.0,
+            show_new_button: true,
+            close_icon: optics_ui_sys::optics_ui_icon_id(u32::MAX),
+            new_icon: optics_ui_sys::optics_ui_icon_id(u32::MAX),
+        }
+    }
+
+    pub fn height(mut self, h: f32) -> Self {
+        self.height = h;
+        self
+    }
+
+    pub fn min_tab_width(mut self, min_w: f32) -> Self {
+        self.min_tab_width = min_w;
+        self
+    }
+
+    pub fn max_tab_width(mut self, max_w: f32) -> Self {
+        self.max_tab_width = max_w;
+        self
+    }
+
+    pub fn show_new_button(mut self, show: bool) -> Self {
+        self.show_new_button = show;
+        self
+    }
+
+    pub fn close_icon(mut self, icon: optics_ui_sys::optics_ui_icon_id) -> Self {
+        self.close_icon = icon;
+        self
+    }
+
+    pub fn new_icon(mut self, icon: optics_ui_sys::optics_ui_icon_id) -> Self {
+        self.new_icon = icon;
+        self
+    }
+
+    /// Show the tab strip and return any action triggered this frame.
+    pub fn show(&self, frame: &mut Frame, tabs: &[TabItem], active_index: usize) -> TabAction {
+        let id_c = CString::new(self.id.as_str()).unwrap_or_default();
+        let c_titles: Vec<CString> = tabs
+            .iter()
+            .map(|t| CString::new(t.title.as_str()).unwrap_or_default())
+            .collect();
+
+        let c_tabs: Vec<optics_ui_sys::optics_ui_tab_item> = tabs
+            .iter()
+            .enumerate()
+            .map(|(i, t)| optics_ui_sys::optics_ui_tab_item {
+                title: c_titles[i].as_ptr(),
+                icon: t.icon,
+                closable: t.closable,
+            })
+            .collect();
+
+        let opts = optics_ui_sys::optics_ui_tab_strip_opts {
+            id: id_c.as_ptr(),
+            tabs: c_tabs.as_ptr(),
+            tab_count: c_tabs.len() as u32,
+            active_index: active_index as u32,
+            height: self.height,
+            min_tab_width: self.min_tab_width,
+            max_tab_width: self.max_tab_width,
+            show_new_button: self.show_new_button,
+            close_icon: self.close_icon,
+            new_icon: self.new_icon,
+        };
+
+        let raw_action = unsafe { optics_ui_sys::optics_ui_tab_strip(frame.as_raw(), &opts) };
+
+        match raw_action.kind {
+            optics_ui_sys::optics_ui_tab_action_kind::OPTICS_UI_TAB_ACTION_SELECT => {
+                TabAction::Select(raw_action.index as usize)
+            }
+            optics_ui_sys::optics_ui_tab_action_kind::OPTICS_UI_TAB_ACTION_CLOSE => {
+                TabAction::Close(raw_action.index as usize)
+            }
+            optics_ui_sys::optics_ui_tab_action_kind::OPTICS_UI_TAB_ACTION_NEW => TabAction::NewTab,
+            optics_ui_sys::optics_ui_tab_action_kind::OPTICS_UI_TAB_ACTION_MOVE => {
+                TabAction::Move(raw_action.index as usize, raw_action.to as usize)
+            }
+            // The press flag only ever fires on the press frame, where the
+            // action kind is still NONE (clicks resolve on release).
+            _ if raw_action.pressed_on_tab => TabAction::PressedOnTab,
+            _ => TabAction::None,
+        }
+    }
+}

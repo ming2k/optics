@@ -13,6 +13,7 @@ negative_knowledge: true
 - Status: Accepted
 - Date: 2026-11-15
 - Scope: `Cargo.toml`, `bindings/`, `.github/workflows/ci.yml`, `docs/`
+- Amended: 2026-11-20 — crates elevated from `bindings/crates/` to repository-root `crates/`, prefixed `optics-*`, and build scripts unified via `optics-build` by [ADR-0169](0169-root-crates-layout-optics-namespace-and-shared-build.md).
 - Amends: [ADR-0159](0159-unified-cargo-workspace-and-optics-facade-bindings.md)
 
 ## Context

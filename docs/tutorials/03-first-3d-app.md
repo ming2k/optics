@@ -3,7 +3,7 @@
 You will draw a cube. By the end you will understand `flux_camera`,
 `flux_mesh`, `flux_material`, and the depth-tested pass.
 
-## Step 1 — Start from `examples/flux/scene_cube.c`
+## Step 1 — Start from `examples/showcase/scene_studio.c`
 
 The example is the smallest 3D program possible. Copy it; we will
 narrate what each part does instead of writing from scratch.
@@ -122,5 +122,5 @@ it on shutdown.
 | Want to...                              | Read                                               |
 |-----------------------------------------|----------------------------------------------------|
 | Combine 2D and 3D in one frame          | [Application architecture](../explanation/application-architecture.md) |
-| Understand the math types               | [`libs/flux/include/flux/math.h`](../../libs/flux/include/flux/math.h) |
+| Understand the math types               | [`libs/gfx/include/flux/math.h`](../../libs/gfx/include/optics/gfx/math.h) |
 | Add directional lighting                | [How to light a mesh](../how-to/light-a-mesh.md) |

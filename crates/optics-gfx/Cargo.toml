@@ -1,0 +1,16 @@
+[package]
+name = "optics-gfx"
+description = "Safe Rust bindings to flux: a Vulkan-first 2D/3D graphics library"
+publish = false
+links = "optics_gfx_rs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+optics-gfx-sys = { workspace = true }
+
+[build-dependencies]
+optics-build = { workspace = true }

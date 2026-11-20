@@ -1,0 +1,22 @@
+[package]
+name = "optics-app"
+description = "Safe Rust bindings to aperture: the application shell that runs a lens UI in an iris window"
+publish = false
+links = "optics_app_rs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+optics-app-sys = { workspace = true }
+optics-window = { workspace = true }
+optics-ui = { workspace = true }
+optics-gfx = { workspace = true }
+
+[build-dependencies]
+optics-build = { workspace = true }
+
+[[example]]
+name = "hello"

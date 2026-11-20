@@ -140,9 +140,9 @@ jobs:
             echo "no Windows-only TUs yet — nothing to check"
             exit 0
           fi
-          # No lens include path on purpose: iris and glyph depend on flux
+          # No ui include path on purpose: window and text depend on gfx
           # only, and this gate fails if a Windows TU reaches for the UI layer.
           echo "$files" | xargs tools/ci/zig-win32-check.sh \
-            -Ilibs/flux/include -Ilibs/glyph/include -Ilibs/glyph/src \
-            -Ilibs/iris/include -Ilibs/iris/src \
+            -Ilibs/gfx/include -Ilibs/text/include -Ilibs/text/src \
+            -Ilibs/window/include -Ilibs/window/src \
             -I/usr/include/freetype2

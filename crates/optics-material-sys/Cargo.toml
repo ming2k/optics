@@ -1,0 +1,18 @@
+[package]
+name = "optics-material-sys"
+description = "Raw FFI bindings to prism (libprism), generated from <prism/prism.h>"
+publish = false
+links = "optics_material"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# prism's C API speaks flux types (flux_image, flux_result, ...). They are
+# re-exported from optics-gfx-sys instead of being bindgen-duplicated.
+optics-gfx-sys = { workspace = true }
+
+[build-dependencies]
+optics-build = { workspace = true }

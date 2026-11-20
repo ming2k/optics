@@ -10,9 +10,9 @@ the split; the material model is
 [ADR-0046](../adr/0046-liquid-glass-convex-lens-model.md) and the focus
 field is [ADR-0050](../adr/0050-single-body-liquid-glass-focus-field.md).
 
-Headers: `<prism/prism.h>`
-(umbrella), `<prism/liquid_glass.h>`, `<prism/frosted.h>`,
-`<prism/acrylic.h>`, `<prism/mica.h>`, and `<prism/backdrop_layer.h>`.
+Headers: `<optics/material.h>`
+(umbrella), `<optics/material/liquid_glass.h>`, `<optics/material/frosted.h>`,
+`<optics/material/acrylic.h>`, `<optics/material/mica.h>`, and `<optics/material/backdrop_layer.h>`.
 
 ## Build flag
 
@@ -31,7 +31,7 @@ transparent output per frame-in-flight slot. Apply it at a frame pass
 boundary, then draw the borrowed output over the sharp scene:
 
 ```c
-#include <prism/liquid_glass.h>
+#include <optics/material/liquid_glass.h>
 
 prism_liquid_glass_filter *filter = NULL;
 prism_liquid_glass_filter_create(device, &filter);
@@ -121,7 +121,7 @@ model (ADR-0102), the liquid glass shader relies on sub-pixel Contact AO
 (`contact_ao`) and isotropic ambient Fresnel (`ambient_fresnel`) for silhouette
 separation without requiring callers to drive binary polarity latches. For
 applications that do monitor backdrop statistics across frames, `libtransit`
-(`<transit/transit.h>`, ADR-0077, ADR-0106) provides temporal de-jitter primitives (`transit_hysteresis_step`
+(`<optics/motion.h>`, ADR-0077, ADR-0106) provides temporal de-jitter primitives (`transit_hysteresis_step`
 and `transit_smoother_step`):
 
 ```c
@@ -181,7 +181,7 @@ because its inputs are the capture and its blur and it never sees another
 material's output.
 
 ```c
-#include <prism/backdrop_layer.h>
+#include <optics/material/backdrop_layer.h>
 
 prism_backdrop_layer_filter *filter = NULL;
 prism_backdrop_layer_filter_create(device, &filter);
@@ -242,7 +242,7 @@ mode, Smoke for dark mode), theme color tinting, procedural dithering, and
 inactive fallback states ([ADR-0096](../adr/0096-prism-mica-foundation-material.md)):
 
 ```c
-#include <prism/mica.h>
+#include <optics/material/mica.h>
 
 prism_mica_filter *filter = NULL;
 prism_mica_filter_create(device, &filter);

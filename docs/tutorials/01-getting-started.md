@@ -60,7 +60,7 @@ output is stored in `build/meson-logs/testlog.txt`; pass `-v` to
 ## Step 4 — Run the Smallest Windowed Example
 
 ```bash
-./build/examples/flux/hello_triangle
+./build/examples/getting_started/hello_triangle
 ```
 
 A window opens with a coloured triangle. This program uses `flux-core`
@@ -72,16 +72,16 @@ reconfigure the build. If no display is available, run the headless compute
 example instead:
 
 ```bash
-./build/examples/flux/compute_fill
+./build/examples/getting_started/compute_pass
 ```
 
 ## Step 5 — Explore 2D, 3D, and UI
 
 ```bash
-./build/examples/flux/canvas_hello
-./build/examples/flux/scene_cube
-./build/examples/lens/headless_demo
-./build/examples/aperture/widgets
+./build/examples/getting_started/canvas_window
+./build/examples/showcase/scene_studio
+./build/examples/showcase/headless_demo
+./build/examples/showcase/widget_gallery
 ```
 
 The `flux` examples show direct rendering, the `lens` example exercises the

@@ -10,10 +10,10 @@ Technical descriptions of C APIs, exported symbols, material properties, effect 
 | :--- | :--- |
 | **[Public API Architecture](api.md)** | Core C API conventions, lifecycle contracts, and header structure. |
 | **[Exported Symbol Index](symbols.md)** | Index of exported C symbols, grouped by public header. |
-| **[Reticle Document Compiler](reticle.md)** | SVG parse/paint/rasterize contracts, flat shape IR, ownership, and resource limits. |
-| **[Prism Material System](prism.md)** | Technical specification for physical materials: Liquid Glass, Frosted Glass, Acrylic, and Mica. |
-| **[Image Effect Operators](effect.md)** | Pixel operators, blur algorithms, tone mapping, and scratch render target rules in `flux_effect`. |
-| **[Thread Safety & Concurrency](thread-safety.md)** | Thread-safety contracts across `flux_device`, surfaces, frame loops, and presentation. |
+| **[SVG Document Compiler](svg.md)** | SVG parse/paint/rasterize contracts, flat shape IR, ownership, and resource limits. |
+| **[Material System](prism.md)** | Technical specification for physical materials: Liquid Glass, Frosted Glass, Acrylic, and Mica. |
+| **[Image Effect Operators](effect.md)** | Pixel operators, blur algorithms, tone mapping, and scratch render target rules in `optics_gfx_effect`. |
+| **[Thread Safety & Concurrency](thread-safety.md)** | Thread-safety contracts across `optics_gfx_device`, surfaces, frame loops, and presentation. |
 | **[Composition Graph](composition-graph.md)** | Historical reference on render passes, dependency tracking, and resource planning. |
 | **[Glossary](glossary.md)** | Authoritative glossary of optics, rendering, geometry, and UI terminology. |
 

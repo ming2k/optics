@@ -78,7 +78,7 @@ except ModuleNotFoundError:  # pragma: no cover - environment, not tree state
     raise SystemExit(2) from None
 
 CONTRACT_REL = Path("tools/config/wayland-listeners.toml")
-BACKEND_DIR = Path("libs/iris/src")
+BACKEND_DIR = Path("libs/window/src")
 
 C_COMMENT_RE = re.compile(r"//[^\n]*|/\*.*?\*/", re.DOTALL)
 
@@ -189,7 +189,7 @@ def protocol_xml_roots(repo_root: Path) -> tuple[list[Path], str]:
     """
     roots: list[Path] = []
 
-    for lib in ("iris", "lens", "flux"):
+    for lib in ("window", "ui", "gfx"):
         proto = repo_root / "libs" / lib / "protocol"
         if proto.is_dir():
             roots.append(proto)

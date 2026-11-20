@@ -1,0 +1,807 @@
+/*
+ * flux/dmabuf.c - import a Linux dma-buf as a sampled flux_image.
+ *
+ * Uses VK_EXT_image_drm_format_modifier to create a VkImage whose memory
+ * layout matches the producer's DRM modifier, VK_KHR_external_memory_fd to
+ * import the plane's file descriptor, and a dedicated allocation bound to it.
+ * An optional Linux sync_file acquire fence can be imported as an external
+ * semaphore and waited by the foreign-queue acquire. The image is then
+ * registered in the bindless heap, so the canvas samples it like any other
+ * flux_image.
+ *
+ * Scope: single-plane formats with an explicit DRM modifier. Synchronisation
+ * with the producer remains a caller contract in this revision.
+ *
+ * This is a core-level facility: device.c / surface.c / frame.c call the
+ * acquire-semaphore pool helpers and flux_dmabuf_supported unconditionally
+ * (ADR-0052: no #ifdef at call sites), so meson compiles this file (or its
+ * non-Linux stub) regardless of the canvas module gate. The one entry point
+ * that genuinely needs canvas internals, flux_canvas_wait_dmabuf_acquire,
+ * lives in src/canvas/dmabuf_acquire.c.
+ */
+
+#include "image_internal.h"
+#include "internal.h"
+#include <optics/gfx/dmabuf.h>
+
+#include <errno.h>
+#include <stdatomic.h>
+#include <unistd.h>
+
+static uint32_t dmabuf_min_bytes_per_pixel(optics_gfx_format f) {
+    switch (f) {
+    case OPTICS_GFX_FORMAT_R8_UNORM:
+        return 1;
+    case OPTICS_GFX_FORMAT_RGBA8_UNORM:
+    case OPTICS_GFX_FORMAT_BGRA8_UNORM:
+    case OPTICS_GFX_FORMAT_RGBA8_SRGB:
+    case OPTICS_GFX_FORMAT_BGRA8_SRGB:
+    case OPTICS_GFX_FORMAT_RGB10A2_UNORM:
+        return 4;
+    case OPTICS_GFX_FORMAT_RGBA16_SFLOAT:
+        return 8;
+    case OPTICS_GFX_FORMAT_R32_SFLOAT:
+        return 4;
+    case OPTICS_GFX_FORMAT_RG32_SFLOAT:
+        return 8;
+    case OPTICS_GFX_FORMAT_RGB32_SFLOAT:
+        return 12;
+    case OPTICS_GFX_FORMAT_RGBA32_SFLOAT:
+        return 16;
+    default:
+        return 0;
+    }
+}
+
+static bool format_modifier_supports_sampling(optics_gfx_device *d, VkFormat format,
+                                              uint64_t modifier, uint32_t plane_count) {
+    VkDrmFormatModifierPropertiesListEXT list = {
+        .sType = VK_STRUCTURE_TYPE_DRM_FORMAT_MODIFIER_PROPERTIES_LIST_EXT,
+    };
+    VkFormatProperties2 props = {
+        .sType = VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2,
+        .pNext = &list,
+    };
+    vkGetPhysicalDeviceFormatProperties2(d->physical_device, format, &props);
+    if (list.drmFormatModifierCount == 0)
+        return false;
+
+    VkDrmFormatModifierPropertiesEXT stack_mods[64] = {};
+    VkDrmFormatModifierPropertiesEXT *mods = stack_mods;
+    /* Capacity of `mods`. The second query below reports the real count again,
+     * and a driver is allowed to report more than the first query asked for;
+     * iterating that larger count would read past the array. Pin the loop bound
+     * to what was actually allocated. */
+    const uint32_t capacity = list.drmFormatModifierCount;
+    if (capacity > 64u) {
+        mods = optics_gfx_internal_alloc(d, sizeof(*mods) * capacity);
+        if (!mods)
+            return false;
+    }
+
+    list.pDrmFormatModifierProperties = mods;
+    list.drmFormatModifierCount = capacity;
+    vkGetPhysicalDeviceFormatProperties2(d->physical_device, format, &props);
+    if (list.drmFormatModifierCount > capacity)
+        list.drmFormatModifierCount = capacity;
+
+    bool supported = false;
+    for (uint32_t i = 0; i < list.drmFormatModifierCount; ++i) {
+        const VkDrmFormatModifierPropertiesEXT *m = &mods[i];
+        if (m->drmFormatModifier != modifier)
+            continue;
+        if (m->drmFormatModifierPlaneCount != plane_count)
+            continue;
+        if ((m->drmFormatModifierTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT) == 0) {
+            continue;
+        }
+        supported = true;
+        break;
+    }
+
+    if (mods != stack_mods)
+        optics_gfx_internal_free(d, mods);
+    return supported;
+}
+
+static bool external_image_importable(optics_gfx_device *d, VkFormat format, uint64_t modifier,
+                                      uint32_t width, uint32_t height) {
+    VkPhysicalDeviceExternalImageFormatInfo external_info = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_IMAGE_FORMAT_INFO,
+        .handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT,
+    };
+    VkPhysicalDeviceImageDrmFormatModifierInfoEXT modifier_info = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_DRM_FORMAT_MODIFIER_INFO_EXT,
+        .pNext = &external_info,
+        .drmFormatModifier = modifier,
+        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+        .queueFamilyIndexCount = 0,
+        .pQueueFamilyIndices = nullptr,
+    };
+    VkPhysicalDeviceImageFormatInfo2 info = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_FORMAT_INFO_2,
+        .pNext = &modifier_info,
+        .format = format,
+        .type = VK_IMAGE_TYPE_2D,
+        .tiling = VK_IMAGE_TILING_DRM_FORMAT_MODIFIER_EXT,
+        .usage = VK_IMAGE_USAGE_SAMPLED_BIT,
+        .flags = 0,
+    };
+    VkExternalImageFormatProperties external_props = {
+        .sType = VK_STRUCTURE_TYPE_EXTERNAL_IMAGE_FORMAT_PROPERTIES,
+    };
+    VkImageFormatProperties2 props = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_FORMAT_PROPERTIES_2,
+        .pNext = &external_props,
+    };
+    VkResult vr = vkGetPhysicalDeviceImageFormatProperties2(d->physical_device, &info, &props);
+    if (vr != VK_SUCCESS)
+        return false;
+    if ((external_props.externalMemoryProperties.externalMemoryFeatures &
+         VK_EXTERNAL_MEMORY_FEATURE_IMPORTABLE_BIT) == 0) {
+        return false;
+    }
+    return width <= props.imageFormatProperties.maxExtent.width &&
+           height <= props.imageFormatProperties.maxExtent.height;
+}
+
+/* Enumerate the single-plane DRM modifiers a buffer of `vfmt` may use to be
+ * both sampleable and importable as external dma-buf memory: the set a
+ * compositor should advertise so clients allocate GPU-optimal layouts instead
+ * of falling back to DRM_FORMAT_MOD_LINEAR. Reuses the same two property
+ * queries that validate a concrete import. */
+static optics_gfx_result dmabuf_enum_sampleable_importable_modifiers(optics_gfx_device *d,
+                                                                     VkFormat vfmt, uint64_t *out,
+                                                                     uint32_t *inout_count) {
+    /* The caller's contract (flux_dmabuf_format_modifiers) guarantees
+     * out != NULL whenever *inout_count != 0; assert it here so the
+     * analyzer can prove the write below, and a future caller passing
+     * a NULL out with a nonzero capacity fails loudly at the boundary
+     * instead of writing through a null pointer. */
+    if (!out && *inout_count != 0)
+        return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
+    VkDrmFormatModifierPropertiesListEXT list = {
+        .sType = VK_STRUCTURE_TYPE_DRM_FORMAT_MODIFIER_PROPERTIES_LIST_EXT,
+    };
+    VkFormatProperties2 props = {
+        .sType = VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2,
+        .pNext = &list,
+    };
+    vkGetPhysicalDeviceFormatProperties2(d->physical_device, vfmt, &props);
+    if (list.drmFormatModifierCount == 0) {
+        *inout_count = 0;
+        return OPTICS_GFX_OK;
+    }
+
+    VkDrmFormatModifierPropertiesEXT *mods =
+        optics_gfx_internal_alloc(d, sizeof(*mods) * list.drmFormatModifierCount);
+    if (!mods)
+        return OPTICS_GFX_ERROR_OUT_OF_MEMORY;
+    list.pDrmFormatModifierProperties = mods;
+    vkGetPhysicalDeviceFormatProperties2(d->physical_device, vfmt, &props);
+
+    /* A modifier qualifies when the device can sample it as a single-plane
+     * image and import it as external dma-buf memory. Dimensions are
+     * negotiated separately by clients, so the import check uses 1x1 only to
+     * probe format/modifier/handle compatibility. */
+    uint32_t qualified = 0;
+    for (uint32_t i = 0; i < list.drmFormatModifierCount; ++i) {
+        const VkDrmFormatModifierPropertiesEXT *m = &mods[i];
+        if ((m->drmFormatModifierTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT) == 0)
+            continue;
+        if (m->drmFormatModifierPlaneCount != 1)
+            continue;
+        if (!external_image_importable(d, vfmt, m->drmFormatModifier, 1, 1))
+            continue;
+        ++qualified;
+    }
+
+    if (*inout_count < qualified) {
+        /* Two-pass contract: report the required length and let the caller
+         * retry with a larger buffer. Nothing is written in this case. */
+        *inout_count = qualified;
+        optics_gfx_internal_free(d, mods);
+        return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
+    }
+
+    /* From here, written <= *inout_count <= caller's capacity, and the
+     * boundary guard above proved out != NULL for any nonzero capacity;
+     * written stays 0 when the capacity is 0, so the write below is
+     * unreachable with a NULL out. The analyzer needs the coupling made
+     * local: only touch `out` while written < the capacity. */
+    uint32_t written = 0;
+    for (uint32_t i = 0; i < list.drmFormatModifierCount && written < *inout_count; ++i) {
+        const VkDrmFormatModifierPropertiesEXT *m = &mods[i];
+        if ((m->drmFormatModifierTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT) == 0)
+            continue;
+        if (m->drmFormatModifierPlaneCount != 1)
+            continue;
+        if (!external_image_importable(d, vfmt, m->drmFormatModifier, 1, 1))
+            continue;
+        out[written++] = m->drmFormatModifier;
+    }
+    *inout_count = written;
+
+    optics_gfx_internal_free(d, mods);
+    return OPTICS_GFX_OK;
+}
+
+static VkSemaphore create_sync_fd_semaphore(optics_gfx_device *d) {
+    VkExportSemaphoreCreateInfo export_info = {
+        .sType = VK_STRUCTURE_TYPE_EXPORT_SEMAPHORE_CREATE_INFO,
+        .handleTypes = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT,
+    };
+    VkSemaphoreCreateInfo sci = {
+        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
+        .pNext = &export_info,
+    };
+    VkSemaphore semaphore = VK_NULL_HANDLE;
+    VkResult vr = vkCreateSemaphore(d->device, &sci, nullptr, &semaphore);
+    if (vr != VK_SUCCESS) {
+        OPTICS_GFX_FAIL_VK(OPTICS_GFX_ERROR_BACKEND_FAILURE,
+                           "dma-buf acquire semaphore create failed", vr);
+        return VK_NULL_HANDLE;
+    }
+    return semaphore;
+}
+
+VkSemaphore optics_gfx_dmabuf_acquire_semaphore_take(optics_gfx_device *d) {
+    if (!d || !d->device || !d->has_external_semaphore_fd)
+        return VK_NULL_HANDLE;
+
+    VkSemaphore semaphore = VK_NULL_HANDLE;
+    if (d->dmabuf_acquire_pool_lock_initialized) {
+        optics_gfx_platform_mutex_lock(&d->dmabuf_acquire_pool_lock);
+        if (d->dmabuf_acquire_pool_count > 0)
+            semaphore = d->dmabuf_acquire_pool[--d->dmabuf_acquire_pool_count];
+        optics_gfx_platform_mutex_unlock(&d->dmabuf_acquire_pool_lock);
+    }
+    return semaphore ? semaphore : create_sync_fd_semaphore(d);
+}
+
+void optics_gfx_dmabuf_acquire_semaphore_recycle(optics_gfx_device *d, VkSemaphore semaphore) {
+    if (!d || !d->device || !semaphore)
+        return;
+    if (!d->dmabuf_acquire_pool_lock_initialized) {
+        vkDestroySemaphore(d->device, semaphore, nullptr);
+        return;
+    }
+
+    optics_gfx_platform_mutex_lock(&d->dmabuf_acquire_pool_lock);
+    if (d->dmabuf_acquire_pool_count == d->dmabuf_acquire_pool_capacity) {
+        uint32_t next_capacity =
+            d->dmabuf_acquire_pool_capacity ? d->dmabuf_acquire_pool_capacity * 2u : 8u;
+        VkSemaphore *grown = optics_gfx_internal_alloc(
+            d, (size_t)next_capacity * sizeof(*grown)); // NOLINT(bugprone-sizeof-expression)
+
+        if (grown) {
+            if (d->dmabuf_acquire_pool_count > 0)
+                memcpy(grown, d->dmabuf_acquire_pool,
+                       (size_t)d->dmabuf_acquire_pool_count *
+                           sizeof(*grown)); // NOLINT(bugprone-sizeof-expression)
+            optics_gfx_internal_free(d, d->dmabuf_acquire_pool);
+            d->dmabuf_acquire_pool = grown;
+            d->dmabuf_acquire_pool_capacity = next_capacity;
+        }
+    }
+    if (d->dmabuf_acquire_pool_count < d->dmabuf_acquire_pool_capacity) {
+        d->dmabuf_acquire_pool[d->dmabuf_acquire_pool_count++] = semaphore;
+        semaphore = VK_NULL_HANDLE;
+    }
+    optics_gfx_platform_mutex_unlock(&d->dmabuf_acquire_pool_lock);
+
+    if (semaphore)
+        vkDestroySemaphore(d->device, semaphore, nullptr);
+}
+
+void optics_gfx_dmabuf_acquire_semaphore_pool_destroy(optics_gfx_device *d) {
+    if (!d)
+        return;
+    if (d->dmabuf_acquire_pool_lock_initialized)
+        optics_gfx_platform_mutex_lock(&d->dmabuf_acquire_pool_lock);
+    VkSemaphore *pool = d->dmabuf_acquire_pool;
+    uint32_t count = d->dmabuf_acquire_pool_count;
+    d->dmabuf_acquire_pool = nullptr;
+    d->dmabuf_acquire_pool_count = 0;
+    d->dmabuf_acquire_pool_capacity = 0;
+    if (d->dmabuf_acquire_pool_lock_initialized)
+        optics_gfx_platform_mutex_unlock(&d->dmabuf_acquire_pool_lock);
+
+    if (d->device) {
+        for (uint32_t i = 0; i < count; ++i)
+            vkDestroySemaphore(d->device, pool[i], nullptr);
+    }
+    optics_gfx_internal_free(d, pool);
+}
+
+static optics_gfx_result import_sync_fd_payload(optics_gfx_device *d, int acquire_sync_fd,
+                                                VkSemaphore semaphore) {
+    int import_fd = dup(acquire_sync_fd);
+    if (import_fd < 0) {
+        optics_gfx_result dr =
+            (errno == EBADF) ? OPTICS_GFX_ERROR_INVALID_ARGUMENT : OPTICS_GFX_ERROR_BACKEND_FAILURE;
+        OPTICS_GFX_FAIL(dr, "failed to duplicate acquire_sync_fd for Vulkan import");
+        return dr;
+    }
+
+    PFN_vkImportSemaphoreFdKHR pImportSemaphoreFd =
+        (PFN_vkImportSemaphoreFdKHR)vkGetDeviceProcAddr(d->device, "vkImportSemaphoreFdKHR");
+    if (!pImportSemaphoreFd) {
+        close(import_fd);
+        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_UNSUPPORTED,
+                        "VK_KHR_external_semaphore_fd entry point missing");
+        return OPTICS_GFX_ERROR_UNSUPPORTED;
+    }
+
+    VkImportSemaphoreFdInfoKHR import_info = {
+        .sType = VK_STRUCTURE_TYPE_IMPORT_SEMAPHORE_FD_INFO_KHR,
+        .semaphore = semaphore,
+        .flags = VK_SEMAPHORE_IMPORT_TEMPORARY_BIT,
+        .handleType = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT,
+        .fd = import_fd,
+    };
+    VkResult vr = pImportSemaphoreFd(d->device, &import_info);
+    if (vr != VK_SUCCESS) {
+        close(import_fd);
+        OPTICS_GFX_FAIL_VK(OPTICS_GFX_ERROR_BACKEND_FAILURE,
+                           "dma-buf acquire semaphore import failed", vr);
+        return OPTICS_GFX_ERROR_BACKEND_FAILURE;
+    }
+    /* A successful SYNC_FD import transfers ownership of import_fd. */
+    return OPTICS_GFX_OK;
+}
+
+static optics_gfx_result import_sync_fd_semaphore(optics_gfx_device *d, int acquire_sync_fd,
+                                                  VkSemaphore *out) {
+    *out = VK_NULL_HANDLE;
+    if (!d->has_external_semaphore_fd) {
+        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_UNSUPPORTED,
+                        "acquire_sync_fd requires VK_KHR_external_semaphore_fd");
+        return OPTICS_GFX_ERROR_UNSUPPORTED;
+    }
+    VkSemaphore semaphore = create_sync_fd_semaphore(d);
+    if (!semaphore)
+        return OPTICS_GFX_ERROR_BACKEND_FAILURE;
+    optics_gfx_result r = import_sync_fd_payload(d, acquire_sync_fd, semaphore);
+    if (r != OPTICS_GFX_OK) {
+        vkDestroySemaphore(d->device, semaphore, nullptr);
+        return r;
+    }
+    *out = semaphore;
+    return OPTICS_GFX_OK;
+}
+
+/* Cross-TU body for the canvas-level flux_canvas_wait_dmabuf_acquire
+ * (src/canvas/dmabuf_acquire.c): import `acquire_sync_fd` as a temporary
+ * SYNC_FD payload on a pooled semaphore. The stub twin reports
+ * FLUX_ERROR_UNSUPPORTED so the canvas file stays platform-neutral. */
+optics_gfx_result optics_gfx_dmabuf_import_acquire_semaphore(optics_gfx_device *d,
+                                                             int acquire_sync_fd,
+                                                             VkSemaphore *out) {
+    *out = optics_gfx_dmabuf_acquire_semaphore_take(d);
+    if (!*out)
+        return OPTICS_GFX_ERROR_BACKEND_FAILURE;
+    optics_gfx_result r = import_sync_fd_payload(d, acquire_sync_fd, *out);
+    if (r != OPTICS_GFX_OK) {
+        /* The import did not install a temporary payload, so this handle is
+         * safe to destroy immediately. */
+        vkDestroySemaphore(d->device, *out, nullptr);
+        *out = VK_NULL_HANDLE;
+    }
+    return r;
+}
+
+void optics_gfx_dmabuf_close_fd(int fd) {
+    close(fd);
+}
+
+/* The FOREIGN -> graphics-family acquire transition is submitted
+ * deferred: the batch waits on acquire_sem GPU-side, so the calling
+ * thread never blocks on the producer's fence, and later same-queue
+ * work (the frame that samples this image) is ordered after the
+ * transition by queue submission order alone. On success the parked
+ * pending entry owns both the command pool and acquire_sem, recycled
+ * once the batch's fence signals. */
+static optics_gfx_result dmabuf_transition_image_layout(optics_gfx_device *d, VkImage img,
+                                                        VkSemaphore acquire_sem) {
+    VkCommandPool pool = VK_NULL_HANDLE;
+    VkCommandBuffer cmd = VK_NULL_HANDLE;
+    VkResult vr = optics_gfx_vk_new_transient_cmd(d, d->graphics_family, &pool, &cmd);
+    if (vr != VK_SUCCESS) {
+        OPTICS_GFX_FAIL_VK(OPTICS_GFX_ERROR_BACKEND_FAILURE, "dma-buf transition begin failed", vr);
+        goto fail;
+    }
+
+    VkImageMemoryBarrier2 b = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+        .srcStageMask = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
+        .srcAccessMask = 0,
+        .dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+        .dstAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+        .oldLayout = VK_IMAGE_LAYOUT_GENERAL,
+        .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_FOREIGN_EXT,
+        .dstQueueFamilyIndex = d->graphics_family,
+        .image = img,
+        .subresourceRange =
+            {
+                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                .levelCount = 1,
+                .layerCount = 1,
+            },
+    };
+    VkDependencyInfo di = {
+        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+        .imageMemoryBarrierCount = 1,
+        .pImageMemoryBarriers = &b,
+    };
+    vkCmdPipelineBarrier2(cmd, &di);
+
+    vr = vkEndCommandBuffer(cmd);
+    if (vr != VK_SUCCESS) {
+        OPTICS_GFX_FAIL_VK(OPTICS_GFX_ERROR_BACKEND_FAILURE, "dma-buf transition end failed", vr);
+        goto fail;
+    }
+
+    {
+        VkFence fence = VK_NULL_HANDLE;
+        uint64_t serial = 0;
+        vr = optics_gfx_vk_submit_upload(d, d->graphics_queue, cmd, acquire_sem,
+                                         VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_NULL_HANDLE, 0,
+                                         &fence, &serial);
+        if (vr == VK_SUCCESS) {
+            /* Ownership of the command pool, command buffer, and acquire_sem
+             * moves to the pending entry; the pool is recycled back to the
+             * graphics-family transient pool cache when the batch retires. */
+            optics_gfx_vk_upload_pending_park_families(d, fence, pool, d->graphics_family, cmd,
+                                                       VK_NULL_HANDLE, UINT32_MAX, VK_NULL_HANDLE,
+                                                       acquire_sem, nullptr, serial);
+            return OPTICS_GFX_OK;
+        }
+    }
+
+fail:
+    if (pool)
+        vkDestroyCommandPool(d->device, pool, nullptr);
+    optics_gfx_result r = vr == VK_TIMEOUT             ? OPTICS_GFX_ERROR_TIMEOUT
+                          : vr == VK_ERROR_DEVICE_LOST ? OPTICS_GFX_ERROR_DEVICE_LOST
+                                                       : OPTICS_GFX_ERROR_BACKEND_FAILURE;
+    OPTICS_GFX_FAIL_VK(r, "dma-buf transition submit failed", vr);
+    return r;
+}
+
+bool optics_gfx_dmabuf_supported(const optics_gfx_device *d) {
+    return d && (d->enabled_features & OPTICS_GFX_DEVICE_FEATURE_DMABUF) != 0;
+}
+
+bool optics_gfx_dmabuf_sync_supported(const optics_gfx_device *d) {
+    return d && (d->enabled_features & OPTICS_GFX_DEVICE_FEATURE_DMABUF_SYNC_FILE) != 0;
+}
+
+optics_gfx_result
+optics_gfx_dmabuf_format_modifiers(optics_gfx_device *d,
+                                   const optics_gfx_dmabuf_format_modifiers_opts *opts) {
+    if (!d || !opts || !opts->inout_count)
+        return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
+    optics_gfx_format format = opts->format;
+    uint64_t *out_modifiers = opts->out_modifiers;
+    uint32_t *inout_count = opts->inout_count;
+    if (!out_modifiers && *inout_count != 0)
+        return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
+    /* A device missing the dma-buf extensions has no importable modifiers to
+     * report; surface the empty set rather than a capability error so a caller
+     * advertising formats still degrades to "no dmabuf" cleanly. */
+    if (!optics_gfx_dmabuf_supported(d)) {
+        *inout_count = 0;
+        return OPTICS_GFX_OK;
+    }
+    VkFormat vfmt = optics_gfx_format_to_vk(format);
+    if (vfmt == VK_FORMAT_UNDEFINED)
+        return OPTICS_GFX_ERROR_UNSUPPORTED;
+    return dmabuf_enum_sampleable_importable_modifiers(d, vfmt, out_modifiers, inout_count);
+}
+
+optics_gfx_result optics_gfx_image_import_dmabuf(optics_gfx_device *d,
+                                                 const optics_gfx_dmabuf_image_desc *desc,
+                                                 optics_gfx_image **out) {
+    if (!d || !desc || !out)
+        return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
+    *out = nullptr;
+    if (desc->type != OPTICS_GFX_TYPE_DMABUF_IMAGE_DESC) {
+        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT,
+                        "desc->type != FLUX_TYPE_DMABUF_IMAGE_DESC");
+        return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
+    }
+    if (desc->width == 0 || desc->height == 0) {
+        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT, "dmabuf image zero-extent");
+        return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
+    }
+    if (desc->plane_count != 1) {
+        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_UNSUPPORTED, "only single-plane dma-buf import supported");
+        return OPTICS_GFX_ERROR_UNSUPPORTED;
+    }
+    if (desc->ownership != OPTICS_GFX_DMABUF_OWNERSHIP_BORROWED &&
+        desc->ownership != OPTICS_GFX_DMABUF_OWNERSHIP_EXCLUSIVE) {
+        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT, "dma-buf ownership value is invalid");
+        return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
+    }
+    if (desc->has_acquire_sync_fd && desc->acquire_sync_fd < 0) {
+        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT, "dma-buf acquire_sync_fd is invalid");
+        return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
+    }
+    const optics_gfx_dmabuf_plane *plane = &desc->planes[0];
+    if (plane->fd < 0) {
+        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT, "dma-buf plane fd is invalid");
+        return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
+    }
+    if (plane->stride == 0) {
+        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT, "dma-buf plane stride is zero");
+        return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
+    }
+    if (!optics_gfx_dmabuf_supported(d)) {
+        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_UNSUPPORTED,
+                        "device missing dma-buf import extensions (create with "
+                        "VK_KHR_external_memory_fd + VK_EXT_external_memory_dma_buf + "
+                        "VK_EXT_image_drm_format_modifier + VK_EXT_queue_family_foreign)");
+        return OPTICS_GFX_ERROR_UNSUPPORTED;
+    }
+    VkFormat vfmt = optics_gfx_format_to_vk(desc->format);
+    if (vfmt == VK_FORMAT_UNDEFINED) {
+        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_UNSUPPORTED, "unsupported dma-buf pixel format");
+        return OPTICS_GFX_ERROR_UNSUPPORTED;
+    }
+    uint32_t min_bpp = dmabuf_min_bytes_per_pixel(desc->format);
+    if (min_bpp == 0) {
+        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_UNSUPPORTED, "unsupported dma-buf sampled format");
+        return OPTICS_GFX_ERROR_UNSUPPORTED;
+    }
+    if (plane->stride / min_bpp < desc->width) {
+        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT,
+                        "dma-buf stride is smaller than width * pixel size");
+        return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
+    }
+    if (!format_modifier_supports_sampling(d, vfmt, desc->modifier, desc->plane_count)) {
+        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_UNSUPPORTED,
+                        "dma-buf format/modifier is not sampleable on this device");
+        return OPTICS_GFX_ERROR_UNSUPPORTED;
+    }
+    if (!external_image_importable(d, vfmt, desc->modifier, desc->width, desc->height)) {
+        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_UNSUPPORTED,
+                        "dma-buf format/modifier is not externally importable");
+        return OPTICS_GFX_ERROR_UNSUPPORTED;
+    }
+
+    optics_gfx_result r = OPTICS_GFX_OK;
+    VkSemaphore acquire_sem = VK_NULL_HANDLE;
+    if (desc->has_acquire_sync_fd) {
+        r = import_sync_fd_semaphore(d, desc->acquire_sync_fd, &acquire_sem);
+        if (r != OPTICS_GFX_OK)
+            return r;
+    }
+
+    int import_fd = dup(plane->fd);
+    if (import_fd < 0) {
+        optics_gfx_result dr =
+            (errno == EBADF) ? OPTICS_GFX_ERROR_INVALID_ARGUMENT : OPTICS_GFX_ERROR_BACKEND_FAILURE;
+        OPTICS_GFX_FAIL(dr, "failed to duplicate dma-buf fd for Vulkan import");
+        if (acquire_sem)
+            vkDestroySemaphore(d->device, acquire_sem, nullptr);
+        return dr;
+    }
+    bool import_fd_transferred = false;
+
+    PFN_vkGetMemoryFdPropertiesKHR pGetMemoryFdProperties =
+        (PFN_vkGetMemoryFdPropertiesKHR)vkGetDeviceProcAddr(d->device,
+                                                            "vkGetMemoryFdPropertiesKHR");
+    if (!pGetMemoryFdProperties) {
+        close(import_fd);
+        if (acquire_sem)
+            vkDestroySemaphore(d->device, acquire_sem, nullptr);
+        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_UNSUPPORTED,
+                        "VK_KHR_external_memory_fd entry point missing");
+        return OPTICS_GFX_ERROR_UNSUPPORTED;
+    }
+
+    optics_gfx_image *im = optics_gfx_internal_alloc(d, sizeof(*im));
+    if (!im) {
+        close(import_fd);
+        if (acquire_sem)
+            vkDestroySemaphore(d->device, acquire_sem, nullptr);
+        return OPTICS_GFX_ERROR_OUT_OF_MEMORY;
+    }
+    atomic_init(&im->ref_count, 1u);
+    im->shared = nullptr;
+    im->mutable = false;
+    im->imported = true;
+    im->snapshot_allowed = desc->ownership == OPTICS_GFX_DMABUF_OWNERSHIP_EXCLUSIVE;
+    im->color = nullptr;
+    im->device = optics_gfx_device_retain(d);
+    im->width = desc->width;
+    im->height = desc->height;
+    im->format = desc->format;
+    im->bindless = OPTICS_GFX_BINDLESS_INVALID;
+    im->bindless_storage = OPTICS_GFX_BINDLESS_INVALID;
+    im->current_layout = VK_IMAGE_LAYOUT_UNDEFINED;
+    im->imported_memory = VK_NULL_HANDLE;
+
+    VkResult vr;
+
+    /* Image with an explicit DRM modifier and external-memory provenance. */
+    VkSubresourceLayout plane_layout = {
+        .offset = plane->offset,
+        .rowPitch = plane->stride,
+    };
+    VkImageDrmFormatModifierExplicitCreateInfoEXT mod_info = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_DRM_FORMAT_MODIFIER_EXPLICIT_CREATE_INFO_EXT,
+        .drmFormatModifier = desc->modifier,
+        .drmFormatModifierPlaneCount = 1,
+        .pPlaneLayouts = &plane_layout,
+    };
+    VkExternalMemoryImageCreateInfo ext_info = {
+        .sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO,
+        .pNext = &mod_info,
+        .handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT,
+    };
+    VkImageCreateInfo ici = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .pNext = &ext_info,
+        .imageType = VK_IMAGE_TYPE_2D,
+        .format = vfmt,
+        .extent = {desc->width, desc->height, 1},
+        .mipLevels = 1,
+        .arrayLayers = 1,
+        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .tiling = VK_IMAGE_TILING_DRM_FORMAT_MODIFIER_EXT,
+        .usage = VK_IMAGE_USAGE_SAMPLED_BIT,
+        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+    };
+    vr = vkCreateImage(d->device, &ici, nullptr, &im->image);
+    if (vr != VK_SUCCESS) {
+        OPTICS_GFX_FAIL_VK(OPTICS_GFX_ERROR_BACKEND_FAILURE, "dma-buf vkCreateImage failed", vr);
+        r = OPTICS_GFX_ERROR_BACKEND_FAILURE;
+        goto fail;
+    }
+
+    /* Memory type allowed for this fd, intersected with the image's needs. */
+    VkMemoryFdPropertiesKHR fd_props = {.sType = VK_STRUCTURE_TYPE_MEMORY_FD_PROPERTIES_KHR};
+    vr = pGetMemoryFdProperties(d->device, VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT,
+                                import_fd, &fd_props);
+    if (vr != VK_SUCCESS) {
+        OPTICS_GFX_FAIL_VK(OPTICS_GFX_ERROR_BACKEND_FAILURE, "vkGetMemoryFdPropertiesKHR failed",
+                           vr);
+        r = OPTICS_GFX_ERROR_BACKEND_FAILURE;
+        goto fail;
+    }
+
+    VkImageMemoryRequirementsInfo2 mri = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_REQUIREMENTS_INFO_2,
+        .image = im->image,
+    };
+    VkMemoryRequirements2 mreq = {.sType = VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2};
+    vkGetImageMemoryRequirements2(d->device, &mri, &mreq);
+
+    uint32_t type_bits = mreq.memoryRequirements.memoryTypeBits & fd_props.memoryTypeBits;
+    uint32_t mem_type =
+        optics_gfx_vk_find_memory_type(d, type_bits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    if (mem_type == UINT32_MAX) {
+        mem_type = optics_gfx_vk_find_memory_type(d, type_bits, 0);
+    }
+    if (mem_type == UINT32_MAX) {
+        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_BACKEND_FAILURE, "no memory type for imported dma-buf");
+        r = OPTICS_GFX_ERROR_BACKEND_FAILURE;
+        goto fail;
+    }
+
+    /* Import the fd as dedicated memory bound to this image. Vulkan takes
+     * ownership of the fd on a successful vkAllocateMemory. */
+    VkMemoryDedicatedAllocateInfo dedicated = {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO,
+        .image = im->image,
+    };
+    VkImportMemoryFdInfoKHR import_info = {
+        .sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_FD_INFO_KHR,
+        .pNext = &dedicated,
+        .handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT,
+        .fd = import_fd,
+    };
+    VkMemoryAllocateInfo mai = {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        .pNext = &import_info,
+        .allocationSize = mreq.memoryRequirements.size,
+        .memoryTypeIndex = mem_type,
+    };
+    vr = vkAllocateMemory(d->device, &mai, nullptr, &im->imported_memory);
+    if (vr == VK_SUCCESS)
+        import_fd_transferred = true;
+    if (vr != VK_SUCCESS) {
+        OPTICS_GFX_FAIL_VK(OPTICS_GFX_ERROR_BACKEND_FAILURE, "dma-buf vkAllocateMemory failed", vr);
+        r = OPTICS_GFX_ERROR_BACKEND_FAILURE;
+        goto fail;
+    }
+
+    VkBindImageMemoryInfo bind = {
+        .sType = VK_STRUCTURE_TYPE_BIND_IMAGE_MEMORY_INFO,
+        .image = im->image,
+        .memory = im->imported_memory,
+        .memoryOffset = 0,
+    };
+    vr = vkBindImageMemory2(d->device, 1, &bind);
+    if (vr != VK_SUCCESS) {
+        OPTICS_GFX_FAIL_VK(OPTICS_GFX_ERROR_BACKEND_FAILURE, "dma-buf vkBindImageMemory2 failed",
+                           vr);
+        r = OPTICS_GFX_ERROR_BACKEND_FAILURE;
+        goto fail;
+    }
+
+    r = dmabuf_transition_image_layout(d, im->image, acquire_sem);
+    if (r != OPTICS_GFX_OK)
+        goto fail;
+    /* The deferred transition's pending entry now owns the semaphore;
+     * clear it so the success/fail paths below do not destroy it. */
+    acquire_sem = VK_NULL_HANDLE;
+    im->current_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    im->foreign_owned = false;
+
+    VkImageViewCreateInfo ivci = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .image = im->image,
+        .viewType = VK_IMAGE_VIEW_TYPE_2D,
+        .format = vfmt,
+        .subresourceRange =
+            {
+                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                .levelCount = 1,
+                .layerCount = 1,
+            },
+    };
+    vr = vkCreateImageView(d->device, &ivci, nullptr, &im->view);
+    if (vr != VK_SUCCESS) {
+        OPTICS_GFX_FAIL_VK(OPTICS_GFX_ERROR_BACKEND_FAILURE, "dma-buf vkCreateImageView failed",
+                           vr);
+        r = OPTICS_GFX_ERROR_BACKEND_FAILURE;
+        goto fail;
+    }
+
+    r = optics_gfx_bindless_register_image(d, im->view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                                           &im->bindless);
+    if (r != OPTICS_GFX_OK)
+        goto fail;
+
+    /* ADR-0069/0070: an optional color-space tag on the desc's next
+     * chain decodes the imported texels into the working space. */
+    r = optics_gfx_image_init_color(d, im, desc->next);
+    if (r != OPTICS_GFX_OK)
+        goto fail;
+
+    *out = im;
+    /* The import bypasses the slab; count it so stats and the teardown
+     * leak warning see it. Uncounted at retire time via imported_size. */
+    optics_gfx_vk_allocator_note_external(d, mreq.memoryRequirements.size);
+    im->imported_size = mreq.memoryRequirements.size;
+    close(plane->fd);
+    if (desc->has_acquire_sync_fd)
+        close(desc->acquire_sync_fd);
+    if (acquire_sem)
+        vkDestroySemaphore(d->device, acquire_sem, nullptr);
+    return OPTICS_GFX_OK;
+
+fail:
+    if (acquire_sem)
+        vkDestroySemaphore(d->device, acquire_sem, nullptr);
+    if (!import_fd_transferred && import_fd >= 0)
+        close(import_fd);
+    if (im->bindless != OPTICS_GFX_BINDLESS_INVALID)
+        optics_gfx_bindless_release(d, im->bindless);
+    optics_gfx_image_release_color(d, im->color);
+    im->color = nullptr;
+    if (im->view)
+        vkDestroyImageView(d->device, im->view, nullptr);
+    if (im->image)
+        vkDestroyImage(d->device, im->image, nullptr);
+    if (im->imported_memory)
+        vkFreeMemory(d->device, im->imported_memory, nullptr);
+    optics_gfx_device_release(d);
+    optics_gfx_internal_free(d, im);
+    return r;
+}

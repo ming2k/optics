@@ -6,8 +6,8 @@
 
 #include "gallery.h"
 
-void gallery_view_glass_prepare(gallery_app *app, flux_frame *frame, flux_image *blurred,
-                                const gallery_layout *l) {
+void gallery_view_glass_prepare(gallery_app *app, optics_gfx_frame *frame,
+                                optics_gfx_image *blurred, const gallery_layout *l) {
     (void)app;
     float gap = 20.0f * l->scale;
     float hero_w = l->avail_w * 0.50f - gap * 0.5f;
@@ -16,11 +16,11 @@ void gallery_view_glass_prepare(gallery_app *app, flux_frame *frame, flux_image 
     float hero_y = l->header_h;
 
     /* Exhibit 1: Hero Surface (Continuous G2 Superellipse Squircle) */
-    prism_liquid_glass_shape hero_shapes[1] = {
+    optics_material_liquid_glass_shape hero_shapes[1] = {
         {.bounds = {hero_x, hero_y, hero_w, hero_h}, .corner_radius = 26.0f * l->scale},
     };
 
-    prism_liquid_glass_group hero_group = PRISM_LIQUID_GLASS_GROUP_INIT;
+    optics_material_liquid_glass_group hero_group = OPTICS_MATERIAL_LIQUID_GLASS_GROUP_INIT;
     hero_group.shapes = hero_shapes;
     hero_group.shape_count = 1;
     hero_group.contact_ao = app->dark_mode ? 0.35f : 0.45f;
@@ -43,14 +43,14 @@ void gallery_view_glass_prepare(gallery_app *app, flux_frame *frame, flux_image 
     float orb_x = right_x + right_w * 0.40f + sinf(app->time * 1.4f) * (22.0f * l->scale);
     float orb_y = fusion_y + fusion_h - 62.0f * l->scale;
 
-    prism_liquid_glass_shape fusion_shapes[2] = {
+    optics_material_liquid_glass_shape fusion_shapes[2] = {
         {.bounds = {right_x + 12.0f * l->scale, fusion_y + 8.0f * l->scale, main_drop_w,
                     main_drop_h},
          .corner_radius = 22.0f * l->scale},
         {.bounds = {orb_x, orb_y, orb_w, orb_h}, .corner_radius = 28.0f * l->scale},
     };
 
-    prism_liquid_glass_group fusion_group = PRISM_LIQUID_GLASS_GROUP_INIT;
+    optics_material_liquid_glass_group fusion_group = OPTICS_MATERIAL_LIQUID_GLASS_GROUP_INIT;
     fusion_group.shapes = fusion_shapes;
     fusion_group.shape_count = 2;
     fusion_group.blend_radius = 34.0f * l->scale; /* Smooth-union blend radius */
@@ -66,11 +66,11 @@ void gallery_view_glass_prepare(gallery_app *app, flux_frame *frame, flux_image 
     float bot_h = l->avail_h - fusion_h - gap;
     float tint_w = (right_w - gap) * 0.55f;
 
-    prism_liquid_glass_shape tint_shapes[1] = {
+    optics_material_liquid_glass_shape tint_shapes[1] = {
         {.bounds = {right_x, bot_y, tint_w, bot_h}, .corner_radius = 20.0f * l->scale},
     };
 
-    prism_liquid_glass_group tint_group = PRISM_LIQUID_GLASS_GROUP_INIT;
+    optics_material_liquid_glass_group tint_group = OPTICS_MATERIAL_LIQUID_GLASS_GROUP_INIT;
     tint_group.shapes = tint_shapes;
     tint_group.shape_count = 1;
     tint_group.contact_ao = app->dark_mode ? 0.30f : 0.40f;
@@ -91,11 +91,11 @@ void gallery_view_glass_prepare(gallery_app *app, flux_frame *frame, flux_image 
     float handle_x = pill_box_x + 10.0f * l->scale;
     float handle_y = bot_y + (bot_h - handle_h) * 0.5f;
 
-    prism_liquid_glass_shape pill_shapes[1] = {
+    optics_material_liquid_glass_shape pill_shapes[1] = {
         {.bounds = {handle_x, handle_y, handle_w, handle_h}, .corner_radius = handle_h * 0.5f},
     };
 
-    prism_liquid_glass_group pill_group = PRISM_LIQUID_GLASS_GROUP_INIT;
+    optics_material_liquid_glass_group pill_group = OPTICS_MATERIAL_LIQUID_GLASS_GROUP_INIT;
     pill_group.shapes = pill_shapes;
     pill_group.shape_count = 1;
     pill_group.contact_ao = app->dark_mode ? 0.35f : 0.45f;
@@ -105,14 +105,14 @@ void gallery_view_glass_prepare(gallery_app *app, flux_frame *frame, flux_image 
     pill_group.shadow_offset_y = 4.0f * l->scale;
     pill_group.curvature = 0.0f; /* Pure Euclidean pill */
 
-    prism_liquid_glass_group groups[4] = {
+    optics_material_liquid_glass_group groups[4] = {
         hero_group,
         fusion_group,
         tint_group,
         pill_group,
     };
 
-    prism_liquid_glass_desc desc = PRISM_LIQUID_GLASS_DESC_INIT;
+    optics_material_liquid_glass_desc desc = OPTICS_MATERIAL_LIQUID_GLASS_DESC_INIT;
     desc.input = app->capture;
     desc.blurred_input = blurred;
     desc.groups = groups;
@@ -123,9 +123,9 @@ void gallery_view_glass_prepare(gallery_app *app, flux_frame *frame, flux_image 
     desc.rim_light = 0.70f;
     desc.size_reference = 160.0f * l->scale;
     desc.size_scale_min = 0.65f;
-    prism_material_output out = {};
-    if (prism_liquid_glass_filter_apply(app->glass_filter,
-                                        &(prism_liquid_glass_filter_apply_opts){
-                                            .frame = frame, .desc = &desc, .out = &out}) == FLUX_OK)
+    optics_material_output out = {};
+    if (optics_material_liquid_glass_filter_apply(
+            app->glass_filter, &(optics_material_liquid_glass_filter_apply_opts){
+                                   .frame = frame, .desc = &desc, .out = &out}) == OPTICS_GFX_OK)
         gallery_emit_output(app, &out);
 }

@@ -7,37 +7,37 @@ each one. A rule without a mechanism is not listed here.
 
 ## 1. Library Graph
 
-Nine libraries under `libs/`, plus Rust bindings under `bindings/crates/`.
+Nine libraries under `libs/`, plus Rust crates under `crates/`.
 Dependencies point one way. The Meson dependency declarations are the
 authority; this diagram is a rendering of them.
 
 ```text
-aperture ──┬──► iris ───────────────► flux
-           └──► lens ──┬──► glyph ───► flux
-                       └──► reticle ─► flux
-vista ─────────────────────────────► flux
-prism ─────────────────────────────► flux
-transit   (header-only; libm only)
+app ──┬──► window ───────────────► gfx
+      └──► ui ──┬──► text ───────► gfx
+                └──► svg ────────► gfx
+scene ───────────────────────────► gfx
+material ────────────────────────► gfx
+motion   (header-only; libm only)
 ```
 
 | Library | Depends on | Owns |
 |---|---|---|
-| `flux` | Vulkan | RHI, 2D canvas (GPU and CPU backends), 3D draw core, compute, image effects, curve kernel, distance fields, math. One library, one ABI: no optional modules. |
-| `glyph` | flux | Text shaping, layout metrics, glyph atlas. |
-| `reticle` | flux | SVG static-art compiler. Device-less (ADR-0136). |
-| `vista` | flux | Scene graph, transforms, glTF loading. |
-| `prism` | flux | Named surface materials (ADR-0063). |
-| `transit` | libm | Motion vocabulary. Header-only (ADR-0158). |
-| `iris` | flux | Window, event pump, frame cadence, clipboard, IME, dialogs, accessibility bridge, and the UI-host seam `<iris/host.h>`. |
-| `lens` | flux, glyph, reticle | UI engine. Headless. |
-| `aperture` | iris, lens | Application shell: implements `iris_ui_host` over a lens context. |
+| `gfx` (`liboptics_gfx`) | Vulkan | RHI, 2D canvas (GPU and CPU backends), 3D draw core, compute, image effects, curve kernel, distance fields, math. One library, one ABI: no optional modules. |
+| `text` (`liboptics_text`) | gfx | Text shaping, layout metrics, glyph atlas. |
+| `svg` (`liboptics_svg`) | gfx | SVG static-art compiler. Device-less (ADR-0136). |
+| `scene` (`liboptics_scene`) | gfx | Scene graph, transforms, glTF loading. |
+| `material` (`liboptics_material`) | gfx | Named surface materials (ADR-0063). |
+| `motion` (`<optics/motion.h>`) | libm | Motion vocabulary. Header-only (ADR-0158). |
+| `window` (`liboptics_window`) | gfx | Window, event pump, frame cadence, clipboard, IME, dialogs, accessibility bridge, and the UI-host seam `<optics/window/host.h>`. |
+| `ui` (`liboptics_ui`) | gfx, text, svg | UI engine. Headless. |
+| `app` (`liboptics_app`) | window, ui | Application shell: implements `optics_window_ui_host` over an `optics_ui` context. |
 
 There are no numbered layers. The earlier "Layer 0–3" model implied edges that
-do not exist (nothing in `prism`, `vista` or `transit` depends on `glyph`) and
-hid the one that mattered (`iris` depended on `lens`). The graph above is the
-whole truth (ADR-0166).
+do not exist (nothing in `material`, `scene` or `motion` depends on `text`) and
+hid the one that mattered (`window` depended on `ui`). The graph above is the
+whole truth (ADR-0166, ADR-0170).
 
-flux is large by design: it is the foundation, not a micro-kernel. It ships as
+`gfx` is large by design: it is the foundation, not a micro-kernel. It ships as
 one library with every module so that its ABI is identified by its version
 alone.
 
@@ -46,15 +46,19 @@ alone.
 ## 2. Architectural Rules
 
 1. **One-way dependencies.** A library includes only the libraries on its row
-   above. In particular `iris` never includes a UI header and `lens` never
-   includes a windowing header; `aperture` is the only library that links both.
+   above. In particular `window` never includes a UI header and `ui` never
+   includes a windowing header; `app` is the only library that links both.
    *Mechanism:* each library's Meson target lists its dependencies, so a header
    outside them is not on the include path and the compile fails. The Windows
-   translation-unit gate in `ci-cross.yml` compiles `iris` with no lens include
-   path. `tests/iris` links no lens.
+   translation-unit gate in `ci-cross.yml` compiles `window` with no `ui` include
+   path. `tests/window` links no `ui`.
 2. **The descriptor rule.** See [API design](api-design.md). *Mechanism:*
    `tools/check_api.py` and its shrinking baseline.
-3. **No compatibility shims.** When a design is superseded, the old API is
+3. **Semantic naming and unified `optics` namespace (ADR-0170).** Every library
+   uses its canonical semantic name under `libs/<mod>/`, installs headers under
+   `include/optics/`, prefixes public C symbols with `optics_<mod>_`, and
+   publishes `optics-<mod>` crates. *Mechanism:* `tools/check_naming.py`.
+4. **No compatibility shims.** When a design is superseded, the old API is
    removed in the same change. Pre-1.0 the SONAME is the full version string,
    so nothing can load across releases by accident.
 
@@ -63,17 +67,17 @@ alone.
 ## 3. Red-Lines
 
 ### 3.1 Material Boundary Separation (ADR-0063)
-- **Red-Line**: `flux` must NEVER reference named materials (`prism_`, `liquid_glass`, frosted glass, mica, acrylic) or higher-level material shaders.
-- **Enforcement**: The Meson dependency graph gives `libs/flux` no `prism_dep` and no prism include path, so a material header or symbol fails at compile/link time. `tools/check_library_purity.py` (`meson test --suite lint`) additionally rejects named-material references in flux sources. `flux` exposes generic shader pipelines, bindless handles, and canvas render targets; high-level BRDF models belong exclusively to `prism`.
+- **Red-Line**: `gfx` must NEVER reference named materials (`optics_material_`, `liquid_glass`, frosted glass, mica, acrylic) or higher-level material shaders.
+- **Enforcement**: The Meson dependency graph gives `libs/gfx` no `material_dep` and no material include path, so a material header or symbol fails at compile/link time. `tools/check_library_purity.py` (`meson test --suite lint`) additionally rejects named-material references in `gfx` sources. `gfx` exposes generic shader pipelines, bindless handles, and canvas render targets; high-level BRDF models belong exclusively to `material`.
 
 ### 3.2 Vulkan RHI Purity & Headless Software Fallback (ADR-0006, ADR-0019)
 - **Red-Line**: Optics maintains no runtime RHI abstraction layer. Vulkan 1.3 is the primary GPU backend.
-- **Headless CPU Software Fallback**: `libs/flux` provides `<flux/canvas_cpu.h>` for GPU-free execution, headless rendering, pixel testing, and continuous integration.
+- **Headless CPU Software Fallback**: `libs/gfx` provides `<optics/gfx/canvas_cpu.h>` for GPU-free execution, headless rendering, pixel testing, and continuous integration.
 
 ### 3.3 Zero Heap Allocation in a Steady-State Frame (ADR-0024, ADR-0166)
-- **Red-Line**: A frame that builds the same widgets as the previous frame runs `lens_begin` through `lens_end` without calling libc `malloc`, `calloc`, `realloc`, or `free`, whatever input arrives. Temporary storage comes from the per-frame arena, reset at frame boundaries.
-- **Outside the red-line**: structural change. A node entering or leaving the tree allocates or frees its retained state, and the node store rehashes when it grows or, after a 300-frame dwell, shrinks. Snapshot publication after `lens_end` owns its captured visuals and may allocate.
-- **Enforcement**: `tests/lens/test_zero_alloc.c` interposes the process allocator and counts every heap call made inside 600 steady-state frames driven with pointer motion, clicks and focus changes. The count must be zero.
+- **Red-Line**: A frame that builds the same widgets as the previous frame runs `optics_ui_begin` through `optics_ui_end` without calling libc `malloc`, `calloc`, `realloc`, or `free`, whatever input arrives. Temporary storage comes from the per-frame arena, reset at frame boundaries.
+- **Outside the red-line**: structural change. A node entering or leaving the tree allocates or frees its retained state, and the node store rehashes when it grows or, after a 300-frame dwell, shrinks. Snapshot publication after `optics_ui_end` owns its captured visuals and may allocate.
+- **Enforcement**: `tests/ui/test_zero_alloc.c` interposes the process allocator and counts every heap call made inside 600 steady-state frames driven with pointer motion, clicks and focus changes. The count must be zero.
 
 ### 3.4 Library Stdout Hygiene
 - **Red-Line**: Shared library translation units under `libs/` must never write to `stdout` (`printf`, `puts`). Standard output is strictly reserved for application CLI or IPC wires. Diagnostic messages use `stderr`.

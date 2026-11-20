@@ -69,7 +69,7 @@ FLUX_API void flux_canvas_draw_geometry(flux_canvas *c,
 
 ### Zero-Cost Ergonomic Layer
 
-To provide immediate-mode convenience without dynamic symbol table bloat, `<flux/canvas_helpers.h>` provides `static inline` functions that compile down to stack-allocated C23 compound literals:
+To provide immediate-mode convenience without dynamic symbol table bloat, `<optics/gfx/canvas_helpers.h>` provides `static inline` functions that compile down to stack-allocated C23 compound literals:
 
 ```c
 // High-level call:
@@ -140,7 +140,7 @@ VSR maps directly to modern explicit graphics APIs (Vulkan 1.3, Metal 3, DirectX
 * Temporary contour and link arrays (`scratch_pts`, `scratch_verts`) are pre-allocated per canvas. Draw operations never trigger `malloc` or `free`.
 
 ### 2. Minimum-Latency Presentation (`VK_PRESENT_MODE_MAILBOX_KHR`)
-* In `libs/flux/src/core/surface.c`, Flux prioritises Vulkan's Mailbox presentation mode.
+* In `libs/gfx/src/core/surface.c`, Flux prioritises Vulkan's Mailbox presentation mode.
 * Unlike FIFO double/triple buffering, Mailbox does not queue frames; it continuously updates the backbuffer with the newest frame completed before the vertical blanking interval.
 * Input-to-photon latency is reduced by $16 \sim 33\text{ ms}$ compared to traditional queues.
 

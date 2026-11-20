@@ -96,20 +96,20 @@ under-declaring the read.
 
 ## Files
 
-- `libs/flux/src/core/render_plan.h/.c` — last-writer lookup and node
+- `libs/gfx/src/core/render_plan.h/.c` — last-writer lookup and node
   access/dependency append helpers.
-- `libs/flux/src/core/plan.c` — `flux_frame_plan_upload`.
-- `libs/flux/src/core/frame.c` — current-frame stack, presentation `OUTPUT`
+- `libs/gfx/src/core/plan.c` — `flux_frame_plan_upload`.
+- `libs/gfx/src/core/frame.c` — current-frame stack, presentation `OUTPUT`
   node, recording-state cleanup.
-- `libs/flux/src/core/surface.c` — resize/release leave the current-frame stack
+- `libs/gfx/src/core/surface.c` — resize/release leave the current-frame stack
   through the same transition as submit.
-- `libs/flux/src/core/oneshot.c` — upload records its node before emitting the
+- `libs/gfx/src/core/oneshot.c` — upload records its node before emitting the
   copy.
-- `libs/flux/src/canvas/canvas.c` — Canvas node lifetime and sampled-image
+- `libs/gfx/src/canvas/canvas.c` — Canvas node lifetime and sampled-image
   reads.
-- `tests/flux/unit/test_render_plan.c` — upload → canvas → output chains and
+- `tests/gfx/unit/test_render_plan.c` — upload → canvas → output chains and
   the unordered-read/write rejections.
-- `tests/flux/integration/test_render_plan_frame.c` — production wiring:
+- `tests/gfx/integration/test_render_plan_frame.c` — production wiring:
   create/update during a frame, Canvas draw naming the upload producer.
 
 ## Deletion gate

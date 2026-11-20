@@ -7,7 +7,7 @@ in the tree (and every module) makes sense.
 ## Prerequisites
 
 You have a `flux_device *d` and a `flux_surface *s`. The fastest path
-to a working pair is to copy `examples/flux/canvas_hello.c` and trim it;
+to a working pair is to copy `examples/getting_started/canvas_window.c` and trim it;
 [tutorial 01](../tutorials/01-getting-started.md) walks through the
 build and run.
 
@@ -68,7 +68,7 @@ Provide a caller-owned image view in the pass desc:
         .depth                  = &depth,
     };
 
-`examples/flux/scene_cube.c` does exactly this; it owns its own depth image
+`examples/showcase/scene_studio.c` does exactly this; it owns its own depth image
 and recreates it on surface resize. Copy that pattern when you write a
 3D renderer.
 
@@ -96,5 +96,5 @@ pass; both write to the same command buffer returned by
 
 - [Vulkan backend explanation](../explanation/vulkan-backend.md) — the
   same lifecycle in prose, with diagrams.
-- [examples/flux/canvas_hello.c](../../examples/flux/canvas_hello.c) — minimal
+- [examples/getting_started/canvas_window.c](../../examples/getting_started/canvas_window.c) — minimal
   working frame loop.

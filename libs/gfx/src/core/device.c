@@ -1,0 +1,2327 @@
+/*
+ * Vulkan instance + physical device + logical device + queues +
+ * pipeline cache. Memory allocation is provided by the slab allocator
+ * in vk_allocator.c (ADR-0007); the device-wide bindless descriptor
+ * heap is described by ADR-0003.
+ */
+#include "internal.h"
+#include <optics/gfx/vulkan.h>
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+/* VK_KHR_portability_subset (MoltenVK) is provisional in the Vulkan
+ * headers: its name macro hides behind VK_ENABLE_BETA_EXTENSIONS. The
+ * extension string itself is stable and shipped by MoltenVK, so provide
+ * the macro when the headers withhold it. */
+#ifndef VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME
+#define VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME "VK_KHR_portability_subset"
+#endif
+
+/* ------------------------------------------------------------------ */
+/*  Allocator + logger plumbing                                       */
+/* ------------------------------------------------------------------ */
+
+/* Always returns zeroed memory. If the caller supplied an allocator,
+ * we zero the result ourselves because a user `alloc` may not. The
+ * library treats `flux_internal_alloc` as zalloc throughout, so the
+ * contract is consistent regardless of allocator origin. */
+void *optics_gfx_internal_alloc(optics_gfx_device *d, size_t bytes) {
+    void *p;
+    if (d && d->allocator.alloc) {
+        p = d->allocator.alloc(bytes, d->allocator.user);
+        if (p)
+            memset(p, 0, bytes);
+    } else {
+        p = calloc(1, bytes);
+    }
+    /* The single host-side chokepoint (ADR-0129). Counting here rather than
+     * at each resource constructor is what makes coverage total: a new
+     * resource type cannot be added without crossing this line.
+     *
+     * Bytes are deliberately not tracked for this kind: free() does not
+     * receive a size, so a byte counter here would drift monotonically and
+     * manufacture a fake leak. Byte-domain accounting lives on
+     * VkDeviceMemory, which does know its size at both ends. */
+    if (p)
+        OPTICS_GFX_OBSERVE_ACQUIRE(d, OPTICS_GFX_SCOPE_DEVICE, OPTICS_GFX_LIFETIME_CONTEXT, "host",
+                                   "flux/core", 0, OPTICS_GFX_SITE_HOST_ALLOC);
+    return p;
+}
+
+void optics_gfx_internal_free(optics_gfx_device *d, void *ptr) {
+    if (!ptr)
+        return;
+    OPTICS_GFX_OBSERVE_RELEASE(d, OPTICS_GFX_SCOPE_DEVICE, "host", "flux/core", 0);
+    if (d && d->allocator.free)
+        d->allocator.free(ptr, d->allocator.user);
+    else
+        free(ptr);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Validation layer wiring                                           */
+/* ------------------------------------------------------------------ */
+
+static VKAPI_ATTR VkBool32 VKAPI_CALL debug_callback(
+    VkDebugUtilsMessageSeverityFlagBitsEXT severity, VkDebugUtilsMessageTypeFlagsEXT type,
+    const VkDebugUtilsMessengerCallbackDataEXT *data, void *user) {
+    optics_gfx_device *d = (optics_gfx_device *)user;
+    optics_gfx_log_level level = OPTICS_GFX_LOG_INFO;
+    if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT)
+        level = OPTICS_GFX_LOG_ERROR;
+    else if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT)
+        level = OPTICS_GFX_LOG_WARN;
+    else if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT)
+        level = OPTICS_GFX_LOG_INFO;
+    else
+        level = OPTICS_GFX_LOG_DEBUG;
+    (void)type;
+    if (d && d->log && data && data->pMessage) {
+        d->log(level, "vulkan-validation", 0, "%s", data->pMessage, d->log_user);
+    }
+    return VK_FALSE;
+}
+
+static bool has_layer(const VkLayerProperties *layers, uint32_t n, const char *name) {
+    for (uint32_t i = 0; i < n; ++i) {
+        if (strcmp(layers[i].layerName, name) == 0)
+            return true;
+    }
+    return false;
+}
+
+static bool has_extension(const VkExtensionProperties *exts, uint32_t n, const char *name) {
+    for (uint32_t i = 0; i < n; ++i) {
+        if (strcmp(exts[i].extensionName, name) == 0)
+            return true;
+    }
+    return false;
+}
+
+#ifdef OPTICS_GFX_HAVE_DMABUF
+#define OPTICS_GFX_DEVICE_FEATURE_KNOWN_MASK                                                       \
+    (OPTICS_GFX_DEVICE_FEATURE_DMABUF | OPTICS_GFX_DEVICE_FEATURE_DMABUF_SYNC_FILE)
+
+static const char *const dmabuf_feature_extensions[] = {
+    VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME,
+    VK_EXT_EXTERNAL_MEMORY_DMA_BUF_EXTENSION_NAME,
+    VK_EXT_IMAGE_DRM_FORMAT_MODIFIER_EXTENSION_NAME,
+    VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME,
+};
+
+static bool extension_bundle_supported(const VkExtensionProperties *available, uint32_t count,
+                                       const char *const *extensions, uint32_t extension_count) {
+    for (uint32_t i = 0; i < extension_count; ++i) {
+        if (!has_extension(available, count, extensions[i]))
+            return false;
+    }
+    return true;
+}
+
+static bool feature_bundle_supported(const VkExtensionProperties *available, uint32_t count,
+                                     optics_gfx_device_feature_flags features) {
+    if ((features & OPTICS_GFX_DEVICE_FEATURE_DMABUF) != 0 &&
+        !extension_bundle_supported(
+            available, count, dmabuf_feature_extensions,
+            (uint32_t)(sizeof(dmabuf_feature_extensions) / sizeof(dmabuf_feature_extensions[0])))) {
+        return false;
+    }
+    if ((features & OPTICS_GFX_DEVICE_FEATURE_DMABUF_SYNC_FILE) != 0 &&
+        (!extension_bundle_supported(available, count, dmabuf_feature_extensions,
+                                     (uint32_t)(sizeof(dmabuf_feature_extensions) /
+                                                sizeof(dmabuf_feature_extensions[0]))) ||
+         !has_extension(available, count, VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME))) {
+        return false;
+    }
+    return (features & ~OPTICS_GFX_DEVICE_FEATURE_KNOWN_MASK) == 0;
+}
+#else
+/* dma-buf is a Linux-only feature set: on other hosts the semantic
+ * feature bits are unknown, so requesting them (required or optional)
+ * fails validation up front instead of silently degrading. */
+#define OPTICS_GFX_DEVICE_FEATURE_KNOWN_MASK 0ULL
+
+static bool feature_bundle_supported(const VkExtensionProperties *available, uint32_t count,
+                                     optics_gfx_device_feature_flags features) {
+    (void)available;
+    (void)count;
+    return features == 0;
+}
+#endif /* FLUX_HAVE_DMABUF */
+
+typedef struct optics_gfx_device_config {
+    const optics_gfx_device_drm_node_desc *drm_node;
+    const optics_gfx_device_features_desc *features;
+    const optics_gfx_observe_opts *observe;
+} optics_gfx_device_config;
+
+static optics_gfx_result parse_device_extensions(const optics_gfx_device_desc *desc,
+                                                 optics_gfx_device_config *config) {
+    const struct {
+        optics_gfx_struct_type type;
+        const void *next;
+    } *extension = desc->next;
+    while (extension) {
+        if (extension->type == OPTICS_GFX_TYPE_DEVICE_DRM_NODE_DESC) {
+            if (config->drm_node) {
+                OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT,
+                                "duplicate device DRM-node extension");
+                return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
+            }
+            config->drm_node = (const void *)extension;
+        } else if (extension->type == OPTICS_GFX_TYPE_DEVICE_FEATURES_DESC) {
+            if (config->features) {
+                OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT,
+                                "duplicate device-features extension");
+                return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
+            }
+            config->features = (const void *)extension;
+        } else if (extension->type == OPTICS_GFX_TYPE_OBSERVE_OPTS) {
+            if (config->observe) {
+                OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT,
+                                "duplicate observe-opts extension");
+                return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
+            }
+            config->observe = (const void *)extension;
+        }
+        /* Unknown tagged extensions are ignored for forward compatibility,
+         * matching the other public descriptor-chain parsers. */
+        extension = extension->next;
+    }
+    if (config->features &&
+        (config->features->required & ~OPTICS_GFX_DEVICE_FEATURE_KNOWN_MASK) != 0) {
+        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_UNSUPPORTED, "unknown required semantic device feature");
+        return OPTICS_GFX_ERROR_UNSUPPORTED;
+    }
+    return OPTICS_GFX_OK;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Instance                                                          */
+/* ------------------------------------------------------------------ */
+
+#define MAX_EXT 32
+#define MAX_LAYER 4
+
+static optics_gfx_result create_instance(optics_gfx_device *d, const optics_gfx_device_desc *desc) {
+    /* Required instance extensions: caller list + debug-utils if validating. */
+    const char *exts[MAX_EXT];
+    uint32_t ext_count = 0;
+
+    for (uint32_t i = 0; i < desc->required_instance_extension_count; ++i) {
+        if (ext_count >= MAX_EXT) {
+            OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT, "too many instance extensions");
+            return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
+        }
+        exts[ext_count++] = desc->required_instance_extensions[i];
+    }
+
+    /* Validation: enable VK_LAYER_KHRONOS_validation + debug-utils ext. */
+    const char *layers[MAX_LAYER];
+    uint32_t layer_count = 0;
+    bool want_validation = false;
+
+    switch (desc->validation) {
+    case OPTICS_GFX_VALIDATION_ON:
+        want_validation = true;
+        break;
+    case OPTICS_GFX_VALIDATION_OFF:
+        want_validation = false;
+        break;
+    case OPTICS_GFX_VALIDATION_AUTO:
+#ifdef NDEBUG
+        want_validation = false;
+#else
+        want_validation = true;
+#endif
+        break;
+    }
+
+    /* Enumerate instance extensions once: gates optional extensions the
+     * library benefits from but does not require. */
+    uint32_t inst_avail = 0;
+    VkExtensionProperties *inst_exts = nullptr;
+    VkResult ier = vkEnumerateInstanceExtensionProperties(nullptr, &inst_avail, nullptr);
+    if (ier == VK_SUCCESS && inst_avail > 0) {
+        inst_exts = calloc(inst_avail, sizeof(*inst_exts));
+        if (inst_exts)
+            ier = vkEnumerateInstanceExtensionProperties(nullptr, &inst_avail, inst_exts);
+    }
+
+    /* VK_EXT_debug_utils: enable whenever advertised, validation or not.
+     * The messenger is validation-only, but object naming must also work
+     * in release builds under RenderDoc (which injects the extension). */
+    bool enumerate_portability = false;
+    if (inst_exts && ier == VK_SUCCESS) {
+        if (has_extension(inst_exts, inst_avail, VK_EXT_DEBUG_UTILS_EXTENSION_NAME) &&
+            ext_count < MAX_EXT) {
+            exts[ext_count++] = VK_EXT_DEBUG_UTILS_EXTENSION_NAME;
+            d->has_debug_utils = true;
+        }
+        /* VK_KHR_portability_enumeration (MoltenVK): without it,
+         * portability-subset physical devices (Apple GPUs via MoltenVK)
+         * are hidden from vkEnumeratePhysicalDevices. Desktop drivers
+         * never advertise the extension, so this stays a no-op there. */
+        if (has_extension(inst_exts, inst_avail, VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME) &&
+            ext_count < MAX_EXT) {
+            exts[ext_count++] = VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME;
+            enumerate_portability = true;
+        }
+        /* VK_EXT_swapchain_colorspace: required for any non-sRGB
+         * VkColorSpaceKHR (ADR-0069). Enable whenever advertised —
+         * drivers that lack it only offer SRGB_NONLINEAR anyway. */
+        if (has_extension(inst_exts, inst_avail, VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME) &&
+            ext_count < MAX_EXT) {
+            exts[ext_count++] = VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME;
+        }
+    }
+    free(inst_exts);
+
+    if (want_validation) {
+        uint32_t avail = 0;
+        VkResult lr = vkEnumerateInstanceLayerProperties(&avail, nullptr);
+        VkLayerProperties *layer_props = nullptr;
+        if (lr == VK_SUCCESS && avail > 0) {
+            layer_props = calloc(avail, sizeof(*layer_props));
+            if (layer_props) {
+                lr = vkEnumerateInstanceLayerProperties(&avail, layer_props);
+            }
+        }
+        if (lr == VK_SUCCESS && layer_props &&
+            has_layer(layer_props, avail, "VK_LAYER_KHRONOS_validation")) {
+            layers[layer_count++] = "VK_LAYER_KHRONOS_validation";
+            d->validation_enabled = true;
+        }
+        free(layer_props);
+    }
+
+    VkApplicationInfo ai = {
+        .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
+        .pApplicationName = "flux app",
+        .applicationVersion = 0,
+        .pEngineName = "flux",
+        .engineVersion = OPTICS_GFX_VERSION_NUMBER,
+        .apiVersion = VK_API_VERSION_1_3,
+    };
+
+    VkInstanceCreateInfo ici = {
+        .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
+        .flags = enumerate_portability ? VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR : 0,
+        .pApplicationInfo = &ai,
+        .enabledLayerCount = layer_count,
+        .ppEnabledLayerNames = layers,
+        .enabledExtensionCount = ext_count,
+        .ppEnabledExtensionNames = exts,
+    };
+
+    VkResult vr = vkCreateInstance(&ici, nullptr, &d->instance);
+    if (vr != VK_SUCCESS) {
+        OPTICS_GFX_FAIL_VK(OPTICS_GFX_ERROR_BACKEND_FAILURE, "vkCreateInstance failed", vr);
+        return OPTICS_GFX_ERROR_BACKEND_FAILURE;
+    }
+
+    if (d->validation_enabled) {
+        VkDebugUtilsMessengerCreateInfoEXT dmci = {
+            .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
+            .messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
+                               VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT,
+            .messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT |
+                           VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
+                           VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT,
+            .pfnUserCallback = debug_callback,
+            .pUserData = d,
+        };
+        PFN_vkCreateDebugUtilsMessengerEXT create_dum =
+            (PFN_vkCreateDebugUtilsMessengerEXT)vkGetInstanceProcAddr(
+                d->instance, "vkCreateDebugUtilsMessengerEXT");
+        if (create_dum) {
+            create_dum(d->instance, &dmci, nullptr, &d->debug_messenger);
+        }
+    }
+
+    return OPTICS_GFX_OK;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Physical device selection                                         */
+/* ------------------------------------------------------------------ */
+
+static const char *required_device_ext_baseline[] = {
+    /* Vulkan 1.3 promoted features cover sync2, dynamic rendering,
+     * timeline semaphores, buffer device address. Descriptor indexing
+     * is promoted to core 1.2 features. We don't need to enable these
+     * as extensions on a 1.3 device — they're in PhysicalDeviceFeatures2
+     * chain instead. */
+    nullptr,
+};
+
+static int score_device(VkPhysicalDevice pd, bool prefer_integrated) {
+    VkPhysicalDeviceProperties props;
+    vkGetPhysicalDeviceProperties(pd, &props);
+    if (props.apiVersion < VK_API_VERSION_1_3)
+        return -1;
+    switch (props.deviceType) {
+    case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:
+        return prefer_integrated ? 500 : 1000;
+    case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU:
+        return prefer_integrated ? 1000 : 500;
+    case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU:
+        return 200;
+    case VK_PHYSICAL_DEVICE_TYPE_CPU:
+        return 100;
+    default:
+        return 0;
+    }
+}
+
+/* OPTICS_GFX_GPU_PREFERENCE=integrated|low-power biases generic (non-DRM-pinned)
+ * device selection toward the integrated GPU. It is a *preference*, never a
+ * strict constraint: a candidate must still satisfy every requirement in the
+ * descriptor, and it is deliberately ignored when a DRM node is pinned, where
+ * ADR-0049 makes the physical-GPU identity the binding contract. */
+static bool gpu_preference_prefers_integrated(void) {
+    const char *pref = getenv("OPTICS_GFX_GPU_PREFERENCE");
+    if (!pref)
+        return false;
+    return strcmp(pref, "integrated") == 0 || strcmp(pref, "low-power") == 0;
+}
+
+static bool device_meets_requirements(VkPhysicalDevice pd, const optics_gfx_device_desc *desc,
+                                      optics_gfx_device_feature_flags required_features) {
+    uint32_t qcount = 0;
+    vkGetPhysicalDeviceQueueFamilyProperties(pd, &qcount, nullptr);
+    if (qcount == 0)
+        return false;
+    VkQueueFamilyProperties *queues = calloc(qcount, sizeof(*queues));
+    if (!queues)
+        return false;
+    vkGetPhysicalDeviceQueueFamilyProperties(pd, &qcount, queues);
+    bool has_graphics = false;
+    for (uint32_t i = 0; i < qcount; ++i)
+        has_graphics |= (queues[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) != 0;
+    free(queues);
+    if (!has_graphics)
+        return false;
+
+    if (desc->required_device_extension_count > 0 || required_features != 0) {
+        uint32_t count = 0;
+        if (vkEnumerateDeviceExtensionProperties(pd, nullptr, &count, nullptr) != VK_SUCCESS ||
+            count == 0)
+            return false;
+        VkExtensionProperties *available = calloc(count, sizeof(*available));
+        if (!available)
+            return false;
+        VkResult vr = vkEnumerateDeviceExtensionProperties(pd, nullptr, &count, available);
+        bool supported = vr == VK_SUCCESS;
+        for (uint32_t i = 0; supported && i < desc->required_device_extension_count; ++i)
+            supported = has_extension(available, count, desc->required_device_extensions[i]);
+        if (supported)
+            supported = feature_bundle_supported(available, count, required_features);
+        free(available);
+        if (!supported)
+            return false;
+    }
+
+    VkPhysicalDeviceVulkan13Features have13 = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
+    };
+    VkPhysicalDeviceVulkan12Features have12 = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
+        .pNext = &have13,
+    };
+    VkPhysicalDeviceFeatures2 have2 = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+        .pNext = &have12,
+    };
+    vkGetPhysicalDeviceFeatures2(pd, &have2);
+    return have13.dynamicRendering && have13.synchronization2 && have12.timelineSemaphore &&
+           have12.bufferDeviceAddress && have12.descriptorIndexing && have12.hostQueryReset;
+}
+
+static bool physical_device_has_extension(VkPhysicalDevice pd, const char *name) {
+    uint32_t count = 0;
+    if (vkEnumerateDeviceExtensionProperties(pd, nullptr, &count, nullptr) != VK_SUCCESS ||
+        count == 0)
+        return false;
+    VkExtensionProperties *available = calloc(count, sizeof(*available));
+    if (!available)
+        return false;
+    VkResult vr = vkEnumerateDeviceExtensionProperties(pd, nullptr, &count, available);
+    bool present = vr == VK_SUCCESS && has_extension(available, count, name);
+    free(available);
+    return present;
+}
+
+static bool physical_device_drm_identity(VkPhysicalDevice pd, optics_gfx_drm_device_identity *out) {
+    *out = (optics_gfx_drm_device_identity){};
+    if (!physical_device_has_extension(pd, VK_EXT_PHYSICAL_DEVICE_DRM_EXTENSION_NAME))
+        return false;
+
+    VkPhysicalDeviceDrmPropertiesEXT drm = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRM_PROPERTIES_EXT,
+    };
+    VkPhysicalDeviceProperties2 properties = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
+        .pNext = &drm,
+    };
+    vkGetPhysicalDeviceProperties2(pd, &properties);
+
+    if (drm.hasPrimary && drm.primaryMajor >= 0 && drm.primaryMajor <= UINT32_MAX &&
+        drm.primaryMinor >= 0 && drm.primaryMinor <= UINT32_MAX) {
+        out->has_primary = true;
+        out->primary.major = (uint32_t)drm.primaryMajor;
+        out->primary.minor = (uint32_t)drm.primaryMinor;
+    }
+    if (drm.hasRender && drm.renderMajor >= 0 && drm.renderMajor <= UINT32_MAX &&
+        drm.renderMinor >= 0 && drm.renderMinor <= UINT32_MAX) {
+        out->has_render = true;
+        out->render.major = (uint32_t)drm.renderMajor;
+        out->render.minor = (uint32_t)drm.renderMinor;
+    }
+    return out->has_primary || out->has_render;
+}
+
+static bool device_matches_drm_node(VkPhysicalDevice pd,
+                                    const optics_gfx_device_drm_node_desc *required) {
+    if (!required)
+        return true;
+    optics_gfx_drm_device_identity identity;
+    if (!physical_device_drm_identity(pd, &identity))
+        return false;
+    return (identity.has_primary && identity.primary.major == required->drm_major &&
+            identity.primary.minor == required->drm_minor) ||
+           (identity.has_render && identity.render.major == required->drm_major &&
+            identity.render.minor == required->drm_minor);
+}
+
+static optics_gfx_result pick_physical_device(optics_gfx_device *d,
+                                              const optics_gfx_device_desc *desc,
+                                              const optics_gfx_device_drm_node_desc *drm_node,
+                                              optics_gfx_device_feature_flags required_features) {
+    uint32_t count = 0;
+    VkResult vr = vkEnumeratePhysicalDevices(d->instance, &count, nullptr);
+    if (vr != VK_SUCCESS) {
+        OPTICS_GFX_FAIL_VK(OPTICS_GFX_ERROR_BACKEND_FAILURE, "vkEnumeratePhysicalDevices failed",
+                           vr);
+        return OPTICS_GFX_ERROR_BACKEND_FAILURE;
+    }
+    if (count == 0) {
+        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_UNSUPPORTED, "no Vulkan-capable GPU found");
+        return OPTICS_GFX_ERROR_UNSUPPORTED;
+    }
+
+    VkPhysicalDevice *pds =
+        calloc(count, sizeof(*pds)); // NOLINT(bugprone-sizeof-expression): pointer array
+    if (!pds)
+        return OPTICS_GFX_ERROR_OUT_OF_MEMORY;
+    vr = vkEnumeratePhysicalDevices(d->instance, &count, pds);
+    if (vr != VK_SUCCESS) {
+        free(pds);
+        OPTICS_GFX_FAIL_VK(OPTICS_GFX_ERROR_BACKEND_FAILURE, "vkEnumeratePhysicalDevices failed",
+                           vr);
+        return OPTICS_GFX_ERROR_BACKEND_FAILURE;
+    }
+
+    VkPhysicalDevice best = VK_NULL_HANDLE;
+    int best_score = -1;
+    /* The env preference is a generic-app default; a pinned DRM node is a
+     * strict contract (ADR-0049) and must not be re-biased by it. */
+    bool prefer_integrated = drm_node == nullptr && gpu_preference_prefers_integrated();
+    for (uint32_t i = 0; i < count; ++i) {
+        if (!device_matches_drm_node(pds[i], drm_node))
+            continue;
+        if (!device_meets_requirements(pds[i], desc, required_features))
+            continue;
+        int s = score_device(pds[i], prefer_integrated);
+        if (s > best_score) {
+            best_score = s;
+            best = pds[i];
+        }
+    }
+    free(pds);
+
+    if (best == VK_NULL_HANDLE || best_score < 0) {
+        if (drm_node) {
+            OPTICS_GFX_FAIL(
+                OPTICS_GFX_ERROR_UNSUPPORTED,
+                "no Vulkan device matches the required DRM node and features/extensions");
+        } else {
+            OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_UNSUPPORTED,
+                            "no Vulkan device satisfies the required features and extensions");
+        }
+        return OPTICS_GFX_ERROR_UNSUPPORTED;
+    }
+
+    d->physical_device = best;
+    (void)physical_device_drm_identity(best, &d->drm_identity);
+    vkGetPhysicalDeviceProperties(d->physical_device, &d->props);
+    vkGetPhysicalDeviceMemoryProperties(d->physical_device, &d->mem_props);
+
+    d->vendor_id = d->props.vendorID;
+    d->device_id = d->props.deviceID;
+    d->is_nvidia = (d->props.vendorID == 0x10DE);
+    d->is_amd = (d->props.vendorID == 0x1002 || d->props.vendorID == 0x1022);
+    d->is_intel = (d->props.vendorID == 0x8086);
+    d->is_apple = (d->props.vendorID == 0x106B);
+    d->buffer_image_granularity = d->props.limits.bufferImageGranularity;
+
+    /* Cache the descriptor-indexing properties for the bindless heap. */
+    d->descriptor_indexing_props = (VkPhysicalDeviceDescriptorIndexingProperties){
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_PROPERTIES,
+    };
+    VkPhysicalDeviceProperties2 p2 = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
+        .pNext = &d->descriptor_indexing_props,
+    };
+    vkGetPhysicalDeviceProperties2(d->physical_device, &p2);
+    return OPTICS_GFX_OK;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Queue family selection                                            */
+/* ------------------------------------------------------------------ */
+
+#define INVALID_FAMILY UINT32_C(0xffffffff)
+
+static optics_gfx_result pick_queue_families(optics_gfx_device *d) {
+    uint32_t count = 0;
+    vkGetPhysicalDeviceQueueFamilyProperties(d->physical_device, &count, nullptr);
+    if (count == 0) {
+        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_UNSUPPORTED, "physical device exposes no queue families");
+        return OPTICS_GFX_ERROR_UNSUPPORTED;
+    }
+    VkQueueFamilyProperties *families = calloc(count, sizeof(*families));
+    if (!families)
+        return OPTICS_GFX_ERROR_OUT_OF_MEMORY;
+    vkGetPhysicalDeviceQueueFamilyProperties(d->physical_device, &count, families);
+    /* vkGetPhysicalDeviceQueueFamilyProperties is void-returning; no
+     * VkResult to check (Vulkan 1.0 guarantee). */
+
+    d->graphics_family = INVALID_FAMILY;
+    d->transfer_family = INVALID_FAMILY;
+    d->transfer_dedicated = false;
+
+    /* Graphics: first family with GRAPHICS bit. */
+    for (uint32_t i = 0; i < count; ++i) {
+        if (families[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) {
+            d->graphics_family = i;
+            /* Timestamp support is a per-queue-family property; capture it
+             * for flux_device_get_limits (feature discovery by query, not
+             * by watching timestamp collection come back empty). */
+            d->graphics_queue_timestamp_valid_bits = families[i].timestampValidBits;
+            break;
+        }
+    }
+
+    /* Transfer: prefer a dedicated family (TRANSFER but not GRAPHICS or COMPUTE).
+     * If none exists, fall back to a COMPUTE+TRANSFER family. Then to graphics. */
+    for (uint32_t i = 0; i < count; ++i) {
+        VkQueueFlags f = families[i].queueFlags;
+        if ((f & VK_QUEUE_TRANSFER_BIT) && !(f & VK_QUEUE_GRAPHICS_BIT) &&
+            !(f & VK_QUEUE_COMPUTE_BIT)) {
+            d->transfer_family = i;
+            d->transfer_dedicated = true;
+            break;
+        }
+    }
+    if (d->transfer_family == INVALID_FAMILY) {
+        for (uint32_t i = 0; i < count; ++i) {
+            VkQueueFlags f = families[i].queueFlags;
+            if ((f & VK_QUEUE_TRANSFER_BIT) && !(f & VK_QUEUE_GRAPHICS_BIT)) {
+                d->transfer_family = i;
+                d->transfer_dedicated = true;
+                break;
+            }
+        }
+    }
+    if (d->transfer_family == INVALID_FAMILY) {
+        d->transfer_family = d->graphics_family;
+        d->transfer_dedicated = false;
+    }
+
+    free(families);
+
+    if (d->graphics_family == INVALID_FAMILY) {
+        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_UNSUPPORTED, "no graphics-capable queue family");
+        return OPTICS_GFX_ERROR_UNSUPPORTED;
+    }
+    return OPTICS_GFX_OK;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Logical device                                                    */
+/* ------------------------------------------------------------------ */
+
+static optics_gfx_result append_device_extension(const char **extensions, uint32_t *count,
+                                                 const char *extension) {
+    for (uint32_t i = 0; i < *count; ++i) {
+        if (strcmp(extensions[i], extension) == 0)
+            return OPTICS_GFX_OK;
+    }
+    if (*count >= MAX_EXT) {
+        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT, "too many device extensions");
+        return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
+    }
+    extensions[(*count)++] = extension;
+    return OPTICS_GFX_OK;
+}
+
+#ifdef OPTICS_GFX_HAVE_DMABUF
+static optics_gfx_result append_feature_extensions(const char **extensions, uint32_t *count,
+                                                   optics_gfx_device_feature_flags features) {
+    if ((features &
+         (OPTICS_GFX_DEVICE_FEATURE_DMABUF | OPTICS_GFX_DEVICE_FEATURE_DMABUF_SYNC_FILE)) != 0) {
+        for (uint32_t i = 0; i < (uint32_t)(sizeof(dmabuf_feature_extensions) /
+                                            sizeof(dmabuf_feature_extensions[0]));
+             ++i) {
+            optics_gfx_result r =
+                append_device_extension(extensions, count, dmabuf_feature_extensions[i]);
+            if (r != OPTICS_GFX_OK)
+                return r;
+        }
+    }
+    if ((features & OPTICS_GFX_DEVICE_FEATURE_DMABUF_SYNC_FILE) != 0)
+        return append_device_extension(extensions, count,
+                                       VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME);
+    return OPTICS_GFX_OK;
+}
+#else
+static optics_gfx_result append_feature_extensions(const char **extensions, uint32_t *count,
+                                                   optics_gfx_device_feature_flags features) {
+    /* No semantic feature maps to a device extension on this host. */
+    (void)extensions;
+    (void)count;
+    (void)features;
+    return OPTICS_GFX_OK;
+}
+#endif /* FLUX_HAVE_DMABUF */
+
+static optics_gfx_result create_logical_device(optics_gfx_device *d,
+                                               const optics_gfx_device_desc *desc,
+                                               const optics_gfx_device_features_desc *features) {
+    /* Device extensions: caller-required plus optional extensions the
+     * library consumes itself when the driver advertises them (e.g.
+     * VK_EXT_memory_budget). Vulkan 1.3 features (sync2, dynamic
+     * rendering, timeline semaphores, buffer device address, descriptor
+     * indexing) come from the feature chain. */
+    const char *device_exts[MAX_EXT];
+    uint32_t device_ext_count = 0;
+    for (uint32_t i = 0; i < desc->required_device_extension_count; ++i) {
+        optics_gfx_result r = append_device_extension(device_exts, &device_ext_count,
+                                                      desc->required_device_extensions[i]);
+        if (r != OPTICS_GFX_OK)
+            return r;
+    }
+
+    /* Enumerate what the physical device advertises: validates the
+     * caller-required list and gates the optional extensions below. */
+    uint32_t avail = 0;
+    VkExtensionProperties *available = nullptr;
+    VkResult er =
+        vkEnumerateDeviceExtensionProperties(d->physical_device, nullptr, &avail, nullptr);
+    if (er != VK_SUCCESS) {
+        OPTICS_GFX_FAIL_VK(OPTICS_GFX_ERROR_BACKEND_FAILURE,
+                           "vkEnumerateDeviceExtensionProperties failed", er);
+        return OPTICS_GFX_ERROR_BACKEND_FAILURE;
+    }
+    if (avail > 0) {
+        available = calloc(avail, sizeof(*available));
+        if (!available)
+            return OPTICS_GFX_ERROR_OUT_OF_MEMORY;
+        er = vkEnumerateDeviceExtensionProperties(d->physical_device, nullptr, &avail, available);
+        if (er != VK_SUCCESS) {
+            free(available);
+            OPTICS_GFX_FAIL_VK(OPTICS_GFX_ERROR_BACKEND_FAILURE,
+                               "vkEnumerateDeviceExtensionProperties failed", er);
+            return OPTICS_GFX_ERROR_BACKEND_FAILURE;
+        }
+    }
+
+    optics_gfx_device_feature_flags enabled_semantic = features ? features->required : 0;
+    optics_gfx_device_feature_flags optional =
+        features ? features->optional & OPTICS_GFX_DEVICE_FEATURE_KNOWN_MASK : 0;
+    for (optics_gfx_device_feature_flags bit = UINT64_C(1);
+         bit <= OPTICS_GFX_DEVICE_FEATURE_DMABUF_SYNC_FILE; bit <<= 1) {
+        if ((optional & bit) != 0 && feature_bundle_supported(available, avail, bit))
+            enabled_semantic |= bit;
+    }
+    optics_gfx_result feature_result =
+        append_feature_extensions(device_exts, &device_ext_count, enabled_semantic);
+    if (feature_result != OPTICS_GFX_OK) {
+        free(available);
+        return feature_result;
+    }
+
+    /* Validate that the physical device advertises every required ext. */
+    for (uint32_t i = 0; i < device_ext_count; ++i) {
+        if (!available || !has_extension(available, avail, device_exts[i])) {
+            OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_UNSUPPORTED,
+                            "required device extension not supported");
+            free(available);
+            return OPTICS_GFX_ERROR_UNSUPPORTED;
+        }
+    }
+
+    /* Enable VK_EXT_memory_budget when advertised. Without this the
+     * budget query in flux_device_memory_budget chains a struct whose
+     * extension is not enabled, which the spec forbids. */
+    if (available && has_extension(available, avail, VK_EXT_MEMORY_BUDGET_EXTENSION_NAME)) {
+        optics_gfx_result memory_budget_result = append_device_extension(
+            device_exts, &device_ext_count, VK_EXT_MEMORY_BUDGET_EXTENSION_NAME);
+        if (memory_budget_result != OPTICS_GFX_OK) {
+            free(available);
+            return memory_budget_result;
+        }
+    }
+    /* VK_EXT_hdr_metadata when advertised: enables vkSetHdrMetadataEXT for
+     * HDR10 static metadata on HDR swapchains (ADR-0069). */
+    if (available && has_extension(available, avail, VK_EXT_HDR_METADATA_EXTENSION_NAME)) {
+        optics_gfx_result hdr_result = append_device_extension(device_exts, &device_ext_count,
+                                                               VK_EXT_HDR_METADATA_EXTENSION_NAME);
+        if (hdr_result != OPTICS_GFX_OK) {
+            free(available);
+            return hdr_result;
+        }
+        d->has_hdr_metadata = true;
+    }
+    /* VK_KHR_portability_subset must be enabled whenever the physical
+     * device advertises it (MoltenVK requires it; vkCreateDevice rejects
+     * the device otherwise). Desktop Vulkan drivers never advertise it,
+     * so this is a no-op outside macOS/iOS. */
+    if (available && has_extension(available, avail, VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME)) {
+        optics_gfx_result portability_result = append_device_extension(
+            device_exts, &device_ext_count, VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME);
+        if (portability_result != OPTICS_GFX_OK) {
+            free(available);
+            return portability_result;
+        }
+    }
+    /* VK_KHR_global_priority or VK_EXT_global_priority when advertised:
+     * enables requesting VK_QUEUE_GLOBAL_PRIORITY_HIGH_KHR on graphics queue
+     * so GPU hardware scheduler prioritizes UI/presentation rendering under compute load. */
+    bool has_global_priority = false;
+    const char *global_priority_ext = nullptr;
+    if (available && has_extension(available, avail, VK_KHR_GLOBAL_PRIORITY_EXTENSION_NAME)) {
+        global_priority_ext = VK_KHR_GLOBAL_PRIORITY_EXTENSION_NAME;
+    } else if (available &&
+               has_extension(available, avail, VK_EXT_GLOBAL_PRIORITY_EXTENSION_NAME)) {
+        global_priority_ext = VK_EXT_GLOBAL_PRIORITY_EXTENSION_NAME;
+    }
+    if (global_priority_ext) {
+        optics_gfx_result gp_res =
+            append_device_extension(device_exts, &device_ext_count, global_priority_ext);
+        if (gp_res == OPTICS_GFX_OK) {
+            has_global_priority = true;
+        }
+    }
+    free(available);
+    (void)required_device_ext_baseline;
+
+#ifdef OPTICS_GFX_HAVE_DMABUF
+    for (uint32_t i = 0; i < device_ext_count; ++i) {
+        if (strcmp(device_exts[i], VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME) == 0) {
+            d->has_external_memory_fd = true;
+        } else if (strcmp(device_exts[i], VK_EXT_EXTERNAL_MEMORY_DMA_BUF_EXTENSION_NAME) == 0) {
+            d->has_external_memory_dma_buf = true;
+        } else if (strcmp(device_exts[i], VK_EXT_IMAGE_DRM_FORMAT_MODIFIER_EXTENSION_NAME) == 0) {
+            d->has_image_drm_format_modifier = true;
+        } else if (strcmp(device_exts[i], VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME) == 0) {
+            d->has_external_semaphore_fd = true;
+        } else if (strcmp(device_exts[i], VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME) == 0) {
+            d->has_queue_family_foreign = true;
+        }
+    }
+#endif
+    d->enabled_features = enabled_semantic;
+#ifdef OPTICS_GFX_HAVE_DMABUF
+    if (d->has_external_memory_fd && d->has_external_memory_dma_buf &&
+        d->has_image_drm_format_modifier && d->has_queue_family_foreign) {
+        d->enabled_features |= OPTICS_GFX_DEVICE_FEATURE_DMABUF;
+        if (d->has_external_semaphore_fd)
+            d->enabled_features |= OPTICS_GFX_DEVICE_FEATURE_DMABUF_SYNC_FILE;
+    }
+#endif
+
+    /* Feature chain: enable Vulkan 1.3 features we rely on globally. */
+    VkPhysicalDeviceVulkan13Features feat13 = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
+        .dynamicRendering = VK_TRUE,
+        .synchronization2 = VK_TRUE,
+    };
+    VkPhysicalDeviceVulkan12Features feat12 = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
+        .pNext = &feat13,
+        .timelineSemaphore = VK_TRUE,
+        .bufferDeviceAddress = VK_TRUE,
+        .descriptorIndexing = VK_TRUE,
+        .descriptorBindingPartiallyBound = VK_TRUE,
+        .descriptorBindingVariableDescriptorCount = VK_TRUE,
+        .descriptorBindingSampledImageUpdateAfterBind = VK_TRUE,
+        .descriptorBindingStorageImageUpdateAfterBind = VK_TRUE,
+        .descriptorBindingStorageBufferUpdateAfterBind = VK_TRUE,
+        .descriptorBindingUpdateUnusedWhilePending = VK_TRUE,
+        .runtimeDescriptorArray = VK_TRUE,
+        .shaderSampledImageArrayNonUniformIndexing = VK_TRUE,
+        .shaderStorageImageArrayNonUniformIndexing = VK_TRUE,
+        .hostQueryReset = VK_TRUE,
+    };
+    VkPhysicalDeviceFeatures2 feat2 = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+        .pNext = &feat12,
+        .features = {},
+    };
+
+    /* Confirm the device actually supports every flag we set. */
+    VkPhysicalDeviceVulkan13Features have13 = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};
+    VkPhysicalDeviceVulkan12Features have12 = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES, .pNext = &have13};
+    VkPhysicalDeviceFeatures2 have2 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+                                       .pNext = &have12};
+    vkGetPhysicalDeviceFeatures2(d->physical_device, &have2);
+
+    if (!have13.dynamicRendering || !have13.synchronization2 || !have12.timelineSemaphore ||
+        !have12.bufferDeviceAddress || !have12.descriptorIndexing || !have12.hostQueryReset) {
+        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_UNSUPPORTED,
+                        "physical device missing required Vulkan 1.3 features "
+                        "(dynamicRendering, sync2, timelineSemaphore, bufferDeviceAddress, "
+                        "descriptorIndexing, hostQueryReset)");
+        return OPTICS_GFX_ERROR_UNSUPPORTED;
+    }
+
+    /* Optional core feature used by POINT_LIST consumers. Enabling every
+     * supported device lets procedural-particle pipelines use gl_PointSize
+     * above 1 without making large points a baseline requirement for Flux. */
+    feat2.features.largePoints = have2.features.largePoints;
+    d->large_points_enabled = have2.features.largePoints;
+
+    /* Queue create infos: graphics; transfer iff dedicated. */
+    float prio = 1.0f;
+    VkDeviceQueueGlobalPriorityCreateInfoKHR global_prio_ci = {
+        .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_GLOBAL_PRIORITY_CREATE_INFO_KHR,
+        .globalPriority = VK_QUEUE_GLOBAL_PRIORITY_HIGH_KHR,
+    };
+    VkDeviceQueueCreateInfo qcis[2] = {
+        {
+            .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+            .pNext = has_global_priority ? &global_prio_ci : nullptr,
+            .queueFamilyIndex = d->graphics_family,
+            .queueCount = 1,
+            .pQueuePriorities = &prio,
+        },
+    };
+    uint32_t qci_count = 1;
+    if (d->transfer_dedicated && d->transfer_family != d->graphics_family) {
+        qcis[1] = (VkDeviceQueueCreateInfo){
+            .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+            .queueFamilyIndex = d->transfer_family,
+            .queueCount = 1,
+            .pQueuePriorities = &prio,
+        };
+        qci_count = 2;
+    }
+
+    VkDeviceCreateInfo dci = {
+        .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
+        .pNext = &feat2,
+        .queueCreateInfoCount = qci_count,
+        .pQueueCreateInfos = qcis,
+        .enabledExtensionCount = device_ext_count,
+        .ppEnabledExtensionNames = device_exts,
+    };
+
+    VkResult vr = vkCreateDevice(d->physical_device, &dci, nullptr, &d->device);
+    if ((vr == VK_ERROR_NOT_PERMITTED_KHR || vr == VK_ERROR_NOT_PERMITTED_EXT) &&
+        has_global_priority) {
+        /* High priority was refused by the kernel/driver (unprivileged or no CAP_SYS_NICE);
+         * fall back cleanly to default queue priority. */
+        qcis[0].pNext = nullptr;
+        vr = vkCreateDevice(d->physical_device, &dci, nullptr, &d->device);
+    }
+    if (vr != VK_SUCCESS) {
+        OPTICS_GFX_FAIL_VK(OPTICS_GFX_ERROR_BACKEND_FAILURE, "vkCreateDevice failed", vr);
+        return OPTICS_GFX_ERROR_BACKEND_FAILURE;
+    }
+
+    vkGetDeviceQueue(d->device, d->graphics_family, 0, &d->graphics_queue);
+    vkGetDeviceQueue(d->device, d->transfer_family, 0, &d->transfer_queue);
+
+    if (d->has_debug_utils) {
+        d->pfn_set_name = (PFN_vkSetDebugUtilsObjectNameEXT)vkGetDeviceProcAddr(
+            d->device, "vkSetDebugUtilsObjectNameEXT");
+        d->pfn_cmd_begin_label = (PFN_vkCmdBeginDebugUtilsLabelEXT)vkGetDeviceProcAddr(
+            d->device, "vkCmdBeginDebugUtilsLabelEXT");
+        d->pfn_cmd_end_label = (PFN_vkCmdEndDebugUtilsLabelEXT)vkGetDeviceProcAddr(
+            d->device, "vkCmdEndDebugUtilsLabelEXT");
+    }
+    if (d->has_hdr_metadata) {
+        d->pfn_set_hdr_metadata =
+            (PFN_vkSetHdrMetadataEXT)vkGetDeviceProcAddr(d->device, "vkSetHdrMetadataEXT");
+    }
+
+    /* Pipeline cache — seeded from the consumer's storage if a
+     * persistence hook was wired into flux_device_desc (Skia
+     * PersistentCache model). With no hook the cache starts cold
+     * and lives only for the device lifetime. The library never
+     * touches the filesystem itself. */
+    void *seed_data = nullptr;
+    size_t seed_size = 0;
+    if (d->pipeline_cache_load) {
+        seed_data = d->pipeline_cache_load(d->pipeline_cache_userdata, &seed_size);
+    }
+
+    VkPipelineCacheCreateInfo pcci = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO,
+        .initialDataSize = seed_size,
+        .pInitialData = seed_data,
+    };
+    vr = vkCreatePipelineCache(d->device, &pcci, nullptr, &d->pipeline_cache);
+    free(seed_data);
+    if (vr != VK_SUCCESS) {
+        OPTICS_GFX_FAIL_VK(OPTICS_GFX_ERROR_BACKEND_FAILURE, "vkCreatePipelineCache failed", vr);
+        return OPTICS_GFX_ERROR_BACKEND_FAILURE;
+    }
+
+    return OPTICS_GFX_OK;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Pipeline cache flush (consumer-driven)                            */
+/*                                                                    */
+/*  If the consumer wired a save hook into flux_device_desc, hand the */
+/*  current VkPipelineCache blob to it. The library owns no storage   */
+/*  strategy; this just bridges Vulkan's blob out to the callback.    */
+/* ------------------------------------------------------------------ */
+
+static void flush_pipeline_cache(optics_gfx_device *d) {
+    if (!d->pipeline_cache_save || !d->pipeline_cache)
+        return;
+
+    optics_gfx_device_vk_pipeline_cache_lock(d);
+    size_t size = 0;
+    if (vkGetPipelineCacheData(d->device, d->pipeline_cache, &size, nullptr) != VK_SUCCESS) {
+        optics_gfx_device_vk_pipeline_cache_unlock(d);
+        return;
+    }
+    if (size == 0) {
+        optics_gfx_device_vk_pipeline_cache_unlock(d);
+        return;
+    }
+    void *buf = malloc(size);
+    if (!buf) {
+        optics_gfx_device_vk_pipeline_cache_unlock(d);
+        return;
+    }
+    if (vkGetPipelineCacheData(d->device, d->pipeline_cache, &size, buf) != VK_SUCCESS) {
+        optics_gfx_device_vk_pipeline_cache_unlock(d);
+        free(buf);
+        return;
+    }
+    optics_gfx_device_vk_pipeline_cache_unlock(d);
+    d->pipeline_cache_save(d->pipeline_cache_userdata, buf, size);
+    free(buf);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Public lifecycle                                                  */
+/* ------------------------------------------------------------------ */
+
+optics_gfx_result optics_gfx_device_create(const optics_gfx_device_desc *desc,
+                                           optics_gfx_device **out) {
+    if (!desc || !out)
+        return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
+    if (desc->type != OPTICS_GFX_TYPE_DEVICE_DESC) {
+        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT, "desc->type != FLUX_TYPE_DEVICE_DESC");
+        return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
+    }
+    if ((desc->required_instance_extension_count && !desc->required_instance_extensions) ||
+        (desc->required_device_extension_count && !desc->required_device_extensions)) {
+        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT,
+                        "extension count requires a non-null name array");
+        return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
+    }
+    for (uint32_t i = 0; i < desc->required_instance_extension_count; ++i) {
+        if (!desc->required_instance_extensions[i]) {
+            OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT, "instance extension name is null");
+            return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
+        }
+    }
+    for (uint32_t i = 0; i < desc->required_device_extension_count; ++i) {
+        if (!desc->required_device_extensions[i]) {
+            OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT, "device extension name is null");
+            return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
+        }
+    }
+    *out = nullptr;
+
+    optics_gfx_device_config config = {};
+    optics_gfx_result r = parse_device_extensions(desc, &config);
+    if (r != OPTICS_GFX_OK)
+        return r;
+
+    optics_gfx_device *d = calloc(1, sizeof(*d));
+    if (!d) {
+        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_OUT_OF_MEMORY, "device alloc");
+        return OPTICS_GFX_ERROR_OUT_OF_MEMORY;
+    }
+    atomic_init(&d->ref_count, 1u);
+    /* Zeroed by calloc, but the bindless sentinel is all-ones — the
+     * lock-free fast path in flux_device_default_sampler_handle treats
+     * anything else as a published handle. */
+    atomic_init(&d->default_sampler_handle, OPTICS_GFX_BINDLESS_INVALID);
+    d->allocator = desc->allocator;
+    d->log = desc->log;
+    d->log_user = desc->log_user;
+    d->pipeline_cache_load = desc->pipeline_cache_load;
+    d->pipeline_cache_save = desc->pipeline_cache_save;
+    d->pipeline_cache_userdata = desc->pipeline_cache_userdata;
+    d->frames_in_flight = desc->frames_in_flight ? desc->frames_in_flight : 2;
+    d->headless = desc->headless;
+    /* The ledger must exist before any counted resource can be created, so
+     * it is initialised here rather than at the end of bringup (ADR-0129). */
+    r = optics_gfx_observe_init(d, config.observe);
+    if (r != OPTICS_GFX_OK)
+        goto fail;
+
+    /* The per-surface frame slot array is fixed at
+     * FLUX_MAX_FRAMES_IN_FLIGHT entries; values above are silently
+     * clamped in flux_surface_create. Surface the clamp here so the
+     * caller learns at device-bringup time, not later when a surface
+     * ends up with fewer frames than requested. */
+    if (desc->frames_in_flight > OPTICS_GFX_MAX_FRAMES_IN_FLIGHT) {
+        d->frames_in_flight = OPTICS_GFX_MAX_FRAMES_IN_FLIGHT;
+        if (d->log) {
+            char buf[160];
+            snprintf(buf, sizeof(buf),
+                     "flux_device_create: desc->frames_in_flight=%u exceeds "
+                     "FLUX_MAX_FRAMES_IN_FLIGHT=%u; clamped (per-surface frame "
+                     "slot array is fixed-size)",
+                     desc->frames_in_flight, OPTICS_GFX_MAX_FRAMES_IN_FLIGHT);
+            d->log(OPTICS_GFX_LOG_WARN, "flux_device_create", 0, "%s", buf, d->log_user);
+        }
+    }
+
+    r = create_instance(d, desc);
+    if (r != OPTICS_GFX_OK)
+        goto fail;
+    optics_gfx_device_feature_flags required_features =
+        config.features ? config.features->required : 0;
+    r = pick_physical_device(d, desc, config.drm_node, required_features);
+    if (r != OPTICS_GFX_OK)
+        goto fail;
+    r = pick_queue_families(d);
+    if (r != OPTICS_GFX_OK)
+        goto fail;
+    /* Reject hosts that can't satisfy the library's push-constant
+     * budget before we waste time creating the logical device. */
+    if (d->props.limits.maxPushConstantsSize < OPTICS_GFX_DEVICE_REQUIRED_PUSH_BYTES) {
+        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_UNSUPPORTED,
+                        "device.limits.maxPushConstantsSize below FLUX_DEVICE_REQUIRED_PUSH_BYTES");
+        r = OPTICS_GFX_ERROR_UNSUPPORTED;
+        goto fail;
+    }
+    r = create_logical_device(d, desc, config.features);
+    if (r != OPTICS_GFX_OK)
+        goto fail;
+    if (!optics_gfx_platform_mutex_init(&d->queue_lock)) {
+        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_BACKEND_FAILURE, "queue lock init failed");
+        r = OPTICS_GFX_ERROR_BACKEND_FAILURE;
+        goto fail;
+    }
+    d->queue_lock_initialized = true;
+    if (!optics_gfx_platform_mutex_init(&d->image_version_lock)) {
+        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_BACKEND_FAILURE, "image version lock init failed");
+        r = OPTICS_GFX_ERROR_BACKEND_FAILURE;
+        goto fail;
+    }
+    d->image_version_lock_initialized = true;
+    if (!optics_gfx_platform_mutex_init(&d->dmabuf_acquire_pool_lock)) {
+        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_BACKEND_FAILURE,
+                        "dma-buf acquire semaphore pool lock init failed");
+        r = OPTICS_GFX_ERROR_BACKEND_FAILURE;
+        goto fail;
+    }
+    d->dmabuf_acquire_pool_lock_initialized = true;
+    if (!optics_gfx_platform_mutex_init(&d->pipeline_cache_lock)) {
+        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_BACKEND_FAILURE, "pipeline cache lock init failed");
+        r = OPTICS_GFX_ERROR_BACKEND_FAILURE;
+        goto fail;
+    }
+    d->pipeline_cache_lock_initialized = true;
+    if (!optics_gfx_platform_mutex_init(&d->module_state_lock)) {
+        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_BACKEND_FAILURE, "module state lock init failed");
+        r = OPTICS_GFX_ERROR_BACKEND_FAILURE;
+        goto fail;
+    }
+    d->module_state_lock_initialized = true;
+    if (!optics_gfx_platform_mutex_init(&d->retire_lock)) {
+        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_BACKEND_FAILURE, "retire lock init failed");
+        r = OPTICS_GFX_ERROR_BACKEND_FAILURE;
+        goto fail;
+    }
+    d->retire_lock_initialized = true;
+    if (!optics_gfx_platform_mutex_init(&d->staging_lock)) {
+        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_BACKEND_FAILURE, "staging lock init failed");
+        r = OPTICS_GFX_ERROR_BACKEND_FAILURE;
+        goto fail;
+    }
+    d->staging_lock_initialized = true;
+    if (!optics_gfx_platform_mutex_init(&d->upload_lock)) {
+        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_BACKEND_FAILURE, "upload lock init failed");
+        r = OPTICS_GFX_ERROR_BACKEND_FAILURE;
+        goto fail;
+    }
+    d->upload_lock_initialized = true;
+    if (!optics_gfx_platform_mutex_init(&d->upload_pending_lock)) {
+        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_BACKEND_FAILURE, "upload pending lock init failed");
+        r = OPTICS_GFX_ERROR_BACKEND_FAILURE;
+        goto fail;
+    }
+    d->upload_pending_lock_initialized = true;
+    d->upload_pending_head = nullptr;
+    atomic_init(&d->submit_serial, 0u);
+    atomic_init(&d->labels_emitted, 0u);
+    atomic_init(&d->completed_serial, 0u);
+    d->retire_head = nullptr;
+    d->retire_tail = &d->retire_head;
+    r = optics_gfx_vk_allocator_init(d);
+    if (r != OPTICS_GFX_OK)
+        goto fail;
+    r = optics_gfx_bindless_heap_init(d);
+    if (r != OPTICS_GFX_OK)
+        goto fail;
+
+    if (d->log) {
+        char buf[512];
+        snprintf(buf, sizeof(buf),
+                 "device created: %s (gfx q=%u, xfer q=%u%s, validation=%s, headless=%s)",
+                 d->props.deviceName, d->graphics_family, d->transfer_family,
+                 d->transfer_dedicated ? " dedicated" : "", d->validation_enabled ? "on" : "off",
+                 d->headless ? "yes" : "no");
+        d->log(OPTICS_GFX_LOG_INFO, "flux", 0, "%s", buf, d->log_user);
+    }
+
+    *out = d;
+    return OPTICS_GFX_OK;
+
+fail:
+    /* Tear down partial state. */
+    optics_gfx_observe_destroy(d);
+    optics_gfx_dmabuf_acquire_semaphore_pool_destroy(d);
+    optics_gfx_bindless_heap_destroy(d);
+    optics_gfx_vk_allocator_destroy(d);
+    if (d->upload_pending_lock_initialized) {
+        optics_gfx_platform_mutex_destroy(&d->upload_pending_lock);
+        d->upload_pending_lock_initialized = false;
+    }
+    if (d->upload_lock_initialized) {
+        optics_gfx_platform_mutex_destroy(&d->upload_lock);
+        d->upload_lock_initialized = false;
+    }
+    if (d->staging_lock_initialized) {
+        optics_gfx_platform_mutex_destroy(&d->staging_lock);
+        d->staging_lock_initialized = false;
+    }
+    if (d->retire_lock_initialized) {
+        optics_gfx_platform_mutex_destroy(&d->retire_lock);
+        d->retire_lock_initialized = false;
+    }
+    if (d->module_state_lock_initialized) {
+        optics_gfx_platform_mutex_destroy(&d->module_state_lock);
+        d->module_state_lock_initialized = false;
+    }
+    if (d->pipeline_cache_lock_initialized) {
+        optics_gfx_platform_mutex_destroy(&d->pipeline_cache_lock);
+        d->pipeline_cache_lock_initialized = false;
+    }
+    if (d->image_version_lock_initialized) {
+        optics_gfx_platform_mutex_destroy(&d->image_version_lock);
+        d->image_version_lock_initialized = false;
+    }
+    if (d->queue_lock_initialized) {
+        optics_gfx_platform_mutex_destroy(&d->queue_lock);
+        d->queue_lock_initialized = false;
+    }
+    if (d->dmabuf_acquire_pool_lock_initialized) {
+        optics_gfx_platform_mutex_destroy(&d->dmabuf_acquire_pool_lock);
+        d->dmabuf_acquire_pool_lock_initialized = false;
+    }
+    if (d->pipeline_cache)
+        vkDestroyPipelineCache(d->device, d->pipeline_cache, nullptr);
+    if (d->device)
+        vkDestroyDevice(d->device, nullptr);
+    if (d->debug_messenger) {
+        PFN_vkDestroyDebugUtilsMessengerEXT destroy =
+            (PFN_vkDestroyDebugUtilsMessengerEXT)vkGetInstanceProcAddr(
+                d->instance, "vkDestroyDebugUtilsMessengerEXT");
+        if (destroy)
+            destroy(d->instance, d->debug_messenger, nullptr);
+    }
+    if (d->instance)
+        vkDestroyInstance(d->instance, nullptr);
+    free(d);
+    return r;
+}
+
+optics_gfx_device_feature_flags optics_gfx_device_enabled_features(const optics_gfx_device *d) {
+    return d ? d->enabled_features : 0;
+}
+
+optics_gfx_result optics_gfx_device_get_limits(const optics_gfx_device *d,
+                                               optics_gfx_device_limits *out) {
+    if (!out)
+        return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
+    *out = (optics_gfx_device_limits){};
+    out->struct_size = sizeof(optics_gfx_device_limits);
+    if (!d)
+        return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
+
+    const VkPhysicalDeviceLimits *l = &d->props.limits;
+    out->max_image_dimension1d = l->maxImageDimension1D;
+    out->max_image_dimension2d = l->maxImageDimension2D;
+    out->max_image_dimension3d = l->maxImageDimension3D;
+    out->max_color_attachments = l->maxColorAttachments;
+    out->max_framebuffer_width = l->maxFramebufferWidth;
+    out->max_framebuffer_height = l->maxFramebufferHeight;
+    out->max_frames_in_flight = d->frames_in_flight;
+    out->min_uniform_buffer_offset_alignment = l->minUniformBufferOffsetAlignment;
+    out->min_storage_buffer_offset_alignment = l->minStorageBufferOffsetAlignment;
+    out->buffer_image_granularity = l->bufferImageGranularity;
+    out->timestamp_period_ns = d->props.limits.timestampPeriod;
+    /* Queue-family timestamp support: 0 bits = timestamps unavailable on
+     * the graphics queue (timestampValidBits lives on the QUEUE family,
+     * not on device limits). */
+    out->timestamp_valid_bits = d->graphics_queue_timestamp_valid_bits;
+    return OPTICS_GFX_OK;
+}
+
+bool optics_gfx_device_get_drm_identity(const optics_gfx_device *d,
+                                        optics_gfx_drm_device_identity *out_identity) {
+    if (!out_identity)
+        return false;
+    *out_identity = (optics_gfx_drm_device_identity){};
+    if (!d || (!d->drm_identity.has_primary && !d->drm_identity.has_render))
+        return false;
+    *out_identity = d->drm_identity;
+    return true;
+}
+
+optics_gfx_device *optics_gfx_device_retain(optics_gfx_device *d) {
+    if (d)
+        atomic_fetch_add_explicit(&d->ref_count, 1u, memory_order_relaxed);
+    return d;
+}
+
+void optics_gfx_device_release(optics_gfx_device *d) {
+    if (!d)
+        return;
+    if (atomic_fetch_sub_explicit(&d->ref_count, 1u, memory_order_acq_rel) != 1u)
+        return;
+
+    /* A batch left open still has recorded-but-unsubmitted uploads and
+     * checked-out staging buffers; flush it so resources created inside
+     * it are complete before we tear down. */
+    (void)optics_gfx_uploads_flush(d);
+
+    if (d->device)
+        optics_gfx_vk_wait_idle(d);
+
+    /* The device is idle: every deferred upload fence has signaled, so
+     * draining returns the parked staging buffers to the cache and
+     * destroys the remaining fences/pools/semaphores. Must run before
+     * the staging pool and allocator teardown below. */
+    optics_gfx_vk_upload_pending_drain(d);
+    if (d->upload_pending_lock_initialized) {
+        optics_gfx_platform_mutex_destroy(&d->upload_pending_lock);
+        d->upload_pending_lock_initialized = false;
+    }
+    /* Per-module teardown before we destroy the VkDevice. The effect
+     * module is torn down first because its transient images may
+     * have been registered into the bindless heap and must be
+     * released before the heap goes away. */
+    if (d->effect_state_destroy)
+        d->effect_state_destroy(d);
+    if (d->canvas_state_destroy)
+        d->canvas_state_destroy(d);
+    if (d->module_state_lock_initialized) {
+        optics_gfx_platform_mutex_destroy(&d->module_state_lock);
+        d->module_state_lock_initialized = false;
+    }
+
+    optics_gfx_bindless_handle default_samp_h =
+        atomic_load_explicit(&d->default_sampler_handle, memory_order_relaxed);
+    if (default_samp_h != OPTICS_GFX_BINDLESS_INVALID) {
+        optics_gfx_bindless_release(d, default_samp_h);
+        atomic_store_explicit(&d->default_sampler_handle, OPTICS_GFX_BINDLESS_INVALID,
+                              memory_order_relaxed);
+    }
+    if (d->default_sampler) {
+        vkDestroySampler(d->device, d->default_sampler, nullptr);
+        d->default_sampler = VK_NULL_HANDLE;
+    }
+    optics_gfx_dmabuf_acquire_semaphore_pool_destroy(d);
+    /* The device is idle: every parked zombie is safe to destroy. This
+     * must run before the bindless heap and allocator go away — zombie
+     * teardown returns slots to the heap and memory to the allocator. */
+    optics_gfx_device_drain_retire(d);
+    if (d->retire_lock_initialized) {
+        optics_gfx_platform_mutex_destroy(&d->retire_lock);
+        d->retire_lock_initialized = false;
+    }
+    /* Idle staging entries still hold allocator memory: return it before
+     * the allocator (and its leak warning) goes away. The device is idle,
+     * and no thread can hold a checked-out entry once the refcount hit
+     * zero, so no lock is needed here. */
+    optics_gfx_vk_staging_pool_destroy(d);
+    if (d->staging_lock_initialized) {
+        optics_gfx_platform_mutex_destroy(&d->staging_lock);
+        d->staging_lock_initialized = false;
+    }
+    /* flush above destroyed the batch's pool and returned its staging
+     * buffers; only the lock remains. */
+    if (d->upload_lock_initialized) {
+        optics_gfx_platform_mutex_destroy(&d->upload_lock);
+        d->upload_lock_initialized = false;
+    }
+    optics_gfx_bindless_heap_destroy(d);
+    optics_gfx_vk_allocator_destroy(d);
+    flush_pipeline_cache(d);
+    if (d->pipeline_cache_lock_initialized) {
+        optics_gfx_platform_mutex_destroy(&d->pipeline_cache_lock);
+        d->pipeline_cache_lock_initialized = false;
+    }
+    /* ADR-0129 decision 3: drain reporting runs here — after the retire
+     * queue has drained (so in-flight objects are not misreported as
+     * leaked) and before vkDestroyDevice (after which the object names
+     * injected through VK_EXT_debug_utils are unrecoverable). */
+    optics_gfx_observe_report_emit(d, OPTICS_GFX_SCOPE_DEVICE);
+    optics_gfx_observe_report_emit(d, OPTICS_GFX_SCOPE_CONTEXT);
+    optics_gfx_observe_destroy(d);
+    if (d->image_version_lock_initialized) {
+        optics_gfx_platform_mutex_destroy(&d->image_version_lock);
+        d->image_version_lock_initialized = false;
+    }
+    if (d->queue_lock_initialized) {
+        optics_gfx_platform_mutex_destroy(&d->queue_lock);
+        d->queue_lock_initialized = false;
+    }
+    if (d->dmabuf_acquire_pool_lock_initialized) {
+        optics_gfx_platform_mutex_destroy(&d->dmabuf_acquire_pool_lock);
+        d->dmabuf_acquire_pool_lock_initialized = false;
+    }
+    if (d->pipeline_cache)
+        vkDestroyPipelineCache(d->device, d->pipeline_cache, nullptr);
+    if (d->device)
+        vkDestroyDevice(d->device, nullptr);
+
+    if (d->debug_messenger) {
+        PFN_vkDestroyDebugUtilsMessengerEXT destroy =
+            (PFN_vkDestroyDebugUtilsMessengerEXT)vkGetInstanceProcAddr(
+                d->instance, "vkDestroyDebugUtilsMessengerEXT");
+        if (destroy)
+            destroy(d->instance, d->debug_messenger, nullptr);
+    }
+    if (d->instance)
+        vkDestroyInstance(d->instance, nullptr);
+    free(d);
+}
+
+/* Name an object from the ledger (ADR-0132). Renders into device-owned
+ * storage and calls the driver in one step, so no caller can hand the driver a
+ * stack buffer: the previous shape was
+ *
+ *     char name[80];
+ *     snprintf(name, sizeof(name), ...);
+ *     flux_vk_set_name(d, type, handle, name);   // name dies on return
+ *
+ * which relies on the driver copying the string. That is not a contract.
+ */
+void optics_gfx_vk_set_name_from_ledger(optics_gfx_device *d, VkObjectType type, uint64_t handle,
+                                        optics_gfx_scope scope, const char *kind,
+                                        const char *owner) {
+    const char *name = optics_gfx_observe_name_object(d, scope, kind, owner);
+    if (!name)
+        return;
+    optics_gfx_vk_set_name(d, type, handle, name);
+}
+
+/* Command-buffer section labels (ADR-0133).
+ *
+ * A label is what turns "this draw was slow" into "the backdrop material's
+ * second plate was slow". It is the only diagnostic here that annotates the
+ * *recording*, not the object, so it covers passes the ledger cannot see.
+ *
+ * Cost when off: one branch. Cost when on: one driver call per pass, which is
+ * negligible against the pass itself. The CPU canvas backend has no command
+ * buffer and never reaches these. */
+void optics_gfx_vk_cmd_begin_label(optics_gfx_device *d, VkCommandBuffer cmd, const char *label) {
+    if (!d || cmd == VK_NULL_HANDLE || !label)
+        return;
+    if ((d->observe.capabilities & (uint32_t)OPTICS_GFX_OBSERVE_PASS_LABELS) == 0)
+        return;
+    if (!d->pfn_cmd_begin_label || !d->has_debug_utils)
+        return;
+    VkDebugUtilsLabelEXT li = {
+        .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT,
+        .pLabelName = label,
+        .color = {0.25f, 0.5f, 1.0f, 1.0f},
+    };
+    d->pfn_cmd_begin_label(cmd, &li);
+    atomic_fetch_add_explicit(&d->labels_emitted, 1u, memory_order_relaxed);
+}
+
+uint64_t optics_gfx_device_labels_emitted(const optics_gfx_device *d) {
+    return d ? (uint64_t)atomic_load_explicit(&d->labels_emitted, memory_order_relaxed) : 0u;
+}
+
+void optics_gfx_vk_cmd_end_label(optics_gfx_device *d, VkCommandBuffer cmd) {
+    if (!d || cmd == VK_NULL_HANDLE)
+        return;
+    if ((d->observe.capabilities & (uint32_t)OPTICS_GFX_OBSERVE_PASS_LABELS) == 0)
+        return;
+    if (!d->pfn_cmd_end_label || !d->has_debug_utils)
+        return;
+    d->pfn_cmd_end_label(cmd);
+}
+
+void optics_gfx_vk_set_name(optics_gfx_device *d, VkObjectType type, uint64_t handle,
+                            const char *name) {
+    if (!d || !name || handle == 0 || !d->pfn_set_name)
+        return;
+    VkDebugUtilsObjectNameInfoEXT ni = {
+        .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT,
+        .objectType = type,
+        .objectHandle = handle,
+        .pObjectName = name,
+    };
+    d->pfn_set_name(d->device, &ni);
+}
+
+void optics_gfx_vk_wait_idle(optics_gfx_device *d) {
+    /* vkDeviceWaitIdle is host access to every queue, so the Vulkan
+     * threading rules require it to be externally synchronised with
+     * vkQueueSubmit2. queue_lock already serialises all submits; hold it
+     * across the wait. Without this, a wait racing a concurrent submit
+     * faults inside the driver (observed as an ANV double-free in
+     * anv_async_submit_fini). The lock is released before touching the
+     * retire watermark so no queue_lock -> retire_lock ordering arises. */
+    optics_gfx_platform_mutex_lock(&d->queue_lock);
+    vkDeviceWaitIdle(d->device);
+    optics_gfx_platform_mutex_unlock(&d->queue_lock);
+}
+
+void optics_gfx_device_wait_idle(const optics_gfx_device *d) {
+    if (!d)
+        return;
+    if (d->device)
+        optics_gfx_vk_wait_idle((optics_gfx_device *)d);
+    /* The whole device is idle, so every graphics batch submitted so far
+     * has completed. The public signature is const; the retire watermark is
+     * bookkeeping, not observable device state. */
+    optics_gfx_device *mut = (optics_gfx_device *)d;
+    optics_gfx_vk_note_graphics_completed(
+        mut, atomic_load_explicit(&mut->submit_serial, memory_order_acquire));
+    /* An idle device proves every parked upload fence has signaled too.
+     * Recycle those entries here for the same reason as the retire FIFO
+     * below: wait_idle is the host's "everything I released is gone"
+     * barrier, and without this they sit on the pending-upload list until
+     * the next upload happens to sweep them or the device is destroyed.
+     * Staging buffers return to the reuse cache by design, so the cache
+     * itself remains live. */
+    optics_gfx_vk_upload_pending_drain(mut);
+    /* An idle device means every parked resource is provably unreferenced,
+     * so drain the retire FIFO here rather than leaving it to the async
+     * sweep. Hosts and tests use this call as the "everything I released is
+     * actually gone" barrier, and before this it was not one: the objects
+     * sat on the FIFO until the next submission advanced the watermark.
+     * That gap is exactly what made leak assertions on live counts
+     * unreliable, and why leak tests previously had to submit empty frames
+     * or accept tolerances (see the note in test_text_atlas_leak.c). */
+    optics_gfx_device_drain_retire(mut);
+}
+
+uint64_t optics_gfx_vk_note_graphics_submission(optics_gfx_device *d) {
+    /* Callers hold queue_lock around vkQueueSubmit2, so serials are
+     * assigned in true queue order. */
+    return atomic_fetch_add_explicit(&d->submit_serial, 1u, memory_order_acq_rel) + 1u;
+}
+
+void optics_gfx_vk_note_graphics_completed(optics_gfx_device *d, uint64_t serial) {
+    uint64_t completed = atomic_load_explicit(&d->completed_serial, memory_order_acquire);
+    while (completed < serial &&
+           !atomic_compare_exchange_weak_explicit(&d->completed_serial, &completed, serial,
+                                                  memory_order_acq_rel, memory_order_acquire)) {
+    }
+    optics_gfx_device_sweep_retire(d);
+}
+
+/* True while any surface on this device is between begin_frame and submit.
+ *
+ * A release that happens during recording must assume the recording frame may
+ * already reference the resource, so its retire tag has to cover that frame's
+ * submission. With no recording frame nothing can still reference it. */
+static bool device_has_recording_frame(const optics_gfx_device *d) {
+    return atomic_load_explicit(&d->recording_frames, memory_order_acquire) != 0u;
+}
+
+/* Tag `z` one past the current submission serial and append it to the
+ * retire FIFO. Tagging under the lock keeps list order non-decreasing
+ * even when releases race on different threads. Batches submitted before
+ * this release carry serials <= submit_serial; a frame that is still
+ * recording (and may have referenced the resource earlier this frame)
+ * gets the *next* serial, so tag one past the counter to cover it. Later
+ * batches cannot reference the resource — its refcount reached zero, so
+ * no live reference remains to be recorded.
+ *
+ * The `+ 1` covers a recording frame only. A device with no frame in
+ * recording state has nothing that could still reference the resource, so the
+ * tag is the current serial and the release becomes reclaimable as soon as every
+ * submission has completed — which is exactly what flux_device_wait_idle
+ * establishes. Without that distinction a host that released its last material
+ * and waited for idle kept the memory until it submitted another (empty) frame,
+ * making wait_idle an unreliable reclamation point. See
+ * flux_device_reclaim_retired.
+ *
+ * Backpressure: the FIFO holds real GPU memory alive, so it has a hard
+ * entry bound (FLUX_RETIRE_MAX_PENDING). The bound is only reachable
+ * when the watermark is frozen — the host stopped submitting frames (or
+ * no fence ever completes) while resources keep being released. Passing
+ * the bound forces a full drain: wait for the queue, advance the
+ * watermark, destroy everything. That stall is deliberate and strictly
+ * better than the alternative (unbounded GPU memory growth while the
+ * host is idle), and the normal path never comes near it: with frames
+ * in flight the watermark advances every begin_frame and the queue
+ * holds at most a few frames' worth of releases. */
+static void zombie_park(optics_gfx_device *d, optics_gfx_retire_zombie *z) {
+    uint32_t pending;
+    z->next = nullptr;
+    bool recording = device_has_recording_frame(d);
+    optics_gfx_platform_mutex_lock(&d->retire_lock);
+    z->retire_after =
+        atomic_load_explicit(&d->submit_serial, memory_order_acquire) + (recording ? 1u : 0u);
+    *d->retire_tail = z;
+    d->retire_tail = &z->next;
+    d->retire_pending++;
+    pending = d->retire_pending;
+    optics_gfx_platform_mutex_unlock(&d->retire_lock);
+
+    if (pending >= OPTICS_GFX_RETIRE_MAX_PENDING) {
+        /* Keep submissions excluded through the sweep. A plain
+         * flux_device_wait_idle() only advances completed_serial to the
+         * latest submitted batch, while zombies are deliberately tagged one
+         * serial beyond it to cover a frame that is still recording. At the
+         * hard bound we take the documented slow path: no resource whose
+         * refcount reached zero may remain referenced by a recording frame,
+         * so after the device is idle the whole parked set is safe to drain.
+         * zombie_park releases retire_lock before reaching this point, so the
+         * queue_lock -> retire_lock order below has no inverse in this path. */
+        optics_gfx_platform_mutex_lock(&d->queue_lock);
+        vkDeviceWaitIdle(d->device);
+        optics_gfx_vk_note_graphics_completed(
+            d, atomic_load_explicit(&d->submit_serial, memory_order_acquire));
+        optics_gfx_device_drain_retire(d);
+        optics_gfx_platform_mutex_unlock(&d->queue_lock);
+    }
+}
+
+void optics_gfx_vk_retire_pipeline(optics_gfx_device *d, VkPipeline pipeline) {
+    if (!d || pipeline == VK_NULL_HANDLE)
+        return;
+    optics_gfx_retire_zombie *z = optics_gfx_internal_alloc(d, sizeof(*z));
+    if (!z) {
+        /* OOM fallback mirrors the image path: block, then destroy. */
+        optics_gfx_vk_wait_idle(d);
+        vkDestroyPipeline(d->device, pipeline, nullptr);
+        return;
+    }
+    memset(z, 0, sizeof *z);
+    z->pipeline = pipeline;
+    z->bindless = OPTICS_GFX_BINDLESS_INVALID;
+    z->bindless_storage = OPTICS_GFX_BINDLESS_INVALID;
+    zombie_park(d, z);
+}
+
+void optics_gfx_device_retire_image(optics_gfx_device *d, VkImageView view, VkImage image,
+                                    const optics_gfx_vk_alloc *alloc,
+                                    VkDeviceMemory imported_memory, VkDeviceSize imported_size,
+                                    uint32_t bindless, uint32_t bindless_storage) {
+    optics_gfx_retire_zombie *z = optics_gfx_internal_alloc(d, sizeof(*z));
+    if (!z) {
+        /* Nowhere safe to park the pieces: the queue may still reference
+         * them, but leaking the wrapper must not leak the GPU objects.
+         * Blocking here is the lesser evil and only reachable on OOM. */
+        optics_gfx_vk_wait_idle(d);
+        if (bindless != OPTICS_GFX_BINDLESS_INVALID)
+            optics_gfx_bindless_release(d, bindless);
+        if (bindless_storage != OPTICS_GFX_BINDLESS_INVALID)
+            optics_gfx_bindless_release(d, bindless_storage);
+        if (view)
+            vkDestroyImageView(d->device, view, nullptr);
+        if (image) {
+            vkDestroyImage(d->device, image, nullptr);
+            OPTICS_GFX_OBSERVE_RELEASE(d, OPTICS_GFX_SCOPE_DEVICE, "vk_image", "flux/core", 0);
+        }
+        if (alloc && alloc->memory) {
+            optics_gfx_vk_alloc copy = *alloc;
+            optics_gfx_vk_deallocate(d, &copy); /* releases its own ledger row */
+        }
+        if (imported_memory) {
+            vkFreeMemory(d->device, imported_memory, nullptr);
+            if (imported_size)
+                optics_gfx_vk_allocator_unnote_external(d, imported_size);
+        }
+        return;
+    }
+    z->view = view;
+    z->image = image;
+    z->alloc = alloc ? *alloc : (optics_gfx_vk_alloc){};
+    z->imported_memory = imported_memory;
+    z->imported_size = imported_size;
+    z->bindless = bindless;
+    z->bindless_storage = bindless_storage;
+    zombie_park(d, z);
+}
+
+void optics_gfx_device_retire_buffer(optics_gfx_device *d, VkBuffer buffer,
+                                     const optics_gfx_vk_alloc *alloc) {
+    optics_gfx_retire_zombie *z = optics_gfx_internal_alloc(d, sizeof(*z));
+    if (!z) {
+        /* Same OOM trade-off as flux_device_retire_image: block until
+         * the queue is idle rather than leak the GPU objects. */
+        optics_gfx_vk_wait_idle(d);
+        if (buffer)
+            vkDestroyBuffer(d->device, buffer, nullptr);
+        if (alloc && alloc->memory) {
+            optics_gfx_vk_alloc copy = *alloc;
+            optics_gfx_vk_deallocate(d, &copy);
+        }
+        return;
+    }
+    z->buffer = buffer;
+    z->alloc = alloc ? *alloc : (optics_gfx_vk_alloc){};
+    z->bindless = OPTICS_GFX_BINDLESS_INVALID;
+    z->bindless_storage = OPTICS_GFX_BINDLESS_INVALID;
+    zombie_park(d, z);
+}
+
+void optics_gfx_device_retire_sampler(optics_gfx_device *d, VkSampler sampler, uint32_t bindless) {
+    optics_gfx_retire_zombie *z = optics_gfx_internal_alloc(d, sizeof(*z));
+    if (!z) {
+        /* Same OOM trade-off as flux_device_retire_image: block until
+         * the queue is idle rather than leak the GPU objects. */
+        optics_gfx_vk_wait_idle(d);
+        if (bindless != OPTICS_GFX_BINDLESS_INVALID)
+            optics_gfx_bindless_release(d, bindless);
+        if (sampler) {
+            vkDestroySampler(d->device, sampler, nullptr);
+            OPTICS_GFX_OBSERVE_RELEASE(d, OPTICS_GFX_SCOPE_DEVICE, "vk_sampler", "flux/core", 0);
+        }
+        return;
+    }
+    z->sampler = sampler;
+    z->bindless = bindless;
+    z->bindless_storage = OPTICS_GFX_BINDLESS_INVALID;
+    zombie_park(d, z);
+}
+
+static void zombie_destroy(optics_gfx_device *d, optics_gfx_retire_zombie *z) {
+    /* The ledger is settled here, not at the release call: a retired object
+     * is no longer owned by the resource but is still allocated, so counting
+     * it out at release time would let the ledger claim the device drained
+     * while the GPU memory is provably still held. That is the difference
+     * between a leak report and a lie (ADR-0129 decision 3). */
+    if (z->bindless != OPTICS_GFX_BINDLESS_INVALID)
+        optics_gfx_bindless_release(d, z->bindless);
+    if (z->bindless_storage != OPTICS_GFX_BINDLESS_INVALID)
+        optics_gfx_bindless_release(d, z->bindless_storage);
+    if (z->view)
+        vkDestroyImageView(d->device, z->view, nullptr);
+    if (z->image)
+        vkDestroyImage(d->device, z->image, nullptr);
+    if (z->buffer)
+        vkDestroyBuffer(d->device, z->buffer, nullptr);
+    if (z->sampler)
+        vkDestroySampler(d->device, z->sampler, nullptr);
+    if (z->pipeline)
+        vkDestroyPipeline(d->device, z->pipeline, nullptr);
+    if (z->alloc.memory)
+        optics_gfx_vk_deallocate(d, &z->alloc); /* releases its own ledger row */
+    if (z->imported_memory) {
+        vkFreeMemory(d->device, z->imported_memory, nullptr);
+        if (z->imported_size)
+            optics_gfx_vk_allocator_unnote_external(d, z->imported_size);
+    }
+    optics_gfx_internal_free(d, z);
+}
+
+static void sweep_retire_below(optics_gfx_device *d, uint64_t completed) {
+    optics_gfx_platform_mutex_lock(&d->retire_lock);
+    optics_gfx_retire_zombie *last_ready = nullptr;
+    for (optics_gfx_retire_zombie *z = d->retire_head; z && z->retire_after <= completed;
+         z = z->next) {
+        last_ready = z;
+        d->retire_pending--;
+    }
+    optics_gfx_retire_zombie *ready = nullptr;
+    if (last_ready) {
+        ready = d->retire_head;
+        d->retire_head = last_ready->next;
+        last_ready->next = nullptr;
+        if (!d->retire_head)
+            d->retire_tail = &d->retire_head;
+    }
+    optics_gfx_platform_mutex_unlock(&d->retire_lock);
+    while (ready) {
+        optics_gfx_retire_zombie *next = ready->next;
+        zombie_destroy(d, ready);
+        ready = next;
+    }
+}
+
+void optics_gfx_device_sweep_retire(optics_gfx_device *d) {
+    sweep_retire_below(d, atomic_load_explicit(&d->completed_serial, memory_order_acquire));
+}
+
+void optics_gfx_device_drain_retire(optics_gfx_device *d) {
+    sweep_retire_below(d, UINT64_MAX);
+}
+
+/* Device-owned host allocation (ADR-0135).
+ *
+ * The ownership pair is what makes adoption safe: a peer library routing its
+ * memory through here is attributed to itself rather than to flux. Counting
+ * still happens at one chokepoint, but with the caller's (owner, kind, scope)
+ * instead of a hardcoded flux pair.
+ *
+ * flux_internal_alloc stays the funnel for flux's own objects and keeps
+ * reporting owner="flux/core"; this function deliberately does not use it,
+ * because that would re-attribute the caller's memory to flux. */
+optics_gfx_result optics_gfx_device_alloc(optics_gfx_device *d,
+                                          const optics_gfx_device_alloc_opts *opts, void **out) {
+    if (!out)
+        return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
+    *out = nullptr;
+    if (!opts || opts->type != OPTICS_GFX_TYPE_DEVICE_ALLOC_OPTS) {
+        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT, "flux_device_alloc_opts.type mismatch");
+        return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
+    }
+    /* Required, not defaulted: an allocation with no owner is exactly the
+     * unattributable row this ADR exists to remove. */
+    if (!opts->owner || !opts->kind) {
+        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT,
+                        "flux_device_alloc requires owner and kind");
+        return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
+    }
+    if ((uint32_t)opts->scope >= (uint32_t)OPTICS_GFX_SCOPE_COUNT) {
+        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT, "flux_device_alloc: bad scope");
+        return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
+    }
+    if (opts->bytes == 0) {
+        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT, "flux_device_alloc: zero bytes");
+        return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
+    }
+
+    void *p;
+    if (d && d->allocator.alloc) {
+        p = d->allocator.alloc(opts->bytes, d->allocator.user);
+        if (p)
+            memset(p, 0, opts->bytes); /* contract: returned memory is zeroed */
+    } else {
+        p = calloc(1, opts->bytes);
+    }
+    if (!p) {
+        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_OUT_OF_MEMORY, "host allocation failed");
+        return OPTICS_GFX_ERROR_OUT_OF_MEMORY;
+    }
+    OPTICS_GFX_OBSERVE_ACQUIRE(d, opts->scope, OPTICS_GFX_LIFETIME_CONTEXT, opts->kind, opts->owner,
+                               0, OPTICS_GFX_SITE_NONE);
+    *out = p;
+    return OPTICS_GFX_OK;
+}
+
+void optics_gfx_device_free(optics_gfx_device *d, const optics_gfx_device_free_opts *opts) {
+    if (!opts || opts->type != OPTICS_GFX_TYPE_DEVICE_FREE_OPTS || !opts->ptr)
+        return;
+    OPTICS_GFX_OBSERVE_RELEASE(d, opts->scope, opts->kind, opts->owner, 0);
+    if (d && d->allocator.free)
+        d->allocator.free(opts->ptr, d->allocator.user);
+    else
+        free(opts->ptr);
+}
+
+void optics_gfx_device_memory_budget(const optics_gfx_device *d, optics_gfx_memory_budget *out) {
+    if (!out)
+        return;
+    memset(out, 0, sizeof(*out));
+    if (!d || !d->device)
+        return;
+
+    out->heap_count = d->mem_props.memoryHeapCount;
+    if (out->heap_count > OPTICS_GFX_MAX_MEMORY_HEAPS)
+        out->heap_count = OPTICS_GFX_MAX_MEMORY_HEAPS;
+
+    for (uint32_t i = 0; i < out->heap_count; ++i) {
+        out->heap_bytes_total[i] = d->mem_props.memoryHeaps[i].size;
+    }
+
+    out->has_budget_extension = d->mem_allocator.has_memory_budget;
+    if (!d->mem_allocator.has_memory_budget)
+        return;
+
+    VkPhysicalDeviceMemoryBudgetPropertiesEXT budget_props = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT,
+    };
+    VkPhysicalDeviceMemoryProperties2 mem_props2 = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2,
+        .pNext = &budget_props,
+    };
+    vkGetPhysicalDeviceMemoryProperties2(d->physical_device, &mem_props2);
+
+    for (uint32_t i = 0; i < out->heap_count && i < VK_MAX_MEMORY_HEAPS; ++i) {
+        out->heap_bytes_used[i] = budget_props.heapUsage[i];
+        out->heap_budget[i] = budget_props.heapBudget[i];
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/*  Raw Vulkan accessors (vulkan.h)                                   */
+/* ------------------------------------------------------------------ */
+
+VkInstance optics_gfx_device_vk_instance(const optics_gfx_device *d) {
+    return d ? d->instance : VK_NULL_HANDLE;
+}
+VkPhysicalDevice optics_gfx_device_vk_physical_device(const optics_gfx_device *d) {
+    return d ? d->physical_device : VK_NULL_HANDLE;
+}
+VkDevice optics_gfx_device_vk_device(const optics_gfx_device *d) {
+    return d ? d->device : VK_NULL_HANDLE;
+}
+VkQueue optics_gfx_device_vk_graphics_queue(const optics_gfx_device *d) {
+    return d ? d->graphics_queue : VK_NULL_HANDLE;
+}
+uint32_t optics_gfx_device_vk_graphics_family(const optics_gfx_device *d) {
+    return d ? d->graphics_family : 0;
+}
+VkQueue optics_gfx_device_vk_transfer_queue(const optics_gfx_device *d) {
+    return d ? d->transfer_queue : VK_NULL_HANDLE;
+}
+uint32_t optics_gfx_device_vk_transfer_family(const optics_gfx_device *d) {
+    return d ? d->transfer_family : 0;
+}
+bool optics_gfx_device_supports_large_points(const optics_gfx_device *d) {
+    return d && d->large_points_enabled;
+}
+VkPipelineCache optics_gfx_device_vk_pipeline_cache(const optics_gfx_device *d) {
+    return d ? d->pipeline_cache : VK_NULL_HANDLE;
+}
+void optics_gfx_device_vk_pipeline_cache_lock(optics_gfx_device *d) {
+    if (d && d->pipeline_cache_lock_initialized)
+        optics_gfx_platform_mutex_lock(&d->pipeline_cache_lock);
+}
+void optics_gfx_device_vk_pipeline_cache_unlock(optics_gfx_device *d) {
+    if (d && d->pipeline_cache_lock_initialized)
+        optics_gfx_platform_mutex_unlock(&d->pipeline_cache_lock);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Bindless descriptor heap                                          */
+/*                                                                    */
+/*  Single VkDescriptorSet at slot 0 with four bindings:              */
+/*    0  SAMPLED_IMAGE   (default 16 384 slots, capped by device)     */
+/*    1  STORAGE_IMAGE   (default  4 096)                             */
+/*    2  SAMPLER         (default    256)                             */
+/*    3  STORAGE_BUFFER  (default  4 096)                             */
+/*  All bindings carry UPDATE_AFTER_BIND + PARTIALLY_BOUND +          */
+/*  VARIABLE_DESCRIPTOR_COUNT, so registration after draw recording   */
+/*  is legal and unused slots cost nothing.                           */
+/*                                                                    */
+/*  Slot allocator: per-binding free-list stack populated with        */
+/*  0..capacity-1 at init. Registration pops; release pushes.         */
+/* ------------------------------------------------------------------ */
+
+static inline bool slot_is_live(const optics_gfx_bindless_pool *p, uint32_t slot) {
+    return (p->allocated[slot >> 6] >> (slot & 63u)) & 1u;
+}
+
+static inline void slot_mark(optics_gfx_bindless_pool *p, uint32_t slot, bool live) {
+    uint64_t mask = 1ull << (slot & 63u);
+    if (live) {
+        p->allocated[slot >> 6] |= mask;
+        p->live++;
+    } else {
+        p->allocated[slot >> 6] &= ~mask;
+        p->live--;
+    }
+}
+
+static uint32_t slot_alloc(optics_gfx_bindless_pool *p) {
+    if (p->free_top == 0)
+        return OPTICS_GFX_BINDLESS_INVALID;
+    uint32_t slot = p->free_stack[--p->free_top];
+    /* An allocated bit can only be set here, and slot_free clears it, so a
+     * set bit means internal corruption of the free stack itself (not a
+     * caller double release). Refuse rather than hand out an alias. */
+    if (slot_is_live(p, slot))
+        return OPTICS_GFX_BINDLESS_INVALID;
+    slot_mark(p, slot, true);
+    return slot;
+}
+
+/* Returns false when `slot` was not live, i.e. the caller released a handle
+ * twice or released a handle it never owned. The free stack is left
+ * untouched: pushing a live-but-already-free slot is what silently aliased
+ * two resources (ADR-0131). */
+static bool slot_free(optics_gfx_bindless_pool *p, uint32_t slot) {
+    if (slot >= p->capacity)
+        return false;
+    if (!slot_is_live(p, slot))
+        return false;
+    if (p->free_top >= p->capacity)
+        return false;
+    slot_mark(p, slot, false);
+    p->free_stack[p->free_top++] = slot;
+    return true;
+}
+
+static optics_gfx_result init_pool(optics_gfx_bindless_pool *p, uint32_t capacity) {
+    p->capacity = capacity;
+    p->free_stack = calloc(capacity, sizeof(uint32_t));
+    if (!p->free_stack)
+        return OPTICS_GFX_ERROR_OUT_OF_MEMORY;
+    /* ceil(capacity / 64) words; calloc zeroes them, so every slot starts
+     * free. */
+    p->allocated = calloc((size_t)(capacity + 63u) / 64u, sizeof(uint64_t));
+    if (!p->allocated) {
+        free(p->free_stack);
+        p->free_stack = nullptr;
+        return OPTICS_GFX_ERROR_OUT_OF_MEMORY;
+    }
+    /* Push 0..capacity-1 so slot 0 is allocated first. */
+    for (uint32_t i = 0; i < capacity; ++i)
+        p->free_stack[capacity - 1 - i] = i;
+    p->free_top = capacity;
+    p->live = 0;
+    return OPTICS_GFX_OK;
+}
+
+static uint32_t cap_for_binding(optics_gfx_device *d, uint32_t binding, uint32_t want) {
+    const VkPhysicalDeviceDescriptorIndexingProperties *di = &d->descriptor_indexing_props;
+    uint32_t hw = 0;
+    switch (binding) {
+    case OPTICS_GFX_BINDLESS_BIND_SAMPLED_IMAGE:
+        hw = di->maxPerStageDescriptorUpdateAfterBindSampledImages;
+        break;
+    case OPTICS_GFX_BINDLESS_BIND_STORAGE_IMAGE:
+        hw = di->maxPerStageDescriptorUpdateAfterBindStorageImages;
+        break;
+    case OPTICS_GFX_BINDLESS_BIND_SAMPLER:
+        hw = di->maxPerStageDescriptorUpdateAfterBindSamplers;
+        break;
+    case OPTICS_GFX_BINDLESS_BIND_STORAGE_BUFFER:
+        hw = di->maxPerStageDescriptorUpdateAfterBindStorageBuffers;
+        break;
+    }
+    if (hw == 0)
+        hw = want;
+    return want < hw ? want : hw;
+}
+
+/* Handle layout: top 4 bits = binding index (0..15), low 28 bits = slot index. */
+#define OPTICS_GFX_BL_BIND_SHIFT 28u
+#define OPTICS_GFX_BL_SLOT_MASK ((1u << OPTICS_GFX_BL_BIND_SHIFT) - 1u)
+
+static optics_gfx_bindless_handle pack_handle(uint32_t binding, uint32_t slot) {
+    if (slot > OPTICS_GFX_BL_SLOT_MASK)
+        return OPTICS_GFX_BINDLESS_INVALID;
+    return (binding << OPTICS_GFX_BL_BIND_SHIFT) | slot;
+}
+static uint32_t handle_binding(optics_gfx_bindless_handle h) {
+    return h >> OPTICS_GFX_BL_BIND_SHIFT;
+}
+static uint32_t handle_slot(optics_gfx_bindless_handle h) {
+    return h & OPTICS_GFX_BL_SLOT_MASK;
+}
+
+optics_gfx_result optics_gfx_bindless_heap_init(optics_gfx_device *d) {
+    optics_gfx_bindless_heap *h = &d->bindless;
+
+    const uint32_t defaults[OPTICS_GFX_BINDLESS_BINDINGS] = {
+        [OPTICS_GFX_BINDLESS_BIND_SAMPLED_IMAGE] = 16384,
+        [OPTICS_GFX_BINDLESS_BIND_STORAGE_IMAGE] = 4096,
+        [OPTICS_GFX_BINDLESS_BIND_SAMPLER] = 256,
+        [OPTICS_GFX_BINDLESS_BIND_STORAGE_BUFFER] = 4096,
+    };
+    uint32_t caps[OPTICS_GFX_BINDLESS_BINDINGS];
+    for (uint32_t i = 0; i < OPTICS_GFX_BINDLESS_BINDINGS; ++i)
+        caps[i] = cap_for_binding(d, i, defaults[i]);
+
+    VkDescriptorType types[OPTICS_GFX_BINDLESS_BINDINGS] = {
+        [OPTICS_GFX_BINDLESS_BIND_SAMPLED_IMAGE] = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+        [OPTICS_GFX_BINDLESS_BIND_STORAGE_IMAGE] = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+        [OPTICS_GFX_BINDLESS_BIND_SAMPLER] = VK_DESCRIPTOR_TYPE_SAMPLER,
+        [OPTICS_GFX_BINDLESS_BIND_STORAGE_BUFFER] = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+    };
+
+    VkDescriptorSetLayoutBinding bindings[OPTICS_GFX_BINDLESS_BINDINGS];
+    VkDescriptorBindingFlags flags[OPTICS_GFX_BINDLESS_BINDINGS];
+    VkDescriptorPoolSize pool_sz[OPTICS_GFX_BINDLESS_BINDINGS];
+    for (uint32_t i = 0; i < OPTICS_GFX_BINDLESS_BINDINGS; ++i) {
+        bindings[i] = (VkDescriptorSetLayoutBinding){
+            .binding = i,
+            .descriptorType = types[i],
+            .descriptorCount = caps[i],
+            .stageFlags = VK_SHADER_STAGE_ALL,
+        };
+        flags[i] = VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT |
+                   VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT |
+                   VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT;
+        pool_sz[i] = (VkDescriptorPoolSize){.type = types[i], .descriptorCount = caps[i]};
+    }
+    /* Only the last binding may carry VARIABLE_DESCRIPTOR_COUNT;
+     * leaving it off all bindings still works — the set has fixed
+     * capacity that we allocate from. */
+
+    VkDescriptorSetLayoutBindingFlagsCreateInfo flags_ci = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO,
+        .bindingCount = OPTICS_GFX_BINDLESS_BINDINGS,
+        .pBindingFlags = flags,
+    };
+    VkDescriptorSetLayoutCreateInfo dsli = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+        .pNext = &flags_ci,
+        .flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT,
+        .bindingCount = OPTICS_GFX_BINDLESS_BINDINGS,
+        .pBindings = bindings,
+    };
+    VkResult vr = vkCreateDescriptorSetLayout(d->device, &dsli, nullptr, &h->layout);
+    if (vr != VK_SUCCESS) {
+        OPTICS_GFX_FAIL_VK(OPTICS_GFX_ERROR_BACKEND_FAILURE, "bindless DescriptorSetLayout failed",
+                           vr);
+        return OPTICS_GFX_ERROR_BACKEND_FAILURE;
+    }
+
+    VkDescriptorPoolCreateInfo dpci = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        .flags = VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT,
+        .maxSets = 1,
+        .poolSizeCount = OPTICS_GFX_BINDLESS_BINDINGS,
+        .pPoolSizes = pool_sz,
+    };
+    vr = vkCreateDescriptorPool(d->device, &dpci, nullptr, &h->pool);
+    if (vr != VK_SUCCESS) {
+        OPTICS_GFX_FAIL_VK(OPTICS_GFX_ERROR_BACKEND_FAILURE, "bindless DescriptorPool failed", vr);
+        return OPTICS_GFX_ERROR_BACKEND_FAILURE;
+    }
+
+    VkDescriptorSetAllocateInfo dsai = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+        .descriptorPool = h->pool,
+        .descriptorSetCount = 1,
+        .pSetLayouts = &h->layout,
+    };
+    vr = vkAllocateDescriptorSets(d->device, &dsai, &h->set);
+    if (vr != VK_SUCCESS) {
+        OPTICS_GFX_FAIL_VK(OPTICS_GFX_ERROR_BACKEND_FAILURE,
+                           "bindless AllocateDescriptorSets failed", vr);
+        return OPTICS_GFX_ERROR_BACKEND_FAILURE;
+    }
+
+    for (uint32_t i = 0; i < OPTICS_GFX_BINDLESS_BINDINGS; ++i) {
+        optics_gfx_result r = init_pool(&h->pools[i], caps[i]);
+        if (r != OPTICS_GFX_OK)
+            return r;
+    }
+    optics_gfx_platform_mutex_init(&h->lock);
+    h->lock_initialized = true;
+    return OPTICS_GFX_OK;
+}
+
+void optics_gfx_bindless_heap_destroy(optics_gfx_device *d) {
+    optics_gfx_bindless_heap *h = &d->bindless;
+    if (!d->device)
+        return;
+    if (h->lock_initialized)
+        optics_gfx_platform_mutex_destroy(&h->lock);
+    if (h->pool)
+        vkDestroyDescriptorPool(d->device, h->pool, nullptr);
+    if (h->layout)
+        vkDestroyDescriptorSetLayout(d->device, h->layout, nullptr);
+    for (uint32_t i = 0; i < OPTICS_GFX_BINDLESS_BINDINGS; ++i) {
+        free(h->pools[i].free_stack);
+        free(h->pools[i].allocated);
+    }
+    memset(h, 0, sizeof(*h));
+}
+
+static optics_gfx_result write_image(optics_gfx_device *d, uint32_t binding, VkImageView view,
+                                     VkImageLayout layout, VkSampler sampler,
+                                     optics_gfx_bindless_handle *out) {
+    if (!d || !out)
+        return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
+    /* Writing a null handle into a descriptor is undefined behavior
+     * per spec (VUID-VkWriteDescriptorSet-descriptorType-00325/-00326)
+     * — ANV happens to tolerate it; lavapipe crashes. Reject it here
+     * so the error is defined and driver-independent. */
+    if (binding == OPTICS_GFX_BINDLESS_BIND_SAMPLER ? sampler == VK_NULL_HANDLE
+                                                    : view == VK_NULL_HANDLE) {
+        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT, "bindless register: null handle");
+        *out = OPTICS_GFX_BINDLESS_INVALID;
+        return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
+    }
+    optics_gfx_platform_mutex_lock(&d->bindless.lock);
+
+    optics_gfx_bindless_pool *p = &d->bindless.pools[binding];
+    uint32_t slot = slot_alloc(p);
+    if (slot == OPTICS_GFX_BINDLESS_INVALID) {
+        optics_gfx_platform_mutex_unlock(&d->bindless.lock);
+        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_OUT_OF_MEMORY, "bindless heap binding exhausted");
+        *out = OPTICS_GFX_BINDLESS_INVALID;
+        return OPTICS_GFX_ERROR_OUT_OF_MEMORY;
+    }
+
+    VkDescriptorImageInfo dii = {.imageView = view, .imageLayout = layout, .sampler = sampler};
+    VkDescriptorType dtype =
+        (binding == OPTICS_GFX_BINDLESS_BIND_SAMPLED_IMAGE)   ? VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE
+        : (binding == OPTICS_GFX_BINDLESS_BIND_STORAGE_IMAGE) ? VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
+                                                              : VK_DESCRIPTOR_TYPE_SAMPLER;
+    VkWriteDescriptorSet w = {
+        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        .dstSet = d->bindless.set,
+        .dstBinding = binding,
+        .dstArrayElement = slot,
+        .descriptorCount = 1,
+        .descriptorType = dtype,
+        .pImageInfo = &dii,
+    };
+    /* Vulkan requires external synchronisation on writes to a single
+     * descriptor set; the same lock covers our slot allocator and
+     * the descriptor write. */
+    vkUpdateDescriptorSets(d->device, 1, &w, 0, nullptr);
+    optics_gfx_platform_mutex_unlock(&d->bindless.lock);
+    *out = pack_handle(binding, slot);
+    OPTICS_GFX_OBSERVE_ACQUIRE(d, OPTICS_GFX_SCOPE_DEVICE, OPTICS_GFX_LIFETIME_CONTEXT, "bindless",
+                               "flux/core", 0, OPTICS_GFX_SITE_BINDLESS);
+    return OPTICS_GFX_OK;
+}
+
+optics_gfx_result optics_gfx_bindless_register_image(optics_gfx_device *d, VkImageView view,
+                                                     VkImageLayout layout,
+                                                     optics_gfx_bindless_handle *out) {
+    return write_image(d, OPTICS_GFX_BINDLESS_BIND_SAMPLED_IMAGE, view, layout, VK_NULL_HANDLE,
+                       out);
+}
+
+optics_gfx_result optics_gfx_bindless_register_storage_image(optics_gfx_device *d, VkImageView view,
+                                                             VkImageLayout layout,
+                                                             optics_gfx_bindless_handle *out) {
+    return write_image(d, OPTICS_GFX_BINDLESS_BIND_STORAGE_IMAGE, view, layout, VK_NULL_HANDLE,
+                       out);
+}
+
+optics_gfx_result optics_gfx_bindless_register_sampler(optics_gfx_device *d, VkSampler sampler,
+                                                       optics_gfx_bindless_handle *out) {
+    return write_image(d, OPTICS_GFX_BINDLESS_BIND_SAMPLER, VK_NULL_HANDLE,
+                       VK_IMAGE_LAYOUT_UNDEFINED, sampler, out);
+}
+
+void optics_gfx_bindless_release(optics_gfx_device *d, optics_gfx_bindless_handle h) {
+    if (!d || h == OPTICS_GFX_BINDLESS_INVALID)
+        return;
+    uint32_t binding = handle_binding(h);
+    uint32_t slot = handle_slot(h);
+    if (binding >= OPTICS_GFX_BINDLESS_BINDINGS)
+        return;
+    optics_gfx_platform_mutex_lock(&d->bindless.lock);
+    bool released = slot_free(&d->bindless.pools[binding], slot);
+    optics_gfx_platform_mutex_unlock(&d->bindless.lock);
+
+    /* ADR-0131: a duplicated release used to push the slot a second time,
+     * after which two registrations popped the same index and one resource
+     * was silently re-pointed at the other. Refuse it loudly instead. */
+    if (!released) {
+        if (d->log) {
+            char buf[160];
+            snprintf(buf, sizeof(buf),
+                     "bindless release refused: binding=%u slot=%u was not live "
+                     "(double release or foreign handle)",
+                     binding, slot);
+            d->log(OPTICS_GFX_LOG_ERROR, "flux", 0, "%s", buf, d->log_user);
+        }
+        return;
+    }
+    OPTICS_GFX_OBSERVE_RELEASE(d, OPTICS_GFX_SCOPE_DEVICE, "bindless", "flux/core", 0);
+    /* Note: the descriptor write is not cleared. PARTIALLY_BOUND +
+     * UPDATE_UNUSED_WHILE_PENDING means the stale descriptor is
+     * harmless as long as nothing indexes the freed slot. Callers
+     * are responsible for not using a released handle in a shader. */
+}
+
+VkDescriptorSet optics_gfx_device_bindless_set(optics_gfx_device *d) {
+    return d ? d->bindless.set : VK_NULL_HANDLE;
+}
+VkDescriptorSetLayout optics_gfx_device_bindless_layout(optics_gfx_device *d) {
+    return d ? d->bindless.layout : VK_NULL_HANDLE;
+}
+
+optics_gfx_bindless_handle optics_gfx_device_default_sampler_handle(optics_gfx_device *d) {
+    if (!d)
+        return OPTICS_GFX_BINDLESS_INVALID;
+    /* Fast path: the handle is immutable once published (the single writer
+     * below never changes it afterwards — teardown destroys the device).
+     * Every glyph run and image draw lands here, so an uncontended atomic
+     * load replaces the bindless lock round-trip that used to dominate
+     * text-heavy frames. */
+    optics_gfx_bindless_handle published =
+        atomic_load_explicit(&d->default_sampler_handle, memory_order_acquire);
+    if (published != OPTICS_GFX_BINDLESS_INVALID)
+        return published;
+    optics_gfx_platform_mutex_lock(&d->bindless.lock);
+    if (d->default_sampler != VK_NULL_HANDLE) {
+        optics_gfx_bindless_handle h =
+            atomic_load_explicit(&d->default_sampler_handle, memory_order_relaxed);
+        optics_gfx_platform_mutex_unlock(&d->bindless.lock);
+        return h;
+    }
+    optics_gfx_platform_mutex_unlock(&d->bindless.lock);
+
+    /* Build outside the lock to avoid blocking other allocations. */
+    VkSamplerCreateInfo sci = {
+        .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+        .magFilter = VK_FILTER_LINEAR,
+        .minFilter = VK_FILTER_LINEAR,
+        .mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR,
+        .addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+        .addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+        .addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+        .maxLod = VK_LOD_CLAMP_NONE,
+    };
+    VkSampler s = VK_NULL_HANDLE;
+    if (vkCreateSampler(d->device, &sci, nullptr, &s) != VK_SUCCESS) {
+        return OPTICS_GFX_BINDLESS_INVALID;
+    }
+    optics_gfx_bindless_handle h = OPTICS_GFX_BINDLESS_INVALID;
+    if (optics_gfx_bindless_register_sampler(d, s, &h) != OPTICS_GFX_OK) {
+        vkDestroySampler(d->device, s, nullptr);
+        return OPTICS_GFX_BINDLESS_INVALID;
+    }
+
+    optics_gfx_platform_mutex_lock(&d->bindless.lock);
+    if (d->default_sampler != VK_NULL_HANDLE) {
+        /* Lost the race; another thread already built one. */
+        optics_gfx_platform_mutex_unlock(&d->bindless.lock);
+        optics_gfx_bindless_release(d, h);
+        vkDestroySampler(d->device, s, nullptr);
+        optics_gfx_platform_mutex_lock(&d->bindless.lock);
+        h = atomic_load_explicit(&d->default_sampler_handle, memory_order_relaxed);
+        optics_gfx_platform_mutex_unlock(&d->bindless.lock);
+        return h;
+    }
+    d->default_sampler = s;
+    /* Publish after `default_sampler` and the heap registration are both
+     * visible; readers on the fast path acquire-sync against this store. */
+    atomic_store_explicit(&d->default_sampler_handle, h, memory_order_release);
+    optics_gfx_platform_mutex_unlock(&d->bindless.lock);
+    return h;
+}

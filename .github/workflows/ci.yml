@@ -123,7 +123,7 @@ jobs:
           # The runner has no GPU; Phase B0's device_hardware gate otherwise
           # deliberately fails on llvmpipe. The software lane reports the
           # device and still asserts the compute prerequisites.
-          FLUX_ALLOW_SOFTWARE_DEVICE: 1
+          OPTICS_GFX_ALLOW_SOFTWARE_DEVICE: 1
           # Leak detection & diagnostic hardening are ON: the root meson.build
           # registers the default 'sanitizer' test setup (active under any b_sanitize)
           # that binds LSAN_OPTIONS (tools/config/lsan.supp), abort behaviors, and timeouts.
@@ -137,13 +137,13 @@ jobs:
       matrix:
         include:
           - name: no-ui
-            flags: -Dglyph=false -Dreticle=false
-          - name: no-prism
-            flags: -Dprism=false
-          - name: no-transit
-            flags: -Dtransit=false
-          - name: no-vista
-            flags: -Dvista=false
+            flags: -Dtext=false -Dsvg=false
+          - name: no-material
+            flags: -Dmaterial=false
+          - name: no-motion
+            flags: -Dmotion=false
+          - name: no-scene
+            flags: -Dscene=false
     env:
       DEBIAN_FRONTEND: noninteractive
       CC: clang
@@ -232,11 +232,11 @@ jobs:
       - name: "Test (integration: Lavapipe)"
         env:
           VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
-          FLUX_ALLOW_SOFTWARE_DEVICE: 1
+          OPTICS_GFX_ALLOW_SOFTWARE_DEVICE: 1
         run: meson test -C build --suite integration --print-errorlogs
 
-  bindings:
-    name: rust bindings (workspace)
+  rust-crates:
+    name: rust crates (workspace)
     runs-on: ubuntu-24.04
     env:
       DEBIAN_FRONTEND: noninteractive
@@ -281,8 +281,8 @@ jobs:
         env:
           VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
 
-  bindings-msrv:
-    name: rust bindings (MSRV 1.85.0)
+  rust-crates-msrv:
+    name: rust crates (MSRV 1.85.0)
     runs-on: ubuntu-24.04
     env:
       DEBIAN_FRONTEND: noninteractive

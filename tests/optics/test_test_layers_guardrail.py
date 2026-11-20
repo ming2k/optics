@@ -95,12 +95,12 @@ class LayerGuardrailTest(unittest.TestCase):
     def test_rejects_private_harnesses_and_e2e_internals(self):
         with tempfile.TemporaryDirectory() as temp:
             root = pathlib.Path(temp)
-            (root / "tests" / "lens").mkdir(parents=True)
-            (root / "tests" / "lens" / "test_helpers.h").write_text("")
+            (root / "tests" / "ui").mkdir(parents=True)
+            (root / "tests" / "ui" / "test_helpers.h").write_text("")
             e2e = root / "tests" / "e2e"
             e2e.mkdir()
-            (e2e / "bad.c").write_text('#include "../../libs/lens/src/internal.h"\n')
-            (e2e / "meson.build").write_text("sources = ['../../libs/lens/src/x.c']\n")
+            (e2e / "bad.c").write_text('#include "../../libs/ui/src/internal.h"\n')
+            (e2e / "meson.build").write_text("sources = ['../../libs/ui/src/x.c']\n")
 
             errors = self.guardrail.check_no_private_harness(root)
             errors += self.guardrail.check_e2e_boundary(root)
@@ -112,17 +112,17 @@ class LayerGuardrailTest(unittest.TestCase):
     def test_rejects_device_work_in_a_unit_suite(self):
         with tempfile.TemporaryDirectory() as temp:
             root = pathlib.Path(temp)
-            unit = root / "tests" / "flux" / "unit"
+            unit = root / "tests" / "gfx" / "unit"
             unit.mkdir(parents=True)
-            (unit / "bad.c").write_text("int main(void) { flux_device_create(); }\n")
+            (unit / "bad.c").write_text("int main(void) { optics_gfx_device_create(); }\n")
             errors = self.guardrail.check_unit_cpu_purity(root)
         self.assertTrue(any("move it to integration" in error for error in errors))
 
     def test_rejects_legacy_harness_tokens(self):
         with tempfile.TemporaryDirectory() as temp:
             root = pathlib.Path(temp)
-            (root / "tests" / "lens").mkdir(parents=True)
-            (root / "tests" / "lens" / "bad.c").write_text("#define CHECK(x) x\n")
+            (root / "tests" / "ui").mkdir(parents=True)
+            (root / "tests" / "ui" / "bad.c").write_text("#define CHECK(x) x\n")
             errors = self.guardrail.check_no_private_harness(root)
         self.assertTrue(any("legacy/private assertion token" in error for error in errors))
 

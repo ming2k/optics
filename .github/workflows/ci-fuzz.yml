@@ -48,26 +48,26 @@ jobs:
         # and adding a harness is a one-line change here.
         include:
           - target: fuzz_path_flatten
-            dir: tests/flux/fuzz
-            corpus: tests/flux/fuzz/corpus/path_flatten
+            dir: tests/gfx/fuzz
+            corpus: tests/gfx/fuzz/corpus/path_flatten
           - target: fuzz_text_shape
-            dir: tests/flux/fuzz
-            corpus: tests/flux/fuzz/corpus/text_shape
+            dir: tests/gfx/fuzz
+            corpus: tests/gfx/fuzz/corpus/text_shape
           - target: fuzz_coverage_raster
-            dir: tests/flux/fuzz
-            corpus: tests/flux/fuzz/corpus/coverage_raster
+            dir: tests/gfx/fuzz
+            corpus: tests/gfx/fuzz/corpus/coverage_raster
           - target: fuzz_glb_parse
-            dir: tests/vista/fuzz
-            corpus: tests/vista/fuzz/corpus/glb_parse
+            dir: tests/scene/fuzz
+            corpus: tests/scene/fuzz/corpus/glb_parse
           - target: fuzz_display_list_deserialize
-            dir: tests/flux/fuzz
-            corpus: tests/flux/fuzz/corpus/display_list_deserialize
+            dir: tests/gfx/fuzz
+            corpus: tests/gfx/fuzz/corpus/display_list_deserialize
           - target: fuzz_lens_store
-            dir: tests/lens/fuzz
-            corpus: tests/lens/fuzz/corpus/lens_store
+            dir: tests/ui/fuzz
+            corpus: tests/ui/fuzz/corpus/lens_store
           - target: fuzz_reticle_parse
-            dir: tests/reticle/fuzz
-            corpus: tests/reticle/fuzz/corpus/reticle_parse
+            dir: tests/svg/fuzz
+            corpus: tests/svg/fuzz/corpus/reticle_parse
     steps:
       - uses: actions/checkout@v4
 

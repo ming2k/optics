@@ -1,0 +1,355 @@
+/*
+ * Graphics pipeline. Wraps vkCreateGraphicsPipelines + the boilerplate
+ * the user otherwise has to write by hand: shader modules, vertex
+ * input layout, blend preset selection, depth/stencil preset
+ * selection, dynamic viewport+scissor (set per-draw), dynamic-
+ * rendering format info via pNext.
+ *
+ * Pipeline layout includes the device bindless set at slot 0
+ * (matching every other flux pipeline) plus the caller's push range.
+ */
+#include "internal.h"
+#include <optics/gfx/vulkan.h>
+
+#include <stdatomic.h>
+#include <string.h>
+
+struct optics_gfx_graphics_pipeline {
+    atomic_uint ref_count;
+    optics_gfx_device *device;
+    VkPipelineLayout layout;
+    VkPipeline pipeline;
+    uint32_t push_bytes;
+};
+
+static VkPrimitiveTopology to_vk_topology(optics_gfx_primitive_topology t) {
+    switch (t) {
+    case OPTICS_GFX_TOPOLOGY_TRIANGLE_LIST:
+        return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    case OPTICS_GFX_TOPOLOGY_TRIANGLE_STRIP:
+        return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
+    case OPTICS_GFX_TOPOLOGY_LINE_LIST:
+        return VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
+    case OPTICS_GFX_TOPOLOGY_LINE_STRIP:
+        return VK_PRIMITIVE_TOPOLOGY_LINE_STRIP;
+    case OPTICS_GFX_TOPOLOGY_POINT_LIST:
+        return VK_PRIMITIVE_TOPOLOGY_POINT_LIST;
+    }
+    return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+}
+
+static VkCullModeFlags to_vk_cull(optics_gfx_cull_mode c) {
+    switch (c) {
+    case OPTICS_GFX_CULL_NONE:
+        return VK_CULL_MODE_NONE;
+    case OPTICS_GFX_CULL_BACK:
+        return VK_CULL_MODE_BACK_BIT;
+    case OPTICS_GFX_CULL_FRONT:
+        return VK_CULL_MODE_FRONT_BIT;
+    }
+    return VK_CULL_MODE_NONE;
+}
+
+static VkPipelineColorBlendAttachmentState blend_for(optics_gfx_blend_preset p) {
+    VkPipelineColorBlendAttachmentState b = {
+        .colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+                          VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT,
+    };
+    switch (p) {
+    case OPTICS_GFX_BLEND_PRESET_NONE:
+        b.blendEnable = VK_FALSE;
+        break;
+    case OPTICS_GFX_BLEND_PRESET_PREMUL:
+        /* Porter-Duff source-over, src already premultiplied. */
+        b.blendEnable = VK_TRUE;
+        b.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
+        b.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        b.colorBlendOp = VK_BLEND_OP_ADD;
+        b.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+        b.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        b.alphaBlendOp = VK_BLEND_OP_ADD;
+        break;
+    case OPTICS_GFX_BLEND_PRESET_ADDITIVE:
+        b.blendEnable = VK_TRUE;
+        b.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
+        b.dstColorBlendFactor = VK_BLEND_FACTOR_ONE;
+        b.colorBlendOp = VK_BLEND_OP_ADD;
+        b.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+        b.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+        b.alphaBlendOp = VK_BLEND_OP_ADD;
+        break;
+    }
+    return b;
+}
+
+optics_gfx_result optics_gfx_graphics_pipeline_create(optics_gfx_device *d,
+                                                      const optics_gfx_graphics_pipeline_desc *desc,
+                                                      optics_gfx_graphics_pipeline **out) {
+    if (!d || !desc || !out)
+        return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
+    if (desc->type != OPTICS_GFX_TYPE_GRAPHICS_PIPELINE_DESC) {
+        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT,
+                        "desc->type != FLUX_TYPE_GRAPHICS_PIPELINE_DESC");
+        return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
+    }
+    if (!desc->vertex_spirv || desc->vertex_spirv_word_count == 0 || !desc->fragment_spirv ||
+        desc->fragment_spirv_word_count == 0) {
+        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT,
+                        "vertex and fragment SPIR-V both required");
+        return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
+    }
+    if (desc->color_format == OPTICS_GFX_FORMAT_UNDEFINED) {
+        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT, "color_format is required");
+        return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
+    }
+    if (desc->push_constant_bytes > d->props.limits.maxPushConstantsSize) {
+        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT,
+                        "graphics push_constant_bytes exceeds device maxPushConstantsSize");
+        return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
+    }
+    *out = nullptr;
+
+    optics_gfx_graphics_pipeline *p = optics_gfx_internal_alloc(d, sizeof(*p));
+    if (!p)
+        return OPTICS_GFX_ERROR_OUT_OF_MEMORY;
+    atomic_init(&p->ref_count, 1u);
+    p->device = optics_gfx_device_retain(d);
+    p->push_bytes = desc->push_constant_bytes;
+
+    /* Pipeline layout: bindless set + caller's push range. */
+    VkDescriptorSetLayout bindless_layout = d->bindless.layout;
+    VkPushConstantRange push_range = {
+        .stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+        .offset = 0,
+        .size = desc->push_constant_bytes,
+    };
+    VkPipelineLayoutCreateInfo plci = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+        .setLayoutCount = bindless_layout != VK_NULL_HANDLE ? 1u : 0u,
+        .pSetLayouts = bindless_layout != VK_NULL_HANDLE ? &bindless_layout : nullptr,
+        .pushConstantRangeCount = desc->push_constant_bytes > 0 ? 1u : 0u,
+        .pPushConstantRanges = desc->push_constant_bytes > 0 ? &push_range : nullptr,
+    };
+    VkResult vr = vkCreatePipelineLayout(d->device, &plci, nullptr, &p->layout);
+    if (vr != VK_SUCCESS) {
+        OPTICS_GFX_FAIL_VK(OPTICS_GFX_ERROR_BACKEND_FAILURE, "vkCreatePipelineLayout failed", vr);
+        goto fail;
+    }
+
+    /* Shader modules — destroyed after pipeline creation completes. */
+    VkShaderModule vs = VK_NULL_HANDLE, fs = VK_NULL_HANDLE;
+    {
+        VkShaderModuleCreateInfo smv = {
+            .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+            .codeSize = desc->vertex_spirv_word_count * sizeof(uint32_t),
+            .pCode = desc->vertex_spirv,
+        };
+        vr = vkCreateShaderModule(d->device, &smv, nullptr, &vs);
+        if (vr != VK_SUCCESS) {
+            OPTICS_GFX_FAIL_VK(OPTICS_GFX_ERROR_BACKEND_FAILURE,
+                               "vertex vkCreateShaderModule failed", vr);
+            goto fail;
+        }
+        VkShaderModuleCreateInfo smf = {
+            .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+            .codeSize = desc->fragment_spirv_word_count * sizeof(uint32_t),
+            .pCode = desc->fragment_spirv,
+        };
+        vr = vkCreateShaderModule(d->device, &smf, nullptr, &fs);
+        if (vr != VK_SUCCESS) {
+            OPTICS_GFX_FAIL_VK(OPTICS_GFX_ERROR_BACKEND_FAILURE,
+                               "fragment vkCreateShaderModule failed", vr);
+            vkDestroyShaderModule(d->device, vs, nullptr);
+            goto fail;
+        }
+    }
+
+    VkPipelineShaderStageCreateInfo stages[2] = {
+        {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+         .stage = VK_SHADER_STAGE_VERTEX_BIT,
+         .module = vs,
+         .pName = desc->vertex_entry_point ? desc->vertex_entry_point : "main"},
+        {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+         .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
+         .module = fs,
+         .pName = desc->fragment_entry_point ? desc->fragment_entry_point : "main"},
+    };
+
+    /* Vertex input — caller-supplied or empty (BDA-style pulling). */
+    VkVertexInputBindingDescription vk_binding = {};
+    VkVertexInputAttributeDescription vk_attrs[16] = {};
+    VkPipelineVertexInputStateCreateInfo vi = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+    };
+    if (desc->vertex_binding) {
+        const optics_gfx_vertex_binding *vb = desc->vertex_binding;
+        if (vb->attribute_count > 16) {
+            OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT,
+                            "vertex_binding.attribute_count exceeds internal cap of 16");
+            vkDestroyShaderModule(d->device, vs, nullptr);
+            vkDestroyShaderModule(d->device, fs, nullptr);
+            goto fail;
+        }
+        vk_binding.binding = 0;
+        vk_binding.stride = vb->stride;
+        vk_binding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+        for (uint32_t i = 0; i < vb->attribute_count; ++i) {
+            vk_attrs[i].location = vb->attributes[i].location;
+            vk_attrs[i].binding = 0;
+            vk_attrs[i].format = optics_gfx_format_to_vk(vb->attributes[i].format);
+            vk_attrs[i].offset = vb->attributes[i].offset;
+        }
+        vi.vertexBindingDescriptionCount = 1;
+        vi.pVertexBindingDescriptions = &vk_binding;
+        vi.vertexAttributeDescriptionCount = vb->attribute_count;
+        vi.pVertexAttributeDescriptions = vk_attrs;
+    }
+
+    VkPipelineInputAssemblyStateCreateInfo ia = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+        .topology = to_vk_topology(desc->topology),
+    };
+    VkPipelineViewportStateCreateInfo vp = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+        .viewportCount = 1,
+        .scissorCount = 1,
+    };
+    VkPipelineRasterizationStateCreateInfo rs = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+        .polygonMode = VK_POLYGON_MODE_FILL,
+        .cullMode = to_vk_cull(desc->cull),
+        .frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE,
+        .lineWidth = 1.0f,
+    };
+    VkPipelineMultisampleStateCreateInfo ms = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+        .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
+    };
+    VkPipelineDepthStencilStateCreateInfo ds = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+        .depthTestEnable = desc->depth != OPTICS_GFX_DEPTH_NONE,
+        .depthWriteEnable = desc->depth == OPTICS_GFX_DEPTH_TEST_AND_WRITE,
+        .depthCompareOp = VK_COMPARE_OP_LESS,
+    };
+    VkPipelineColorBlendAttachmentState ba = blend_for(desc->blend);
+    VkPipelineColorBlendStateCreateInfo cb = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+        .attachmentCount = 1,
+        .pAttachments = &ba,
+    };
+    VkDynamicState dyn_states[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
+    VkPipelineDynamicStateCreateInfo dyn = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+        .dynamicStateCount = sizeof(dyn_states) / sizeof(dyn_states[0]),
+        .pDynamicStates = dyn_states,
+    };
+    VkFormat color_fmt = optics_gfx_format_to_vk(desc->color_format);
+    VkFormat depth_fmt = optics_gfx_format_to_vk(desc->depth_format);
+    VkPipelineRenderingCreateInfo prci = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
+        .colorAttachmentCount = 1,
+        .pColorAttachmentFormats = &color_fmt,
+        .depthAttachmentFormat = depth_fmt,
+    };
+    VkGraphicsPipelineCreateInfo gpci = {
+        .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
+        .pNext = &prci,
+        .stageCount = 2,
+        .pStages = stages,
+        .pVertexInputState = &vi,
+        .pInputAssemblyState = &ia,
+        .pViewportState = &vp,
+        .pRasterizationState = &rs,
+        .pMultisampleState = &ms,
+        .pDepthStencilState = &ds,
+        .pColorBlendState = &cb,
+        .pDynamicState = &dyn,
+        .layout = p->layout,
+    };
+    optics_gfx_device_vk_pipeline_cache_lock(d);
+    vr = vkCreateGraphicsPipelines(d->device, d->pipeline_cache, 1, &gpci, nullptr, &p->pipeline);
+    optics_gfx_device_vk_pipeline_cache_unlock(d);
+    vkDestroyShaderModule(d->device, vs, nullptr);
+    vkDestroyShaderModule(d->device, fs, nullptr);
+    if (vr != VK_SUCCESS) {
+        OPTICS_GFX_FAIL_VK(OPTICS_GFX_ERROR_BACKEND_FAILURE, "vkCreateGraphicsPipelines failed",
+                           vr);
+        goto fail;
+    }
+
+    *out = p;
+    OPTICS_GFX_OBSERVE_ACQUIRE(d, OPTICS_GFX_SCOPE_DEVICE, OPTICS_GFX_LIFETIME_CONTEXT,
+                               "vk_pipeline", "flux/core", 0, OPTICS_GFX_SITE_VK_PIPELINE);
+    return OPTICS_GFX_OK;
+
+fail:
+    if (p->layout)
+        vkDestroyPipelineLayout(d->device, p->layout, nullptr);
+    optics_gfx_device_release(p->device);
+    optics_gfx_internal_free(d, p);
+    return OPTICS_GFX_ERROR_BACKEND_FAILURE;
+}
+
+optics_gfx_graphics_pipeline *optics_gfx_graphics_pipeline_retain(optics_gfx_graphics_pipeline *p) {
+    if (p)
+        atomic_fetch_add_explicit(&p->ref_count, 1u, memory_order_relaxed);
+    return p;
+}
+
+void optics_gfx_graphics_pipeline_release(optics_gfx_graphics_pipeline *p) {
+    if (!p)
+        return;
+    if (atomic_fetch_sub_explicit(&p->ref_count, 1u, memory_order_acq_rel) != 1u)
+        return;
+
+    optics_gfx_device *d = p->device;
+    if (p->pipeline) {
+        optics_gfx_vk_retire_pipeline(d, p->pipeline);
+        p->pipeline = VK_NULL_HANDLE;
+    }
+    optics_gfx_device *pd = p->device;
+    if (p->layout)
+        vkDestroyPipelineLayout(pd->device, p->layout, nullptr);
+    OPTICS_GFX_OBSERVE_RELEASE(pd, OPTICS_GFX_SCOPE_DEVICE, "vk_pipeline", "flux/core", 0);
+    optics_gfx_internal_free(pd, p);
+    optics_gfx_device_release(pd);
+}
+
+VkPipeline optics_gfx_graphics_pipeline_vk_pipeline(const optics_gfx_graphics_pipeline *p) {
+    return p ? p->pipeline : VK_NULL_HANDLE;
+}
+
+VkPipelineLayout optics_gfx_graphics_pipeline_vk_layout(const optics_gfx_graphics_pipeline *p) {
+    return p ? p->layout : VK_NULL_HANDLE;
+}
+
+void optics_gfx_graphics_pipeline_bind(optics_gfx_frame *f,
+                                       const optics_gfx_graphics_pipeline_bind_opts *opts) {
+    if (!f || !opts || !opts->pipeline || !opts->pipeline->pipeline)
+        return;
+    optics_gfx_graphics_pipeline *p = opts->pipeline;
+    const void *push_constants = opts->push_constants;
+    uint32_t push_bytes = opts->push_bytes;
+    VkCommandBuffer cmd = optics_gfx_frame_vk_command_buffer(f);
+    if (!cmd)
+        return;
+
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, p->pipeline);
+
+    VkDescriptorSet bindless = p->device->bindless.set;
+    if (bindless != VK_NULL_HANDLE) {
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, p->layout, 0, 1, &bindless, 0,
+                                nullptr);
+    }
+
+    if (push_constants && push_bytes > 0) {
+        if (push_bytes > p->push_bytes) {
+            OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT,
+                            "flux_graphics_pipeline_bind push_bytes exceeds pipeline range");
+            return;
+        }
+        vkCmdPushConstants(cmd, p->layout,
+                           VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, push_bytes,
+                           push_constants);
+    }
+}

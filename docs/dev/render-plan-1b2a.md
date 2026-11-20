@@ -10,7 +10,7 @@ change does not leave two liveness tables behind.
 
 ADR-0147's deferred effect plan keeps its own pass array, provider/requires
 edges, tokens, and `required`/`built`/`executed` state in
-`libs/flux/src/core/plan.c`. ADR-0089's RenderPlan now has the frame's target
+`libs/gfx/src/core/plan.c`. ADR-0089's RenderPlan now has the frame's target
 contract and node/dependency table. A second liveness authority is exactly the
 architecture rot this program is removing.
 

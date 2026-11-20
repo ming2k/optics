@@ -1,0 +1,17 @@
+[package]
+name = "optics-text"
+description = "Safe Rust bindings for glyph — text shaping, metrics, and dynamic glyph atlas runtime"
+publish = false
+links = "optics_text_rs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+optics-text-sys = { workspace = true }
+optics-gfx = { workspace = true }
+
+[build-dependencies]
+optics-build = { workspace = true }

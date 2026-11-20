@@ -77,6 +77,24 @@ test(
 )
 
 test(
+  'semantic_naming',
+  py,
+  args : [files('../../tools/check_naming.py')],
+  workdir : meson.project_source_root(),
+  suite : ['lint', 'tooling'],
+  timeout : 30,
+)
+
+test(
+  'naming_guardrail_selftest',
+  py,
+  args : [files('test_naming_guardrail.py')],
+  workdir : meson.project_source_root(),
+  suite : 'tooling',
+  timeout : 30,
+)
+
+test(
   'docs_links',
   py,
   args : [files('../../tools/check_doc_links.py')],
@@ -112,7 +130,7 @@ test(
 # Umbrella Facade and Integrated Dependencies (ADR-0160). The facade test
 # exercises lens/iris/transit through the umbrella, so it is meaningless when
 # the selected distribution omits any of them.
-if opt_lens and opt_transit
+if opt_ui and opt_motion
   test_optics_facade_bin = executable(
     'test_optics_facade',
     files('test_optics_facade.c'),

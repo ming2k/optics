@@ -202,3 +202,7 @@ silent fallback. Its primitives have landed.
 | 0166 | [One-Way Library Graph and Enforced Invariants](0166-one-way-library-graph-and-enforced-invariants.md) | Accepted |
 | 0167 | [A scoped frame clip follows placed overlays — the clip a chrome strip needs is not a parent viewport](0167-scoped-frame-clip-follows-placed-overlays.md) | Accepted |
 | 0168 | [Exported dma-buf images carry a lease](0168-exported-dmabuf-image-leases.md) | Accepted |
+| 0169 | [Repository-Root `crates/` Layout, `optics-*` Crate Namespace, and Shared `optics-build` Helper](0169-root-crates-layout-optics-namespace-and-shared-build.md) | Accepted |
+| 0170 | [Semantic Module Naming and Unified `optics` Namespace](0170-semantic-module-naming-and-optics-namespace.md) | Accepted |
+| 0171 | [Curated Examples Taxonomy and Showcase Design System](0171-curated-examples-taxonomy-and-showcase-design-system.md) | Accepted |
+| 0172 | [Zero-Stutter Public C API and Clean `window` vs. `app` Runtime Boundary](0172-zero-stutter-api-and-window-app-boundary.md) | Accepted |

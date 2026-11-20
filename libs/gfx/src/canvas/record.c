@@ -1,0 +1,402 @@
+/*
+ * Canvas display-list segments — record / replay (see internal.h
+ * "Display-list segments" for the design contract).
+ *
+ * Recording is a passive front-end layer over the backend vtable:
+ * canvas_emit captures every batch (pipeline id, push block, scissor,
+ * blend, vertex bytes) into each active recording before submitting it
+ * live. Replay re-validates the recorded anchor (framebuffer extent,
+ * absolute transform, incoming scissor) and re-submits the captured
+ * batches through the same backend entry points, so no backend needs to
+ * know segments exist.
+ */
+#include "backend.h"
+#include "internal.h"
+
+#include <string.h>
+
+/* ------------------------------------------------------------------ */
+/*  Slot pool                                                         */
+/* ------------------------------------------------------------------ */
+
+static void slot_free_contents(optics_gfx_canvas *c, optics_gfx_canvas_record_slot *s) {
+    for (uint32_t i = 0; i < s->image_count; ++i)
+        optics_gfx_image_release(s->images[i]);
+    s->image_count = 0;
+    for (uint32_t i = 0; i < s->sampler_count; ++i)
+        optics_gfx_sampler_release(s->samplers[i]);
+    s->sampler_count = 0;
+    optics_gfx_canvas_free(c->device, s->ops);
+    optics_gfx_canvas_free(c->device, s->verts);
+    s->ops = nullptr;
+    s->verts = nullptr;
+    s->op_count = s->op_cap = 0;
+    s->vert_count = s->vert_cap = 0;
+    s->bytes = 0;
+}
+
+/* Return a VALID segment to the pool, bumping the generation so any
+ * outstanding handle fails validation from now on. */
+static void slot_evict(optics_gfx_canvas *c, optics_gfx_canvas_record_slot *s) {
+    c->record_bytes -= s->bytes;
+    slot_free_contents(c, s);
+    s->state = OPTICS_GFX_RECORD_SLOT_FREE;
+    s->generation++;
+}
+
+static bool slot_on_stack(const optics_gfx_canvas *c, const optics_gfx_canvas_record_slot *s) {
+    for (uint32_t i = 0; i < c->record_depth; ++i)
+        if (c->record_stack[i] == s)
+            return true;
+    return false;
+}
+
+static optics_gfx_canvas_record_slot *slot_alloc(optics_gfx_canvas *c) {
+    if (!c->record_slots) {
+        c->record_slots = optics_gfx_canvas_alloc(c->device, OPTICS_GFX_CANVAS_RECORD_SLOT_CAP *
+                                                                 sizeof(*c->record_slots));
+        if (!c->record_slots)
+            return nullptr;
+    }
+    for (uint32_t i = 0; i < OPTICS_GFX_CANVAS_RECORD_SLOT_CAP; ++i)
+        if (c->record_slots[i].state == OPTICS_GFX_RECORD_SLOT_FREE)
+            return &c->record_slots[i];
+
+    /* Pool full: reclaim the least-recently-used VALID segment. Slots on
+     * the recording stack are untouchable. */
+    optics_gfx_canvas_record_slot *lru = nullptr;
+    for (uint32_t i = 0; i < OPTICS_GFX_CANVAS_RECORD_SLOT_CAP; ++i) {
+        optics_gfx_canvas_record_slot *s = &c->record_slots[i];
+        if (s->state != OPTICS_GFX_RECORD_SLOT_VALID || slot_on_stack(c, s))
+            continue;
+        if (!lru || s->last_used < lru->last_used)
+            lru = s;
+    }
+    if (lru)
+        slot_evict(c, lru);
+    return lru;
+}
+
+void canvas_record_pool_destroy(optics_gfx_canvas *c) {
+    if (!c->record_slots)
+        return;
+    for (uint32_t i = 0; i < OPTICS_GFX_CANVAS_RECORD_SLOT_CAP; ++i)
+        slot_free_contents(c, &c->record_slots[i]);
+    optics_gfx_canvas_free(c->device, c->record_slots);
+    c->record_slots = nullptr;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Capture                                                           */
+/* ------------------------------------------------------------------ */
+
+static void slot_poison(optics_gfx_canvas_record_slot *s) {
+    if (s->state == OPTICS_GFX_RECORD_SLOT_RECORDING)
+        s->state = OPTICS_GFX_RECORD_SLOT_POISONED;
+}
+
+/* Grow `*buf` (element size `esz`) to `need` elements. Returns false on
+ * allocation failure; the old buffer stays valid for slot_free_contents. */
+static bool slot_grow(optics_gfx_canvas *c, void **buf, uint32_t *cap, uint32_t need, size_t esz) {
+    uint32_t new_cap = *cap ? *cap : 16u;
+    while (new_cap < need) {
+        if (new_cap > UINT32_MAX / 2u)
+            return false;
+        new_cap *= 2u;
+    }
+    void *nbuf = optics_gfx_canvas_alloc(c->device, (size_t)new_cap * esz);
+    if (!nbuf)
+        return false;
+    if (*buf) {
+        memcpy(nbuf, *buf, (size_t)*cap * esz);
+        optics_gfx_canvas_free(c->device, *buf);
+    }
+    *buf = nbuf;
+    *cap = new_cap;
+    return true;
+}
+
+/* Append one batch to a recording slot. Poison on overflow/alloc failure:
+ * the live draw already went out, only the segment is lost. */
+static void slot_capture(optics_gfx_canvas *c, optics_gfx_canvas_record_slot *s, canvas_pipe_id id,
+                         const optics_gfx_canvas_push *push, const optics_gfx_canvas_vertex *verts,
+                         uint32_t vertex_count) {
+    if (s->state != OPTICS_GFX_RECORD_SLOT_RECORDING)
+        return;
+    if (s->op_count == s->op_cap &&
+        !slot_grow(c, (void **)&s->ops, &s->op_cap, s->op_count + 1, sizeof(*s->ops))) {
+        slot_poison(s);
+        return;
+    }
+    if (s->vert_count + vertex_count > s->vert_cap &&
+        !slot_grow(c, (void **)&s->verts, &s->vert_cap, s->vert_count + vertex_count,
+                   sizeof(*s->verts))) {
+        slot_poison(s);
+        return;
+    }
+
+    size_t bytes = (size_t)s->op_cap * sizeof(*s->ops) + (size_t)s->vert_cap * sizeof(*s->verts);
+    if (bytes > OPTICS_GFX_CANVAS_RECORD_SEG_BUDGET) {
+        slot_poison(s);
+        return;
+    }
+    s->bytes = bytes;
+
+    optics_gfx_record_op *op = &s->ops[s->op_count++];
+    op->push = *push;
+    op->scissor = c->states[c->state_top].scissor;
+    op->pipe_id = (uint32_t)id;
+    op->blend = (uint32_t)c->pending_blend;
+    op->vert_offset = s->vert_count;
+    op->vert_count = vertex_count;
+    op->host_atlas = c->pending_host_atlas;
+    op->host_atlas_w = c->pending_host_atlas_w;
+    op->host_atlas_h = c->pending_host_atlas_h;
+    op->host_atlas_gen = c->pending_host_atlas_gen;
+    memcpy(s->verts + s->vert_count, verts, (size_t)vertex_count * sizeof(*verts));
+    s->vert_count += vertex_count;
+}
+
+void canvas_record_retain_image(optics_gfx_canvas *c, optics_gfx_image *img) {
+    if (!c || !c->device || !img || c->record_depth == 0)
+        return;
+    for (uint32_t d = 0; d < c->record_depth; ++d) {
+        optics_gfx_canvas_record_slot *s = c->record_stack[d];
+        if (s->state != OPTICS_GFX_RECORD_SLOT_RECORDING)
+            continue;
+        uint32_t i = 0;
+        while (i < s->image_count && s->images[i] != img)
+            ++i;
+        if (i < s->image_count)
+            continue; /* already retained */
+        if (s->image_count == OPTICS_GFX_CANVAS_RECORD_IMG_CAP) {
+            slot_poison(s);
+            continue;
+        }
+        s->images[s->image_count++] = optics_gfx_image_retain(img);
+    }
+}
+
+void canvas_record_retain_sampler(optics_gfx_canvas *c, optics_gfx_sampler *sampler) {
+    if (!c || !c->device || !sampler || c->record_depth == 0)
+        return;
+    for (uint32_t d = 0; d < c->record_depth; ++d) {
+        optics_gfx_canvas_record_slot *s = c->record_stack[d];
+        if (s->state != OPTICS_GFX_RECORD_SLOT_RECORDING)
+            continue;
+        uint32_t i = 0;
+        while (i < s->sampler_count && s->samplers[i] != sampler)
+            ++i;
+        if (i < s->sampler_count)
+            continue;
+        if (s->sampler_count == OPTICS_GFX_CANVAS_RECORD_SAMPLER_CAP) {
+            slot_poison(s);
+            continue;
+        }
+        s->samplers[s->sampler_count++] = optics_gfx_sampler_retain(sampler);
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/*  Host-atlas generation registry                                    */
+/*                                                                    */
+/*  A host coverage buffer (ADR-0019 CPU glyph path) is borrowed by    */
+/*  pointer, never copied, so a recorded segment's baked UVs are only  */
+/*  faithful while the producer has not rearranged the buffer's        */
+/*  texels. Producers tag runs with a content generation               */
+/*  (flux_glyph_run_host_atlas_desc); the canvas remembers the newest  */
+/*  generation seen per buffer and replay refuses older segments.      */
+/* ------------------------------------------------------------------ */
+
+void canvas_host_atlas_gen_track(optics_gfx_canvas *c, const uint8_t *ptr, uint64_t gen) {
+    for (uint32_t i = 0; i < OPTICS_GFX_CANVAS_HOST_ATLAS_GEN_CAP; ++i) {
+        if (c->host_atlas_gens[i].ptr == ptr) {
+            c->host_atlas_gens[i].gen = gen;
+            return;
+        }
+    }
+    uint32_t slot = c->host_atlas_gen_next;
+    c->host_atlas_gens[slot] = (optics_gfx_host_atlas_gen){.ptr = ptr, .gen = gen};
+    c->host_atlas_gen_next = (slot + 1u) % OPTICS_GFX_CANVAS_HOST_ATLAS_GEN_CAP;
+}
+
+/* True while the canvas has never seen a newer generation for `ptr` than
+ * the one recorded. An unknown pointer means no generation-tagged run for
+ * the buffer was ever drawn on this canvas — nothing to contradict the
+ * recorded generation. */
+static bool host_atlas_gen_current(const optics_gfx_canvas *c, const uint8_t *ptr, uint64_t gen) {
+    for (uint32_t i = 0; i < OPTICS_GFX_CANVAS_HOST_ATLAS_GEN_CAP; ++i)
+        if (c->host_atlas_gens[i].ptr == ptr)
+            return c->host_atlas_gens[i].gen == gen;
+    return true;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Submission choke point                                            */
+/* ------------------------------------------------------------------ */
+
+void canvas_emit(optics_gfx_canvas *c, canvas_pipe_id id, const optics_gfx_canvas_push *push,
+                 const optics_gfx_canvas_vertex *verts, uint32_t vertex_count) {
+    for (uint32_t d = 0; d < c->record_depth; ++d)
+        slot_capture(c, c->record_stack[d], id, push, verts, vertex_count);
+    c->backend->submit(c->backend, c, id, push, verts, vertex_count);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Public API                                                        */
+/* ------------------------------------------------------------------ */
+
+bool optics_gfx_canvas_cache_begin(optics_gfx_canvas *c) {
+    if (!c || !c->recording) {
+        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_STATE,
+                        "flux_canvas_cache_begin outside begin/end frame");
+        return false;
+    }
+    if (c->record_depth >= OPTICS_GFX_CANVAS_RECORD_DEPTH_CAP) {
+        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_OUT_OF_RANGE, "flux_canvas_cache_begin nesting too deep");
+        return false;
+    }
+    optics_gfx_canvas_record_slot *s = slot_alloc(c);
+    if (!s) {
+        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_OUT_OF_MEMORY, "flux_canvas_cache_begin: no slot");
+        return false;
+    }
+    s->owner = c;
+    s->state = OPTICS_GFX_RECORD_SLOT_RECORDING;
+    s->anchor_transform = c->states[c->state_top].transform;
+    s->anchor_scissor = c->states[c->state_top].scissor;
+    s->fb_w = c->fb_width;
+    s->fb_h = c->fb_height;
+    s->op_count = s->vert_count = s->image_count = s->sampler_count = 0;
+    s->bytes = 0;
+    c->record_stack[c->record_depth++] = s;
+    return true;
+}
+
+optics_gfx_canvas_cache_entry optics_gfx_canvas_cache_end(optics_gfx_canvas *c) {
+    optics_gfx_canvas_cache_entry null_rec = OPTICS_GFX_CANVAS_CACHE_ENTRY_INIT;
+    if (!c || c->record_depth == 0) {
+        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_STATE,
+                        "flux_canvas_cache_end without begin_record");
+        return null_rec;
+    }
+    optics_gfx_canvas_record_slot *s = c->record_stack[--c->record_depth];
+    if (s->state == OPTICS_GFX_RECORD_SLOT_POISONED) {
+        slot_free_contents(c, s);
+        s->state = OPTICS_GFX_RECORD_SLOT_FREE;
+        s->generation++;
+        return null_rec;
+    }
+    s->state = OPTICS_GFX_RECORD_SLOT_VALID;
+    s->last_used = ++c->record_tick;
+    c->record_bytes += s->bytes;
+    c->records_created++;
+
+    /* Canvas-wide byte budget: evict least-recently-used segments until
+     * the total fits. The just-finished segment has the newest tick, so
+     * it is evicted last (and only when it alone exceeds the budget). */
+    while (c->record_bytes > OPTICS_GFX_CANVAS_RECORD_TOTAL_BUDGET) {
+        optics_gfx_canvas_record_slot *lru = nullptr;
+        for (uint32_t i = 0; i < OPTICS_GFX_CANVAS_RECORD_SLOT_CAP; ++i) {
+            optics_gfx_canvas_record_slot *v = &c->record_slots[i];
+            if (v->state != OPTICS_GFX_RECORD_SLOT_VALID || slot_on_stack(c, v))
+                continue;
+            if (!lru || v->last_used < lru->last_used)
+                lru = v;
+        }
+        if (!lru)
+            break;
+        slot_evict(c, lru);
+    }
+    return (optics_gfx_canvas_cache_entry){.slot = s, .generation = s->generation};
+}
+
+bool optics_gfx_canvas_cache_replay(optics_gfx_canvas *c, optics_gfx_canvas_cache_entry rec) {
+    if (!c || !rec.slot || !c->recording)
+        return false;
+    optics_gfx_canvas_record_slot *s = rec.slot;
+    if (s->owner != c || s->state != OPTICS_GFX_RECORD_SLOT_VALID ||
+        s->generation != rec.generation)
+        return false;
+
+    /* Anchor check: recorded vertices and push constants are baked in
+     * physical pixels, so the segment is only faithful under the exact
+     * state it was recorded against. */
+    optics_gfx_canvas_state *cur = &c->states[c->state_top];
+    if (s->fb_w != c->fb_width || s->fb_h != c->fb_height)
+        return false;
+    if (memcmp(&s->anchor_transform, &cur->transform, sizeof(optics_gfx_mat3x2)) != 0)
+        return false;
+    if (memcmp(&s->anchor_scissor, &cur->scissor, sizeof(optics_gfx_recti)) != 0)
+        return false;
+    /* Host-atlas check: a glyph batch's baked UVs only stay faithful while
+     * the producer has not rearranged the buffer since the segment was
+     * captured (flux_glyph_run_host_atlas_desc). Refuse up front so a stale
+     * segment draws nothing rather than mis-sampling moved texels. */
+    for (uint32_t i = 0; i < s->op_count; ++i) {
+        const optics_gfx_record_op *op = &s->ops[i];
+        if (op->host_atlas && op->host_atlas_gen != OPTICS_GFX_HOST_ATLAS_UNVERSIONED &&
+            !host_atlas_gen_current(c, op->host_atlas, op->host_atlas_gen))
+            return false;
+    }
+    for (uint32_t i = 0; i < s->image_count; ++i) {
+        if (!canvas_track_foreign_image(c, s->images[i]))
+            return false;
+    }
+
+    const optics_gfx_recti saved_scissor = cur->scissor;
+    const optics_gfx_blend_mode saved_blend = c->pending_blend;
+    const uint8_t *saved_atlas = c->pending_host_atlas;
+    const uint32_t saved_atlas_w = c->pending_host_atlas_w;
+    const uint32_t saved_atlas_h = c->pending_host_atlas_h;
+    const uint64_t saved_atlas_gen = c->pending_host_atlas_gen;
+
+    for (uint32_t i = 0; i < s->op_count; ++i) {
+        const optics_gfx_record_op *op = &s->ops[i];
+        /* The CPU backend reads states[top].scissor directly, so the
+         * recorded scissor must be poked into the live state (restored
+         * below), not just sent to the backend. */
+        cur->scissor = op->scissor;
+        c->backend->set_scissor(c->backend, c, op->scissor);
+        c->pending_blend = (optics_gfx_blend_mode)op->blend;
+        c->pending_host_atlas = op->host_atlas;
+        c->pending_host_atlas_w = op->host_atlas_w;
+        c->pending_host_atlas_h = op->host_atlas_h;
+        c->pending_host_atlas_gen = op->host_atlas_gen;
+        /* A replay inside an active recording is captured too, so a
+         * re-recording ancestor ends up with a complete segment even
+         * when an unchanged child took the replay path. */
+        canvas_emit(c, (canvas_pipe_id)op->pipe_id, &op->push, s->verts + op->vert_offset,
+                    op->vert_count);
+    }
+
+    cur->scissor = saved_scissor;
+    c->backend->set_scissor(c->backend, c, saved_scissor);
+    c->pending_blend = saved_blend;
+    c->pending_host_atlas = saved_atlas;
+    c->pending_host_atlas_w = saved_atlas_w;
+    c->pending_host_atlas_h = saved_atlas_h;
+    c->pending_host_atlas_gen = saved_atlas_gen;
+
+    s->last_used = ++c->record_tick;
+    c->records_replayed++;
+    return true;
+}
+
+void optics_gfx_canvas_cache_release(optics_gfx_canvas *c, optics_gfx_canvas_cache_entry rec) {
+    if (!c || !rec.slot)
+        return;
+    optics_gfx_canvas_record_slot *s = rec.slot;
+    if (s->owner != c || s->state != OPTICS_GFX_RECORD_SLOT_VALID ||
+        s->generation != rec.generation)
+        return;
+    slot_evict(c, s);
+}
+
+uint64_t optics_gfx_canvas_cache_entries_created(const optics_gfx_canvas *c) {
+    return c ? c->records_created : 0;
+}
+
+uint64_t optics_gfx_canvas_cache_entries_replayed(const optics_gfx_canvas *c) {
+    return c ? c->records_replayed : 0;
+}

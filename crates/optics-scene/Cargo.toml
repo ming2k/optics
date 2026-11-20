@@ -1,0 +1,17 @@
+[package]
+name = "optics-scene"
+description = "Safe Rust bindings for vista — 3D scene hierarchy and glTF 2.0 asset runtime"
+publish = false
+links = "optics_scene_rs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+optics-scene-sys = { workspace = true }
+optics-gfx = { workspace = true }
+
+[build-dependencies]
+optics-build = { workspace = true }

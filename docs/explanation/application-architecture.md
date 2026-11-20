@@ -23,10 +23,10 @@ application
                                       └── Vulkan 1.3
 ```
 
-There are three ways in. `aperture_app_run` is a complete application host: a
-window, a lens UI, and optional canvas content underneath it. `iris_app_run` on
+There are three ways in. `optics_app_run` is a complete application host: a
+window, a lens UI, and optional canvas content underneath it. `optics_window_run` on
 its own is a window with flux content and no UI toolkit, or with a different
-UI layer plugged into `<iris/host.h>`. `lens` on its own is a headless UI
+UI layer plugged into `<optics/window/host.h>`. `lens` on its own is a headless UI
 engine. The content siblings are producers of `flux` primitives, not alternate
 rendering backends.
 
@@ -85,9 +85,9 @@ through public `flux` APIs and remain separately consumable libraries.
 
 `iris` reifies each native event — Wayland `wl_pointer`, Win32 `WM_*`,
 Cocoa `NSEvent` — into one platform-neutral `iris_event`
-(`<iris/event.h>`) in arrival order. Before folding the survivors into the
+(`<optics/window/event.h>`) in arrival order. Before folding the survivors into the
 frame's `iris_input`, `iris` runs the host's optional
-`iris_app_opts.on_event` callback, which may drop or rewrite each event.
+`optics_window_opts.on_event` callback, which may drop or rewrite each event.
 This is the only point at which a host may change what `lens` sees;
 The UI host's `frame` receives the already-folded snapshot; `aperture` converts it to `lens_input` for `build`. `iris`
 itself applies no policy — it reifies, orders, folds, and forwards. See

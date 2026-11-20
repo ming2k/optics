@@ -32,7 +32,7 @@ rejected), a Vulkan loader (`vulkan-loader` via Homebrew), the pinned Slang
 release from the official tarball (Homebrew has no `slang` formula), and the
 same three text libraries (wraps also work). Font discovery uses CoreText.
 The iris backend is Cocoa (`app_cocoa.m`); Objective-C is enabled
-automatically by `libs/iris/meson.build`. See
+automatically by `libs/window/meson.build`. See
 [Cross-platform](cross-platform.md) for the full matrix and invariants.
 
 On Debian or Ubuntu, install the development packages with:
@@ -62,7 +62,7 @@ and examples:
 meson setup build -Dexamples=true -Dtests=true
 ```
 
-The default root build links `flux`, `lens`, and `iris` directly; a reduced
+The default root build links `gfx`, `window`, `ui`, and `app` directly; a reduced
 feature build may omit the UI stack. Do not install one library before building
 the next, and do not configure nested Meson subprojects.
 
@@ -70,21 +70,21 @@ Useful feature options are defined in `meson_options.txt`:
 
 | Option | Default | Effect |
 |--------|---------|--------|
-| `glyph` | `true` | Build the `glyph` text shaping library. |
-| `vista` | `true` | Build the `vista` 3D scene-graph library. |
-| `prism` | `true` | Build the `prism` material library. |
-| `transit` | `true` | Build the header-only `transit` motion vocabulary. |
-| `reticle` | `true` | Build the `reticle` SVG document compiler. |
+| `text` | `true` | Build the `text` (`liboptics_text`) shaping library. |
+| `scene` | `true` | Build the `scene` (`liboptics_scene`) 3D scene-graph library. |
+| `material` | `true` | Build the `material` (`liboptics_material`) surface-material library. |
+| `motion` | `true` | Install the header-only `<optics/motion.h>` motion vocabulary. |
+| `svg` | `true` | Build the `svg` (`liboptics_svg`) SVG document compiler. |
 | `examples` | `false` | Build all available C examples. |
 | `tests` | `false` | Build C tests and benchmarks. |
 | `fuzz` | `false` | Build fuzz harnesses (libFuzzer when available). |
 
-`flux` itself has no module switches: every libflux carries the canvas, scene,
-compute and effect modules, so its ABI is identified by its version alone. The
-options above only select which sibling libraries are built. The `lens`/`iris`
-UI stack is built only when `glyph` and `reticle` are both enabled. A flux-only
-build is `-Dglyph=false -Dreticle=false -Dvista=false -Dprism=false
--Dtransit=false`.
+`gfx` itself has no module switches: every `liboptics_gfx` carries the canvas,
+scene, compute and effect modules, so its ABI is identified by its version
+alone. The options above only select which sibling libraries are built. The
+`ui`/`app` stack is built only when `text` and `svg` are both enabled. A
+`gfx`+`window`-only build is `-Dtext=false -Dsvg=false -Dscene=false
+-Dmaterial=false -Dmotion=false`.
 
 After changing options or installing a missing dependency, reconfigure:
 
@@ -102,9 +102,9 @@ meson test -C build --no-suite bench --no-suite fuzz
 Run representative binaries from their module directories:
 
 ```bash
-./build/examples/flux/scene_cube
-./build/examples/lens/headless_demo
-./build/examples/aperture/widgets
+./build/examples/showcase/scene_studio
+./build/examples/showcase/headless_demo
+./build/examples/showcase/widget_gallery
 ```
 
 The `iris` examples need a Wayland session. The `lens` examples are headless.
@@ -116,7 +116,7 @@ see [Interactive examples showcase](../how-to/run-and-explore-examples.md).
 
 Meson enforces out-of-tree builds. Adhere to these conventions to keep the repository root orderly:
 
-- `build/`: The **canonical local development directory** (Debug + tests + examples). Rust binding crates under `bindings/crates/` probe this directory automatically; the Cargo workspace manifest is at the repository root.
+- `build/`: The **canonical local development directory** (Debug + tests + examples). Rust crates under `crates/` probe this directory automatically via `optics-build`; the Cargo workspace manifest is at the repository root.
 - `build-tidy/`: Dedicated build tree for `tools/check-tidy.sh` (created automatically on demand).
 - **Ephemeral matrix builds (`build-fuzz*`, `build-release*`, `build-api*`, etc.)**: Temporary directories created when reproducing CI matrices locally. Treat them as disposable and clean them up after testing:
   ```bash

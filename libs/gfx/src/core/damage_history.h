@@ -1,0 +1,90 @@
+/*
+ * damage_history.h — the write-epoch history a swapchain rotation is repaired
+ * from (ADR-0149).
+ *
+ * A windowed surface renders into one persistent content image. The acquired
+ * swapchain image is a *presentation* buffer, and which one it is changes every
+ * frame. For the images to agree, each acquired image must receive exactly the
+ * pixels written since the last time *that* image was presented.
+ *
+ * That is what this structure records: one entry per committed frame, naming the
+ * regions that frame wrote. "What must image X receive" then has a single answer —
+ * the union of every entry newer than the epoch X last presented.
+ *
+ * Deliberately pure: no Vulkan, no allocation, no I/O. The window arithmetic is
+ * the part of the mechanism most likely to be wrong, and it is the part that can
+ * be proven by a table-driven unit test instead of a GPU run. `frame.c` and
+ * `surface.c` own the images; this owns the policy.
+ */
+#ifndef OPTICS_GFX_CORE_DAMAGE_HISTORY_H
+#define OPTICS_GFX_CORE_DAMAGE_HISTORY_H
+
+#include <optics/gfx/core.h>
+#include <optics/gfx/math.h> /* flux_rect */
+
+/* How many frames of write history are retained. A swapchain rotation is
+ * `minImageCount + 1` images deep in the worst case, so a deeper window than the
+ * rotation is required for a steady-state frame to be describable; anything
+ * deeper than this and the answer degrades to "copy everything", which is always
+ * correct. */
+#define OPTICS_GFX_DAMAGE_HISTORY_DEPTH 8u
+
+/* Sentinel epoch: "this image has never presented anything this surface's content
+ * image could reproduce". Always resolves to a full copy. */
+#define OPTICS_GFX_DAMAGE_EPOCH_NONE UINT64_MAX
+
+/* Upper bound on the rectangles one frame's write set may name. Mirrors the
+ * public `FLUX_DAMAGE_CAPACITY`; a frame that exceeds it commits as `full`. */
+#define OPTICS_GFX_DAMAGE_HISTORY_RECTS 64u
+
+typedef struct optics_gfx_damage_epoch {
+    uint64_t epoch; /* 0 = this slot has never been written */
+    optics_gfx_rect rects[OPTICS_GFX_DAMAGE_HISTORY_RECTS];
+    uint32_t count;
+    bool full; /* the frame wrote its whole extent, or could not describe itself */
+} optics_gfx_damage_epoch;
+
+typedef struct optics_gfx_damage_history {
+    optics_gfx_damage_epoch entries[OPTICS_GFX_DAMAGE_HISTORY_DEPTH];
+    /* Newest epoch that has an entry. Epochs are 1-based and strictly
+     * increasing, so 0 doubles as "nothing committed yet". */
+    uint64_t committed;
+} optics_gfx_damage_history;
+
+/* Forget every entry and restart the epoch counter. Called when the content
+ * image is (re)created: after a resize the previous pixels are meaningless, so no
+ * image is synchronised with anything. */
+void optics_gfx_damage_history_reset(optics_gfx_damage_history *h);
+
+/* Subtract every rectangle already in `out[0..*count)` from `r` and append the
+ * remainder, keeping the set strictly pairwise disjoint. Returns false when the
+ * decomposition cannot fit `capacity` (the caller must degrade to full). This
+ * is the single implementation of damage-set union in the engine: the epoch
+ * history and the frame repaint scope both use it so they cannot disagree about
+ * overlap or outward rounding. */
+bool optics_gfx_rect_set_append_disjoint(optics_gfx_rect *out, uint32_t *count, uint32_t capacity,
+                                         optics_gfx_rect r);
+
+/* Commit one frame's write set and return the epoch number it was given.
+ *
+ * `full` is the explicit "wrote the whole extent / could not localise" verdict.
+ * Empty + full=false is a real no-change epoch (a pacing or history-repair
+ * frame); it neither widens the history nor requires a copy. */
+uint64_t optics_gfx_damage_history_commit(optics_gfx_damage_history *h,
+                                          const optics_gfx_rect *rects, uint32_t count, bool full);
+
+/* The regions `since`'s successor frames wrote, i.e. what an image last
+ * synchronised at epoch `since` is missing.
+ *
+ * Returns the number of rectangles written to `out` (never more than `capacity`).
+ * `*out_full` is set when the answer cannot be a list — the epoch predates the
+ * retained window, an intervening frame was `full`, or the union exceeded
+ * `capacity` — in which case the caller must copy the whole extent.
+ *
+ * `since == FLUX_DAMAGE_EPOCH_NONE` returns `*out_full = true`: never synchronised.
+ * `since == h->committed` returns 0 with `*out_full == false`: the image is
+ * already current. Those two answers are different facts and are never merged. */
+uint32_t optics_gfx_damage_history_since(const optics_gfx_damage_history *h, uint64_t since,
+                                         optics_gfx_rect *out, uint32_t capacity, bool *out_full);
+
+#endif /* FLUX_CORE_DAMAGE_HISTORY_H */

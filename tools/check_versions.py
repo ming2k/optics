@@ -33,13 +33,13 @@ def parse_meson_version() -> str:
     return match.group(1)
 
 
-def parse_cargo_version() -> str:
+def parse_cargo_manifest() -> tuple[str, dict]:
     with (ROOT / "Cargo.toml").open("rb") as handle:
         manifest = tomllib.load(handle)
     version = manifest.get("workspace", {}).get("package", {}).get("version")
     if not isinstance(version, str):
         raise ValueError("Cargo.toml: missing [workspace.package].version")
-    return version
+    return version, manifest
 
 
 def parse_c_versions() -> dict[str, dict[str, int]]:
@@ -63,16 +63,28 @@ def main() -> int:
         meson_version = None
 
     try:
-        cargo_version = parse_cargo_version()
+        cargo_version, root_cargo_manifest = parse_cargo_manifest()
     except (OSError, ValueError, tomllib.TOMLDecodeError) as exc:
         errors.append(str(exc))
         cargo_version = None
+        root_cargo_manifest = {}
 
     if meson_version and cargo_version and meson_version != cargo_version:
         errors.append(f"Cargo.toml workspace version {cargo_version} != meson.build {meson_version}")
 
     if cargo_version:
-        for manifest_path in sorted((ROOT / "bindings" / "crates").glob("*/Cargo.toml")):
+        ws_deps = root_cargo_manifest.get("workspace", {}).get("dependencies", {})
+        for name, spec in ws_deps.items():
+            if not isinstance(spec, dict) or "path" not in spec:
+                continue
+            version = spec.get("version")
+            if isinstance(version, str) and version != cargo_version:
+                errors.append(
+                    f"Cargo.toml [workspace.dependencies]: {name} pins "
+                    f"{version}, workspace is {cargo_version}"
+                )
+
+        for manifest_path in sorted((ROOT / "crates").glob("*/Cargo.toml")):
             try:
                 with manifest_path.open("rb") as handle:
                     manifest = tomllib.load(handle)
@@ -111,6 +123,10 @@ def main() -> int:
 
     if (ROOT / "bindings" / "Cargo.toml").exists():
         errors.append("bindings/Cargo.toml exists: the workspace root must be the repository root")
+    if (ROOT / "bindings" / "crates").exists():
+        errors.append("bindings/crates exists: Rust crates must live under repository-root crates/")
+    if (ROOT / "crates" / "Cargo.toml").exists():
+        errors.append("crates/Cargo.toml exists: the workspace root must be the repository root")
 
     if errors:
         sys.stderr.write("version lockstep failed:\n")

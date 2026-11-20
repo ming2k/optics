@@ -5,15 +5,15 @@
 #ifndef MATERIAL_GALLERY_H
 #define MATERIAL_GALLERY_H
 
-#include <flux/effect.h>
-#include <flux/flux.h>
-#include <aperture/aperture.h>
-#include <iris/app.h>
-#include <iris/cursor.h>
-#include <iris/iris.h>
-#include <iris/window.h>
-#include <lens/lens.h>
-#include <prism/prism.h>
+#include <optics/gfx/effect.h>
+#include <optics/gfx.h>
+#include <optics/app.h>
+#include <optics/window/loop.h>
+#include <optics/window/cursor.h>
+#include <optics/window.h>
+#include <optics/window/state.h>
+#include <optics/ui.h>
+#include <optics/material.h>
 
 #include <math.h>
 #include <stdbool.h>
@@ -41,7 +41,7 @@ typedef enum backdrop_kind : uint32_t {
 typedef struct backdrop_info {
     backdrop_kind kind;
     const char *label;
-    lens_icon_id icon;
+    optics_ui_icon_id icon;
 } backdrop_info;
 
 extern const backdrop_info g_backdrops[BACKDROP_COUNT];
@@ -61,7 +61,7 @@ typedef struct gallery_layout {
 typedef struct gallery_app {
     view_mode view;
     backdrop_kind backdrop;
-    flux_rect backdrop_btn_rect;
+    optics_gfx_rect backdrop_btn_rect;
     bool animating;
     bool dark_mode;
     bool inactive_fallback;
@@ -80,16 +80,16 @@ typedef struct gallery_app {
     bool dvd_init;
 
     /* GPU resources */
-    flux_arena arena;
-    flux_image *capture;
-    flux_blur_filter *blur_filter;
-    prism_liquid_glass_filter *glass_filter;
-    prism_frosted_filter *frosted_filter;
-    prism_acrylic_filter *acrylic_filter;
-    prism_mica_filter *mica_filter;
+    optics_gfx_arena arena;
+    optics_gfx_image *capture;
+    optics_gfx_blur_filter *blur_filter;
+    optics_material_liquid_glass_filter *glass_filter;
+    optics_material_frosted_filter *frosted_filter;
+    optics_material_acrylic_filter *acrylic_filter;
+    optics_material_mica_filter *mica_filter;
 
     /* Active material layer outputs emitted for the current frame */
-    prism_material_output outputs[GALLERY_MAX_OUTPUTS];
+    optics_material_output outputs[GALLERY_MAX_OUTPUTS];
     uint32_t output_count;
 
     uint32_t width_px;
@@ -100,32 +100,32 @@ typedef struct gallery_app {
 } gallery_app;
 
 /* UI and theme */
-void gallery_apply_theme(gallery_app *app, lens *ui);
-void gallery_ui_build(gallery_app *app, lens *ui, const lens_input *in);
+void gallery_apply_theme(gallery_app *app, optics_ui *ui);
+void gallery_ui_build(gallery_app *app, optics_ui *ui, const optics_ui_input *in);
 
 /* Backdrop provider */
-void gallery_backdrop_render(gallery_app *app, flux_canvas *canvas, float W, float H);
+void gallery_backdrop_render(gallery_app *app, optics_gfx_canvas *canvas, float W, float H);
 
 /* Output pipeline */
-void gallery_emit_output(gallery_app *app, const prism_material_output *out);
+void gallery_emit_output(gallery_app *app, const optics_material_output *out);
 
 /* Declarative Zen material helpers */
-void gallery_render_frosted(gallery_app *app, flux_frame *frame, flux_image *blurred,
-                            flux_rect bounds, float corner_radius, float saturation);
-void gallery_render_acrylic(gallery_app *app, flux_frame *frame, flux_image *blurred,
-                            flux_rect bounds, float corner_radius, float polarity,
+void gallery_render_frosted(gallery_app *app, optics_gfx_frame *frame, optics_gfx_image *blurred,
+                            optics_gfx_rect bounds, float corner_radius, float saturation);
+void gallery_render_acrylic(gallery_app *app, optics_gfx_frame *frame, optics_gfx_image *blurred,
+                            optics_gfx_rect bounds, float corner_radius, float polarity,
                             float noise_intensity, float border_width);
-void gallery_render_mica(gallery_app *app, flux_frame *frame, flux_image *blurred, flux_rect bounds,
-                         float corner_radius, prism_mica_kind kind, float polarity, bool inactive);
+void gallery_render_mica(gallery_app *app, optics_gfx_frame *frame, optics_gfx_image *blurred, optics_gfx_rect bounds,
+                         float corner_radius, optics_material_mica_kind kind, float polarity, bool inactive);
 
 /* View preparers */
-void gallery_view_glass_prepare(gallery_app *app, flux_frame *frame, flux_image *blurred,
+void gallery_view_glass_prepare(gallery_app *app, optics_gfx_frame *frame, optics_gfx_image *blurred,
                                 const gallery_layout *l);
-void gallery_view_frosted_prepare(gallery_app *app, flux_frame *frame, flux_image *blurred,
+void gallery_view_frosted_prepare(gallery_app *app, optics_gfx_frame *frame, optics_gfx_image *blurred,
                                   const gallery_layout *l);
-void gallery_view_acrylic_prepare(gallery_app *app, flux_frame *frame, flux_image *blurred,
+void gallery_view_acrylic_prepare(gallery_app *app, optics_gfx_frame *frame, optics_gfx_image *blurred,
                                   const gallery_layout *l);
-void gallery_view_mica_prepare(gallery_app *app, flux_frame *frame, flux_image *blurred,
+void gallery_view_mica_prepare(gallery_app *app, optics_gfx_frame *frame, optics_gfx_image *blurred,
                                const gallery_layout *l);
 
 #endif /* MATERIAL_GALLERY_H */

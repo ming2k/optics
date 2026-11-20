@@ -1,0 +1,18 @@
+[package]
+name = "optics-svg-sys"
+description = "Raw FFI bindings to reticle (libreticle), the Optics vector-document compiler"
+publish = false
+links = "optics_svg"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# optics-gfx-sys is re-exported so the flux handles reticle speaks have ONE
+# Rust definition across the stack, with no casts at the crate seam.
+optics-gfx-sys = { workspace = true }
+
+[build-dependencies]
+optics-build = { workspace = true }
