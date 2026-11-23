@@ -18,18 +18,13 @@ fn main() {
         .allowlist_type("optics_scene")
         .allowlist_type("optics_scene_.*")
         .allowlist_var("OPTICS_SCENE_.*")
-        .allowlist_type("optics_gfx_vec3")
-        .blocklist_type("optics_gfx_result")
-        .blocklist_type("optics_gfx_device")
-        .blocklist_type("optics_gfx_frame")
-        .blocklist_type("optics_gfx_camera")
-        .blocklist_type("optics_gfx_material")
-        .blocklist_type("optics_gfx_scene_light")
-        .blocklist_type("optics_gfx_mesh")
-        .blocklist_function("optics_gfx_(device|frame|camera|material|scene|mesh)_.*")
+        .blocklist_type("optics_gfx_.*")
+        .blocklist_function("optics_gfx_.*")
+        .blocklist_var("OPTICS_GFX_.*")
         .raw_line(
-            "pub use optics_gfx_sys::{optics_gfx_camera, optics_gfx_device, optics_gfx_frame, optics_gfx_material, \
-             optics_gfx_result, optics_gfx_scene_light};",
+            "pub use optics_gfx_sys::{optics_gfx_camera, optics_gfx_device, optics_gfx_frame, \
+             optics_gfx_material, optics_gfx_mesh, optics_gfx_result, optics_gfx_scene_light, \
+             optics_gfx_vec3};",
         )
         .layout_tests(true)
         .generate()

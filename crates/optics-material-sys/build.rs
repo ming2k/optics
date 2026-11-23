@@ -18,6 +18,8 @@ fn main() {
         .allowlist_type("optics_material_.*")
         .allowlist_var("OPTICS_MATERIAL_.*")
         .blocklist_type("optics_gfx_.*")
+        .blocklist_function("optics_gfx_.*")
+        .blocklist_var("OPTICS_GFX_.*")
         .raw_line(
             "pub use optics_gfx_sys::{optics_gfx_device, optics_gfx_format, optics_gfx_frame, optics_gfx_image, \
              optics_gfx_point, optics_gfx_rect, optics_gfx_result};",

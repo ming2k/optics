@@ -6,8 +6,14 @@ fn main() {
     let probed = probe_and_link(&SysLibConfig {
         pkg_name: "optics-app",
         env_prefix: "OPTICS_APP",
-        dep_env_prefixes: &["OPTICS_WINDOW", "OPTICS_UI", "OPTICS_GFX"],
-        include_libs: &["app", "window", "ui", "gfx"],
+        dep_env_prefixes: &[
+            "OPTICS_WINDOW",
+            "OPTICS_UI",
+            "OPTICS_TEXT",
+            "OPTICS_SVG",
+            "OPTICS_GFX",
+        ],
+        include_libs: &["app", "window", "ui", "text", "svg", "gfx"],
         extra_pkg_config_includes: &[],
         headers: &["app.h"],
     });

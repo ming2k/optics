@@ -17,6 +17,10 @@ fn main() {
         .allowlist_function("optics_svg_.*")
         .allowlist_type("optics_svg_.*")
         .allowlist_var("OPTICS_SVG_.*")
+        // Opaque handle types and optics_gfx_result are blocklisted and
+        // re-exported from optics-gfx-sys; POD value types embedded by-value in
+        // svg view structs are bound locally so bindgen can emit Copy/Clone/Debug
+        // derives for those outer structs.
         .allowlist_type("optics_gfx_color")
         .allowlist_type("optics_gfx_point")
         .allowlist_type("optics_gfx_rect")
@@ -25,20 +29,20 @@ fn main() {
         .allowlist_type("optics_gfx_line_cap")
         .allowlist_type("optics_gfx_line_join")
         .allowlist_type("optics_gfx_fill_rule")
-        .allowlist_type("optics_gfx_result")
         .blocklist_type("optics_gfx_canvas")
         .blocklist_type("optics_gfx_encoder")
         .blocklist_type("optics_gfx_device")
         .blocklist_type("optics_gfx_image")
         .blocklist_type("optics_gfx_path")
         .blocklist_type("optics_gfx_arena")
+        .blocklist_type("optics_gfx_result")
         .blocklist_function("optics_gfx_.*")
         .blocklist_var("OPTICS_GFX_.*")
         .raw_line(
-            "pub use optics_gfx_sys::{optics_gfx_arena, optics_gfx_canvas, optics_gfx_device, optics_gfx_encoder, \
-             optics_gfx_image, optics_gfx_path};",
+            "pub use optics_gfx_sys::{optics_gfx_arena, optics_gfx_canvas, \
+             optics_gfx_color_rgba_premul, optics_gfx_device, optics_gfx_encoder, \
+             optics_gfx_image, optics_gfx_path, optics_gfx_result};",
         )
-        .raw_line("pub use optics_gfx_sys::optics_gfx_color_rgba_premul;")
         .newtype_enum("optics_svg_path_verb")
         .newtype_enum("optics_svg_pixel_format")
         .layout_tests(true)

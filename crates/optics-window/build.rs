@@ -1,4 +1,4 @@
-//! Relay rpaths from `optics-window-sys` and republish via `links = "optics_window"`.
+//! Relay rpaths from `optics-window-sys` and republish for downstream crates.
 
 fn main() {
     optics_build::relay_rpaths(&["DEP_OPTICS_WINDOW_RPATHS"], true);

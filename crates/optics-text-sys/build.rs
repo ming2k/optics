@@ -17,17 +17,16 @@ fn main() {
         .allowlist_function("optics_text_.*")
         .allowlist_type("optics_text_.*")
         .allowlist_var("OPTICS_TEXT_.*")
-        .blocklist_type("optics_gfx_device")
-        .blocklist_type("optics_gfx_canvas")
-        .blocklist_type("optics_gfx_arena")
-        .blocklist_type("optics_gfx_color")
-        .blocklist_type("optics_gfx_result")
+        .blocklist_type("optics_gfx_.*")
+        .blocklist_function("optics_gfx_.*")
+        .blocklist_var("OPTICS_GFX_.*")
         .raw_line(
-            "pub use optics_gfx_sys::{optics_gfx_arena, optics_gfx_canvas, optics_gfx_color, optics_gfx_device, optics_gfx_result};",
+            "pub use optics_gfx_sys::{optics_gfx_arena, optics_gfx_canvas, optics_gfx_color, \
+             optics_gfx_device, optics_gfx_encoder, optics_gfx_frame, optics_gfx_result};",
         )
         .layout_tests(true)
         .generate()
-        .expect("bindgen failed to generate glyph bindings");
+        .expect("bindgen failed to generate text bindings");
 
     write_bindings(&bindings);
 }

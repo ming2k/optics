@@ -1,4 +1,4 @@
-//! Relay rpaths for `optics-text` and republish via `links = "optics_text"`.
+//! Relay rpaths for `optics-text` and republish for downstream crates.
 
 fn main() {
     optics_build::relay_rpaths(

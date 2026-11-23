@@ -269,11 +269,12 @@ jobs:
           meson setup build -Dexamples=false -Dtests=false --buildtype=release
           sudo meson install -C build
 
-      - name: cargo fmt + clippy + test
+      - name: cargo fmt + clippy + test (dynamic & static)
         run: |
           cargo fmt --all -- --check
           cargo clippy --workspace --all-targets --locked -- -D warnings
           cargo test --workspace --locked
+          OPTICS_STATIC=1 cargo test --workspace --locked
         env:
           VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
 

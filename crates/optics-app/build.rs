@@ -1,4 +1,4 @@
-//! Relay rpaths from `optics-app-sys` and republish via `links = "optics_app"`.
+//! Relay rpaths from `optics-app-sys` and republish for downstream crates.
 
 fn main() {
     optics_build::relay_rpaths(
