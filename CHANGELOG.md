@@ -14,6 +14,24 @@ pre-1.0 release may break source or binary compatibility, so the SONAME
 carries the full version and a mismatched binary fails to load instead of
 silently reading a different descriptor layout.
 
+## [0.0.84] - 2026-11-24
+
+### Fixed — Rust `-sys` bindgen type ownership, dependency prefixes, and static CI gate
+
+- **Unified `optics_gfx_*` FFI type re-exports across `-sys` crates.**
+  `optics-ui-sys` and `optics-svg-sys` now blocklist `optics_gfx_result` and
+  re-export it from `optics-gfx-sys`; `optics-scene-sys` and `optics-text-sys`
+  blocklist all `optics_gfx_*` types, functions, and constants and re-export the
+  used symbols from `optics-gfx-sys`.
+- **Complete upstream build-dir and include-path discovery for `ui` and `app`.**
+  `optics-ui-sys` and `optics-app-sys` now list `OPTICS_TEXT` and `OPTICS_SVG`
+  in `dep_env_prefixes` and `text` / `svg` in `include_libs`.
+- **Consistent `rpath` relay and CI static-link verification.**
+  `optics-material` relays `DEP_OPTICS_GFX_RS_RPATHS` consistently with sibling
+  wrapper crates, and `.github/workflows/ci.yml` now executes
+  `OPTICS_STATIC=1 cargo test --workspace --locked` alongside the default
+  shared-preferred test pass.
+
 ## [0.0.83] - 2026-11-23
 
 ### Breaking — Rust crates link the shared Optics libraries by default
