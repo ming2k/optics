@@ -8,7 +8,7 @@
 # Orthogonal lanes (not layers): bench, fuzz, lint, tooling.
 #
 # Every test binary links tests/support/optics_test (assertions) and, when it
-# needs a device, tests/support/flux_test (fixtures). No suite owns a private
+# needs a device, tests/support/optics_gfx_test (fixtures). No suite owns a private
 # copy of CHECK/EXPECT/TEST_REPORT.
 
 subdir('support')

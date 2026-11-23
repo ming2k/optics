@@ -1,11 +1,11 @@
 /* test_a11y.c — accessibility semantics + export walk (ADR-0012). */
 
-#include "lens_test.h"
 #include "optics_test.h"
+#include "ui_test.h"
 #include <optics/ui.h>
 #include <string.h>
 
-/* ---- a collector for lens_accessibility_walk ---- */
+/* ---- a collector for optics_ui_accessibility_walk ---- */
 
 typedef struct rec {
     optics_ui_role role;
@@ -92,7 +92,7 @@ static void test_widget_roles(void) {
     optics_ui_release(ui);
 }
 
-/* lens_a11y overrides the most recent widget's name (icon-only control). */
+/* optics_ui_a11y overrides the most recent widget's name (icon-only control). */
 static void test_a11y_override(void) {
     optics_ui *ui = nullptr;
     OT_EXPECT(optics_ui_create(&(optics_ui_desc){}, &ui) == OPTICS_GFX_OK);

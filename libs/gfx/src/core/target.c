@@ -2,10 +2,10 @@
  * Refcounted render-target image + view.
  *
  * The depth/colour attachment a caller owns and feeds to a pass via
- * flux_pass_desc (peer-defined attachments, ADR-0001). flux owns the
- * VkImage, the backing GPU-allocator memory (flux_vk_alloc_image), and
- * the VkImageView; the refcount lifecycle mirrors flux_buffer /
- * flux_mesh. This is the replacement for the raw Vulkan
+ * optics_gfx_pass_desc (peer-defined attachments, ADR-0001). gfx owns the
+ * VkImage, the backing GPU-allocator memory (optics_gfx_vk_alloc_image), and
+ * the VkImageView; the refcount lifecycle mirrors optics_gfx_buffer /
+ * optics_gfx_mesh. This is the replacement for the raw Vulkan
  * image/memory/view plumbing every depth-using example used to carry.
  */
 #include "image_internal.h"
@@ -13,13 +13,15 @@
 #include <optics/gfx/vulkan.h>
 
 #include <stdatomic.h>
+#include <stdlib.h>
 
 optics_gfx_result optics_gfx_target_create(optics_gfx_device *d, const optics_gfx_target_desc *desc,
                                            optics_gfx_target **out) {
     if (!d || !desc || !out)
         return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
     if (desc->type != OPTICS_GFX_TYPE_TARGET_DESC) {
-        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT, "desc->type != FLUX_TYPE_TARGET_DESC");
+        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT,
+                        "desc->type != OPTICS_GFX_TYPE_TARGET_DESC");
         return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
     }
     if (desc->width == 0 || desc->height == 0) {
@@ -30,12 +32,12 @@ optics_gfx_result optics_gfx_target_create(optics_gfx_device *d, const optics_gf
     bool is_color = desc->usage & OPTICS_GFX_TARGET_COLOR;
     if (!is_depth && !is_color) {
         OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT,
-                        "target usage must set FLUX_TARGET_DEPTH or FLUX_TARGET_COLOR");
+                        "target usage must set OPTICS_GFX_TARGET_DEPTH or OPTICS_GFX_TARGET_COLOR");
         return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
     }
     if (desc->format == OPTICS_GFX_FORMAT_UNDEFINED) {
         OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT,
-                        "target format is FLUX_FORMAT_UNDEFINED");
+                        "target format is OPTICS_GFX_FORMAT_UNDEFINED");
         return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
     }
     *out = nullptr;
@@ -106,7 +108,7 @@ optics_gfx_result optics_gfx_target_create(optics_gfx_device *d, const optics_gf
 
     *out = t;
     OPTICS_GFX_OBSERVE_ACQUIRE(d, OPTICS_GFX_SCOPE_DEVICE, OPTICS_GFX_LIFETIME_CONTEXT, "vk_target",
-                               "flux/core", 0, OPTICS_GFX_SITE_VK_TARGET);
+                               "gfx/core", 0, OPTICS_GFX_SITE_VK_TARGET);
     return OPTICS_GFX_OK;
 
 fail:
@@ -129,7 +131,7 @@ optics_gfx_result optics_gfx_target_create_cpu(const optics_gfx_cpu_target_desc 
         return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
     if (desc->type != OPTICS_GFX_TYPE_CPU_TARGET_DESC) {
         OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT,
-                        "desc->type != FLUX_TYPE_CPU_TARGET_DESC");
+                        "desc->type != OPTICS_GFX_TYPE_CPU_TARGET_DESC");
         return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
     }
     if (desc->width == 0 || desc->height == 0) {
@@ -243,13 +245,13 @@ void optics_gfx_target_release(optics_gfx_target *t) {
     }
 
     optics_gfx_device *d = t->device;
-    /* Same in-flight hazard as flux_image_release: the target may still
+    /* Same in-flight hazard as optics_gfx_image_release: the target may still
      * be an attachment of batches executing on the graphics queue. Park
      * the pieces on the device retire queue — a target owns no bindless
      * slots and no imported memory. */
     optics_gfx_device_retire_image(d, t->view, t->image, &t->alloc, VK_NULL_HANDLE, 0,
                                    OPTICS_GFX_BINDLESS_INVALID, OPTICS_GFX_BINDLESS_INVALID);
-    OPTICS_GFX_OBSERVE_RELEASE(d, OPTICS_GFX_SCOPE_DEVICE, "vk_target", "flux/core", 0);
+    OPTICS_GFX_OBSERVE_RELEASE(d, OPTICS_GFX_SCOPE_DEVICE, "vk_target", "gfx/core", 0);
     optics_gfx_internal_free(d, t);
     optics_gfx_device_release(d);
 }

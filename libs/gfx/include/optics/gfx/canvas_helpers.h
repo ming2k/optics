@@ -1,9 +1,9 @@
 /*
- * flux/canvas_helpers.h — Zero-cost inline convenience layer (RFC-0094 / ADR-0087).
+ * gfx/canvas_helpers.h — Zero-cost inline convenience layer (RFC-0094 / ADR-0087).
  *
  * Orthogonal Core with Inline Layers: Dynamic libraries (.so / .dylib / .dll)
- * export ONLY orthogonal unified drawing primitives (flux_canvas_draw and
- * flux_canvas_draw_glyph_run). All specialized convenience functions are provided
+ * export ONLY orthogonal unified drawing primitives (optics_gfx_canvas_draw_geometry
+ * and optics_gfx_canvas_draw_glyph_run). All specialized convenience functions are provided
  * as header-only static inline wrappers, guaranteeing zero-cost abstraction without
  * polluting the dynamic symbol table.
  */
@@ -83,7 +83,7 @@ static inline optics_gfx_geometry optics_gfx_geom_path(const optics_gfx_path *pa
  * Drawing convenience functions (Header-only static inline)
  *
  * All helpers construct clean-break Geometry x Brush representations and
- * route exclusively through flux_canvas_draw_geometry(ADR-0089 / ADR-0091).
+ * route exclusively through optics_gfx_canvas_draw_geometry(ADR-0089 / ADR-0091).
  * ============================================================================= */
 
 /* Constructors preserve invalid counts for draw-time validation; no truncation
@@ -306,4 +306,4 @@ static inline void optics_gfx_canvas_draw_image_sampled(optics_gfx_canvas *c,
 }
 #endif
 
-#endif /* FLUX_CANVAS_HELPERS_H */
+#endif /* OPTICS_GFX_CANVAS_HELPERS_H */

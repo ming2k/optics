@@ -3,6 +3,9 @@ id: ADR-0090
 title: "DisplayList snapshots and resource ownership"
 status: accepted
 date: 2026-09-14
+scope: Recording, resources, caches, and cross-thread publication
+superseded_by: null
+negative_knowledge: true
 ---
 
 # ADR-0090: DisplayList snapshots and resource ownership

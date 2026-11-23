@@ -10,7 +10,9 @@ Task-oriented problem-solving recipes for common rendering, layout, and visual c
 | :--- | :--- |
 | **[Record and Present a Frame](record-and-present-a-frame.md)** | Execute the standard 5-call Vulkan frame lifecycle: acquire, begin, draw, end, present. |
 | **[Run and Explore Examples](run-and-explore-examples.md)** | Build and interact with the complete showcase gallery: physical glass materials, particles, and UI apps. |
-| **[Apply a Blur Effect](apply-a-blur-effect.md)** | Run an exact separable Gaussian or dual-pass blur on a `flux_image` and manage transient targets. |
+| **[Use Optics from a Rust Project](use-optics-from-rust.md)** | Add the `optics` crate to an external Cargo project: build the C libraries at the matching version, point the build at them, and run the result. |
+| **[Choose a Static or Shared Link](choose-a-static-or-shared-link.md)** | Link the shared objects (the default) or embed the archives with the `static` feature: precedence, how the probe decides, and link-failure triage. |
+| **[Apply a Blur Effect](apply-a-blur-effect.md)** | Run an exact separable Gaussian or dual-pass blur on a `optics_gfx_image` and manage transient targets. |
 | **[Render on the CPU (No GPU)](render-on-cpu.md)** | Execute headless 2D canvas drawing on the CPU via `<optics/gfx/canvas_cpu.h>` without a Vulkan ICD. |
 | **[Render Offscreen (No Window)](render-offscreen.md)** | Render vector or 3D scene content into an offscreen image target and read back pixels for tests. |
 | **[Light a Mesh](light-a-mesh.md)** | Configure directional lighting and Blinn-Phong transient uniform blocks for 3D meshes. |

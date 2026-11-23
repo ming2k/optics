@@ -27,7 +27,7 @@ optics_ui_tree_action optics_ui_tree_view(optics_ui *ui, const optics_ui_tree_op
     optics_ui_push_id(ui, id_str ? id_str : "tree_view");
 
     optics_ui_id state_id = optics_ui_current_id(ui, "tree_state");
-    optics_ui_node *state_node = lensi_store_touch(ui, state_id);
+    optics_ui_node *state_node = optics_ui__store_touch(ui, state_id);
     tree_view_state *state =
         state_node ? (tree_view_state *)optics_ui_node_state(state_node, sizeof(tree_view_state))
                    : nullptr;

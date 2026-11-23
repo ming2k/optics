@@ -3,6 +3,9 @@ id: ADR-0075
 title: "System accessibility preferences — lens executes, iris observes, the OS owns"
 status: accepted
 date: 2026-08-23
+scope: ui (text-scale mechanism), window (preference query/watch on all
+superseded_by: null
+negative_knowledge: true
 ---
 
 # ADR-0075: System accessibility preferences — lens executes, iris observes, the OS owns

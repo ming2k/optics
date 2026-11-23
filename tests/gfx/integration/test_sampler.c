@@ -1,5 +1,5 @@
 /*
- * flux_sampler lifecycle + bindless auto-registration.
+ * optics_gfx_sampler lifecycle + bindless auto-registration.
  */
 #include "gfx_test.h"
 #include "optics_test.h"
@@ -90,7 +90,7 @@ int main(void) {
     OT_EXPECT(optics_gfx_sampler_retain(nullptr) == nullptr);
     optics_gfx_sampler_release(nullptr);
 
-    /* --- flux_canvas_draw_image_sampled NULL safety ---
+    /* --- optics_gfx_canvas_draw_image_sampled NULL safety ---
      * Exhaustive coverage needs a recording canvas, which needs a
      * surface (no headless canvas path). The function must at
      * minimum tolerate NULL arguments without crashing — that is

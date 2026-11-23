@@ -1,4 +1,4 @@
-//! Smoke tests for the `aperture` binding that do not require a window:
+//! Smoke tests for the `app` binding that do not require a window:
 //! Config construction and validation.
 
 #![deny(rust_2018_idioms)]
@@ -31,7 +31,7 @@ fn config_roundtrip_is_panic_free() {
     // Honest name for what this checks: constructing and dropping a Config
     // (it cannot call Application::run from a unit test — no compositor).
     // The null-config rejection path of optics_app_run is covered by the C
-    // test suite (tests/aperture/test_host_binding.c), not here.
+    // test suite (tests/app/test_host_binding.c), not here.
     let cfg = optics_app::Config::new("noop").unwrap();
     drop(cfg); // no panic on drop
 }

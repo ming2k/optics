@@ -1,6 +1,6 @@
-# Optics / Lens Design Philosophy
+# Optics / ui Design Philosophy
 
-This document articulates the foundational architectural principles and design philosophy of the Optics graphics and UI stack (`flux` ➔ `lens` ➔ `iris`).
+This document articulates the foundational architectural principles and design philosophy of the Optics graphics and UI stack (`gfx` ➔ `ui` ➔ `window`).
 
 ---
 
@@ -13,13 +13,13 @@ Every system layer and primitive must solve **one independent physical problem**
 - Compound widgets (such as data tables, tab bars, dropdowns, accordions, and modal dialogs) belong to **userland component kits**, never the immediate-mode core micro-kernel.
 
 ### II. Single Opts Descriptor Paradigm (单一描述符范式)
-Every widget exports **exactly one** canonical C entry point that accepts a single typed options struct pointer (`const lens_<widget>_opts *opts`) and returns a uniform `lens_response`:
+Every widget exports **exactly one** canonical C entry point that accepts a single typed options struct pointer (`const optics_ui_<widget>_opts *opts`) and returns a uniform `optics_ui_response`:
 ```c
-lens_response lens_<widget>(lens *ui, const lens_<widget>_opts *opts);
+optics_ui_response optics_ui_<widget>(optics_ui *ui, const optics_ui_<widget>_opts *opts);
 ```
 - **Zero Dual-API Tiers**: Eliminate the duality of terse vs extended (`_ex`) APIs.
 - **Zero Parameter-Derived Suffixes**: Eliminate functions derived purely from argument variations (e.g. `_wrapped`, `_primary`, `_subtle`, `_vertical`, `_active`, `_tinted`).
-- **Modern C23 Baseline**: Full standard C23 adoption (`-std=c23`). Native `nullptr`, `{}` zero-initialization, fixed underlying enums (`enum name : uint32_t`), `[[nodiscard]]`, and compound literals (`&(lens_<widget>_opts){...}`). No legacy pre-C23 shims.
+- **Modern C23 Baseline**: Full standard C23 adoption (`-std=c23`). Native `nullptr`, `{}` zero-initialization, fixed underlying enums (`enum name : uint32_t`), `[[nodiscard]]`, and compound literals (`&(optics_ui_<widget>_opts){...}`). No legacy pre-C23 shims.
 
 ### III. Composition Over Specialization (组合优于特化)
 - Variants in visual hierarchy (e.g. primary vs subtle vs link) or presentation mode (e.g. checkbox box vs switch vs radio) are expressed as plain data enums inside the option struct, not as separate functions or widget kinds.
@@ -48,34 +48,34 @@ The GUI stack is separated into four strictly isolated layers:
 
 ## 2. The Layered System Model
 
-### Layer 1: Overlay System (`lens_place`)
+### Layer 1: Overlay System (`optics_ui_place`)
 - **Single Responsibility**: Manage elements that escape normal layout flow and parent scissor clipping.
 - **Physics**: Maintains Z-band ordering (`BACKDROP`, `CHROME`, `POPUP`, `MODAL`, `TOOLTIP`), automatic collision detection with display boundaries (auto-flip on edge collision), and transient lifecycle (Esc and click-outside dismissal).
 - **Invariance**: `place` does not dictate how children are laid out or scrolled; it only manages spatial coordinates and overlay occlusion.
 
-### Layer 2: Viewport & Camera (`lens_scroll`)
+### Layer 2: Viewport & Camera (`optics_ui_scroll_begin`)
 - **Single Responsibility**: Transform and clip rendered output when content extent exceeds available bounds.
 - **Physics**: Applies GPU scissor clipping and `(-scroll_x, -scroll_y)` world matrix translation. Intercepts mouse wheel/touch drag and manages scrollbar thumb interaction.
 - **Invariance**: `scroll` is not a layout system. It does not arrange children; it only provides a moving viewing window over a layout container.
 
-### Layer 3: Layout Flow (`lens_row`, `lens_column`, `lens_grid`)
+### Layer 3: Layout Flow (`optics_ui_row_begin`, `optics_ui_column_begin`, `optics_ui_grid_begin`)
 - **Single Responsibility**: Solve 2D box positioning $(x, y, w, h)$ for child nodes.
 - **Physics**:
-  - **1D Flexbox Flow (`lens_row`, `lens_column`)**: Main-axis slack distribution (`flex`), cross-axis alignment (`cross`), inter-child spacing (`gap`, `pad`), panel styling (`bg`, `border`, `radius`).
-  - **2D Planar Grid (`lens_grid`)**: Column and row track partitioning (`columns`, `row_height`), multi-cell spans (`col_span`, `row_span`), explicit planar positioning (`grid_col`, `grid_row`), and dense Bento auto-packing (ADR-0104).
+  - **1D Flexbox Flow (`optics_ui_row_begin`, `optics_ui_column_begin`)**: Main-axis slack distribution (`flex`), cross-axis alignment (`cross`), inter-child spacing (`gap`, `pad`), panel styling (`bg`, `border`, `radius`).
+  - **2D Planar Grid (`optics_ui_grid_begin`)**: Column and row track partitioning (`columns`, `row_height`), multi-cell spans (`col_span`, `row_span`), explicit planar positioning (`grid_col`, `grid_row`), and dense Bento auto-packing (ADR-0104).
 - **Invariance**: Layout containers do not perform GPU viewport clipping and do not escape parent coordinates. 1D Flex and 2D Grid are completely orthogonal and freely nestable to arbitrary depths.
 
 ### Layer 4: Data & Interaction Atoms
 The 9 canonical orthogonal widget primitives:
-1. **`lens_label`**: Static read-only typography (headings, body, wrapped text).
-2. **`lens_icon`**: Vector symbol rendering (SVG glyphs).
-3. **`lens_image`**: Raster texture rendering.
-4. **`lens_separator`**: 1D geometric dividing lines.
-5. **`lens_button`**: 0D transient pulse/action trigger (Default, Primary, Subtle, Link, Icon/Image content).
-6. **`lens_checkbox`**: 0D discrete boolean toggle (Box, Switch, Radio appearance).
-7. **`lens_selectable`**: Row selection and highlight atom (for menus, lists, tabs, trees).
-8. **`lens_slider`**: 1D scalar value dragging along an axis.
-9. **`lens_textedit`**: 1D/2D string buffer editing (single-line inputs and multi-line editors).
+1. **`optics_ui_label`**: Static read-only typography (headings, body, wrapped text).
+2. **`optics_ui_icon`**: Vector symbol rendering (SVG glyphs).
+3. **`optics_ui_image`**: Raster texture rendering.
+4. **`optics_ui_separator`**: 1D geometric dividing lines.
+5. **`optics_ui_button`**: 0D transient pulse/action trigger (Default, Primary, Subtle, Link, Icon/Image content).
+6. **`optics_ui_checkbox`**: 0D discrete boolean toggle (Box, Switch, Radio appearance).
+7. **`optics_ui_selectable`**: Row selection and highlight atom (for menus, lists, tabs, trees).
+8. **`optics_ui_slider`**: 1D scalar value dragging along an axis.
+9. **`optics_ui_textedit`**: 1D/2D string buffer editing (single-line inputs and multi-line editors).
 
 ---
 

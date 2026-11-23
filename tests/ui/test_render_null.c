@@ -1,8 +1,8 @@
 /* test_render_null.c — snapshot publication argument validation (render seam,
  * ADR-0024/0025). CPU-only. */
 
-#include "lens_test.h"
 #include "optics_test.h"
+#include "ui_test.h"
 #include <optics/ui.h>
 
 int main(void) {

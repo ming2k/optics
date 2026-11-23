@@ -9,9 +9,9 @@
  *
  * Live watch needs no watcher thread on Win32: the change signal is
  * WM_SETTINGCHANGE (lParam "ImmersiveColorSet"), which Windows broadcasts to
- * top-level windows — i.e. it already arrives on the iris main thread's
- * message loop. iris_color_scheme_watch therefore only registers the
- * callback; app_win32.c's WndProc calls iris_theme_win32__notify_setting_change()
+ * top-level windows — i.e. it already arrives on the window main thread's
+ * message loop. optics_window_color_scheme_watch therefore only registers the
+ * callback; app_win32.c's WndProc calls optics_window_theme_win32__notify_setting_change()
  * from WM_SETTINGCHANGE, and the callback fires synchronously on the loop
  * thread, satisfying theme.h's main-thread delivery guarantee without
  * detouring through the wakeup seam.
@@ -42,7 +42,7 @@
 
 #include "theme_watch_internal.h"
 
-/* Registered watchers, touched on the iris main thread only (watch/unwatch
+/* Registered watchers, touched on the window main thread only (watch/unwatch
  * are documented main-thread-only, and the notify hook runs inside the
  * WndProc on the same thread). Two independent slots: the host's public one
  * and the platform backend's internal one (theme_watch_internal.h) — the
@@ -110,7 +110,7 @@ void optics_window_theme__unwatch_backend(void) {
 }
 
 /* Internal seam (not in any public header): called by app_win32.c's WndProc
- * on WM_SETTINGCHANGE. Runs on the iris main thread; fires the registered
+ * on WM_SETTINGCHANGE. Runs on the window main thread; fires the registered
  * callbacks synchronously when the scheme actually changed. */
 void optics_window_theme_win32__notify_setting_change(void) {
     optics_window_color_scheme now = optics_window_query_system_color_scheme();

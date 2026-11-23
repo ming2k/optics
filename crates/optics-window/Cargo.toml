@@ -1,6 +1,6 @@
 [package]
 name = "optics-window"
-description = "Safe Rust bindings to iris: the platform shell (window, events, frame cadence) over flux"
+description = "Safe Rust bindings to window: the platform shell (window, events, frame cadence) over gfx"
 publish = false
 links = "optics_window_rs"
 version.workspace = true
@@ -14,3 +14,9 @@ optics-window-sys = { workspace = true }
 
 [build-dependencies]
 optics-build = { workspace = true }
+
+[features]
+# Force a static link of the Optics archives; the default links the shared
+# objects (docs/how-to/choose-a-static-or-shared-link.md). OPTICS_STATIC /
+# OPTICS_DYNAMIC in the environment override it.
+static = ["optics-window-sys/static"]

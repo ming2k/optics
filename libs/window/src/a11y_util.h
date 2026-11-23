@@ -9,7 +9,7 @@
  * It also owns the pieces of the AT-SPI wire contract that must stay
  * verifiable without a bus: the AtspiRole / AtspiState numeric constants
  * (values cross-checked against at-spi2-core's atspi-constants.h — getting
- * these wrong makes orca announce the wrong control type), the lens→AT-SPI
+ * these wrong makes orca announce the wrong control type), the ui→AT-SPI
  * role/state mapping, and the per-frame tree diff that decides which
  * Event.Object signals the bridge emits.
  */
@@ -39,7 +39,7 @@ bool optics_window_a11y__supports_value(optics_window_role r);
  * role is not actionable. */
 const char *optics_window_a11y__action_name(optics_window_role r);
 
-/* Parse a lens semantic `value` string (a slider readout like "1.5" or
+/* Parse a ui semantic `value` string (a slider readout like "1.5" or
  * "42") into a double. Returns 0.0 for NULL / empty / non-numeric input. */
 double optics_window_a11y__parse_value(const char *s);
 
@@ -88,21 +88,21 @@ typedef enum optics_window_atspi_state : uint32_t {
     OPTICS_WINDOW_ATSPI_STATE_SHOWING = 25,
 } optics_window_atspi_state;
 
-/* Map lens role → AT-SPI role (IRIS_ATSPI_ROLE_UNKNOWN when unmapped). */
+/* Map ui role → AT-SPI role (OPTICS_WINDOW_ATSPI_ROLE_UNKNOWN when unmapped). */
 optics_window_atspi_role optics_window_a11y__map_role(optics_window_role r);
 
 /* The RoleName string clients display for an AT-SPI role ("push button", …). */
 const char *optics_window_a11y__role_name(optics_window_atspi_role r);
 
-/* Build the AT-SPI (lo, hi) state bitfield from lens's IRIS_A11Y_* flags. */
+/* Build the AT-SPI (lo, hi) state bitfield from ui's OPTICS_WINDOW_A11Y_* flags. */
 void optics_window_a11y__state_bits(uint32_t flags, uint32_t *out_lo, uint32_t *out_hi);
 
 /* ------------------------------------------------------------------ */
 /*  Per-frame tree diff (which Event.Object signals to emit)           */
 /* ------------------------------------------------------------------ */
 
-/* One snapshot node. name/value are deep-copied out of lens's per-frame
- * arena (the pointers lens hands to the walk are only valid until the next
+/* One snapshot node. name/value are deep-copied out of ui's per-frame
+ * arena (the pointers ui hands to the walk are only valid until the next
  * frame), truncated on a UTF-8 code-point boundary when overlong. */
 #define OPTICS_WINDOW_A11Y__NODE_NAME_MAX 128
 #define OPTICS_WINDOW_A11Y__NODE_VALUE_MAX 256
@@ -113,12 +113,12 @@ typedef struct optics_window_a11y__node {
     optics_window_role role;
     char name[OPTICS_WINDOW_A11Y__NODE_NAME_MAX];
     char value[OPTICS_WINDOW_A11Y__NODE_VALUE_MAX];
-    uint32_t flags;         /* IRIS_A11Y_*                        */
+    uint32_t flags;         /* OPTICS_WINDOW_A11Y_*                        */
     int32_t index;          /* index among same-parent siblings    */
     optics_gfx_rect bounds; /* solved bounds this frame (Component / BoundsChanged) */
 } optics_window_a11y__node;
 
-/* Copy one walked lens node into snapshot storage (deep string copies,
+/* Copy one walked ui node into snapshot storage (deep string copies,
  * sibling index computed against the partially built `cur` array). */
 void optics_window_a11y__node_fill(optics_window_a11y__node *dst, const optics_window_semantics *s,
                                    optics_window_node_id id, optics_window_node_id parent,
@@ -168,13 +168,13 @@ typedef enum optics_window_a11y__event_kind : uint32_t {
 typedef struct optics_window_a11y__event {
     optics_window_a11y__event_kind kind;
     optics_window_node_id id;
-    optics_window_node_id parent;         /* add/remove: the parent the change is reported on */
-    int32_t index;                        /* add/remove: index in that parent's child list    */
-    int32_t state;                        /* STATE_ON/OFF: iris_atspi_state bit               */
-    optics_window_role role;              /* ROLE: the new role                               */
-    optics_window_a11y__text_delta text;  /* TEXT: the edit delta                   */
-    const optics_window_a11y__node *node; /* the current-frame node (NULL for REMOVE,
-                                    which points at `prev_node` instead)   */
+    optics_window_node_id parent; /* add/remove: the parent the change is reported on */
+    int32_t index;                /* add/remove: index in that parent's child list    */
+    int32_t state;                /* STATE_ON/OFF: optics_window_atspi_state bit               */
+    optics_window_role role;      /* ROLE: the new role                               */
+    optics_window_a11y__text_delta text;       /* TEXT: the edit delta                   */
+    const optics_window_a11y__node *node;      /* the current-frame node (NULL for REMOVE,
+                                         which points at `prev_node` instead)   */
     const optics_window_a11y__node *prev_node; /* REMOVE: the old node            */
 } optics_window_a11y__event;
 
@@ -188,4 +188,4 @@ size_t optics_window_a11y__diff(const optics_window_a11y__node *prev, size_t n_p
                                 const optics_window_a11y__node *cur, size_t n_cur,
                                 optics_window_a11y__event *out, size_t cap);
 
-#endif /* IRIS_A11Y_UTIL_H */
+#endif /* OPTICS_WINDOW_A11Y_UTIL_H */

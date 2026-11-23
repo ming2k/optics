@@ -6,7 +6,6 @@
  * SDK vtable signatures. NOT runtime-tested on a Windows machine: the
  * logic is written defensively — every HRESULT is checked, every COM
  * pointer is NULL-guarded, and every AddRef is paired with a Release.
- * Review the FIXME-adjacent comments before shipping a Windows build.
  *
  * Mapping to the interface:
  *  - Family query: IDWriteFontCollection::FindFamilyName →
@@ -45,15 +44,8 @@
 #include <dwrite_2.h>
 #include <windows.h>
 
-/* ------------------------------------------------------------------ */
-/*  IID helper: MSVC has __uuidof, everything else uses the IID_ symbols */
-/* ------------------------------------------------------------------ */
-
-#ifdef _MSC_VER
-#define TXT_IID_OF(x) __uuidof(x)
-#else
+/* C COM: interface IDs are the IID_ symbols (__uuidof is C++ only). */
 #define TXT_IID_OF(x) (&IID_##x)
-#endif
 
 /* ------------------------------------------------------------------ */
 /*  UTF-8 ↔ UTF-16 helpers                                             */
@@ -251,7 +243,7 @@ static IDWriteFactory *create_factory(void) {
 
 /* Generic names arrive from face.c; map them to families that exist on
  * every supported Windows release, most preferred first. A custom family
- * name (FLUX_TEXT_FONT) is tried verbatim first. */
+ * name (OPTICS_TEXT_FONT) is tried verbatim first. */
 static const WCHAR *const sans_fallbacks[] = {L"Segoe UI", L"Arial", nullptr};
 static const WCHAR *const serif_fallbacks[] = {L"Georgia", L"Times New Roman", nullptr};
 static const WCHAR *const mono_fallbacks[] = {L"Consolas", L"Courier New", nullptr};

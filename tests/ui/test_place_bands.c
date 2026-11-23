@@ -3,8 +3,8 @@
  * above, intra-band by registration), EXACT placement as the persistent
  * chrome mode, and BACKDROP's default hit-transparency. */
 
-#include "lens_test.h"
 #include "optics_test.h"
+#include "ui_test.h"
 #include <optics/gfx/canvas_cpu.h>
 #include <optics/ui.h>
 
@@ -505,8 +505,8 @@ static void test_intra_band_registration_order(void) {
     optics_ui_release(ui);
 }
 
-/* ADR-0060 reserves LENS_BAND_BASE for flow content: an ABS node asking
- * for BASE is clamped to CHROME by lens_place_begin, so the "what paints
+/* ADR-0060 reserves OPTICS_UI_BAND_BASE for flow content: an ABS node asking
+ * for BASE is clamped to CHROME by optics_ui_place_begin, so the "what paints
  * above also hit-tests above" invariant can never be violated — it must
  * render above the base tree AND occlude it. */
 static void test_base_band_request_clamped_to_chrome(void) {

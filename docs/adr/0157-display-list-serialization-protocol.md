@@ -3,7 +3,7 @@ id: ADR-0157
 title: "DisplayList serialization is a versioned byte protocol with caller-owned resource IDs"
 status: accepted
 date: 2026-11-11
-scope: [flux, canvas, bindings, tests]
+scope: [gfx, canvas, bindings, tests]
 superseded_by: null
 negative_knowledge: true
 ---

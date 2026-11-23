@@ -3,6 +3,9 @@ id: ADR-0095
 title: "Flux public contract convergence"
 status: accepted
 date: 2026-09-16
+scope: Flux C API, Rust bindings, and in-tree consumers
+superseded_by: null
+negative_knowledge: true
 ---
 
 # ADR-0095: Flux public contract convergence

@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-/* Single source of truth for LENS_API — never restate it here. */
+/* Single source of truth for OPTICS_UI_API — never restate it here. */
 #include <optics/ui/export.h>
 
 #ifdef __cplusplus
@@ -308,10 +308,10 @@ typedef struct optics_ui_icon_cmd {
     float params[6];
 } optics_ui_icon_cmd;
 
-/* A contiguous sub-range of a lens_icon_desc's cmd stream painted with its
+/* A contiguous sub-range of a optics_ui_icon_desc's cmd stream painted with its
  * own colour and mode. `color` is a straight (non-premultiplied)
  * 0xRRGGBBAA value; `fill` selects fill_path vs stroke_path for the range.
- * Runtime SVG registration (lens_icon_register_svg) produces one run per
+ * Runtime SVG registration (optics_ui_icon_register_svg) produces one run per
  * source shape, preserving the SVG's paint colours; `runs == NULL` on a
  * desc means "single paint for the whole stream" (every built-in icon) and
  * the draw colour comes from the widget/theme as before. */
@@ -330,28 +330,28 @@ typedef struct optics_ui_icon_desc {
     uint32_t run_count;             /* 0 unless runs != NULL */
 } optics_ui_icon_desc;
 
-/* The built-in icon table is internal: lens_icon_id values < LENS_ICON_COUNT
- * index it, and lens_icon_info() is the public read access. It is not part
+/* The built-in icon table is internal: optics_ui_icon_id values < OPTICS_UI_ICON_COUNT
+ * index it, and optics_ui_icon_info() is the public read access. It is not part
  * of the installed API surface. */
 
-/* Resolve an icon id — built-in (0 .. LENS_ICON_COUNT-1) or runtime
- * (lens_icon_register_svg, >= LENS_ICON_COUNT) — to its command stream,
+/* Resolve an icon id — built-in (0 .. OPTICS_UI_ICON_COUNT-1) or runtime
+ * (optics_ui_icon_register_svg, >= OPTICS_UI_ICON_COUNT) — to its command stream,
  * per-run paints, and render mode. Returns NULL for unknown ids. The
  * returned descriptor is owned by the registry and stays valid for the
  * process lifetime (ids are never reclaimed), so callers may cache it.
  * `mode` (0 = filled, 1 = outlined) describes the built-in table's render
  * style; runtime SVG icons always report 0 and carry their paints in
  * `runs`. This is the public read access to the icon table that replaced
- * exporting `lens_icon_table` directly. */
+ * exporting `optics_ui_icon_table` directly. */
 OPTICS_UI_API const optics_ui_icon_desc *optics_ui_icon_info(optics_ui_icon_id icon, uint8_t *mode);
 
-/* Failure sentinel of lens_icon_register_svg; also usable as a "no icon"
- * value wherever a lens_icon_id is optional. */
+/* Failure sentinel of optics_ui_icon_register_svg; also usable as a "no icon"
+ * value wherever a optics_ui_icon_id is optional. */
 #define OPTICS_UI_ICON_INVALID ((optics_ui_icon_id) - 1)
 
-/* Register an SVG string as a runtime icon. Returns its id (>= LENS_ICON_COUNT)
- * or LENS_ICON_INVALID on parse failure. Ids are process-global, never reclaimed;
- * call from the UI thread (registration is not thread-safe, like the rest of lens).
+/* Register an SVG string as a runtime icon. Returns its id (>= OPTICS_UI_ICON_COUNT)
+ * or OPTICS_UI_ICON_INVALID on parse failure. Ids are process-global, never reclaimed;
+ * call from the UI thread (registration is not thread-safe, like the rest of ui).
  *
  * Shapes painted `currentColor` (or with no paint attribute) follow the theme
  * colour exactly like built-ins. Shapes carrying an explicit colour keep it:

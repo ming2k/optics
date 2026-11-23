@@ -26,11 +26,11 @@ int main(void) {
 
     /* --- result strings --- */
     {
-        OT_EXPECT(strcmp(optics_gfx_result_string(OPTICS_GFX_OK), "FLUX_OK") == 0);
+        OT_EXPECT(strcmp(optics_gfx_result_string(OPTICS_GFX_OK), "OPTICS_GFX_OK") == 0);
         OT_EXPECT(strcmp(optics_gfx_result_string(OPTICS_GFX_ERROR_UNSUPPORTED),
-                         "FLUX_ERROR_UNSUPPORTED") == 0);
-        OT_EXPECT(strcmp(optics_gfx_result_string((optics_gfx_result)9999), "FLUX_ERROR_UNKNOWN") ==
-                  0);
+                         "OPTICS_GFX_ERROR_UNSUPPORTED") == 0);
+        OT_EXPECT(strcmp(optics_gfx_result_string((optics_gfx_result)9999),
+                         "OPTICS_GFX_ERROR_UNKNOWN") == 0);
     }
 
     /* --- error info plumbing (Stage 1: still zeroed) --- */

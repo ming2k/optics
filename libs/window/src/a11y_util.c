@@ -172,7 +172,7 @@ static void state_set(uint32_t *lo, uint32_t *hi, int bit) {
 
 void optics_window_a11y__state_bits(uint32_t flags, uint32_t *out_lo, uint32_t *out_hi) {
     uint32_t lo = 0, hi = 0;
-    /* Every widget is focusable+enabled+sensitive+showing unless the lens
+    /* Every widget is focusable+enabled+sensitive+showing unless the ui
      * DISABLED flag is set. */
     if (!(flags & OPTICS_WINDOW_A11Y_DISABLED)) {
         state_set(&lo, &hi, OPTICS_WINDOW_ATSPI_STATE_FOCUSABLE);
@@ -223,7 +223,7 @@ static const optics_window_a11y__node *find_by_id(const optics_window_a11y__node
 }
 
 /* Code points in a byte span of valid UTF-8 (same lead-byte counting as
- * iris_a11y__char_count_utf8, bounded by length instead of NUL). */
+ * optics_window_a11y__char_count_utf8, bounded by length instead of NUL). */
 static int32_t span_codepoints(const char *s, size_t bytes) {
     int32_t n = 0;
     for (size_t i = 0; i < bytes; i++)

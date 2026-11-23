@@ -1,6 +1,6 @@
 [package]
 name = "optics-gfx-sys"
-description = "Raw FFI bindings to flux (libflux), generated from the flux public headers incl. <flux/vulkan.h>"
+description = "Raw FFI bindings to gfx (liboptics_gfx), generated from the gfx public headers incl. <optics/gfx/vulkan.h>"
 publish = false
 links = "optics_gfx"
 version.workspace = true
@@ -11,3 +11,9 @@ rust-version.workspace = true
 
 [build-dependencies]
 optics-build = { workspace = true }
+
+[features]
+# Force a static link of the Optics archives; the default links the shared
+# objects (docs/how-to/choose-a-static-or-shared-link.md). OPTICS_STATIC /
+# OPTICS_DYNAMIC in the environment override it.
+static = []

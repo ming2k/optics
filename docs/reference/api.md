@@ -1,6 +1,6 @@
 # API Reference
 
-Version-agnostic description of how the current `flux` public API is shaped.
+Version-agnostic description of how the current `gfx` public API is shaped.
 The installed headers and [symbol reference](symbols.md) are the canonical
 lookup surfaces for this checkout.
 
@@ -8,7 +8,7 @@ lookup surfaces for this checkout.
 
 | Header                | Always available | Contents                                                              |
 |-----------------------|------------------|-----------------------------------------------------------------------|
-| `<optics/gfx.h>`       | Yes              | Umbrella; pulls in every flux module.                                 |
+| `<optics/gfx.h>`       | Yes              | Umbrella; pulls in every gfx module.                                 |
 | `<optics/gfx/core.h>`       | Yes              | Device, surface, frame, buffer, sampled image, allocator, logger, results, version. |
 | `<optics/gfx/math.h>`       | Yes              | Vector, matrix, quaternion, colour, arena. No Vulkan dependency.      |
 | `<optics/gfx/vulkan.h>`     | Yes              | Raw Vulkan handle accessors, sampler, graphics pipeline, pass.        |
@@ -36,7 +36,7 @@ stack from the build rather than leaving unresolved symbols behind. `window`
 depends on `gfx` only and is always built.
 
 `<optics/gfx/core.h>` and `<optics/gfx/math.h>` do **not** include `<vulkan/vulkan.h>`.
-Include `<optics/gfx/vulkan.h>` at the seam where you hand flux a `VkSurfaceKHR`
+Include `<optics/gfx/vulkan.h>` at the seam where you hand gfx a `VkSurfaceKHR`
 or pull a raw `VkCommandBuffer` back.
 
 ## Object model
@@ -46,7 +46,7 @@ or pull a raw `VkCommandBuffer` back.
 | Opaque pointer       | `optics_gfx_device`, `optics_gfx_surface`, `optics_gfx_frame`, `optics_gfx_buffer`, `optics_gfx_target`, `optics_gfx_image`, `optics_gfx_canvas`, `optics_gfx_path`, `optics_gfx_mesh`, `optics_gfx_material`, `optics_gfx_sampler`, `optics_gfx_graphics_pipeline`, `optics_gfx_compute_pipeline`. Never dereferenced by the caller. |
 | Atomic refcount      | Every heavy resource above. `_retain` is `[[nodiscard]]` and returns the same pointer; `_release` is null-safe.  |
 | Value type           | `optics_gfx_vec2/3/4`, `optics_gfx_mat3x2`, `optics_gfx_mat4`, `optics_gfx_quat`, `optics_gfx_color`, `optics_gfx_point`, `optics_gfx_rect`, `optics_gfx_camera`, `optics_gfx_vertex`, `optics_gfx_scene_light`. Pass by value; live on the stack or in a `optics_gfx_arena`. |
-| Arena-owned          | `optics_gfx_path`, `optics_gfx_paint`. Reset/destroy the arena to free; no per-element release.         |
+| Arena-owned          | `optics_gfx_path`, `optics_gfx_brush`. Reset/destroy the arena to free; no per-element release.         |
 
 ## Resource lifecycle
 
@@ -63,7 +63,7 @@ Heavy resources are refcounted with atomic counters. The conventions:
 
 ### Retention by descriptors
 
-When a `_desc` struct holds a pointer to another flux resource, that
+When a `_desc` struct holds a pointer to another gfx resource, that
 pointer is **retained by the constructor**:
 
 | Desc field                              | Retained? |
@@ -102,7 +102,7 @@ the canvas / scene that uses them, releasing only after
 
 ### Arena boundary
 
-`optics_gfx_path` and `optics_gfx_paint` are value-typed objects allocated inside
+`optics_gfx_path` and `optics_gfx_brush` are value-typed objects allocated inside
 a `optics_gfx_arena`. Their lifetime is the arena's lifetime; freeing the
 arena (`optics_gfx_arena_deinit`) or resetting it (`optics_gfx_arena_reset`)
 invalidates every pointer previously returned.
@@ -114,7 +114,7 @@ reset the arena for the next frame.
 
 ## Execution model
 
-Flux supports both immediate target-driven execution and pure CPU command
+gfx supports both immediate target-driven execution and pure CPU command
 encoding with immutable publication (ADR-0089 through ADR-0094):
 
 1. **Draw merging** (automatic): consecutive canvas submits with an
@@ -160,12 +160,12 @@ encoding with immutable publication (ADR-0089 through ADR-0094):
 | `optics_gfx_compute_dispatch` | Records `vkCmdBindPipeline` + bindless set + push constants + `vkCmdDispatch`. |
 | `optics_gfx_graphics_pipeline_bind` | Records `vkCmdBindPipeline` + bindless set + push constants. |
 
-## Scene-graph content layer (vista)
+## Scene-graph content layer (scene)
 
-`vista` preserves glTF primitive material indices. C hosts install
-an index-aligned material table with `vista_scene_set_materials`; a null
-`vista_draw_opts.material` selects that table, while a non-null value
-overrides the complete scene. `vista_draw_opts` also carries the camera and
+`scene` preserves glTF primitive material indices. C hosts install
+an index-aligned material table with `optics_scene_set_materials`; a null
+`optics_scene_draw_opts.material` selects that table, while a non-null value
+overrides the complete scene. `optics_scene_draw_opts` also carries the camera and
 scene, so the draw call itself takes only the frame context and one descriptor.
 
 The safe Rust binding exposes
@@ -216,7 +216,7 @@ key on `optics_gfx_frame_image_index()`, not the frame-in-flight slot returned b
 `optics_gfx_frame_index()`.
 
 Multi-pass image dependencies, reverse ROI, forward damage, and target
-lifetimes are planned through Flux's RenderPlan compiler (ADR-0089 / ADR-0092),
+lifetimes are planned through gfx's RenderPlan compiler (ADR-0089 / ADR-0092),
 replacing external graph planning with a single dependency-driven execution path.
 
 ## Tagged descriptors
@@ -250,9 +250,9 @@ differently:
 
 Pre-1.0, fields can be appended directly to a base desc when it makes
 sense. The pre-1.0 SONAME is the **full version string**
-(`liboptics_gfx.so.0.0.82`), not `major.minor`: releases in this line have
+(`liboptics_gfx.so.0.0.83`), not `major.minor`: releases in this line have
 appended descriptor fields and changed pass behavior on patch bumps, so
-`0.0.81` and `0.0.82` do not share a binary contract. A binary built against
+`0.0.82` and `0.0.83` do not share a binary contract. A binary built against
 one release fails to load the other instead of silently reading a smaller
 struct. Recompile against the matching headers when you upgrade.
 
@@ -280,7 +280,7 @@ device.next = &features;
 
 The semantic interface owns the Vulkan extension bundle. Use
 `required_device_extensions` only for platform or application extensions that
-do not have a Flux capability.
+do not have a gfx capability.
 
 ### DRM physical-device constraint
 
@@ -297,7 +297,7 @@ device.next = &drm;
 device.headless = true;
 ```
 
-Flux compares the pair with the primary and render identities reported by
+gfx compares the pair with the primary and render identities reported by
 `VK_EXT_physical_device_drm` before applying its normal feature checks and
 device scoring. Missing extension support or no exact match returns
 `OPTICS_GFX_ERROR_UNSUPPORTED`; selection never falls back to another GPU.
@@ -330,7 +330,7 @@ features.optional = OPTICS_GFX_DEVICE_FEATURE_DMABUF_SYNC_FILE;
 ```
 
 When `OPTICS_GFX_DEVICE_FEATURE_DMABUF_SYNC_FILE` is enabled, `acquire_sync_fd` is
-imported as a Linux sync_file fence and waited before Flux samples the image.
+imported as a Linux sync_file fence and waited before gfx samples the image.
 
 `optics_gfx_image_import_dmabuf` currently accepts single-plane, sampled color
 formats only. It validates the exact DRM format modifier against the selected
@@ -343,7 +343,7 @@ return `OPTICS_GFX_ERROR_UNSUPPORTED`.
 externally importable. Callers must not add an unreported
 `DRM_FORMAT_MOD_LINEAR` fallback.
 
-On `OPTICS_GFX_OK`, flux owns and closes the file descriptors in
+On `OPTICS_GFX_OK`, gfx owns and closes the file descriptors in
 `optics_gfx_dmabuf_image_desc.planes` and `acquire_sync_fd` when provided. On any
 error, the caller still owns those file descriptors and must close them. The
 imported image follows the normal `optics_gfx_image` lifecycle and is released with
@@ -351,13 +351,13 @@ imported image follows the normal `optics_gfx_image` lifecycle and is released w
 
 If no acquire fence is supplied, the caller must ensure the producer has
 completed writes and must keep the producer from writing concurrently while
-flux samples the image.
+gfx samples the image.
 
 For a producer that recommits an already-imported dma-buf with a new acquire
-fence, call `optics_gfx_canvas_wait_dmabuf_acquire` after `optics_gfx_canvas_begin_frame` and
+fence, call `optics_gfx_canvas_wait_dmabuf_acquire` after `optics_gfx_canvas_begin` and
 before the first draw that samples that image. The wait is submitted to the
 GPU for the current frame; it does not block the calling CPU thread or require
-rebuilding the `optics_gfx_image`. On `OPTICS_GFX_OK`, flux owns and closes the sync-file
+rebuilding the `optics_gfx_image`. On `OPTICS_GFX_OK`, gfx owns and closes the sync-file
 descriptor. On error, the caller retains ownership and must close it.
 
 ## Error model
@@ -375,13 +375,13 @@ from `optics_gfx_get_last_error`.
 
 `optics_gfx_get_last_error(out)` **copies** the diagnostic into the
 caller-supplied `optics_gfx_error_info`. The struct itself becomes the
-caller's; flux retains no reference to it.
+caller's; gfx retains no reference to it.
 
 The pointer fields *inside* the copy (`function`, `file`, `message`)
-reference strings owned by flux:
+reference strings owned by gfx:
 
 - They are **never heap-allocated for the caller** — never free them.
-- They remain valid **until the next fallible flux call returns a
+- They remain valid **until the next fallible gfx call returns a
   non-OK result on the same thread**, at which point they may be
   overwritten in place.
 
@@ -398,9 +398,8 @@ more than the call; instead the canvas defers error reporting:
 
 - The **first** error during a canvas pass is recorded (the "sticky"
   pass error); later errors this pass do not overwrite it.
-- The error surfaces when the pass completes: `optics_gfx_canvas_end_frame_checked`
-  (or `optics_gfx_canvas_end_target_checked`) returns it as the pass result (`optics_gfx_canvas_end_frame`
-  closes the pass without returning the error code).
+- The error surfaces when the pass completes: `optics_gfx_canvas_end` returns it
+  as the pass result (it is `[[nodiscard]]`).
 - Between the failing call and pass end, `optics_gfx_get_last_error` already
   carries the diagnostic — a caller that needs the reason inline (not
   just the pass outcome) can read it there.
@@ -448,8 +447,8 @@ major version bump:
 When a public symbol is on the way out, the preferred path is:
 
 1. Mark deprecated at minor `0.N`. The header carries a
-   `OPTICS_GFX_DEPRECATED("use X")` attribute (defined once in `<optics/gfx/core.h>`,
-   next to `OPTICS_GFX_API`) and the release notes name the replacement.
+   standard C23 `[[deprecated("use X")]]` attribute and the release notes name
+   the replacement.
 2. Remove at minor `0.N+1` or later.
 
 A one-cycle deprecation is the floor, not the ceiling. Symbols with
@@ -458,7 +457,7 @@ callers) may be renamed or removed immediately at a minor bump, with
 the removal called out in the release notes. Recent example: the
 GPU-spelled `optics_gfx_canvas_begin`/`_end`/`_end_checked` wrappers were
 removed outright once the backend-agnostic
-`optics_gfx_canvas_begin_frame`/`optics_gfx_canvas_end_frame`/`_end_frame_checked`
+`optics_gfx_canvas_begin`/`optics_gfx_canvas_end`/`_end_frame_checked`
 pair covered every caller, including the CPU backend.
 
 ## Vulkan handle stability
@@ -467,8 +466,8 @@ pair covered every caller, including the CPU backend.
 `optics_gfx_frame_vk_command_buffer`, `optics_gfx_buffer_vk_buffer`,
 `optics_gfx_sampler_vk_sampler`, `optics_gfx_graphics_pipeline_vk_pipeline`, …)
 return raw Vulkan types. These follow Vulkan's own stability rules,
-not flux's. A Vulkan 1.3 program built against today's loader
-continues to work; flux does not abstract this away.
+not gfx's. A Vulkan 1.3 program built against today's loader
+continues to work; gfx does not abstract this away.
 
 ## Capability queries
 
@@ -496,12 +495,10 @@ submit-and-end, nothing recorded is pending. Required reading for
 
 - Retire-queued (safe at any time): images, buffers, meshes, samplers,
   targets — destruction is deferred until in-flight batches complete.
-- Destroy-inline (caller proves quiescence): `optics_gfx_compute_pipeline_release`,
-  `optics_gfx_graphics_pipeline_release`, `optics_gfx_material_release` destroy the
-  underlying Vulkan objects immediately (VUID-vkDestroyPipeline-00765).
-  The safe-at-any-time spelling for pipelines and materials is
-  `optics_gfx_pipeline_release_deferred`, `optics_gfx_graphics_pipeline_release_deferred`,
-  and `optics_gfx_material_release_deferred`.
+- Pipelines and materials: `optics_gfx_compute_pipeline_release`,
+  `optics_gfx_graphics_pipeline_release` and `optics_gfx_material_release` park
+  the `VkPipeline` on the device's retire queue, so they are safe to call while
+  work that uses it is still in flight (VUID-vkDestroyPipeline-00765).
 
 ## Library versioning
 
@@ -528,8 +525,8 @@ compiles every library against version numbers injected by
 `tools/check_versions.py` (`meson test --suite lint`) compares Meson, the Cargo
 workspace, the umbrella header, and every public header. Bumping the release
 version therefore means touching every surface in one commit — the intended
-discipline. Hard-coded version strings still fail the accessor test (vista once
-shipped "0.0.29" against 0.0.36 headers; transit sat at 0.0.1 for seven months).
+discipline. Hard-coded version strings still fail the accessor test (scene once
+shipped "0.0.29" against 0.0.36 headers; motion sat at 0.0.1 for seven months).
 
 ## Related
 

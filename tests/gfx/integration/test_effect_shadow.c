@@ -8,7 +8,7 @@
  *   - blur > 0 softens the edge monotonically (alpha falls off with
  *     distance from the mask)
  *   - alpha 0 produces a fully transparent output
- *   - flux_effect_reset returns leases; a second shadow works
+ *   - optics_gfx_effect_reset returns leases; a second shadow works
  */
 #include "gfx_test.h"
 #include "optics_test.h"

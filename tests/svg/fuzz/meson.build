@@ -1,4 +1,4 @@
-# tests/svg/fuzz — reticle-side fuzz harnesses.
+# tests/svg/fuzz — svg-side fuzz harnesses.
 #
 # Same build wiring as tests/gfx/fuzz/meson.build: a standalone main()
 # is pulled in from fuzz_main.c, or replaced by libFuzzer's main() when
@@ -12,16 +12,16 @@ fs = import('fs')
 
 fuzz_main_src = files('../../gfx/fuzz/fuzz_main.c')
 
-reticle_fuzz_harnesses = [
+optics_svg_fuzz_harnesses = [
   {
-    'name': 'fuzz_reticle_parse',
-    'src': files('fuzz_reticle_parse.c'),
+    'name': 'fuzz_svg_parse',
+    'src': files('fuzz_svg_parse.c'),
     'deps': [svg_dep, gfx_dep, m_dep],
-    'corpus': 'corpus/reticle_parse',
+    'corpus': 'corpus/svg_parse',
   },
 ]
 
-foreach h : reticle_fuzz_harnesses
+foreach h : optics_svg_fuzz_harnesses
   if libfuzzer_enabled
     exe = executable(h['name'], h['src'],
       dependencies        : h['deps'],

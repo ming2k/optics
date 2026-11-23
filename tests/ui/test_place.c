@@ -2,8 +2,8 @@
  * begin gating, anchored placement (with flip), band-order occlusion of base
  * widgets, click-outside and Escape dismissal, and centered placement. */
 
-#include "lens_test.h"
 #include "optics_test.h"
+#include "ui_test.h"
 #include <optics/ui.h>
 
 static const optics_ui_input ZERO_IN = {.display_size = {400, 300}, .dt_seconds = 0.016f};

@@ -24,7 +24,7 @@ When an incident or regression occurs (e.g. GPU memory leak, presentation lockup
 
 - Date: YYYY-MM-DD
 - Severity: Critical | High | Medium
-- Affected Modules: [e.g. libs/flux, libs/iris]
+- Affected Modules: [e.g. libs/gfx, libs/window]
 - Authors: Optics Engineering Team
 
 ---

@@ -19,19 +19,19 @@
  */
 #include "../../../libs/ui/src/internal.h"
 #include "../../../libs/ui/src/render/icon_mask.h"
-#include "lens_test.h"
 #include "optics_test.h"
+#include "ui_test.h"
 
-/* This test compiles lens's icon_mask.c directly, and that TU now allocates
- * through the lens funnel (ADR-0135), which lives in context.c and is hidden in
+/* This test compiles ui's icon_mask.c directly, and that TU now allocates
+ * through the ui funnel (ADR-0135), which lives in context.c and is hidden in
  * the shared library. Provide the same funnel here so the direct-compiled TU
  * links: same owner/kind attribution, same device-less fallback. */
-void *lensi_alloc(optics_ui *ui, size_t bytes);
-void lensi_free(optics_ui *ui, void *ptr);
+void *optics_ui__alloc(optics_ui *ui, size_t bytes);
+void optics_ui__free(optics_ui *ui, void *ptr);
 #if defined(__GNUC__) || defined(__clang__)
 __attribute__((weak))
 #endif
-void *lensi_alloc(optics_ui *ui, size_t bytes) {
+void *optics_ui__alloc(optics_ui *ui, size_t bytes) {
     if (!ui->device)
         return calloc(1, bytes);
     void *p = nullptr;
@@ -39,7 +39,7 @@ void *lensi_alloc(optics_ui *ui, size_t bytes) {
                                 &(optics_gfx_device_alloc_opts){
                                     .type = OPTICS_GFX_TYPE_DEVICE_ALLOC_OPTS,
                                     .bytes = bytes,
-                                    .owner = "lens/core",
+                                    .owner = "ui/core",
                                     .kind = "host",
                                     .scope = OPTICS_GFX_SCOPE_CONTEXT,
                                 },
@@ -50,7 +50,7 @@ void *lensi_alloc(optics_ui *ui, size_t bytes) {
 #if defined(__GNUC__) || defined(__clang__)
 __attribute__((weak))
 #endif
-void lensi_free(optics_ui *ui, void *ptr) {
+void optics_ui__free(optics_ui *ui, void *ptr) {
     if (!ptr)
         return;
     if (!ui->device) {
@@ -60,7 +60,7 @@ void lensi_free(optics_ui *ui, void *ptr) {
     optics_gfx_device_free(ui->device, &(optics_gfx_device_free_opts){
                                            .type = OPTICS_GFX_TYPE_DEVICE_FREE_OPTS,
                                            .ptr = ptr,
-                                           .owner = "lens/core",
+                                           .owner = "ui/core",
                                            .kind = "host",
                                            .scope = OPTICS_GFX_SCOPE_CONTEXT,
                                        });
@@ -130,7 +130,7 @@ static bool icon_centroid(optics_ui_icon_id id, float size, float scale, uint32_
     optics_ui_icon(ui, &(optics_ui_icon_opts){.id = id, .size = size});
     optics_ui_end(ui);
 
-    /* Content scale stays 1.0: lens already applies ui->scale internally, so a
+    /* Content scale stays 1.0: ui already applies ui->scale internally, so a
      * scaled canvas here would apply it twice. */
     optics_gfx_canvas *c = nullptr;
     if (optics_gfx_canvas_create(&(optics_gfx_canvas_desc){.type = OPTICS_GFX_TYPE_CANVAS_DESC,
@@ -200,14 +200,14 @@ int main(void) {
         OT_EXPECT(optics_ui_create(&(optics_ui_desc){.scale = 1.0f}, &ui) == OPTICS_GFX_OK);
 
         float stroke = 2.0f * 20.0f / 24.0f;
-        lensi_icon_mask *a = lensi_icon_mask_acquire(ui, OPTICS_UI_ICON_CHECK, 20u, stroke, 0.0f,
-                                                     0u, LENSI_ICON_MASK_BODY);
+        optics_ui__icon_mask *a = optics_ui__icon_mask_acquire(
+            ui, OPTICS_UI_ICON_CHECK, 20u, stroke, 0.0f, 0u, OPTICS_UI_ICON_MASK_BODY);
         OT_EXPECT(a != nullptr);
         if (a) {
             OT_EXPECT(a->dev_px == 20u);
             OT_EXPECT(a->w == 20u + 2u * a->halo);
             OT_EXPECT(a->h == a->w);
-            /* Device-less lens: the mask lives as host bytes, not an image. */
+            /* Device-less ui: the mask lives as host bytes, not an image. */
             OT_EXPECT(a->host != nullptr);
             OT_EXPECT(a->image == nullptr);
             int nonzero = 0;
@@ -225,37 +225,37 @@ int main(void) {
         }
 
         /* Same request returns the same entry — no duplicate bakes. */
-        lensi_icon_mask *again = lensi_icon_mask_acquire(ui, OPTICS_UI_ICON_CHECK, 20u, stroke,
-                                                         0.0f, 0u, LENSI_ICON_MASK_BODY);
+        optics_ui__icon_mask *again = optics_ui__icon_mask_acquire(
+            ui, OPTICS_UI_ICON_CHECK, 20u, stroke, 0.0f, 0u, OPTICS_UI_ICON_MASK_BODY);
         OT_EXPECT(again == a);
 
         /* A different device size is a different entry. */
-        lensi_icon_mask *bigger = lensi_icon_mask_acquire(ui, OPTICS_UI_ICON_CHECK, 24u, stroke,
-                                                          0.0f, 0u, LENSI_ICON_MASK_BODY);
+        optics_ui__icon_mask *bigger = optics_ui__icon_mask_acquire(
+            ui, OPTICS_UI_ICON_CHECK, 24u, stroke, 0.0f, 0u, OPTICS_UI_ICON_MASK_BODY);
         OT_EXPECT(bigger != nullptr && bigger != a);
         if (bigger)
             OT_EXPECT(bigger->dev_px == 24u);
 
         /* An outline layer is its own entry, and an outline layer with no
          * outline width is meaningless rather than silently a body mask. */
-        lensi_icon_mask *outline = lensi_icon_mask_acquire(ui, OPTICS_UI_ICON_CHECK, 20u, stroke,
-                                                           1.5f, 0u, LENSI_ICON_MASK_OUTLINE);
+        optics_ui__icon_mask *outline = optics_ui__icon_mask_acquire(
+            ui, OPTICS_UI_ICON_CHECK, 20u, stroke, 1.5f, 0u, OPTICS_UI_ICON_MASK_OUTLINE);
         OT_EXPECT(outline != nullptr && outline != a);
-        OT_EXPECT(lensi_icon_mask_acquire(ui, OPTICS_UI_ICON_CHECK, 20u, stroke, 0.0f, 0u,
-                                          LENSI_ICON_MASK_OUTLINE) == nullptr);
+        OT_EXPECT(optics_ui__icon_mask_acquire(ui, OPTICS_UI_ICON_CHECK, 20u, stroke, 0.0f, 0u,
+                                               OPTICS_UI_ICON_MASK_OUTLINE) == nullptr);
 
         /* A body-layer mask never carries the outline, so asking with an outline
          * width must not mint a second entry with byte-identical coverage. */
-        lensi_icon_mask *body_dup = lensi_icon_mask_acquire(ui, OPTICS_UI_ICON_CHECK, 20u, stroke,
-                                                            1.5f, 0u, LENSI_ICON_MASK_BODY);
+        optics_ui__icon_mask *body_dup = optics_ui__icon_mask_acquire(
+            ui, OPTICS_UI_ICON_CHECK, 20u, stroke, 1.5f, 0u, OPTICS_UI_ICON_MASK_BODY);
         OT_EXPECT(body_dup == a);
 
         /* An unknown run index and a zero device size are rejected, so a caller
          * falls back instead of masking nothing. */
-        OT_EXPECT(lensi_icon_mask_acquire(ui, OPTICS_UI_ICON_CHECK, 20u, stroke, 0.0f, 7u,
-                                          LENSI_ICON_MASK_BODY) == nullptr);
-        OT_EXPECT(lensi_icon_mask_acquire(ui, OPTICS_UI_ICON_CHECK, 0u, stroke, 0.0f, 0u,
-                                          LENSI_ICON_MASK_BODY) == nullptr);
+        OT_EXPECT(optics_ui__icon_mask_acquire(ui, OPTICS_UI_ICON_CHECK, 20u, stroke, 0.0f, 7u,
+                                               OPTICS_UI_ICON_MASK_BODY) == nullptr);
+        OT_EXPECT(optics_ui__icon_mask_acquire(ui, OPTICS_UI_ICON_CHECK, 0u, stroke, 0.0f, 0u,
+                                               OPTICS_UI_ICON_MASK_BODY) == nullptr);
 
         optics_ui_release(ui); /* must free every cached mask without leaking */
     }
@@ -314,9 +314,9 @@ int main(void) {
             .runs = runs,
             .run_count = 3,
         };
-        lensi_icon_run_span spans[LENSI_ICON_MAX_RUNS];
-        uint32_t n =
-            lensi_icon_run_spans(&desc, LENSI_ICON_RENDER_STROKE, spans, LENSI_ICON_MAX_RUNS);
+        optics_ui__icon_run_span spans[OPTICS_UI_ICON_MAX_RUNS];
+        uint32_t n = optics_ui__icon_run_spans(&desc, OPTICS_UI_ICON_RENDER_STROKE, spans,
+                                               OPTICS_UI_ICON_MAX_RUNS);
         OT_EXPECT(n == 3);
         if (n == 3) {
             OT_EXPECT(spans[0].first_cmd == 0 && spans[0].count == 3 && !spans[0].fill);
@@ -324,19 +324,20 @@ int main(void) {
             OT_EXPECT(spans[2].first_cmd == 4 && spans[2].count == 3 && !spans[2].fill);
             /* Distinct colours are preserved, not collapsed to the theme. */
             optics_gfx_color theme = optics_gfx_color_rgba_premul(1, 2, 3, 255);
-            OT_EXPECT(lensi_icon_run_color(spans[0].color, theme) != theme);
-            OT_EXPECT(lensi_icon_run_color(spans[1].color, theme) != theme);
-            OT_EXPECT(lensi_icon_run_color(spans[2].color, theme) != theme);
-            OT_EXPECT(lensi_icon_run_color(spans[0].color, theme) !=
-                      lensi_icon_run_color(spans[1].color, theme));
+            OT_EXPECT(optics_ui__icon_run_color(spans[0].color, theme) != theme);
+            OT_EXPECT(optics_ui__icon_run_color(spans[1].color, theme) != theme);
+            OT_EXPECT(optics_ui__icon_run_color(spans[2].color, theme) != theme);
+            OT_EXPECT(optics_ui__icon_run_color(spans[0].color, theme) !=
+                      optics_ui__icon_run_color(spans[1].color, theme));
             /* color == 0 means "follow the caller", exactly like a built-in. */
-            OT_EXPECT(lensi_icon_run_color(0, theme) == theme);
+            OT_EXPECT(optics_ui__icon_run_color(0, theme) == theme);
         }
 
         /* A collapsed descriptor (built-in icon) is exactly one span covering the
          * whole stream, painted in the caller's colour. */
         optics_ui_icon_desc collapsed = {.cmds = cmds, .count = 7};
-        n = lensi_icon_run_spans(&collapsed, LENSI_ICON_RENDER_FILL, spans, LENSI_ICON_MAX_RUNS);
+        n = optics_ui__icon_run_spans(&collapsed, OPTICS_UI_ICON_RENDER_FILL, spans,
+                                      OPTICS_UI_ICON_MAX_RUNS);
         OT_EXPECT(n == 1);
         if (n == 1) {
             OT_EXPECT(spans[0].first_cmd == 0 && spans[0].count == 7);
@@ -348,7 +349,7 @@ int main(void) {
          * corrupt descriptor degrades to "no spans" rather than reading OOB. */
         optics_ui_icon_run bad_runs[] = {{.first_cmd = 6, .count = 99, .color = 0, .fill = 0}};
         optics_ui_icon_desc bad = {.cmds = cmds, .count = 7, .runs = bad_runs, .run_count = 1};
-        OT_EXPECT(lensi_icon_run_spans(&bad, 0, spans, LENSI_ICON_MAX_RUNS) == 0);
+        OT_EXPECT(optics_ui__icon_run_spans(&bad, 0, spans, OPTICS_UI_ICON_MAX_RUNS) == 0);
     }
 
     return OT_REPORT();

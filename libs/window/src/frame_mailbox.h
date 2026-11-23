@@ -41,7 +41,7 @@ typedef struct optics_window_frame_packet {
 } optics_window_frame_packet;
 
 /* Device-pixel damage scope for one frame, ready to hand to
- * `flux_canvas_pass_desc.damage` (ADR-0149).
+ * `optics_gfx_canvas_pass_desc.damage` (ADR-0149).
  *
  * The conversion from UI-logical to device pixels happens here, once, because
  * it is the boundary at which the producer's units stop mattering: a backend that
@@ -69,9 +69,9 @@ typedef struct optics_window_frame_damage {
 [[nodiscard]] optics_window_frame_damage
 optics_window_frame_packet_damage(const optics_window_frame_packet *pkt);
 
-/* The same resolution for a host that presents lens directly, without the
+/* The same resolution for a host that presents ui directly, without the
  * mailbox (the single-threaded path). `width`/`height` are the surface's *device*
- * pixel extent (as reported by `flux_surface_get_info`), because this path has no
+ * pixel extent (as reported by `optics_gfx_surface_get_info`), because this path has no
  * packet to derive them from. `force_full` is the host's own "everything
  * changed" signal. */
 [[nodiscard]] optics_window_frame_damage
@@ -91,7 +91,7 @@ optics_window_frame_ui_damage(const optics_window_ui_host *ui, float scale, int3
  * frame wins). There is no fourth state to get wrong. */
 typedef struct optics_window_frame_mailbox {
     optics_window_frame_packet pool[3];
-    _Atomic(uint32_t) middle; /* pool index, OR'd with IRIS_MAILBOX_FRESH when unclaimed */
+    _Atomic(uint32_t) middle; /* pool index, OR'd with OPTICS_WINDOW_MAILBOX_FRESH when unclaimed */
     uint32_t back;            /* UI thread only           */
     uint32_t front;           /* presentation thread only */
     _Atomic(uint64_t) sequence;
@@ -125,4 +125,4 @@ optics_window_mailbox_claim(optics_window_frame_mailbox *mb);
 /* Any thread: true while a published packet is waiting to be claimed. */
 [[nodiscard]] bool optics_window_mailbox_pending(const optics_window_frame_mailbox *mb);
 
-#endif /* IRIS_FRAME_MAILBOX_H */
+#endif /* OPTICS_WINDOW_FRAME_MAILBOX_H */

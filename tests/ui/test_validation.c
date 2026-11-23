@@ -1,15 +1,15 @@
-/* test_validation.c — error state (lens_box.error) on textfield and slider.
+/* test_validation.c — error state (optics_ui_box.error) on textfield and slider.
  *
  * The error flag's entire contract is that it reaches the skin as
  * `content.error` (the default skin renders theme.color_error as the
  * border). The earlier version of this file only asserted "no crash /
  * no overflow", which would pass even if the flag were dropped on the
  * floor — so each case now captures the emitted widget record through
- * the public skin-override seam (lens_set_skin) and asserts the flag
+ * the public skin-override seam (optics_ui_set_skin) and asserts the flag
  * arrived, and did NOT arrive on widgets that never asked for it. */
 
-#include "lens_test.h"
 #include "optics_test.h"
+#include "ui_test.h"
 #include <optics/ui.h>
 #include <string.h>
 

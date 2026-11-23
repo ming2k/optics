@@ -1,11 +1,11 @@
-/* test_clip_scope.c — lens_clip_begin/end clips absolutely placed nodes.
+/* test_clip_scope.c — optics_ui_clip_begin/end clips absolutely placed nodes.
  *
  * A placed node deliberately escapes its parent's flow viewport (ADR-0060).
  * A scoped frame clip is a build-time stamp that must follow the node into its
  * band: rendering, the snapshot hit region, and descendants all agree. */
 
-#include "lens_test.h"
 #include "optics_test.h"
+#include "ui_test.h"
 #include <optics/gfx/canvas_cpu.h>
 #include <optics/ui.h>
 

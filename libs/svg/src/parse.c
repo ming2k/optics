@@ -8,7 +8,7 @@
  * processor can (billion laughs, external entities, quadratic namespace
  * resolution), and it is what keeps this library dependency-free.
  *
- * Every ceiling is explicit (reticle_parse_limits): element count, nesting depth,
+ * Every ceiling is explicit (svg_parse_limits): element count, nesting depth,
  * shape count, command count, gradient count, and total input bytes. A document
  * that exceeds one fails to parse; it never yields a truncated document. */
 
@@ -30,7 +30,7 @@ enum {
 };
 
 /* Live documents, for the leak lane (INV-ARCH-LEDGER). Atomic because
- * reticle_retain/reticle_release are documented as callable from any thread. */
+ * optics_svg_retain/optics_svg_release are documented as callable from any thread. */
 static uint32_t g_live_documents;
 
 uint32_t optics_svg_live_documents(void) {
@@ -658,7 +658,7 @@ static bool finish_shape(optics_svg_parser *p, uint32_t cmd_first, uint32_t cmd_
     /* The gradient kind is resolved later, when the definition is known. The
      * stored shape takes ownership of both `gradient_id` strings: on success
      * emit_shape copies the struct, so freeing here would leave the document
-     * with dangling pointers that reticle_release frees a second time. */
+     * with dangling pointers that optics_svg_release frees a second time. */
     if (ok && optics_svg_priv_emit_shape(p, &shape))
         return true;
     free_paint(&shape.fill);
@@ -1386,10 +1386,10 @@ optics_gfx_result optics_svg_parse(const optics_svg_parse_opts *opts, optics_svg
         return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
     *out = nullptr;
 
-    // `RETICLE_LENGTH_MEASURE` is the only "measure it" request; every other value
+    // `OPTICS_SVG_LENGTH_MEASURE` is the only "measure it" request; every other value
     // is a real byte count, so zero of them is an empty input. Treating 0 as
     // "measure it" made an empty `(ptr, len)` pair read past the caller's
-    // buffer (found by the reticle_parse fuzz harness, ADR-0150).
+    // buffer (found by the svg_parse fuzz harness, ADR-0150).
     size_t length = opts->length;
     if (length == OPTICS_SVG_LENGTH_MEASURE)
         length = strlen(opts->text);

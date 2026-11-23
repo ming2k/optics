@@ -69,7 +69,7 @@ static bool resolve_fill_color(optics_gfx_color theme, const optics_svg_paint *p
 
 /* Build the brush for one paint. Gradients are already in user space, so they
  * need the same fit transform the geometry gets; the two endpoints are
- * transformed here and flux interpolates in the destination space. */
+ * transformed here and gfx interpolates in the destination space. */
 static bool build_brush(const optics_svg_document *doc, const optics_svg_paint *paint,
                         optics_svg_paint_mode mode, optics_gfx_color theme, float global_alpha,
                         optics_svg_transform fit, optics_gfx_brush *out) {
@@ -89,7 +89,7 @@ static bool build_brush(const optics_svg_document *doc, const optics_svg_paint *
         return false;
 
     /* Gradients must be unique per shape, so they are not actually shared in the
-     * flux brush: each draw gets its own value. */
+     * gfx brush: each draw gets its own value. */
     optics_svg_gradient resolved = {};
     resolved.stop_count = gradient.stop_count;
     for (uint32_t i = 0; i < gradient.stop_count; ++i)
@@ -117,7 +117,7 @@ static bool build_brush(const optics_svg_document *doc, const optics_svg_paint *
                                                 resolved.stop_count);
     }
     if (global_alpha < 1.0f) {
-        /* flux's brush opacity is a separate multiplier; using it keeps gradient
+        /* gfx's brush opacity is a separate multiplier; using it keeps gradient
          * stop colours from having to be rebuilt per frame. */
         out->opacity = global_alpha;
     }
@@ -224,7 +224,7 @@ optics_gfx_result optics_svg_draw(const optics_svg_draw_opts *opts) {
     if (global_alpha > 1.0f)
         global_alpha = 1.0f;
 
-    /* `reticle_draw` owns its arena: the paths it creates are per-call, and a caller
+    /* `optics_svg_draw` owns its arena: the paths it creates are per-call, and a caller
      * must not have to provision one for a convenience draw. */
     optics_gfx_arena arena;
     optics_gfx_result result = optics_gfx_arena_init(&arena, 64u * 1024u, nullptr);
@@ -276,7 +276,7 @@ optics_gfx_result optics_svg_draw(const optics_svg_draw_opts *opts) {
         optics_gfx_brush stroke_brush = {};
         if (shape->stroke_width > 0.0f && build_brush(doc, &shape->stroke, opts->paint, opts->color,
                                                       shape_alpha, fit, &stroke_brush)) {
-            /* Stroke width is in *user* units and must be handed to flux raw:
+            /* Stroke width is in *user* units and must be handed to gfx raw:
              * the canvas transform (already applied above) scales it to device
              * pixels. Multiplying by the fit scale here would scale it twice. */
             float width = shape->stroke_width;

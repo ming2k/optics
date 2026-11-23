@@ -3,6 +3,9 @@ id: ADR-0025
 title: "Lens draws only through <flux/canvas.h>"
 status: accepted
 date: 2026-07-21
+scope: ui (L2 toolkit)
+superseded_by: null
+negative_knowledge: true
 ---
 
 # ADR-0025: Lens draws only through <flux/canvas.h>

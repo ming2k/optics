@@ -3,6 +3,9 @@ id: ADR-0048
 title: "Textured surface materials and core images"
 status: accepted
 date: 2026-08-02
+scope: unrecorded
+superseded_by: null
+negative_knowledge: true
 ---
 
 # ADR-0048: Textured surface materials and core images

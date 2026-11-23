@@ -3,8 +3,8 @@
  * cursor hints, and vertical centering. */
 
 #include "../../libs/ui/src/internal.h"
-#include "lens_test.h"
 #include "optics_test.h"
+#include "ui_test.h"
 #include <optics/ui.h>
 #include <string.h>
 
@@ -281,7 +281,7 @@ static void test_textedit_caret_coverage(void) {
     /* Find caret draw command */
     const optics_ui_draw_cmd *caret_cmd = nullptr;
     for (uint32_t i = 0; i < n->cmd_count; i++) {
-        /* Caret is drawn as LENS_DRAW_RECT with width 1.5f */
+        /* Caret is drawn as OPTICS_UI_DRAW_RECT with width 1.5f */
         if (n->cmds[i].kind == OPTICS_UI_DRAW_RECT && n->cmds[i].rel.w == 1.5f) {
             caret_cmd = &n->cmds[i];
             break;

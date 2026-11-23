@@ -8,17 +8,19 @@
 ├── Cargo.lock          Single Rust dependency graph lockfile
 ├── crates/             Rust crates (`optics`, `optics-*`, `optics-*-sys`, `optics-build`) (ADR-0169)
 ├── docs/               Tutorials, guides, reference, decisions, and dev docs
-├── examples/           C examples per library, plus showcase/ effect demos
+├── examples/           getting_started/ starters and showcase/ applications (ADR-0171)
 ├── include/            Canonical umbrella C23 header <optics/optics.h> (ADR-0160)
 ├── libs/
-│   ├── flux/           Vulkan RHI, 2D canvas, 3D draw core, compute, effects
-│   ├── glyph/          Text shaping, layout metrics, glyph atlas
-│   ├── vista/          3D scene graph, cameras, glTF loading
-│   ├── prism/          Physical materials (Liquid Glass, Mica, Acrylic)
-│   ├── transit/        Header-only spring physics and parametric easing (ADR-0158)
-│   ├── reticle/        SVG document compiler (device-less, links flux only)
-│   ├── lens/           Headless UI engine
-│   └── iris/           Application host and desktop integration
+│   ├── gfx/            Vulkan RHI, 2D canvas, 3D draw core, compute, effects
+│   ├── text/           Text shaping, layout metrics, glyph atlas
+│   ├── svg/            SVG document compiler (device-less, links gfx only)
+│   ├── scene/          3D scene graph, cameras, glTF loading
+│   ├── material/       Surface materials (Liquid Glass, Frosted, Acrylic, Mica)
+│   ├── motion/         Header-only spring physics and parametric easing (ADR-0158)
+│   ├── window/         Native window, event pump, frame cadence, platform services
+│   ├── ui/             Headless UI engine
+│   └── app/            Application shell joining ui to window
+├── tools/              Tree-level gates, CI helpers, developer probes
 ├── tests/              Three-layer C test pyramid (unit/integration/e2e)
 ├── meson.build         Root build orchestration
 └── meson_options.txt   Repository-wide feature switches
@@ -28,14 +30,15 @@
 
 | Area | Public surface | Implementation | Tests | Examples |
 |------|----------------|----------------|-------|----------|
-| `flux` | `libs/gfx/include/flux/` | `libs/gfx/src/` | `tests/gfx/` | `examples/getting_started/` |
-| `glyph` | `libs/text/include/glyph/` | `libs/text/src/` | `tests/text/` | `examples/showcase/` |
-| `vista` | `libs/scene/include/vista/` | `libs/scene/src/` | `tests/scene/` | `examples/showcase/` |
-| `prism` | `libs/material/include/prism/` | `libs/material/src/` | `tests/material/` | `examples/showcase/` |
-| `transit` | `libs/motion/include/transit/` | Header-only (`export.h`) | `tests/motion/` | `examples/showcase/` |
-| `reticle` | `libs/svg/include/reticle/` | `libs/svg/src/` | `tests/svg/` | `examples/getting_started/` |
-| `lens` | `libs/ui/include/lens/` | `libs/ui/src/` | `tests/ui/` | `examples/showcase/` |
-| `iris` | `libs/window/include/iris/` | `libs/window/src/` | `tests/window/` | `examples/getting_started/` |
+| `gfx` | `libs/gfx/include/optics/gfx/` | `libs/gfx/src/` | `tests/gfx/` | `examples/getting_started/` |
+| `text` | `libs/text/include/optics/text/` | `libs/text/src/` | `tests/text/` | `examples/showcase/` |
+| `scene` | `libs/scene/include/optics/scene/` | `libs/scene/src/` | `tests/scene/` | `examples/showcase/` |
+| `material` | `libs/material/include/optics/material/` | `libs/material/src/` | `tests/material/` | `examples/showcase/` |
+| `motion` | `libs/motion/include/optics/motion/` | Header-only (`export.h`) | `tests/motion/` | `examples/showcase/` |
+| `svg` | `libs/svg/include/optics/svg/` | `libs/svg/src/` | `tests/svg/` | `examples/getting_started/` |
+| `ui` | `libs/ui/include/optics/ui/` | `libs/ui/src/` | `tests/ui/` | `examples/showcase/` |
+| `window` | `libs/window/include/optics/window/` | `libs/window/src/` | `tests/window/` | `examples/getting_started/` |
+| `app` | `libs/app/include/optics/app.h` | `libs/app/src/` | `tests/app/` | `examples/getting_started/` |
 | `optics` | `include/optics/optics.h` | Umbrella facade (`optics_dep`, ADR-0160/0164) | `tests/optics/` | — |
 
 Each library exposes a Meson dependency object to the next layer. Code in one

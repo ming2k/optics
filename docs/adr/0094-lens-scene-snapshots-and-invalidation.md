@@ -3,6 +3,9 @@ id: ADR-0094
 title: "Lens scene snapshots and explicit invalidation"
 status: accepted
 date: 2026-09-14
+scope: Lens layout, visuals, interaction, accessibility, and caches
+superseded_by: null
+negative_knowledge: true
 ---
 
 # ADR-0094: Lens scene snapshots and explicit invalidation

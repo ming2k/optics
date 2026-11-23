@@ -3,6 +3,9 @@ id: ADR-0038
 title: "Lens node state GC — 8-frame grace window for leaving nodes"
 status: accepted
 date: 2026-07-21
+scope: ui (L2 toolkit)
+superseded_by: null
+negative_knowledge: true
 ---
 
 # ADR-0038: Lens node state GC — 8-frame grace window for leaving nodes

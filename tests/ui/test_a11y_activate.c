@@ -1,13 +1,13 @@
 /* test_a11y_activate.c — AT activation seam (ADR-0062).
  *
- * lens_a11y_activate records a pending id; the next frame's lensi_interact
+ * optics_ui_a11y_activate records a pending id; the next frame's optics_ui__interact
  * reports clicked for that node (focusable + not disabled), moves focus,
  * and the request is single-shot. Pointer occlusion does not block it;
  * disabled does.
  */
 
-#include "lens_test.h"
 #include "optics_test.h"
+#include "ui_test.h"
 #include <optics/ui.h>
 
 static const optics_ui_input IN0 = {.display_size = {400, 200}, .dt_seconds = 0.016f};
@@ -34,7 +34,7 @@ static void test_activate_fires_and_focuses(void) {
     OT_EXPECT(!optics_ui_focused(ui, id));
 
     /* The request lands between frames (the AT-SPI pump runs after
-     * lens_end); the upcoming build must report the click. */
+     * optics_ui_end); the upcoming build must report the click. */
     optics_ui_a11y_activate(ui, id);
     clicked = false;
     build_button_frame(ui, &clicked);

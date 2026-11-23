@@ -3,6 +3,9 @@ id: ADR-0059
 title: "Lens widget skins — emission as a replaceable function"
 status: accepted
 date: 2026-08-10
+scope: ui (L2 toolkit)
+superseded_by: null
+negative_knowledge: true
 ---
 
 # ADR-0059: Lens widget skins — emission as a replaceable function

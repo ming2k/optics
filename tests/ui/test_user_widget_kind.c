@@ -1,7 +1,7 @@
 /* test_user_widget_kind.c — the host-reserved widget-kind range (ADR-0073). */
 
-#include "lens_test.h"
 #include "optics_test.h"
+#include "ui_test.h"
 
 #include <optics/ui.h>
 

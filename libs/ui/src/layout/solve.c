@@ -14,8 +14,8 @@ static optics_gfx_point measure(optics_ui_node *n) {
             m.x = n->fixed_w;
         if (n->fixed_h > 0)
             m.y = n->fixed_h;
-        m.x = lensi_constrain_extent(m.x, n->min_w, n->max_w);
-        m.y = lensi_constrain_extent(m.y, n->min_h, n->max_h);
+        m.x = optics_ui__constrain_extent(m.x, n->min_w, n->max_w);
+        m.y = optics_ui__constrain_extent(m.y, n->min_h, n->max_h);
         n->measured = m;
         return m;
     }
@@ -27,17 +27,17 @@ static optics_gfx_point measure(optics_ui_node *n) {
     /* Container measure delegated to layout strategy */
     optics_gfx_point m;
     if (n->is_grid)
-        m = lensi_grid_measure(n);
+        m = optics_ui__grid_measure(n);
     else if (n->is_stack)
-        m = lensi_stack_measure(n);
+        m = optics_ui__stack_measure(n);
     else
-        m = lensi_flex_measure(n);
+        m = optics_ui__flex_measure(n);
     if (n->fixed_w > 0)
         m.x = n->fixed_w;
     if (n->fixed_h > 0)
         m.y = n->fixed_h;
-    m.x = lensi_constrain_extent(m.x, n->min_w, n->max_w);
-    m.y = lensi_constrain_extent(m.y, n->min_h, n->max_h);
+    m.x = optics_ui__constrain_extent(m.x, n->min_w, n->max_w);
+    m.y = optics_ui__constrain_extent(m.y, n->min_h, n->max_h);
     n->measured = m;
     return m;
 }
@@ -69,7 +69,7 @@ static optics_gfx_rect resolve_place_area(const optics_ui *ui, const optics_ui_n
  * size (ADR-0060): EXACT takes place_rect's top-left, ANCHORED drops below
  * the anchor and flips above on overflow, CENTERED centres on the area;
  * every mode clamps onto the placement area. */
-optics_gfx_rect lensi_resolve_abs_rect(const optics_ui *ui, const optics_ui_node *n) {
+optics_gfx_rect optics_ui__resolve_abs_rect(const optics_ui *ui, const optics_ui_node *n) {
     optics_gfx_rect area = resolve_place_area(ui, n);
     float w = n->measured.x;
     float h = n->measured.y;
@@ -109,7 +109,7 @@ optics_gfx_rect lensi_resolve_abs_rect(const optics_ui *ui, const optics_ui_node
     return (optics_gfx_rect){x, y, w, h};
 }
 
-void lensi_arrange_node(optics_ui_node *n, optics_gfx_rect rect) {
+void optics_ui__arrange_node(optics_ui_node *n, optics_gfx_rect rect) {
     n->final_rect = rect;
 
     if (!n->is_container || !n->first_child)
@@ -128,11 +128,11 @@ void lensi_arrange_node(optics_ui_node *n, optics_gfx_rect rect) {
 
     /* Container arrange delegated to layout strategy */
     if (n->is_grid) {
-        lensi_grid_arrange(n, inner);
+        optics_ui__grid_arrange(n, inner);
     } else if (n->is_stack) {
-        lensi_stack_arrange(n, inner);
+        optics_ui__stack_arrange(n, inner);
     } else {
-        lensi_flex_arrange(n, inner);
+        optics_ui__flex_arrange(n, inner);
     }
 }
 
@@ -230,7 +230,7 @@ static void scroll_clamp_node(optics_ui_node *n) {
         scroll_clamp_node(c);
 }
 
-void lensi_scroll_clamp(optics_ui *ui) {
+void optics_ui__scroll_clamp(optics_ui *ui) {
     if (ui->root)
         scroll_clamp_node(ui->root);
 }
@@ -239,17 +239,17 @@ void lensi_scroll_clamp(optics_ui *ui) {
 /*  Public Solver Entry Point                                         */
 /* ================================================================== */
 
-void lensi_layout_solve(optics_ui *ui) {
+void optics_ui__layout_solve(optics_ui *ui) {
     if (!ui->root)
         return;
-    OPTICS_GFX_PROFILE_ZONE(z, "lens.layout_solve");
+    OPTICS_GFX_PROFILE_ZONE(z, "ui.layout_solve");
     (void)measure(ui->root);
     optics_gfx_rect display = {0, 0, ui->input.display_size.x, ui->input.display_size.y};
     if (display.w <= 0)
         display.w = ui->root->measured.x;
     if (display.h <= 0)
         display.h = ui->root->measured.y;
-    lensi_arrange_node(ui->root, display);
-    lensi_scroll_clamp(ui);
+    optics_ui__arrange_node(ui->root, display);
+    optics_ui__scroll_clamp(ui);
     OPTICS_GFX_PROFILE_ZONE_END(z);
 }

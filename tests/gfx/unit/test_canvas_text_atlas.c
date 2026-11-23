@@ -5,7 +5,7 @@
  * shelf packer exhausts the texture. A display-list segment recorded
  * before the clear carries glyph UVs into the pre-clear layout; replaying
  * it against rearranged texels would silently mis-sample. The canvas
- * tracks the producer's atlas generation (flux_glyph_run_host_atlas_desc)
+ * tracks the producer's atlas generation (optics_gfx_glyph_run_host_atlas_desc)
  * and must REFUSE such a replay (return false, draw nothing), after which
  * a live re-draw reproduces the recorded pixels exactly.
  *

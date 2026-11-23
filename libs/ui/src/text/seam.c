@@ -1,8 +1,8 @@
-/* seam.c — lens's thin seam over the shared glyph engine.
+/* seam.c — ui's thin seam over the shared glyph engine.
  *
- * These helpers take an lens (routing to ui->text), apply lens's label
+ * These helpers take a ui (routing to ui->text), apply ui's label
  * conventions (the visible prefix before a "##" id suffix), and convert
- * between lens and glyph metric types. All shaping, layout, caret
+ * between ui and glyph metric types. All shaping, layout, caret
  * mapping, and the monospace fallback live in glyph; ui->text is always
  * usable (it degrades internally), so there is no backend branching here. */
 
@@ -30,11 +30,11 @@ optics_ui_text_metrics optics_ui_text_measure(optics_ui *ui,
 
 /* Measure the visible prefix of a label (everything before "##"). glyph
  * takes (ptr, len), so the prefix is passed directly without copying. */
-optics_ui_text_metrics lensi_text_measure_label(optics_ui *ui, const char *label, float size_px,
-                                                float weight) {
+optics_ui_text_metrics optics_ui__text_measure_label(optics_ui *ui, const char *label,
+                                                     float size_px, float weight) {
     if (!label)
         return (optics_ui_text_metrics){};
-    size_t vlen = lensi_label_visible_len(label);
+    size_t vlen = optics_ui__label_visible_len(label);
     if (vlen == 0)
         return (optics_ui_text_metrics){};
     optics_text_style s = style_of(ui, size_px, weight);
@@ -43,8 +43,8 @@ optics_ui_text_metrics lensi_text_measure_label(optics_ui *ui, const char *label
                             &(optics_text_measure_opts){.utf8 = label, .len = vlen, .style = &s}));
 }
 
-float lensi_text_caret_x(optics_ui *ui, const char *utf8, size_t byte, float size_px,
-                         float weight) {
+float optics_ui__text_caret_x(optics_ui *ui, const char *utf8, size_t byte, float size_px,
+                              float weight) {
     if (!utf8 || byte == 0)
         return 0.0f;
     optics_text_style s = style_of(ui, size_px, weight);
@@ -53,8 +53,8 @@ float lensi_text_caret_x(optics_ui *ui, const char *utf8, size_t byte, float siz
                                      .utf8 = utf8, .len = strlen(utf8), .byte = byte, .style = &s});
 }
 
-size_t lensi_text_caret_byte(optics_ui *ui, const char *utf8, float local_x, float size_px,
-                             float weight) {
+size_t optics_ui__text_caret_byte(optics_ui *ui, const char *utf8, float local_x, float size_px,
+                                  float weight) {
     if (!utf8 || !utf8[0])
         return 0;
     optics_text_style s = style_of(ui, size_px, weight);
@@ -64,8 +64,8 @@ size_t lensi_text_caret_byte(optics_ui *ui, const char *utf8, float local_x, flo
             .utf8 = utf8, .len = strlen(utf8), .local_x = local_x, .style = &s});
 }
 
-int lensi_text_sel_rects(optics_ui *ui, const char *utf8, size_t lo, size_t hi, float size_px,
-                         float weight, optics_ui_text_xrange *out, int max) {
+int optics_ui__text_sel_rects(optics_ui *ui, const char *utf8, size_t lo, size_t hi, float size_px,
+                              float weight, optics_ui_text_xrange *out, int max) {
     if (!utf8 || lo >= hi || max <= 0)
         return 0;
     optics_text_style s = style_of(ui, size_px, weight);
@@ -79,8 +79,8 @@ int lensi_text_sel_rects(optics_ui *ui, const char *utf8, size_t lo, size_t hi, 
                                                                            .max = max});
 }
 
-size_t lensi_text_caret_visual(optics_ui *ui, const char *utf8, size_t byte, bool forward,
-                               float size_px, float weight) {
+size_t optics_ui__text_caret_visual(optics_ui *ui, const char *utf8, size_t byte, bool forward,
+                                    float size_px, float weight) {
     if (!utf8)
         return byte;
     optics_text_style s = style_of(ui, size_px, weight);

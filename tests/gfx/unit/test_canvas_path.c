@@ -83,7 +83,7 @@ int main(void) {
         optics_gfx_arena_deinit(&tiny);
     }
 
-    /* --- flux_path_create rejects NULL arena --- */
+    /* --- optics_gfx_path_create rejects NULL arena --- */
     {
         optics_gfx_path *p = (optics_gfx_path *)(uintptr_t)0xdeadbeef;
         OT_EXPECT(optics_gfx_path_create(&p, nullptr) == OPTICS_GFX_ERROR_INVALID_ARGUMENT);

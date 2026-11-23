@@ -3,6 +3,9 @@ id: ADR-0052
 title: "flux platform abstraction layer + Linux-only dma-buf gate"
 status: accepted
 date: 2026-08-08
+scope: gfx core
+superseded_by: null
+negative_knowledge: true
 ---
 
 # ADR-0052: flux platform abstraction layer + Linux-only dma-buf gate

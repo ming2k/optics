@@ -1,6 +1,6 @@
 [package]
 name = "optics-material"
-description = "Safe Rust bindings to prism: liquid-glass materials on the flux effect runtime"
+description = "Safe Rust bindings to material: liquid-glass materials on the gfx effect runtime"
 publish = false
 links = "optics_material_rs"
 version.workspace = true
@@ -16,3 +16,9 @@ optics-gfx-sys = { workspace = true }
 
 [build-dependencies]
 optics-build = { workspace = true }
+
+[features]
+# Force a static link of the Optics archives; the default links the shared
+# objects (docs/how-to/choose-a-static-or-shared-link.md). OPTICS_STATIC /
+# OPTICS_DYNAMIC in the environment override it.
+static = ["optics-material-sys/static", "optics-gfx/static", "optics-gfx-sys/static"]

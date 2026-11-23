@@ -3,8 +3,8 @@ id: ADR-0141
 title: "Material compute pipeline pre-warming, cold-start hitch elimination, and headless performance governance"
 status: accepted
 date: 2026-11-03
+scope: [material, gfx, tools, architecture]
 superseded_by: null
-scope: [prism, flux, tools, architecture]
 negative_knowledge: true
 ---
 

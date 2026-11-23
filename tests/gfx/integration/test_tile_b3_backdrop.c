@@ -2,7 +2,7 @@
  * Tile-compute winding backdrop (ADR-0120 Phase B3 gate).
  *
  * Assert that per-tile winding computed via two-level prefix sum matches
- * flux_curve_cover_winding on all interior and exterior non-boundary tiles.
+ * optics_gfx_curve_cover_winding on all interior and exterior non-boundary tiles.
  */
 #include "gfx_test.h"
 #include "optics_test.h"

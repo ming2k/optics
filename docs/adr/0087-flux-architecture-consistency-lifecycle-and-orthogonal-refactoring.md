@@ -3,7 +3,9 @@ id: ADR-0087
 title: "Flux Architecture Consistency, Lifecycle Contracts, and Orthogonal Refactoring"
 status: superseded
 date: 2026-08-27
-superseded_by: "ADR-0095"
+scope: gfx (core, canvas, canvas_cpu, vulkan), gfx-text, gfx-scene-graph, downstream UI/compositor consumers (ui, window)
+superseded_by: ADR-0095
+negative_knowledge: false
 ---
 
 # ADR-0087: Flux Architecture Consistency, Lifecycle Contracts, and Orthogonal Refactoring

@@ -3,6 +3,9 @@ id: ADR-0060
 title: "Lens single-tree placement and z bands — place/band supersedes parallel overlay roots"
 status: accepted
 date: 2026-08-10
+scope: ui (L2 toolkit)
+superseded_by: null
+negative_knowledge: true
 ---
 
 # ADR-0060: Lens single-tree placement and z bands — place/band supersedes parallel overlay roots

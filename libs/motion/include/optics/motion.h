@@ -1,17 +1,17 @@
 /*
- * transit/transit.h — the shared state transition and motion vocabulary (ADR-0077, ADR-0106).
+ * optics/motion.h — the shared state transition and motion vocabulary (ADR-0077, ADR-0106).
  *
  * Pure math on caller-owned state. No clock, no timeline, no scheduler,
  * no allocation, no globals: every entry point takes `dt` as a parameter
  * and every type is a plain struct the caller stores wherever it already
- * stores widget state (lens_skin_scratch, lens_node_state, host-side).
+ * stores widget state (optics_ui_skin_scratch, optics_ui_node_state, host-side).
  *
- * Header-only design: transit is a standalone header-only vocabulary.
+ * Header-only design: motion is a standalone header-only vocabulary.
  * All public symbols are `static inline` functions compiled directly into
  * the consumer TU. It produces no `.so` and carries zero dynamic linking tax.
  *
  * Design contract (ADR-0077, ADR-0106):
- *   - Public symbols are `transit_*`; internals are private.
+ *   - Public symbols are `optics_motion_*`; internals are private.
  *   - `dt` is clamped once at the boundary to [0, 1/30] s; zero
  *     integrates nothing (a duplicated frame).
  *   - The spring advances by the closed-form analytic solution, so no
@@ -32,7 +32,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <optics/motion/export.h> /* TRANSIT_API — static inline */
+#include <optics/motion/export.h> /* OPTICS_MOTION_API — static inline */
 
 #ifdef __cplusplus
 extern "C" {
@@ -40,10 +40,10 @@ extern "C" {
 
 #define OPTICS_MOTION_VERSION_MAJOR 0
 #define OPTICS_MOTION_VERSION_MINOR 0
-#define OPTICS_MOTION_VERSION_PATCH 82
+#define OPTICS_MOTION_VERSION_PATCH 83
 
 /* Packed integer version, monotonic — identical layout to
- * FLUX_VERSION_NUMBER (major in bits 16..23, minor 8..15, patch 0..7). */
+ * OPTICS_GFX_VERSION_NUMBER (major in bits 16..23, minor 8..15, patch 0..7). */
 #define OPTICS_MOTION_VERSION_NUMBER                                                               \
     (((uint32_t)OPTICS_MOTION_VERSION_MAJOR << 16) |                                               \
      ((uint32_t)OPTICS_MOTION_VERSION_MINOR << 8) | (uint32_t)OPTICS_MOTION_VERSION_PATCH)
@@ -99,7 +99,7 @@ typedef struct optics_motion_spring {
     float velocity; /* current velocity in value units per second */
 } optics_motion_spring;
 
-/* Tuning pair for `transit_spring_advance`. `stiffness` is omega0^2 (rad/s)^2.
+/* Tuning pair for `optics_motion_spring_advance`. `stiffness` is omega0^2 (rad/s)^2.
  * `damping` is the damping ratio zeta: 1.0 critically damped, <1.0 slight overshoot. */
 typedef struct optics_motion_spring_params {
     float stiffness;
@@ -400,4 +400,4 @@ OPTICS_MOTION_API float optics_motion_smoother_step(optics_motion_smoother *s, f
 }
 #endif
 
-#endif /* TRANSIT_H */
+#endif /* OPTICS_MOTION_H */

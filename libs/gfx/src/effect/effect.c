@@ -1,6 +1,6 @@
 /*
  * Image-domain effects. v1 ships the Gaussian blur operator (see
- * ADR-0008). Module state hangs off flux_device via the same
+ * ADR-0008). Module state hangs off optics_gfx_device via the same
  * pattern the canvas module uses (ADR-0002): a typed pointer + a
  * destroy callback set lazily on first use.
  *
@@ -8,12 +8,12 @@
  *   - module state struct + per-device init/destroy
  *   - transient-image pool (intermediate cache + output list)
  *   - compute pipeline lazy-build (single shader, axis push-const)
- *   - flux_effect_blur exact Gaussian entry point
+ *   - optics_gfx_effect_blur exact Gaussian entry point
  *   - fixed-cost multi-resolution filter for animated backdrops
  */
 
-#include "../compute/internal.h"    /* flux_compute_pipeline_make_device_weak */
-#include "../core/image_internal.h" /* struct flux_image layout */
+#include "../compute/internal.h"    /* optics_gfx_compute_pipeline_make_device_weak */
+#include "../core/image_internal.h" /* struct optics_gfx_image layout */
 #include "../core/internal.h"
 #include <optics/gfx/compute.h>
 #include <optics/gfx/effect.h>
@@ -86,9 +86,9 @@ typedef struct effect_backdrop_push {
 static_assert(sizeof(effect_blur_push) <= OPTICS_GFX_DEVICE_REQUIRED_PUSH_BYTES,
               "effect_blur_push exceeds device-wide push budget");
 static_assert(sizeof(optics_gfx_effect_blur_desc) == 32,
-              "flux_effect_blur_desc ABI size changed; use its next chain instead");
+              "optics_gfx_effect_blur_desc ABI size changed; use its next chain instead");
 static_assert(sizeof(optics_gfx_effect_blur_regions_desc) == 32,
-              "flux_effect_blur_regions_desc ABI layout changed unexpectedly");
+              "optics_gfx_effect_blur_regions_desc ABI layout changed unexpectedly");
 static_assert(sizeof(effect_backdrop_push) <= OPTICS_GFX_DEVICE_REQUIRED_PUSH_BYTES,
               "effect_backdrop_push exceeds device-wide push budget");
 static_assert(sizeof(effect_backdrop_push) == 52,
@@ -125,7 +125,7 @@ static_assert(offsetof(effect_shadow_push, offset_x) == 32,
 static_assert(offsetof(effect_shadow_push, alpha) == 52,
               "effect_shadow_push alpha no longer matches its shader block");
 static_assert(sizeof(optics_gfx_effect_shadow_desc) == 56,
-              "flux_effect_shadow_desc ABI size changed; use its next chain instead");
+              "optics_gfx_effect_shadow_desc ABI size changed; use its next chain instead");
 
 #define EFFECT_BLUR_WG 16u
 #define EFFECT_BLUR_RADIUS_MAX 64
@@ -137,7 +137,7 @@ static_assert(sizeof(optics_gfx_effect_shadow_desc) == 56,
 /* Cached intermediate target keyed by (format, width, height). One
  * intermediate per key is enough — the horizontal pass writes it,
  * the vertical pass reads it, and the two passes are serialised
- * within a single flux_effect_blur call. Callers issuing concurrent
+ * within a single optics_gfx_effect_blur call. Callers issuing concurrent
  * blurs on the same device are already required to serialise per
  * the header doc. */
 typedef struct intermediate_entry {
@@ -603,7 +603,7 @@ static optics_gfx_result ensure_pipeline(optics_gfx_device *d, optics_gfx_comput
     if (r != OPTICS_GFX_OK)
         return r;
     /* The pipeline lives in per-device module state and is released
-     * by effect_state_destroy inside flux_device_release; a strong
+     * by effect_state_destroy inside optics_gfx_device_release; a strong
      * device ref would cycle and leak the whole device. */
     optics_gfx_compute_pipeline_make_device_weak(*slot);
     return OPTICS_GFX_OK;
@@ -803,7 +803,7 @@ static optics_gfx_result record_blur_dispatch(effect_state *st, optics_gfx_devic
 }
 
 /* ------------------------------------------------------------------ */
-/*  Public: flux_effect_blur                                          */
+/*  Public: optics_gfx_effect_blur                                          */
 /* ------------------------------------------------------------------ */
 
 optics_gfx_result optics_gfx_effect_blur(const optics_gfx_effect_blur_opts *opts) {
@@ -814,7 +814,7 @@ optics_gfx_result optics_gfx_effect_blur(const optics_gfx_effect_blur_opts *opts
     optics_gfx_image **out = opts->out;
     if (desc->type != OPTICS_GFX_TYPE_EFFECT_BLUR_DESC) {
         OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT,
-                        "desc->type != FLUX_TYPE_EFFECT_BLUR_DESC");
+                        "desc->type != OPTICS_GFX_TYPE_EFFECT_BLUR_DESC");
         return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
     }
     if (desc->next) {
@@ -836,7 +836,7 @@ optics_gfx_result optics_gfx_effect_blur(const optics_gfx_effect_blur_opts *opts
     if (in->deferred_pending) {
         OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_STATE,
                         "exact blur input is a deferred pass output that has not executed; "
-                        "materialize it or use flux_blur_filter_apply instead");
+                        "materialize it or use optics_gfx_blur_filter_apply instead");
         return OPTICS_GFX_ERROR_INVALID_STATE;
     }
     optics_gfx_device *d = in->device;
@@ -896,7 +896,7 @@ optics_gfx_result optics_gfx_effect_blur(const optics_gfx_effect_blur_opts *opts
 }
 
 /* ------------------------------------------------------------------ */
-/*  Public: flux_effect_shadow                                        */
+/*  Public: optics_gfx_effect_shadow                                        */
 /* ------------------------------------------------------------------ */
 
 #define EFFECT_SHADOW_WG 16u
@@ -999,7 +999,7 @@ optics_gfx_result optics_gfx_effect_shadow(const optics_gfx_effect_shadow_opts *
     optics_gfx_image **out = opts->out;
     if (desc->type != OPTICS_GFX_TYPE_EFFECT_SHADOW_DESC) {
         OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT,
-                        "desc->type != FLUX_TYPE_EFFECT_SHADOW_DESC");
+                        "desc->type != OPTICS_GFX_TYPE_EFFECT_SHADOW_DESC");
         return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
     }
     if (desc->next) {
@@ -1023,7 +1023,7 @@ optics_gfx_result optics_gfx_effect_shadow(const optics_gfx_effect_shadow_opts *
     if (in->deferred_pending) {
         OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_STATE,
                         "exact shadow input is a deferred pass output that has not executed; "
-                        "materialize it or use flux_shadow_filter_apply instead");
+                        "materialize it or use optics_gfx_shadow_filter_apply instead");
         return OPTICS_GFX_ERROR_INVALID_STATE;
     }
     optics_gfx_device *d = in->device;
@@ -1443,7 +1443,7 @@ optics_gfx_result optics_gfx_blur_filter_apply(optics_gfx_blur_filter *filter,
         optics_gfx_plan_pass_desc pass = {
             .record = blur_pass_record,
             .params = params,
-            .label = "flux.effect.blur",
+            .label = "gfx.effect.blur",
             .inputs = {input},
             .input_count = 1,
             .outputs = {slot->output},
@@ -1696,7 +1696,7 @@ optics_gfx_result optics_gfx_shadow_filter_apply(optics_gfx_shadow_filter *filte
         optics_gfx_plan_pass_desc pass = {
             .record = shadow_pass_record,
             .params = params,
-            .label = "flux.effect.shadow",
+            .label = "gfx.effect.shadow",
             .inputs = {input},
             .input_count = 1,
             .outputs = {slot->output},
@@ -1716,7 +1716,7 @@ optics_gfx_result optics_gfx_shadow_filter_apply(optics_gfx_shadow_filter *filte
 }
 
 /* ------------------------------------------------------------------ */
-/*  Public: flux_effect_promote                                       */
+/*  Public: optics_gfx_effect_promote                                       */
 /* ------------------------------------------------------------------ */
 
 static optics_gfx_result promote_copy_submit(optics_gfx_device *d, VkImage src_image,
@@ -1749,7 +1749,7 @@ static optics_gfx_result promote_copy_submit(optics_gfx_device *d, VkImage src_i
             .image = src_image,
             .subresourceRange = subres,
         },
-        /* dst: SHADER_READ_ONLY (flux_image_create's terminal layout) → TRANSFER_DST */
+        /* dst: SHADER_READ_ONLY (optics_gfx_image_create's terminal layout) → TRANSFER_DST */
         {
             .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
             .srcStageMask = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
@@ -1830,8 +1830,9 @@ optics_gfx_result optics_gfx_effect_promote(optics_gfx_image *transient, optics_
     if (!transient || !out)
         return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
     if (transient->bindless_storage == OPTICS_GFX_BINDLESS_INVALID) {
-        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT,
-                        "flux_effect_promote source is not an effect output (no storage handle)");
+        OPTICS_GFX_FAIL(
+            OPTICS_GFX_ERROR_INVALID_ARGUMENT,
+            "optics_gfx_effect_promote source is not an effect output (no storage handle)");
         return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
     }
     *out = nullptr;
@@ -1856,7 +1857,7 @@ optics_gfx_result optics_gfx_effect_promote(optics_gfx_image *transient, optics_
 }
 
 /* ------------------------------------------------------------------ */
-/*  Public: flux_effect_reset                                         */
+/*  Public: optics_gfx_effect_reset                                         */
 /* ------------------------------------------------------------------ */
 
 void optics_gfx_effect_reset(optics_gfx_device *d) {

@@ -3,7 +3,7 @@ id: ADR-0132
 title: "Debug names are ledger-derived per-instance handles, not stack-buffer snprintf"
 status: accepted
 date: 2026-11-02
-scope: [flux, prism, vista, lens, glyph, tools]
+scope: [gfx, material, scene, ui, text, tools]
 superseded_by: null
 negative_knowledge: true
 ---

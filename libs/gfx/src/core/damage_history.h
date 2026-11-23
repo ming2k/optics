@@ -20,7 +20,7 @@
 #define OPTICS_GFX_CORE_DAMAGE_HISTORY_H
 
 #include <optics/gfx/core.h>
-#include <optics/gfx/math.h> /* flux_rect */
+#include <optics/gfx/math.h> /* optics_gfx_rect */
 
 /* How many frames of write history are retained. A swapchain rotation is
  * `minImageCount + 1` images deep in the worst case, so a deeper window than the
@@ -34,7 +34,7 @@
 #define OPTICS_GFX_DAMAGE_EPOCH_NONE UINT64_MAX
 
 /* Upper bound on the rectangles one frame's write set may name. Mirrors the
- * public `FLUX_DAMAGE_CAPACITY`; a frame that exceeds it commits as `full`. */
+ * public `OPTICS_GFX_DAMAGE_CAPACITY`; a frame that exceeds it commits as `full`. */
 #define OPTICS_GFX_DAMAGE_HISTORY_RECTS 64u
 
 typedef struct optics_gfx_damage_epoch {
@@ -81,10 +81,10 @@ uint64_t optics_gfx_damage_history_commit(optics_gfx_damage_history *h,
  * retained window, an intervening frame was `full`, or the union exceeded
  * `capacity` — in which case the caller must copy the whole extent.
  *
- * `since == FLUX_DAMAGE_EPOCH_NONE` returns `*out_full = true`: never synchronised.
+ * `since == OPTICS_GFX_DAMAGE_EPOCH_NONE` returns `*out_full = true`: never synchronised.
  * `since == h->committed` returns 0 with `*out_full == false`: the image is
  * already current. Those two answers are different facts and are never merged. */
 uint32_t optics_gfx_damage_history_since(const optics_gfx_damage_history *h, uint64_t since,
                                          optics_gfx_rect *out, uint32_t capacity, bool *out_full);
 
-#endif /* FLUX_CORE_DAMAGE_HISTORY_H */
+#endif /* OPTICS_GFX_CORE_DAMAGE_HISTORY_H */

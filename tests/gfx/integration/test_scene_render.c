@@ -6,8 +6,8 @@
  *
  *   1. Depth testing through the public seam. A near quad is drawn
  *      BEFORE a far quad; without a working depth attachment the far
- *      quad would paint over it (regression for flux_frame_begin_pass
- *      dropping flux_pass_desc.depth on the floor).
+ *      quad would paint over it (regression for optics_gfx_frame_begin_pass
+ *      dropping optics_gfx_pass_desc.depth on the floor).
  *   2. The Blinn-Phong lit path end-to-end. A head-on directional
  *      light must brighten the quad; a light travelling away from it
  *      must leave only the ambient term.
@@ -85,7 +85,7 @@ static optics_gfx_mesh *make_skinned_quad(optics_gfx_device *d, float half) {
     return optics_gfx_mesh_create(d, &md, &mesh) == OPTICS_GFX_OK ? mesh : nullptr;
 }
 
-/* Shared per-frame plumbing: begin frame, prepare a flux-owned depth target,
+/* Shared per-frame plumbing: begin frame, prepare a gfx-owned depth target,
  * begin a pass with a dark clear + depth clear, set viewport/scissor through
  * the backend-neutral helpers, run `draw`, end, submit, present. */
 typedef void (*draw_fn)(optics_gfx_frame *f, const optics_gfx_camera *cam, void *user);

@@ -3,8 +3,8 @@ id: ADR-0140
 title: "Prism slab convergence: migrating Frosted, Acrylic, and Mica to footprint-quantized slabs and eliminating material memory asymmetry"
 status: accepted
 date: 2026-11-02
+scope: libs/material, architecture
 superseded_by: null
-scope: libs/prism, architecture
 negative_knowledge: true
 ---
 

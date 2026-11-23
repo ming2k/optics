@@ -3,6 +3,9 @@ id: ADR-0049
 title: "Strict DRM identity for Vulkan device selection"
 status: accepted
 date: 2026-08-03
+scope: unrecorded
+superseded_by: null
+negative_knowledge: true
 ---
 
 # ADR-0049: Strict DRM identity for Vulkan device selection

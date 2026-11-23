@@ -1,8 +1,8 @@
-/* aperture.c — lens bound to the iris UI-host seam (iris/host.h).
+/* app.c — ui bound to the window UI-host seam (window/host.h).
  *
  * Everything here is portable: no platform header, no backend #ifdef. The
- * three iris backends reach lens only through the function table built in
- * aperture_app_run. */
+ * three window backends reach ui only through the function table built in
+ * optics_app_run. */
 
 #include "host_binding.h"
 
@@ -11,7 +11,7 @@
 /* ------------------------------------------------------------------ */
 /*  Vocabulary agreement                                               */
 /* ------------------------------------------------------------------ */
-/* iris and lens name the same things with their own constants so neither
+/* window and ui name the same things with their own constants so neither
  * includes the other. The conversions below are value copies; these
  * assertions are what make that sound. A change on either side fails here,
  * at compile time, in the one translation unit that sees both. */
@@ -107,7 +107,7 @@ static void ap_apply_theme(ap_app *app) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  lens → window services                                             */
+/*  ui → window services                                             */
 /* ------------------------------------------------------------------ */
 
 static void ap_clip_request_text(void *user) {
@@ -130,7 +130,7 @@ static int ap_start_drag(const char *text, size_t len, uint32_t actions, void *u
 }
 
 /* ------------------------------------------------------------------ */
-/*  iris_ui_host implementation                                        */
+/*  optics_window_ui_host implementation                                        */
 /* ------------------------------------------------------------------ */
 
 static bool ap_start(void *user, const optics_window_ui_start_info *info) {
@@ -231,7 +231,7 @@ static void ap_frame(void *user, const optics_window_input *in, optics_window_ui
     *out = (optics_window_ui_frame){
         .damaged = optics_ui_frame_needs_repaint(app->ui),
         .animating = optics_ui_anim_pending(app->ui),
-        /* lens is the single authority for the blink phase (ADR-0151). */
+        /* ui is the single authority for the blink phase (ADR-0151). */
         .caret_ticking = optics_ui_caret_clock_live(app->ui),
         .cursor = ap_cursor(optics_ui_get_cursor_hint(app->ui)),
         .text = {.utf8 = text.utf8,
@@ -293,7 +293,7 @@ static uint32_t ap_damage_rects(void *user, optics_gfx_rect *rects, uint32_t cap
                                   &(optics_ui_damage_opts){.rects = rects, .capacity = capacity});
 }
 
-/* iris_ui_snapshot is lens_scene_snapshot seen from below the seam. */
+/* optics_window_ui_snapshot is optics_ui_scene_snapshot seen from below the seam. */
 static optics_gfx_result ap_snapshot_create(void *user, optics_window_ui_snapshot **out) {
     ap_app *app = user;
     optics_ui_scene_snapshot *snapshot = nullptr;

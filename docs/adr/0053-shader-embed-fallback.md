@@ -1,8 +1,11 @@
 ---
 id: ADR-0053
 title: "Shader embedding — C23 #embed with generated-header fallback"
-status: accepted
+status: superseded
 date: 2026-08-08
+scope: build system + every translation unit that bakes SPIR-V
+superseded_by: ADR-0173
+negative_knowledge: true
 ---
 
 # ADR-0053: Shader embedding — C23 #embed with generated-header fallback

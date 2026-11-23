@@ -40,9 +40,9 @@
 
 #include "cursor-shape-v1-client-protocol.h"
 #include "display_pacer.h"
+#include "fd_observe.h"
 #include "fractional-scale-v1-client-protocol.h"
 #include "frame_mailbox.h"
-#include "iris_fd_observe.h"
 #include "presentation-time-client-protocol.h"
 #include "ui_host.h"
 #include "xdg-activation-v1-client-protocol.h"
@@ -69,7 +69,7 @@
 #define WP_KEY_TAB 258
 
 /* ------------------------------------------------------------------ */
-/*  Accumulated input, drained into one iris_input per frame             */
+/*  Accumulated input, drained into one optics_window_input per frame             */
 /* ------------------------------------------------------------------ */
 
 typedef struct wp_accum {
@@ -85,7 +85,7 @@ typedef struct wp_accum {
                                                  scoped by wl_pointer.frame     */
     uint32_t mods;                           /* level state (persists)         */
     char text[256];                          /* committed text this frame; sized
-                                                like iris_input.text_utf8       */
+                                                like optics_window_input.text_utf8       */
     char preedit[OPTICS_WINDOW_PREEDIT_MAX]; /* IME preedit string             */
     uint32_t preedit_cursor;                 /* caret byte offset in preedit   */
     uint32_t preedit_sel_lo;                 /* active clause, byte range      */
@@ -94,13 +94,13 @@ typedef struct wp_accum {
     uint32_t key_count;
 } wp_accum;
 
-/* The staging buffers feed iris_input by whole-buffer memcpy in
- * drain_input; pin the sizes so a lens-side change fails at compile time
+/* The staging buffers feed optics_window_input by whole-buffer memcpy in
+ * drain_input; pin the sizes so a ui-side change fails at compile time
  * instead of over-reading the accumulator. */
 static_assert(sizeof((wp_accum *)0)->text == sizeof((optics_window_input *)0)->text_utf8,
-              "wp_accum.text must match iris_input.text_utf8");
+              "wp_accum.text must match optics_window_input.text_utf8");
 static_assert(sizeof((wp_accum *)0)->preedit == sizeof((optics_window_input *)0)->preedit_utf8,
-              "wp_accum.preedit must match iris_input.preedit_utf8");
+              "wp_accum.preedit must match optics_window_input.preedit_utf8");
 
 /* ------------------------------------------------------------------ */
 /*  Platform state                                                     */
@@ -201,10 +201,14 @@ typedef struct wp_platform {
      * …) instead of falling back to a hard-coded theme name. The manager
      * is bound at registry time; the per-pointer device is created lazily
      * on the first enter. If the compositor doesn't support cursor-shape,
-     * `cursor_shape_mgr` stays NULL and iris_set_cursor is a no-op. */
+     * `cursor_shape_mgr` stays NULL and optics_window_set_cursor is a no-op. */
     struct wp_cursor_shape_manager_v1 *cursor_shape_mgr;
     struct wp_cursor_shape_device_v1 *cursor_shape_device;
-    optics_window_cursor host_cursor;      /* last explicit iris_set_cursor (DEFAULT = none) */
+    /* Cursor-shape device for the tablet tool in proximity over our surface
+     * (NULL otherwise), and the proximity_in serial set_shape requires. */
+    struct wp_cursor_shape_device_v1 *tablet_cursor_device;
+    uint32_t tablet_cursor_serial;
+    optics_window_cursor host_cursor; /* last explicit optics_window_set_cursor (DEFAULT = none) */
     optics_window_cursor effective_cursor; /* what the compositor is asked to show       */
     uint32_t cursor_serial;                /* most recent enter/motion serial */
     bool cursor_inside;                    /* pointer currently inside our surface */
@@ -229,7 +233,7 @@ typedef struct wp_platform {
     int32_t repeat_rate;  /* chars/sec, 0 = disabled */
     int32_t repeat_delay; /* ms before the first repeat */
     uint32_t rep_key;     /* evdev keycode being repeated */
-    int rep_lens_key;     /* its resolved lens key id (0 = unmappable) */
+    int rep_ui_key;       /* its resolved ui key id (0 = unmappable) */
     bool rep_active;      /* timer armed */
 
     struct zwp_text_input_manager_v3 *text_input_mgr;
@@ -237,8 +241,8 @@ typedef struct wp_platform {
     struct wl_surface *text_input_surface;
 
     /* Per-widget IM ownership: the text input is enabled exactly while the
-     * window has keyboard focus AND a lens text widget is focused
-     * (re-evaluated once per frame after lens_end — see im_frame_update).
+     * window has keyboard focus AND a ui text widget is focused
+     * (re-evaluated once per frame after optics_ui_end — see im_frame_update).
      * `im_surr` is the last surrounding text reported to the compositor, so
      * set_surrounding_text goes out only on content/cursor changes. */
     bool kb_focused;
@@ -248,7 +252,7 @@ typedef struct wp_platform {
     uint32_t im_surr_cursor;
 
     /* Pending IME state (double-buffered by text-input-v3 done event).
-     * commit is sized like iris_input.text_utf8: a full-sentence IME
+     * commit is sized like optics_window_input.text_utf8: a full-sentence IME
      * conversion must survive staging before the boundary-aware append
      * clips it into the per-frame accumulator. */
     struct {
@@ -335,8 +339,8 @@ static inline long long now_ns(void) {
     return (long long)t.tv_sec * 1000000000LL + (long long)t.tv_nsec;
 }
 
-/* The platform published for the context-free public APIs (iris/window.h,
- * iris/cursor.h, iris/dnd.h); null outside iris_app_run. Defined in
+/* The platform published for the context-free public APIs (window/window.h,
+ * window/cursor.h, window/dnd.h); null outside optics_window_run. Defined in
  * app_wayland.c. */
 extern wp_platform *g_active_pl;
 
@@ -355,10 +359,10 @@ void wp_maybe_create_primsel_device(wp_platform *pl);
 /* Paste the primary selection (middle click) through the async read path. */
 void wp_primsel_paste(wp_platform *pl);
 
-/* iris_ui_services: clipboard and drag source for the UI layer. `user` is the
- * wp_platform. A text request is answered later through iris_ui_host.paste. */
+/* optics_window_ui_services: clipboard and drag source for the UI layer. `user` is the
+ * wp_platform. A text request is answered later through optics_window_ui_host.paste. */
 void wp_clip_set_text(const char *utf8, size_t len, void *user);
 void wp_clip_request_text(void *user);
 int wp_start_drag(const char *text, size_t len, uint32_t actions, void *user);
 
-#endif /* IRIS_WAYLAND_INTERNAL_H */
+#endif /* OPTICS_WINDOW_WAYLAND_INTERNAL_H */

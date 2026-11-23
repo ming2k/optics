@@ -11,7 +11,7 @@ The rule (docs/dev/standards/api-design.md):
      field, not a second entry point.
 
 Value kernels are exempt from (1): pure math and geometry functions whose
-parameters *are* the operands (`flux/math.h`, `flux/curve.h`, `flux/sdf.h`,
+parameters *are* the operands (`gfx/math.h`, `gfx/curve.h`, `gfx/sdf.h`,
 path verbs). Wrapping six floats in a struct there would only obscure them.
 
 Existing violations are listed in tools/config/api_baseline.txt. The list is a

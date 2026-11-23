@@ -1,7 +1,7 @@
 /* a11y_stub.c — fallback when libsystemd is not available.
  *
- * All iris_a11y_* entry points report the bridge as unavailable. Callers
- * fall back to the contract-only behaviour: the lens semantic tree still
+ * All optics_window_a11y_* entry points report the bridge as unavailable. Callers
+ * fall back to the contract-only behaviour: the ui semantic tree still
  * exists and is walked per frame, but no AT-SPI client sees it.
  */
 
@@ -32,4 +32,4 @@ short optics_window_a11y__poll_events(void) {
 }
 void optics_window_a11y__pump(void) { /* no-op */ }
 
-#endif /* !IRIS_HAVE_ATSPI */
+#endif /* !OPTICS_WINDOW_HAVE_ATSPI */

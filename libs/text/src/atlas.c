@@ -23,7 +23,7 @@
  * every visible glyph on every frame.
  */
 
-#include "glyph_internal.h"
+#include "text_internal.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -249,7 +249,7 @@ static void blit_glyph(optics_text_ctx *t, glyph_entry *e, FT_GlyphSlot g) {
  *   - the CPU-side dirty box, which still names regions of the old image.
  * The clear therefore (a) flushes any pending dirty box to the old image
  * so every quad emitted so far sees complete texels, (b) swaps the page image
- * for a fresh GPU image, and (c) releases the old one — flux_image_release
+ * for a fresh GPU image, and (c) releases the old one — optics_gfx_image_release
  * parks it on the device retire queue (and recorded segments hold their
  * own retain), so old UVs stay self-consistent with old contents until
  * every referencing batch has retired. New allocations are rasterised +
@@ -258,7 +258,7 @@ static void blit_glyph(optics_text_ctx *t, glyph_entry *e, FT_GlyphSlot g) {
  * at a batch boundary. atlas_pixels is not zeroed; new allocations
  * overwrite the regions they use. The CPU backend has no GPU image at
  * all — its stale-segment hazard is covered by the host-atlas generation
- * check (flux_glyph_run_host_atlas_desc). */
+ * check (optics_gfx_glyph_run_host_atlas_desc). */
 static void atlas_clear(optics_text_ctx *t) {
     t->atlas_clears++;
     /* Flush every page's pending dirty box first so quads already emitted
@@ -269,7 +269,7 @@ static void atlas_clear(optics_text_ctx *t) {
     /* The clear must invalidate every page's texels wholesale: cache
      * entries carry (page, x, y) and any page's contents may be
      * rearranged by subsequent packing. Retire every page image, then
-     * recreate only page 0. flux_image_release parks each old image on
+     * recreate only page 0. optics_gfx_image_release parks each old image on
      * the device retire queue (recorded segments hold their own retain),
      * so old UVs stay self-consistent with old contents until every
      * referencing batch has retired. */
@@ -317,9 +317,9 @@ static void atlas_clear(optics_text_ctx *t) {
 /*                                                                    */
 /*  Replaces the per-glyph submit-and-wait that caused one GPU        */
 /*  pipeline stall per cache miss (vkQueueSubmit2 + vkWaitForFences   */
-/*  inside flux_vk_upload_to_image). Cache-miss blits now expand a    */
+/*  inside optics_gfx_vk_upload_to_image). Cache-miss blits now expand a    */
 /*  bounding box; txt_atlas_flush uploads the box in a single         */
-/*  flux_image_update_region before the quads are drawn.              */
+/*  optics_gfx_image_update_region before the quads are drawn.              */
 /* ------------------------------------------------------------------ */
 
 void txt_atlas_mark_dirty(optics_text_ctx *t, uint16_t x, uint16_t y, uint16_t w, uint16_t h) {

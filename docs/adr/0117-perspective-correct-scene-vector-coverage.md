@@ -3,8 +3,8 @@ id: ADR-0117
 title: "Perspective-correct vector coverage in the scene material system"
 status: accepted
 date: 2026-10-25
+scope: libs/gfx, bindings
 superseded_by: null
-scope: libs/flux, bindings
 negative_knowledge: true
 ---
 

@@ -3,6 +3,9 @@ id: ADR-0002
 title: "Per-module device state via opaque slot + destroy hook"
 status: accepted
 date: 2026-01-01
+scope: unrecorded
+superseded_by: null
+negative_knowledge: true
 ---
 
 # ADR-0002: Per-module device state via opaque slot + destroy hook

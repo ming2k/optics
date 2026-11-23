@@ -3,6 +3,9 @@ id: ADR-0008
 title: "Image-effect pipeline as the home for blur and friends"
 status: accepted
 date: 2026-05-24
+scope: unrecorded
+superseded_by: null
+negative_knowledge: true
 ---
 
 # ADR-0008: Image-effect pipeline as the home for blur and friends

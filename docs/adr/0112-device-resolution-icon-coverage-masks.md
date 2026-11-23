@@ -3,8 +3,8 @@ id: ADR-0112
 title: "Device-Resolution Icon Coverage Masks and Explicit Supersampling for the Software Rasteriser"
 status: superseded
 date: 2026-10-23
-scope: libs/flux, libs/lens
-superseded_by: "ADR-0116"
+scope: libs/gfx, libs/ui
+superseded_by: ADR-0116
 negative_knowledge: true
 ---
 

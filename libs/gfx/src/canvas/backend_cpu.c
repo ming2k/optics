@@ -12,15 +12,15 @@
  * ADR-0069: the framebuffer holds premultiplied linear-light values in the
  * scRGB working space, exactly like the GPU's RGBA16F intermediate. Packed
  * sRGB colours (vertex colours, gradient stops, clear, glyph tints) decode
- * at the edges via flux_color_to_linear — the same curve the shaders'
- * flux_decode_premul_srgb applies — and the 8-bit readback performs the
+ * at the edges via optics_gfx_color_to_linear — the same curve the shaders'
+ * optics_gfx_decode_premul_srgb applies — and the 8-bit readback performs the
  * output transform once (un-premultiply, sRGB-encode, re-premultiply). The
  * CPU backend deliberately does NOT dither: it is the deterministic oracle;
  * the GPU's ±1 LSB TPDF dither is absorbed by test tolerances.
  *
  * Unsupported (they need GPU-resident textures): image draws. Glyph draws
  * ARE supported on a device-less canvas via a host-resident R8 coverage
- * atlas (ADR-0019): the caller sets flux_glyph_run_desc::host_coverage
+ * atlas (ADR-0019): the caller sets optics_gfx_glyph_run_desc::host_coverage
  * instead of `atlas`, and the CPU rasteriser samples coverage directly
  * from it. */
 #include "backend.h"
@@ -43,7 +43,7 @@ typedef struct optics_gfx_cpu_canvas {
     struct optics_gfx_cpu_canvas *owner;
     struct optics_gfx_cpu_canvas *target_scratch;
     uint32_t width, height; /* output pixel size (1x, no supersampling) */
-    /* Cached single-channel coverage plane (flux_canvas_cpu_coverage):
+    /* Cached single-channel coverage plane (optics_gfx_canvas_cpu_coverage):
      * width*height bytes, 1x analytic coverage alpha quantised to 8 bits. */
     uint8_t *coverage;
     float *fb;      /* premultiplied RGBA, width*height*4, row-major (active layer or base) */
@@ -53,10 +53,6 @@ typedef struct optics_gfx_cpu_canvas {
      * on demand and kept for the canvas's lifetime. */
     float *cover_scratch;
     size_t cover_scratch_n;
-    optics_gfx_point *tri_pts_scratch;
-    uint32_t tri_pts_cap;
-    optics_gfx_canvas_contour *tri_cons_scratch;
-    uint32_t tri_cons_cap;
 
     /* Isolated layer compositing stack (ADR-0091 Opacity Groups) */
     optics_gfx_cpu_layer layers[OPTICS_GFX_CPU_MAX_LAYERS];
@@ -72,7 +68,7 @@ typedef struct vec4f {
 } vec4f;
 
 /* Packed premultiplied sRGB -> premultiplied linear (working space).
- * Same semantics as the GPU vertex shader's flux_decode_premul_srgb. */
+ * Same semantics as the GPU vertex shader's optics_gfx_decode_premul_srgb. */
 static inline vec4f unpack_premul(optics_gfx_color c) {
     optics_gfx_vec4 l = optics_gfx_color_to_linear(c);
     return (vec4f){l.x, l.y, l.z, l.w};
@@ -503,8 +499,6 @@ static void cpu_canvas_destroy(const optics_gfx_canvas_backend *self, optics_gfx
     free(v->base_fb);
     free(v->rgba8);
     free(v->cover_scratch);
-    free(v->tri_pts_scratch);
-    free(v->tri_cons_scratch);
     free(v->coverage);
     free(v);
     c->backend_data = nullptr;
@@ -924,71 +918,6 @@ static optics_gfx_result cpu_submit_cover(const optics_gfx_canvas_backend *self,
     return OPTICS_GFX_OK;
 }
 
-static optics_gfx_result
-cpu_submit_cover_triangles(const optics_gfx_canvas_backend *self, optics_gfx_canvas *c,
-                           const optics_gfx_canvas_vertex *verts, uint32_t vertex_count,
-                           const canvas_paint *paint, optics_gfx_recti clip) {
-    optics_gfx_cpu_canvas *v = c ? c->backend_data : nullptr;
-    if (!v || !v->fb || !verts || !paint)
-        return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
-    if (clip.w <= 0 || clip.h <= 0 || vertex_count < 3)
-        return OPTICS_GFX_OK;
-    if (paint->kind != CANVAS_PAINT_SOLID && paint->kind != CANVAS_PAINT_LINEAR_GRADIENT &&
-        paint->kind != CANVAS_PAINT_RADIAL_GRADIENT)
-        return OPTICS_GFX_ERROR_UNSUPPORTED;
-
-    const uint32_t ntris = vertex_count / 3;
-    const uint32_t npts = ntris * 3;
-    for (uint32_t i = 0; i < npts; ++i) {
-        if (verts[i].color != verts[0].color)
-            return OPTICS_GFX_ERROR_UNSUPPORTED;
-    }
-
-    if (npts > v->tri_pts_cap) {
-        optics_gfx_point *np = realloc(v->tri_pts_scratch, (size_t)npts * sizeof(*np));
-        if (!np)
-            return OPTICS_GFX_ERROR_OUT_OF_MEMORY;
-        v->tri_pts_scratch = np;
-        v->tri_pts_cap = npts;
-    }
-    if (ntris > v->tri_cons_cap) {
-        optics_gfx_canvas_contour *nc = realloc(v->tri_cons_scratch, (size_t)ntris * sizeof(*nc));
-        if (!nc)
-            return OPTICS_GFX_ERROR_OUT_OF_MEMORY;
-        v->tri_cons_scratch = nc;
-        v->tri_cons_cap = ntris;
-    }
-
-    uint32_t out_tri = 0;
-    for (uint32_t i = 0; i < ntris; ++i) {
-        optics_gfx_point a = {verts[i * 3].pos[0], verts[i * 3].pos[1]};
-        optics_gfx_point b = {verts[i * 3 + 1].pos[0], verts[i * 3 + 1].pos[1]};
-        optics_gfx_point e = {verts[i * 3 + 2].pos[0], verts[i * 3 + 2].pos[1]};
-        float area2 = (b.x - a.x) * (e.y - a.y) - (e.x - a.x) * (b.y - a.y);
-        if (area2 == 0.0f)
-            continue;
-        if (area2 < 0.0f) {
-            optics_gfx_point tmp = b;
-            b = e;
-            e = tmp;
-        }
-        uint32_t base = out_tri * 3;
-        v->tri_pts_scratch[base] = a;
-        v->tri_pts_scratch[base + 1] = b;
-        v->tri_pts_scratch[base + 2] = e;
-        v->tri_cons_scratch[out_tri] =
-            (optics_gfx_canvas_contour){.start = base, .count = 3, .closed = true};
-        out_tri++;
-    }
-    if (out_tri == 0)
-        return OPTICS_GFX_OK;
-
-    canvas_paint local_paint = *paint;
-    local_paint.color = verts[0].color;
-    return cpu_submit_cover(self, c, v->tri_pts_scratch, v->tri_cons_scratch, out_tri,
-                            OPTICS_GFX_FILL_NON_ZERO, &local_paint, clip);
-}
-
 static const optics_gfx_canvas_backend cpu_backend = {
     .name = "cpu",
     .canvas_init = cpu_canvas_init,
@@ -999,7 +928,6 @@ static const optics_gfx_canvas_backend cpu_backend = {
     .bind_program = cpu_bind_program,
     .submit = cpu_submit,
     .submit_cover = cpu_submit_cover,
-    .submit_cover_triangles = cpu_submit_cover_triangles,
     .read_pixels = cpu_read_pixels,
     .read_coverage = cpu_read_coverage,
     .save_layer = cpu_save_layer,
@@ -1011,7 +939,7 @@ const optics_gfx_canvas_backend *optics_gfx_canvas_backend_cpu(void) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Public headless-canvas API (flux/canvas_cpu.h)                    */
+/*  Public headless-canvas API (gfx/canvas_cpu.h)                    */
 /* ------------------------------------------------------------------ */
 
 optics_gfx_result optics_gfx_canvas_cpu_create(uint32_t width, uint32_t height, float scale,

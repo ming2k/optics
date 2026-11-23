@@ -1,7 +1,7 @@
 /*
- * Internal types for vista: a minimal JSON value model used to
+ * Internal types for scene: a minimal JSON value model used to
  * walk the glTF JSON chunk, and the loaded scene representation that owns
- * refcounted flux mesh/material handles.
+ * refcounted gfx mesh/material handles.
  */
 #ifndef OPTICS_SCENE_INTERNAL_H
 #define OPTICS_SCENE_INTERNAL_H
@@ -129,8 +129,8 @@ struct optics_scene_animation {
 struct optics_scene {
     int32_t refcount;
     /* Retained device, so the scene can settle its own ledger row at release
-     * (ADR-0134). Without it a leaked scene was reported as the flux objects
-     * it holds, pointing the reader at flux instead of vista. */
+     * (ADR-0134). Without it a leaked scene was reported as the gfx objects
+     * it holds, pointing the reader at gfx instead of scene. */
     optics_gfx_device *device;
     optics_scene_primitive *prims; /* flat list across all meshes */
     uint32_t prim_count;
@@ -212,4 +212,4 @@ void sg_read_humanoid(const jv *root, const char *extension_name, bool legacy_vr
 optics_gfx_result sg_parse_animation_glb(const optics_scene *target, const void *bytes, size_t len,
                                          optics_scene_animation **out);
 
-#endif /* VISTA_INTERNAL_H */
+#endif /* OPTICS_SCENE_INTERNAL_H */

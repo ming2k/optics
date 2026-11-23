@@ -1,8 +1,11 @@
 ---
 id: ADR-0040
 title: "Lens menus — menubar, context menu, submenu, items (hover-dwell)"
-status: accepted
+status: superseded
 date: 2026-07-21
+scope: ui (L2 toolkit)
+superseded_by: ADR-0082
+negative_knowledge: true
 ---
 
 # ADR-0040: Lens menus — menubar, context menu, submenu, items (hover-dwell)

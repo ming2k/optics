@@ -1,6 +1,6 @@
-# reticle — the SVG vector-art document compiler (ADR-0150, ADR-0161).
+# svg — the SVG vector-art document compiler (ADR-0150, ADR-0161).
 #
-# A separate shared library that links libflux. It owns the SVG static-art
+# A separate shared library that links liboptics_gfx. It owns the SVG static-art
 # surface (path grammar, basic-shape decomposition, paint resolution, gradient
 # baking, fit-and-paint, headless rasterization) and nothing else: no file IO, no
 # text, no images, no scripting, no CSS cascade beyond presentation attributes

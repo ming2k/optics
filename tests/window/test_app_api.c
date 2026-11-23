@@ -3,7 +3,7 @@
  * Headless: every call here must fail fast WITHOUT opening a window or
  * connecting to a compositor.
  *
- *   - iris_app_run(NULL) is rejected at the dispatcher before any backend
+ *   - optics_window_run(NULL) is rejected at the dispatcher before any backend
  *     work. (A non-NULL config always dispatches to the live backend and
  *     opens a window, so it is NOT exercised here.)
  *   - file and folder pickers reject a NULL buffer / zero capacity without
@@ -43,14 +43,14 @@ int main(void) {
     OT_EXPECT(lifecycle_config.stop != nullptr);
     OT_EXPECT(lifecycle_config.record != nullptr);
 
-    /* iris_app_run: NULL config is rejected before any backend work. */
+    /* optics_window_run: NULL config is rejected before any backend work. */
     OT_EXPECT(optics_window_run(nullptr) != 0);
 
     /* Safe outside a running app; the dispatcher/backend seam treats this
      * exactly like a request made after the window has closed. */
     optics_window_request_animation_frame();
 
-    /* iris_record_mark_static: same headless contract — a no-op without an
+    /* optics_window_record_mark_static: same headless contract — a no-op without an
      * active app, and never a crash. */
     optics_window_record_mark_static();
 

@@ -1,6 +1,8 @@
 #ifndef OPTICS_MATERIAL_LIQUID_GLASS_REGIONS_H
 #define OPTICS_MATERIAL_LIQUID_GLASS_REGIONS_H
 
+#include "rect.h"
+
 #include <optics/material/liquid_glass.h>
 
 #include <math.h>
@@ -9,13 +11,6 @@
 
 #define LIQUID_GLASS_MAX_GROUPS 64u
 #define LIQUID_GLASS_MAX_CLEAR_REGIONS (LIQUID_GLASS_MAX_GROUPS * 2u)
-
-typedef struct liquid_glass_region {
-    uint32_t x;
-    uint32_t y;
-    uint32_t width;
-    uint32_t height;
-} liquid_glass_region;
 
 /* Shape capacity per glass body: the shader's SDF slots. Single fact
  * source for regions.h validation, the public max_shapes() accessor,
@@ -79,7 +74,7 @@ static inline float liquid_glass_group_or_desc(float group_value, float desc_val
 static inline bool
 liquid_glass_group_dispatch_bounds(const optics_material_liquid_glass_group *group,
                                    float shadow_reach, uint32_t image_width, uint32_t image_height,
-                                   liquid_glass_region *out) {
+                                   optics_material__rect *out) {
     if (!group || !out || group->shape_count < 1u || group->shape_count > LIQUID_GLASS_MAX_SHAPES ||
         image_width == 0u || image_height == 0u)
         return false;
@@ -108,7 +103,7 @@ liquid_glass_group_dispatch_bounds(const optics_material_liquid_glass_group *gro
     if (ix1 <= ix0 || iy1 <= iy0)
         return false;
 
-    *out = (liquid_glass_region){
+    *out = (optics_material__rect){
         .x = (uint32_t)ix0,
         .y = (uint32_t)iy0,
         .width = (uint32_t)(ix1 - ix0),
@@ -120,10 +115,10 @@ liquid_glass_group_dispatch_bounds(const optics_material_liquid_glass_group *gro
 /* Primary body bounds clipped to the image — the reduction window for
  * per-region backdrop statistics. A body that does not intersect the
  * capture yields a zero region, which the stats shader reports as zeros. */
-static inline liquid_glass_region
+static inline optics_material__rect
 liquid_glass_group_stats_bounds(const optics_material_liquid_glass_group *group,
                                 uint32_t image_width, uint32_t image_height) {
-    liquid_glass_region region = {0u, 0u, 0u, 0u};
+    optics_material__rect region = {0u, 0u, 0u, 0u};
     if (!group || group->shape_count < 1u || image_width == 0u || image_height == 0u)
         return region;
     optics_gfx_rect bounds = group->shapes[0].bounds;
@@ -137,10 +132,10 @@ liquid_glass_group_stats_bounds(const optics_material_liquid_glass_group *group,
     uint32_t iy0 = (uint32_t)floorf(y0);
     uint32_t ix1 = (uint32_t)ceilf(x1);
     uint32_t iy1 = (uint32_t)ceilf(y1);
-    return (liquid_glass_region){ix0, iy0, ix1 - ix0, iy1 - iy0};
+    return (optics_material__rect){ix0, iy0, ix1 - ix0, iy1 - iy0};
 }
 
-static inline bool liquid_glass_regions_overlap(liquid_glass_region a, liquid_glass_region b) {
+static inline bool liquid_glass_regions_overlap(optics_material__rect a, optics_material__rect b) {
     uint64_t ar = (uint64_t)a.x + a.width;
     uint64_t ab = (uint64_t)a.y + a.height;
     uint64_t br = (uint64_t)b.x + b.width;
@@ -156,8 +151,8 @@ static inline bool liquid_glass_regions_overlap(liquid_glass_region a, liquid_gl
  * dispatches write disjoint memory". This is that proof, computed exactly:
  * dispatch footprints are conservative pixel bounds on everything a group
  * writes (including its shadow falloff), so a negative answer is sound. */
-static inline bool liquid_glass_region_overlaps_any(liquid_glass_region region,
-                                                    const liquid_glass_region *earlier,
+static inline bool liquid_glass_region_overlaps_any(optics_material__rect region,
+                                                    const optics_material__rect *earlier,
                                                     uint32_t count) {
     for (uint32_t i = 0; i < count; ++i) {
         if (liquid_glass_regions_overlap(region, earlier[i]))
@@ -166,8 +161,8 @@ static inline bool liquid_glass_region_overlaps_any(liquid_glass_region region,
     return false;
 }
 
-static inline liquid_glass_region liquid_glass_region_union(liquid_glass_region a,
-                                                            liquid_glass_region b) {
+static inline optics_material__rect liquid_glass_region_union(optics_material__rect a,
+                                                              optics_material__rect b) {
     uint32_t x0 = a.x < b.x ? a.x : b.x;
     uint32_t y0 = a.y < b.y ? a.y : b.y;
     uint64_t ar = (uint64_t)a.x + a.width;
@@ -176,7 +171,7 @@ static inline liquid_glass_region liquid_glass_region_union(liquid_glass_region 
     uint64_t bb = (uint64_t)b.y + b.height;
     uint64_t x1 = ar > br ? ar : br;
     uint64_t y1 = ab > bb ? ab : bb;
-    return (liquid_glass_region){
+    return (optics_material__rect){
         .x = x0,
         .y = y0,
         .width = (uint32_t)(x1 - x0),
@@ -184,8 +179,8 @@ static inline liquid_glass_region liquid_glass_region_union(liquid_glass_region 
     };
 }
 
-static inline bool liquid_glass_add_clear_region(liquid_glass_region region,
-                                                 liquid_glass_region *out, uint32_t capacity,
+static inline bool liquid_glass_add_clear_region(optics_material__rect region,
+                                                 optics_material__rect *out, uint32_t capacity,
                                                  uint32_t *count) {
     /* Re-start after every union: the enlarged rectangle can now overlap an
      * earlier entry that did not overlap the original input. This computes a
@@ -206,7 +201,7 @@ static inline bool liquid_glass_add_clear_region(liquid_glass_region region,
 }
 
 /* True when `region` is a non-degenerate rectangle fully inside the image. */
-static inline bool liquid_glass_region_is_dispatchable(liquid_glass_region region,
+static inline bool liquid_glass_region_is_dispatchable(optics_material__rect region,
                                                        uint32_t image_width,
                                                        uint32_t image_height) {
     return region.width != 0u && region.height != 0u && region.x < image_width &&
@@ -234,26 +229,27 @@ static inline bool liquid_glass_region_is_dispatchable(liquid_glass_region regio
  * `slot->previous` stays at the state that caused the overflow. */
 static inline bool
 liquid_glass_build_clear_regions(bool initialized, uint32_t image_width, uint32_t image_height,
-                                 const liquid_glass_region *previous, uint32_t previous_count,
-                                 const liquid_glass_region *current, uint32_t current_count,
-                                 liquid_glass_region *out, uint32_t capacity, uint32_t *out_count) {
+                                 const optics_material__rect *previous, uint32_t previous_count,
+                                 const optics_material__rect *current, uint32_t current_count,
+                                 optics_material__rect *out, uint32_t capacity,
+                                 uint32_t *out_count) {
     if (!out || !out_count || image_width == 0u || image_height == 0u || capacity == 0u ||
         (previous_count > 0u && !previous) || (current_count > 0u && !current))
         return false;
 
     *out_count = 0u;
-    const liquid_glass_region whole = (liquid_glass_region){0u, 0u, image_width, image_height};
+    const optics_material__rect whole = (optics_material__rect){0u, 0u, image_width, image_height};
     if (!initialized) {
         out[0] = whole;
         *out_count = 1u;
         return true;
     }
 
-    const liquid_glass_region *lists[2] = {previous, current};
+    const optics_material__rect *lists[2] = {previous, current};
     uint32_t counts[2] = {previous_count, current_count};
     for (uint32_t list = 0; list < 2u; ++list) {
         for (uint32_t i = 0; i < counts[list]; ++i) {
-            liquid_glass_region region = lists[list][i];
+            optics_material__rect region = lists[list][i];
             if (!liquid_glass_region_is_dispatchable(region, image_width, image_height))
                 return false;
             if (!liquid_glass_add_clear_region(region, out, capacity, out_count)) {
@@ -268,4 +264,4 @@ liquid_glass_build_clear_regions(bool initialized, uint32_t image_width, uint32_
     return true;
 }
 
-#endif /* PRISM_LIQUID_GLASS_REGIONS_H */
+#endif /* OPTICS_MATERIAL_LIQUID_GLASS_REGIONS_H */

@@ -1,4 +1,4 @@
-//! Safe Rust bindings for **vista** — 3D scene hierarchy and glTF 2.0 asset runtime (ADR-0016, ADR-0106).
+//! Safe Rust bindings for **scene** — 3D scene hierarchy and glTF 2.0 asset runtime (ADR-0016, ADR-0106).
 
 #![deny(rust_2018_idioms)]
 
@@ -29,7 +29,7 @@ pub enum LoadError {
     Scene(Error),
     Gltf(String),
     Image(String),
-    Flux(optics_gfx::Error),
+    Gfx(optics_gfx::Error),
     Unsupported(String),
 }
 
@@ -39,7 +39,7 @@ impl fmt::Display for LoadError {
             Self::Scene(error) => error.fmt(f),
             Self::Gltf(error) => write!(f, "invalid glTF: {error}"),
             Self::Image(error) => write!(f, "failed to decode glTF image: {error}"),
-            Self::Flux(error) => error.fmt(f),
+            Self::Gfx(error) => error.fmt(f),
             Self::Unsupported(message) => write!(f, "unsupported glTF material: {message}"),
         }
     }
@@ -49,7 +49,7 @@ impl std::error::Error for LoadError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Scene(error) => Some(error),
-            Self::Flux(error) => Some(error),
+            Self::Gfx(error) => Some(error),
             Self::Gltf(_) | Self::Image(_) | Self::Unsupported(_) => None,
         }
     }
@@ -57,7 +57,7 @@ impl std::error::Error for LoadError {
 
 impl From<optics_gfx::Error> for LoadError {
     fn from(value: optics_gfx::Error) -> Self {
-        Self::Flux(value)
+        Self::Gfx(value)
     }
 }
 

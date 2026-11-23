@@ -1,11 +1,11 @@
 /*
- * iris/window.h — host-driven window state for the active app.
+ * window/window.h — host-driven window state for the active app.
  *
- * iris owns the window; hosts request state changes through this API.
+ * window owns the window; hosts request state changes through this API.
  * The window operated on is the one opened by the most recent
- * iris_app_run call on the calling thread ("the active window").
+ * optics_window_run call on the calling thread ("the active window").
  *
- * All calls are thread-affine to iris_app_run and a no-op outside an
+ * All calls are thread-affine to optics_window_run and a no-op outside an
  * active app. Compositor policy is honoured: a tiling WM may ignore
  * minimize / maximize requests, and fullscreen may be deferred until
  * the user confirms. The window state observable to the host is
@@ -55,7 +55,7 @@ OPTICS_WINDOW_API void optics_window_restore(void);
  * activation token. */
 OPTICS_WINDOW_API void optics_window_focus(void);
 
-/* Request the compositor to close the active window. iris_app_run
+/* Request the compositor to close the active window. optics_window_run
  * returns as if the user had clicked the close button. */
 OPTICS_WINDOW_API void optics_window_close(void);
 
@@ -113,4 +113,4 @@ optics_window_create_activation_token(const optics_window_create_activation_toke
 }
 #endif
 
-#endif /* IRIS_WINDOW_H */
+#endif /* OPTICS_WINDOW_H */

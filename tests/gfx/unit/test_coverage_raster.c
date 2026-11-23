@@ -27,7 +27,7 @@
 #define W 64u
 #define H 64u
 
-/* curve_flatten.c reports through libflux's hidden error sink; this binary
+/* curve_flatten.c reports through liboptics_gfx's hidden error sink; this binary
  * compiles it directly, so the symbol needs a local definition (same pattern as
  * test_canvas_flatten). */
 void optics_gfx_set_last_error(optics_gfx_result code, const char *function, const char *file,

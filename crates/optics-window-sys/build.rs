@@ -41,7 +41,7 @@ fn main() {
         )
         .layout_tests(false)
         .generate()
-        .expect("bindgen failed to generate iris bindings");
+        .expect("bindgen failed to generate window bindings");
 
     write_bindings(&bindings);
 }

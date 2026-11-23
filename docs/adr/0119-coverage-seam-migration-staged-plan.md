@@ -3,8 +3,8 @@ id: ADR-0119
 title: "Coverage-seam migration — staged plan, acceptance harness first"
 status: accepted
 date: 2026-10-25
+scope: libs/gfx, libs/ui, bindings
 superseded_by: null
-scope: libs/flux, libs/lens, bindings
 negative_knowledge: true
 ---
 

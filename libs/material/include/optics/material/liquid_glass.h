@@ -1,23 +1,23 @@
 /*
- * prism/liquid_glass.h — analytic liquid-glass material.
+ * material/liquid_glass.h — analytic liquid-glass material.
  *
- * prism is the material library of the optics stack. A named material —
+ * material is the material library of the optics stack. A named material —
  * its shader, its curve shapes, and its parameter contract — lives here,
- * built on flux's public effect runtime (compute-writable images, frame
- * slots, the bindless heap). flux owns rendering mechanism, prism owns
+ * built on gfx's public effect runtime (compute-writable images, frame
+ * slots, the bindless heap). gfx owns rendering mechanism, material owns
  * material identity, and the caller owns policy (ADR-0063; the material
  * model is ADR-0046, the focus field ADR-0050).
  *
  * The filter is a reusable frame-slot-safe compositor. `input` is the
  * sharp backdrop capture and `blurred_input` is normally the output of
- * flux_blur_filter_apply for the same capture. Both inputs and the
+ * optics_gfx_blur_filter_apply for the same capture. Both inputs and the
  * returned image have the same extent. The output is transparent outside
  * the exact analytic SDF plus the drop-shadow falloff, so drawing it over
  * the sharp desktop performs the complete glass composite without a
  * separate rectangular clip.
  *
  * Threading: filters are not thread-safe per device. Serialize calls per
- * device, as you would for any other flux recording API.
+ * device, as you would for any other gfx recording API.
  */
 
 #ifndef OPTICS_MATERIAL_LIQUID_GLASS_H
@@ -37,14 +37,14 @@ typedef struct optics_material_liquid_glass_shape {
 
 /* One glass body: an array of one or more rounded-rectangle shapes,
  * smoothly fused when more than one. The count supported by this build
- * is returned by prism_liquid_glass_max_shapes(); passing more shapes
+ * is returned by optics_material_liquid_glass_max_shapes(); passing more shapes
  * than that fails the apply call instead of being silently truncated.
  * (Today that ceiling is 2 — the dispatch pushes two SDFs; the pointer
  * form exists so raising it later is a shader change, not an ABI
  * break.)
  *
  * `shapes` is a borrowed array: the caller owns it and only reads it
- * during the prism_liquid_glass_filter_apply call.
+ * during the optics_material_liquid_glass_filter_apply call.
  *
  * Per-body optical character is caller policy, used verbatim:
  * - shadow_alpha / shadow_blur / shadow_offset_y: the drop shadow cast by
@@ -68,19 +68,19 @@ typedef struct optics_material_liquid_glass_shape {
  * - contact_ao: [0, 1] sub-pixel contact ambient occlusion (CAO) at silhouette boundary;
  * - ambient_fresnel: [0, 1] 360-degree isotropic environmental Fresnel sheen.
  *
- * Build groups from PRISM_LIQUID_GLASS_GROUP_INIT: zero-init is NOT inherit
+ * Build groups from OPTICS_MATERIAL_LIQUID_GLASS_GROUP_INIT: zero-init is NOT inherit
  * — a zeroed group pins frost/tint/saturation to explicit zeros instead of
  * inheriting the desc values. The INIT's .shapes needs a caller-owned
  * array; the common single-body pattern is:
  *
- *   const prism_liquid_glass_shape shapes[] = {{.bounds = {…}, .corner_radius = …}};
- *   prism_liquid_glass_group g = PRISM_LIQUID_GLASS_GROUP_INIT;
+ *   const optics_material_liquid_glass_shape shapes[] = {{.bounds = {…}, .corner_radius = …}};
+ *   optics_material_liquid_glass_group g = OPTICS_MATERIAL_LIQUID_GLASS_GROUP_INIT;
  *   g.shapes = shapes;
  *   g.shape_count = 1;
  */
 typedef struct optics_material_liquid_glass_group {
     const optics_material_liquid_glass_shape *shapes; /* borrowed, len = shape_count */
-    uint32_t shape_count;                             /* 1 .. prism_liquid_glass_max_shapes() */
+    uint32_t shape_count; /* 1 .. optics_material_liquid_glass_max_shapes() */
     float blend_radius;
     float opacity;
     float shadow_alpha;
@@ -129,7 +129,7 @@ OPTICS_MATERIAL_API uint32_t optics_material_liquid_glass_max_shapes(void);
  * sheen, fresnel, shadow side, trough) — one knob for overall rim energy.
  * saturation and brightness are multipliers; opacity is additionally
  * multiplied by each group's opacity. Drop shadows are configured per
- * group — see prism_liquid_glass_group.
+ * group — see optics_material_liquid_glass_group.
  *
  * Rim band and lensing scale down for small bodies: size_reference is the
  * body size (small side, px) at which effects render at full strength —
@@ -139,11 +139,11 @@ OPTICS_MATERIAL_API uint32_t optics_material_liquid_glass_max_shapes(void);
  * reference recipe), letting callers dial a body between clearer and
  * frostier without forking the material; saturation, tint_strength and
  * frost_strength are the dispatch-wide defaults that a group may override
- * per body (see prism_liquid_glass_group). group_count may be zero (and
+ * per body (see optics_material_liquid_glass_group). group_count may be zero (and
  * groups NULL) to clear any footprints retained by this frame slot after
  * all bodies disappear; otherwise it is capped at 64. */
 typedef struct optics_material_liquid_glass_desc {
-    optics_material_struct_type type; /* PRISM_TYPE_LIQUID_GLASS_DESC */
+    optics_material_struct_type type; /* OPTICS_MATERIAL_TYPE_LIQUID_GLASS_DESC */
     const void *next;
     optics_gfx_image *input;
     optics_gfx_image *blurred_input;
@@ -188,9 +188,9 @@ typedef struct optics_material_liquid_glass_desc {
 
 typedef struct optics_material_liquid_glass_filter optics_material_liquid_glass_filter;
 
-/* Options descriptor for prism_liquid_glass_filter_warmup (ADR-0141). */
+/* Options descriptor for optics_material_liquid_glass_filter_warmup (ADR-0141). */
 typedef struct optics_material_liquid_glass_warmup_opts {
-    optics_gfx_format format; /* Target image format (default 0 -> FLUX_FORMAT_RGBA8_UNORM) */
+    optics_gfx_format format; /* Target image format (default 0 -> OPTICS_GFX_FORMAT_RGBA8_UNORM) */
     bool stats;               /* Pre-warm stats reduction pipeline */
 } optics_material_liquid_glass_warmup_opts;
 
@@ -205,19 +205,19 @@ OPTICS_MATERIAL_NODISCARD OPTICS_MATERIAL_API optics_material_liquid_glass_filte
 optics_material_liquid_glass_filter_retain(optics_material_liquid_glass_filter *filter);
 /* Release only after every submission that references the filter's outputs
  * has completed (its frame-slot fence has signalled, or after
- * flux_device_wait_idle): release destroys the filter's compute pipelines
+ * optics_gfx_device_wait_idle): release destroys the filter's compute pipelines
  * inline. */
 OPTICS_MATERIAL_API void
 optics_material_liquid_glass_filter_release(optics_material_liquid_glass_filter *filter);
 /* Paint every body into the material's output slab.
  *
  * Requires a recording frame with no active pass
- * (flux_frame_get_state(frame) == FLUX_FRAME_STATE_RECORDING and
- * !flux_frame_has_active_pass(frame)).
+ * (optics_gfx_frame_get_state(frame) == OPTICS_GFX_FRAME_STATE_RECORDING and
+ * !optics_gfx_frame_has_active_pass(frame)).
  *
  * The output is sized to the union of the bodies' footprints, NOT to the input
  * capture, and `out->origin_x/origin_y` say where it belongs in capture pixels
- * (see prism_material_output). Draw it at that placement; everything inside the
+ * (see optics_material_output). Draw it at that placement; everything inside the
  * slab but outside the bodies is transparent, so drawing the whole slab is
  * always correct.
  *
@@ -239,24 +239,24 @@ optics_material_liquid_glass_filter_apply(
     const optics_material_liquid_glass_filter_apply_opts *opts);
 
 /* Per-group backdrop statistics, reduced on the GPU by
- * prism_liquid_glass_filter_apply: the mean Rec.709 luminance of the
+ * optics_material_liquid_glass_filter_apply: the mean Rec.709 luminance of the
  * blurred backdrop over the group's primary body, and the mean
  * |sharp − blurred| luminance (high-frequency energy). What a caller does
  * with the numbers — mapping them onto plate_luminance / backdrop_energy or
- * the strength overrides, temporal smoothing — is caller policy; prism only
+ * the strength overrides, temporal smoothing — is caller policy; material only
  * measures. */
 typedef struct optics_material_backdrop_stat {
     float mean_luminance;
     float high_freq_energy;
 } optics_material_backdrop_stat;
 
-/* Reads the stats this frame slot last submitted (FLUX_MAX_FRAMES_IN_FLIGHT
+/* Reads the stats this frame slot last submitted (OPTICS_GFX_MAX_FRAMES_IN_FLIGHT
  * frames ago): begin_frame has waited that slot's fence, so the mapped
  * buffer is stable while `frame` records. Call before this frame's apply on
  * the same slot — the numbers always describe the slot's previous
  * submission. out_count receives the number of group stats copied
  * (min of max_groups and the group count that submission carried). Returns
- * FLUX_ERROR_INVALID_STATE when the slot has never been applied with
+ * OPTICS_GFX_ERROR_INVALID_STATE when the slot has never been applied with
  * stats. */
 typedef struct optics_material_liquid_glass_filter_stats_opts {
     optics_gfx_frame *frame;
@@ -274,4 +274,4 @@ optics_material_liquid_glass_filter_stats(
 }
 #endif
 
-#endif /* PRISM_LIQUID_GLASS_H */
+#endif /* OPTICS_MATERIAL_LIQUID_GLASS_H */

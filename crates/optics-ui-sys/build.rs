@@ -19,7 +19,7 @@ fn main() {
         .allowlist_type("optics_ui_.*")
         .allowlist_var("OPTICS_UI_.*")
         // Opaque handle types are blocklisted and re-exported from
-        // optics-gfx-sys; POD value types embedded by-value in lens structs
+        // optics-gfx-sys; POD value types embedded by-value in ui structs
         // are bound locally so bindgen can emit derives for those structs.
         .allowlist_type("optics_gfx_color")
         .allowlist_type("optics_gfx_point")
@@ -35,11 +35,11 @@ fn main() {
         )
         .raw_line("pub use optics_gfx_sys::optics_gfx_color_rgba_premul;")
         // optics_ui_icon_id is extensible at runtime (optics_ui_icon_register_svg hands
-        // out ids beyond LENS_ICON_COUNT), so it must be a transparent newtype.
+        // out ids beyond OPTICS_UI_ICON_COUNT), so it must be a transparent newtype.
         .newtype_enum("optics_ui_icon_id")
         .layout_tests(true)
         .generate()
-        .expect("bindgen failed to generate lens bindings");
+        .expect("bindgen failed to generate ui bindings");
 
     write_bindings(&bindings);
 }

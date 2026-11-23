@@ -14,6 +14,152 @@ pre-1.0 release may break source or binary compatibility, so the SONAME
 carries the full version and a mismatched binary fails to load instead of
 silently reading a different descriptor layout.
 
+## [0.0.83] - 2026-11-23
+
+### Breaking — Rust crates link the shared Optics libraries by default
+
+- **The default link mode is now shared-preferred.** With no feature and no
+  environment variable, the `optics-*-sys` crates link `liboptics_*.so` when it
+  exists and use the archives only on a static-only tree. Previously they
+  embedded the archives whenever they existed. This follows the usual `-sys`
+  crate convention. A binary that relied on the old default now needs
+  `liboptics_*.so` at runtime: enable `static` (or set `OPTICS_STATIC=1`) to
+  keep a self-contained binary, or see
+  [Make the shared libraries loadable](docs/how-to/use-optics-from-rust.md#5-make-the-shared-libraries-loadable).
+- **New `static` Cargo feature, forcing a static link.** Every `-sys` crate,
+  wrapper crate, and the `optics` facade has it, forwarded down the graph
+  (`optics = { ..., features = ["static"] }`). It fails when an archive or a
+  private dependency is missing instead of degrading to a shared link. There is
+  deliberately no `dynamic` feature: Cargo features are additive and unified
+  across the graph, so mutually exclusive features would let two unrelated
+  dependents break each other's build.
+- **`OPTICS_STATIC` / `OPTICS_DYNAMIC` remain the top-priority overrides** and
+  can force either mode over the `static` feature, so a packager can still ship
+  shared binaries of a crate that enables `static`.
+
+### Fixed — Optics link-mode selection (`optics-build`)
+
+- **Static-only build trees now link.** `probe_and_emit_link` only probed with
+  `pkg-config --static` when a `liboptics_*.so` also existed next to the
+  archive (`use_static && has_shared`). A tree built with
+  `-Ddefault_library=static` therefore dropped every `Requires.private`
+  dependency and failed with undefined symbols (`FcPatternBuild`,
+  `wl_touch_interface`, `sd_bus_call_method_async`, `FT_Done_Face`, ...).
+  The `--static` probe now depends on the chosen link mode alone, and a probe
+  failure is reported instead of silently falling back to the partial
+  `pkg-config --libs` directive set.
+- **`OPTICS_STATIC` no longer loses to `OPTICS_DYNAMIC` by accident.** Both
+  switches were read independently, so setting both forced the shared branch
+  and then tripped the static assertion with the misleading
+  "no static archive ... was found" message. A contradictory request is now a
+  hard error naming both variables.
+- **`PKG_CONFIG_ALL_STATIC` / `PKG_CONFIG_ALL_DYNAMIC` are honoured.**
+  The `pkg-config` crate infers the mode from those variables, and they were
+  registered with `cargo:rerun-if-env-changed`, but `optics-build` never read
+  them: a caller could set `PKG_CONFIG_ALL_STATIC=1` and still receive a
+  shared link. They are now aliases of `OPTICS_STATIC` / `OPTICS_DYNAMIC`,
+  with the Optics-specific spellings taking precedence.
+- **`OPTICS_DYNAMIC=1` no longer degrades into an embedded link.** `-l<stem>`
+  with no shared object present silently resolves to the archive, so asking for
+  the shared mode on an archive-only tree produced a static link while the
+  wrapper crates published rpaths — and then failed with undefined symbols,
+  because the archive's private dependencies were never emitted. The dynamic
+  branch now verifies that `liboptics_*.so` exists and fails with the
+  remediation.
+- The remediation text no longer recommends `-Ddefault_library=static`. It
+  points at `-Ddefault_library=both` (the upstream default, which builds the
+  archives *and* the shared objects) and names the switch to change.
+- `LinkMode` is a typed enum (`DynamicPreferred` / `Static` / `Dynamic`), and
+  the decision is a pure `resolve_linkage` function. Its unit tests cover the
+  three-way choice, the static-only fallback, upstream adoption, the
+  environment-over-feature precedence, and contradictory switches without
+  mutating the process environment.
+- **One link mode per build.** Each `-sys` crate resolved its link mode on
+  its own, so a mixed install could embed `liboptics_gfx.a` while
+  `liboptics_ui.so` loaded `liboptics_gfx.so`: two copies of gfx in one process.
+  Each `-sys` crate now publishes `cargo:link_mode=static|dynamic`, dependents
+  adopt the upstream choice, and a contradiction is a hard error.
+- **A static link checks the whole closure up front.** Every Optics module in
+  the `pkg-config --static` closure must have its archive; a missing one is
+  reported with the module named, before any directive is emitted.
+- **Windows: the import library is no longer taken for an archive.** Meson names
+  Windows archives `liboptics_<mod>.a`. `optics_<mod>.lib` is the DLL import
+  library, which the probe used to treat as a static archive on shared-only trees.
+  Archives are now linked by exact name (`+verbatim`), and the forced-shared check
+  looks for the import library instead of the DLL, which installed prefixes keep
+  in `bin/`.
+
+### Added — Rust consumer and link-mode documentation
+
+- [docs/how-to/use-optics-from-rust.md](docs/how-to/use-optics-from-rust.md)
+  walks an external Rust project through building the C libraries at the
+  matching version, adding the Git dependency, pointing the build at an
+  uninstalled tree or an installed prefix, and making the shared libraries
+  loadable at runtime.
+- [docs/how-to/choose-a-static-or-shared-link.md](docs/how-to/choose-a-static-or-shared-link.md)
+  documents the link modes and their precedence, what the static branch emits,
+  how to prepare each Meson tree, and how to triage the link failures that the
+  helper now reports.
+
+### Breaking — retired scaffolding (ADR-0173)
+
+- **`<optics/gfx/vault/tess_earcut.h>` is removed**, with
+  `optics_gfx_vault_earcut_triangulate` and `optics_gfx_vault_polygon_signed_area`.
+  No library code used them.
+- **A C23 compiler with `#embed` is required** (GCC >= 15, Clang >= 19).
+  Configure now fails with a message instead of failing at the first shader
+  file. The generated-header shader fallback (`tools/build/spv2h.py`) and the
+  build-side MSVC branches are gone.
+- **Runtime identity strings use the semantic names**: the Vulkan
+  application/engine name is `optics`, ledger owners are `gfx/core`,
+  `ui/core`, `text/core`, `window/wayland` and `material`, and profiler zones
+  are prefixed `gfx.`, `ui.`, `text.`. The xdg-desktop-portal request token is
+  `optics_<sec>_<nsec>`.
+- **`OPTICS_GFX_INIT` takes one spelling**, the type suffix as written:
+  `OPTICS_GFX_INIT(canvas_desc, ...)`. The upper-case form and the 17
+  mixed-case alias typedefs behind it (`optics_gfx_CANVAS_DESC`, ...) are gone.
+- **Rust names finish the rename**: `optics_ui::FluxDiagnostic` is
+  `GfxDiagnostic`, and `optics_scene`'s error variant `Flux` is `Gfx`.
+- The canvas backend interface loses `submit_cover_triangles`; strokes go
+  through `submit_cover` like fills (internal, not installed).
+
+### Fixed
+
+- **Strokes at sharp corners.** At a vertex whose miter overflowed, the
+  outgoing segment started from the incoming segment's offsets, so past a
+  90-degree turn its body twisted and covered about half the band; and bevel,
+  miter and round joins were placed on the inner side of the turn, hidden under
+  the bodies. Both are fixed; `test_canvas_stroke_pieces` pins single coverage
+  and the absence of holes for every join and cap.
+- **Material clears no longer overrun the scratch image.** The layered backdrop
+  cleared its capture-sized scratch image with the slab's extent; every clear
+  is now bounded by its own target.
+- **Mica's reuse barrier** named a read instead of the earlier write in its
+  source access scope; all materials now share one barrier set.
+- **Tooltip text** is no longer truncated at 127 bytes.
+- **Pen cursor on Wayland.** A tablet tool in proximity now shows the same
+  cursor shape as the pointer (cursor-shape-v1 `get_tablet_tool_v2`).
+
+### Changed
+
+- Strokes are emitted as convex coverage contours (one per segment body, join
+  and cap) and rasterized through the same analytic route as fills.
+- The material library embeds each shader once (it carried four copies of the
+  storage-clear shader and two of the glass and stats shaders) and shares its
+  pipeline, slab, clear and barrier code across all five filters.
+- `cursor-shape-v1` comes from the system `wayland-protocols` (>= 1.32) instead
+  of a vendored copy.
+- Removed the unused tab draw opcodes from the UI display list.
+- The developer probes in `tools/probes/` build with `-Dexamples=true`.
+- `docs/reference/symbols.md` is generated from the headers
+  (`tools/gen_symbols.py`); `tools/check_naming.py` also rejects legacy
+  codenames, undefined `optics_*` names and non-existent paths in live files;
+  `tools/check_adr.py` keeps ADR frontmatter and the index consistent.
+- The leak-coverage guardrail (ADR-0130) is back as `tools/check_leaks.py`
+  (lint suite `leak_coverage`) after commit `ffe1fde9` deleted it.
+- Linux CI builds with clang-19, plus a GCC 15 job in a `fedora:42` container
+  (ubuntu-24.04 ships no GCC with `#embed`); the duplicate clang release job is gone.
+
 ## [0.0.82] - 2026-11-20
 
 ### Breaking — Semantic Module Naming & Unified `optics_` Namespace (ADR-0169, ADR-0170)

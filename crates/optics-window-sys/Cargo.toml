@@ -1,6 +1,6 @@
 [package]
 name = "optics-window-sys"
-description = "Raw FFI bindings to iris (libiris), generated from <iris/iris.h>"
+description = "Raw FFI bindings to window (liboptics_window), generated from <optics/window.h>"
 publish = false
 links = "optics_window"
 version.workspace = true
@@ -10,9 +10,15 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-# optics-gfx-sys is re-exported so the seam types iris speaks (flux_canvas,
-# flux_device, flux_encoder, ...) have ONE Rust definition across the stack.
+# optics-gfx-sys is re-exported so the seam types window speaks (optics_gfx_canvas,
+# optics_gfx_device, optics_gfx_encoder, ...) have ONE Rust definition across the stack.
 optics-gfx-sys = { workspace = true }
 
 [build-dependencies]
 optics-build = { workspace = true }
+
+[features]
+# Force a static link of the Optics archives; the default links the shared
+# objects (docs/how-to/choose-a-static-or-shared-link.md). OPTICS_STATIC /
+# OPTICS_DYNAMIC in the environment override it.
+static = ["optics-gfx-sys/static"]

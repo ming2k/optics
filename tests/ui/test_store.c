@@ -1,8 +1,8 @@
 /* test_store.c — retained node lifecycle and per-node state (ADR-0004).
  * CPU-only; no device. */
 
-#include "lens_test.h"
 #include "optics_test.h"
+#include "ui_test.h"
 #include <optics/ui.h>
 
 /* Internal store fields: this test asserts the shrink hysteresis itself
@@ -67,20 +67,20 @@ int main(void) {
      *
      * A transient spike (a long list, a notification burst) used to pin
      * the open-addressing table at its high-water capacity for the
-     * process lifetime, and lensi_store_reap scans O(cap) every frame.
-     * After LENSI_STORE_SHRINK_FRAMES consecutive frames under 1/8 load
-     * the table must halve (never below LENSI_STORE_MIN_CAP). */
+     * process lifetime, and optics_ui__store_reap scans O(cap) every frame.
+     * After OPTICS_UI_STORE_SHRINK_FRAMES consecutive frames under 1/8 load
+     * the table must halve (never below OPTICS_UI_STORE_MIN_CAP). */
     {
         /* Reopen a store sparsely populated post-spike: the earlier part of
          * this test reaped everything, so the load is already minimal. Just
          * verify the hysteresis counters behave: run a long idle stretch
          * and confirm the table never grows and never shrinks below the
          * floor, then spike it once and confirm it is still functional. */
-        for (int f = 0; f < LENSI_STORE_SHRINK_FRAMES + 16; f++) {
+        for (int f = 0; f < OPTICS_UI_STORE_SHRINK_FRAMES + 16; f++) {
             optics_ui_begin(ui, &in);
             optics_ui_test_end(ui);
         }
-        OT_EXPECT(ui->store.cap >= LENSI_STORE_MIN_CAP);
+        OT_EXPECT(ui->store.cap >= OPTICS_UI_STORE_MIN_CAP);
         /* The implicit root node is touched every frame, so the live count
          * is exactly the always-present set — never the spiked high-water. */
         OT_EXPECT(ui->store.count <= 4);

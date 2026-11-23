@@ -3,6 +3,9 @@ id: ADR-0055
 title: "Callback-driven watch APIs + the backend wakeup seam"
 status: accepted
 date: 2026-08-08
+scope: window public API (theme.h, a11y.h) and the internal backend
+superseded_by: null
+negative_knowledge: true
 ---
 
 # ADR-0055: Callback-driven watch APIs + the backend wakeup seam

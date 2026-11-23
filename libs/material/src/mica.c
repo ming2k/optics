@@ -1,12 +1,12 @@
 /*
- * prism/mica.c — mica foundation material implementation.
+ * material/mica.c — mica foundation material implementation.
  *
  * Evaluates screen-anchored wallpaper sampling, luminosity plate balance,
  * tinting, procedural noise, border rim, drop shadow, and inactive state fallback.
  */
 
-#include "prism_material_frame.h"
-#include "prism_observe.h"
+#include "material_frame.h"
+#include "material_observe.h"
 #include <optics/material/mica.h>
 
 #include <optics/gfx.h>
@@ -23,28 +23,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* Shader bytecode embedded via native C23 #embed. */
-alignas(uint32_t) static const unsigned char mica_spv[] = {
-#embed "mica.comp.spv"
-};
-alignas(uint32_t) static const unsigned char mica_16f_spv[] = {
-#embed "mica_16f.comp.spv"
-};
-alignas(uint32_t) static const unsigned char storage_clear_spv[] = {
-#embed "storage_clear.comp.spv"
-};
-alignas(uint32_t) static const unsigned char storage_clear_16f_spv[] = {
-#embed "storage_clear_16f.comp.spv"
-};
-
 #define MICA_MAX_GROUPS 64u
-
-typedef struct mica_region {
-    uint32_t x;
-    uint32_t y;
-    uint32_t width;
-    uint32_t height;
-} mica_region;
 
 typedef struct mica_push {
     uint32_t wallpaper_handle;
@@ -83,39 +62,17 @@ typedef struct mica_push {
     float capture_height;
 } mica_push;
 
-typedef struct storage_clear_push {
-    uint32_t output_handle;
-    uint32_t width;
-    uint32_t height;
-    uint32_t origin_x;
-    uint32_t origin_y;
-    uint32_t region_width;
-    uint32_t region_height;
-} storage_clear_push;
-
 static_assert(sizeof(mica_push) == 148, "mica_push size mismatch");
-static_assert(sizeof(storage_clear_push) == 28, "storage_clear_push size mismatch");
-
-#define OPTICS_MATERIAL_WG 16u
-
-static optics_gfx_format optics_material_output_format(const optics_gfx_image *input) {
-    return optics_gfx_image_format(input) == OPTICS_GFX_FORMAT_RGBA16_SFLOAT
-               ? OPTICS_GFX_FORMAT_RGBA16_SFLOAT
-               : OPTICS_GFX_FORMAT_RGBA8_UNORM;
-}
 
 typedef struct mica_filter_slot {
-    uint32_t width;
-    uint32_t height;
-    optics_gfx_format format;
-    optics_gfx_image *output;
+    optics_material__slab slab; /* the output, on the slab ladder (material_frame.h) */
     bool initialized;
     uint32_t slab_x;
     uint32_t slab_y;
     uint32_t capture_width;
     uint32_t capture_height;
     uint32_t previous_count;
-    mica_region previous[MICA_MAX_GROUPS];
+    optics_material__rect previous[MICA_MAX_GROUPS];
 } mica_filter_slot;
 
 struct optics_material_mica_filter {
@@ -126,89 +83,12 @@ struct optics_material_mica_filter {
     mica_filter_slot slots[OPTICS_GFX_MAX_FRAMES_IN_FLIGHT];
 };
 
-static void barrier_compute_write_to_read(VkCommandBuffer cmd, VkImage image) {
-    VkImageMemoryBarrier2 b = {
-        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-        .srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-        .srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
-        .dstStageMask =
-            VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-        .dstAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_READ_BIT,
-        .oldLayout = VK_IMAGE_LAYOUT_GENERAL,
-        .newLayout = VK_IMAGE_LAYOUT_GENERAL,
-        .image = image,
-        .subresourceRange =
-            {
-                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-                .levelCount = 1,
-                .layerCount = 1,
-            },
-    };
-    VkDependencyInfo di = {
-        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-        .imageMemoryBarrierCount = 1,
-        .pImageMemoryBarriers = &b,
-    };
-    vkCmdPipelineBarrier2(cmd, &di);
-}
-
-static void barrier_reuse_to_compute_write(VkCommandBuffer cmd, VkImage image) {
-    VkImageMemoryBarrier2 b = {
-        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-        .srcStageMask =
-            VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-        .srcAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_READ_BIT,
-        .dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-        .dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
-        .oldLayout = VK_IMAGE_LAYOUT_GENERAL,
-        .newLayout = VK_IMAGE_LAYOUT_GENERAL,
-        .image = image,
-        .subresourceRange =
-            {
-                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-                .levelCount = 1,
-                .layerCount = 1,
-            },
-    };
-    VkDependencyInfo di = {
-        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-        .imageMemoryBarrierCount = 1,
-        .pImageMemoryBarriers = &b,
-    };
-    vkCmdPipelineBarrier2(cmd, &di);
-}
-
-static void barrier_compute_write_to_read_write(VkCommandBuffer cmd, VkImage image) {
-    VkImageMemoryBarrier2 barrier = {
-        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-        .srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-        .srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
-        .dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-        .dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
-        .oldLayout = VK_IMAGE_LAYOUT_GENERAL,
-        .newLayout = VK_IMAGE_LAYOUT_GENERAL,
-        .image = image,
-        .subresourceRange =
-            {
-                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-                .levelCount = 1,
-                .layerCount = 1,
-            },
-    };
-    VkDependencyInfo info = {
-        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-        .imageMemoryBarrierCount = 1,
-        .pImageMemoryBarriers = &barrier,
-    };
-    vkCmdPipelineBarrier2(cmd, &info);
-}
-
 optics_gfx_result optics_material_mica_filter_create(optics_gfx_device *device,
                                                      optics_material_mica_filter **out) {
     if (!device || !out)
         return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
     *out = nullptr;
-    /* Caller's allocator, attributed to prism (ADR-0135). */
+    /* Caller's allocator, attributed to material (ADR-0135). */
     optics_material_mica_filter *filter = nullptr;
     if (optics_gfx_device_alloc(device,
                                 &(optics_gfx_device_alloc_opts){
@@ -240,8 +120,7 @@ void optics_material_mica_filter_release(optics_material_mica_filter *filter) {
         return;
     optics_gfx_device *device = filter->device;
     for (uint32_t i = 0; i < OPTICS_GFX_MAX_FRAMES_IN_FLIGHT; ++i) {
-        if (filter->slots[i].output)
-            optics_gfx_image_release(filter->slots[i].output);
+        optics_material__slab_release(&filter->slots[i].slab);
     }
     for (int i = 0; i < 2; ++i) {
         if (filter->mica_pipelines[i])
@@ -263,71 +142,37 @@ static optics_gfx_result mica_ensure_slot(optics_material_mica_filter *filter, u
                                           const optics_gfx_image *input, uint32_t footprint_w,
                                           uint32_t footprint_h) {
     mica_filter_slot *slot = &filter->slots[index];
-    uint32_t width = 0u;
-    uint32_t height = 0u;
-    optics_material_slab_for_footprint(footprint_w, footprint_h, &width, &height);
-    optics_gfx_format format = optics_material_output_format(input);
-    if (slot->output && slot->width == width && slot->height == height && slot->format == format)
-        return OPTICS_GFX_OK;
-    if (slot->output)
-        optics_gfx_image_release(slot->output);
-    *slot = (mica_filter_slot){};
-    optics_gfx_result r = optics_gfx_image_create(
-        filter->device,
-        &(optics_gfx_image_desc){.type = OPTICS_GFX_TYPE_IMAGE_DESC,
-                                 .width = width,
-                                 .height = height,
-                                 .format = format,
-                                 .usage = OPTICS_GFX_IMAGE_USAGE_COMPUTE_WRITE},
-        &slot->output);
-    if (r != OPTICS_GFX_OK)
-        return r;
-    slot->width = width;
-    slot->height = height;
-    slot->format = format;
-    return OPTICS_GFX_OK;
+    bool recreated = false;
+    optics_gfx_result r = optics_material__slab_ensure(
+        filter->device, &slot->slab,
+        &(optics_material__slab_opts){
+            .input = input, .footprint_width = footprint_w, .footprint_height = footprint_h},
+        &recreated);
+    if (recreated) /* a new image starts with no previous regions to clear */
+        *slot = (mica_filter_slot){.slab = slot->slab};
+    return r;
 }
 
 static optics_gfx_result mica_ensure_pipelines(optics_material_mica_filter *filter, bool is16f,
                                                bool need_clear, bool need_mica) {
     const int cls = is16f ? 1 : 0;
-    const bool missing = (need_clear && !filter->clear_pipelines[cls]) ||
-                         (need_mica && !filter->mica_pipelines[cls]);
-    if (!missing)
-        return OPTICS_GFX_OK;
-
-    OPTICS_GFX_PROFILE_ZONE(z_compile, "prism.mica.compile_pipelines");
-
-    if (need_clear && !filter->clear_pipelines[cls]) {
-        optics_gfx_compute_pipeline_desc pdesc = OPTICS_GFX_COMPUTE_PIPELINE_DESC_INIT;
-        pdesc.spirv = (const uint32_t *)(is16f ? storage_clear_16f_spv : storage_clear_spv);
-        pdesc.spirv_word_count =
-            (is16f ? sizeof(storage_clear_16f_spv) : sizeof(storage_clear_spv)) / sizeof(uint32_t);
-        pdesc.entry_point = "main";
-        pdesc.push_constant_bytes = sizeof(storage_clear_push);
-        optics_gfx_result r = optics_gfx_compute_pipeline_create(filter->device, &pdesc,
-                                                                 &filter->clear_pipelines[cls]);
-        if (r != OPTICS_GFX_OK) {
-            OPTICS_GFX_PROFILE_ZONE_END(z_compile);
-            return r;
-        }
-    }
-    if (need_mica && !filter->mica_pipelines[cls]) {
-        optics_gfx_compute_pipeline_desc pdesc = OPTICS_GFX_COMPUTE_PIPELINE_DESC_INIT;
-        pdesc.spirv = (const uint32_t *)(is16f ? mica_16f_spv : mica_spv);
-        pdesc.spirv_word_count =
-            (is16f ? sizeof(mica_16f_spv) : sizeof(mica_spv)) / sizeof(uint32_t);
-        pdesc.entry_point = "main";
-        pdesc.push_constant_bytes = sizeof(mica_push);
-        optics_gfx_result r = optics_gfx_compute_pipeline_create(filter->device, &pdesc,
-                                                                 &filter->mica_pipelines[cls]);
-        if (r != OPTICS_GFX_OK) {
-            OPTICS_GFX_PROFILE_ZONE_END(z_compile);
-            return r;
-        }
-    }
-    OPTICS_GFX_PROFILE_ZONE_END(z_compile);
-    return OPTICS_GFX_OK;
+    optics_gfx_result r = OPTICS_GFX_OK;
+    if (need_clear)
+        r = optics_material__pipeline_ensure(
+            filter->device, &filter->clear_pipelines[cls],
+            &(optics_material__pipeline_opts){
+                .shader = OPTICS_MATERIAL__SHADER_STORAGE_CLEAR,
+                .is16f = is16f,
+                .push_constant_bytes = optics_material__storage_clear_push_bytes(),
+            });
+    if (r == OPTICS_GFX_OK && need_mica)
+        r = optics_material__pipeline_ensure(filter->device, &filter->mica_pipelines[cls],
+                                             &(optics_material__pipeline_opts){
+                                                 .shader = OPTICS_MATERIAL__SHADER_MICA,
+                                                 .is16f = is16f,
+                                                 .push_constant_bytes = sizeof(mica_push),
+                                             });
+    return r;
 }
 
 optics_gfx_result optics_material_mica_filter_warmup(optics_material_mica_filter *filter,
@@ -346,7 +191,7 @@ optics_gfx_result optics_material_mica_filter_warmup(optics_material_mica_filter
 
 static bool mica_group_dispatch_bounds(const optics_material_mica_group *group,
                                        uint32_t image_width, uint32_t image_height,
-                                       mica_region *out) {
+                                       optics_material__rect *out) {
     if (!group || !out || image_width == 0 || image_height == 0)
         return false;
     float pad = fmaxf(group->shadow_blur * 2.0f, 2.0f);
@@ -393,9 +238,9 @@ typedef struct mica_plan {
     bool clear_full;
     uint32_t slab_x;
     uint32_t slab_y;
-    mica_region current[MICA_MAX_GROUPS];
+    optics_material__rect current[MICA_MAX_GROUPS];
     uint32_t current_count;
-    mica_region previous[MICA_MAX_GROUPS];
+    optics_material__rect previous[MICA_MAX_GROUPS];
     uint32_t previous_count;
     mica_push pushes[MICA_MAX_GROUPS];
     uint32_t push_count;
@@ -409,82 +254,39 @@ static void mica_plan_record(void *raw, VkCommandBuffer cmd) {
     const int cls = p->is16f ? 1 : 0;
     VkImage out_vk = optics_gfx_image_vk_image(p->output);
 
-    barrier_reuse_to_compute_write(cmd, out_vk);
+    optics_material__barrier_reuse_to_compute_write(cmd, out_vk);
 
+    /* Full clear on first use or when the slab origin moved; otherwise only
+     * what the previous submission drew and what this one will draw. */
+    optics_gfx_compute_pipeline *clear = filter->clear_pipelines[cls];
     if (p->clear_full) {
-        storage_clear_push pc = {
-            .output_handle = optics_gfx_image_bindless_storage_handle(p->output),
-            .width = p->output_width,
-            .height = p->output_height,
-            .origin_x = 0,
-            .origin_y = 0,
-            .region_width = p->output_width,
-            .region_height = p->output_height,
-        };
-        uint32_t gx = (pc.region_width + OPTICS_MATERIAL_WG - 1u) / OPTICS_MATERIAL_WG;
-        uint32_t gy = (pc.region_height + OPTICS_MATERIAL_WG - 1u) / OPTICS_MATERIAL_WG;
-        optics_gfx_compute_dispatch(
-            &(optics_gfx_compute_dispatch_opts){.cmd = cmd,
-                                                .pipeline = filter->clear_pipelines[cls],
-                                                .push_constants = &pc,
-                                                .push_bytes = sizeof(pc),
-                                                .group_x = gx,
-                                                .group_y = gy,
-                                                .group_z = 1});
-        barrier_compute_write_to_read_write(cmd, out_vk);
-    } else {
-        for (uint32_t i = 0; i < p->previous_count; ++i) {
-            const mica_region *prev = &p->previous[i];
-            storage_clear_push pc = {
-                .output_handle = optics_gfx_image_bindless_storage_handle(p->output),
-                .width = p->output_width,
-                .height = p->output_height,
-                .origin_x = prev->x,
-                .origin_y = prev->y,
-                .region_width = prev->width,
-                .region_height = prev->height,
-            };
-            uint32_t gx = (prev->width + OPTICS_MATERIAL_WG - 1u) / OPTICS_MATERIAL_WG;
-            uint32_t gy = (prev->height + OPTICS_MATERIAL_WG - 1u) / OPTICS_MATERIAL_WG;
-            optics_gfx_compute_dispatch(
-                &(optics_gfx_compute_dispatch_opts){.cmd = cmd,
-                                                    .pipeline = filter->clear_pipelines[cls],
-                                                    .push_constants = &pc,
-                                                    .push_bytes = sizeof(pc),
-                                                    .group_x = gx,
-                                                    .group_y = gy,
-                                                    .group_z = 1});
-            barrier_compute_write_to_read_write(cmd, out_vk);
-        }
-        for (uint32_t i = 0; i < p->current_count; ++i) {
-            const mica_region *cur = &p->current[i];
-            storage_clear_push pc = {
-                .output_handle = optics_gfx_image_bindless_storage_handle(p->output),
-                .width = p->output_width,
-                .height = p->output_height,
-                .origin_x = cur->x,
-                .origin_y = cur->y,
-                .region_width = cur->width,
-                .region_height = cur->height,
-            };
-            uint32_t gx = (cur->width + OPTICS_MATERIAL_WG - 1u) / OPTICS_MATERIAL_WG;
-            uint32_t gy = (cur->height + OPTICS_MATERIAL_WG - 1u) / OPTICS_MATERIAL_WG;
-            optics_gfx_compute_dispatch(
-                &(optics_gfx_compute_dispatch_opts){.cmd = cmd,
-                                                    .pipeline = filter->clear_pipelines[cls],
-                                                    .push_constants = &pc,
-                                                    .push_bytes = sizeof(pc),
-                                                    .group_x = gx,
-                                                    .group_y = gy,
-                                                    .group_z = 1});
-            barrier_compute_write_to_read_write(cmd, out_vk);
-        }
+        optics_material__clear_regions(
+            &(optics_material__clear_opts){.cmd = cmd, .pipeline = clear, .image = p->output});
+        if (clear)
+            optics_material__barrier_compute_write_to_read_write(cmd, out_vk);
+    } else if (clear) {
+        optics_material__clear_regions(
+            &(optics_material__clear_opts){.cmd = cmd,
+                                           .pipeline = clear,
+                                           .image = p->output,
+                                           .regions = p->previous,
+                                           .region_count = p->previous_count});
+        optics_material__clear_regions(
+            &(optics_material__clear_opts){.cmd = cmd,
+                                           .pipeline = clear,
+                                           .image = p->output,
+                                           .regions = p->current,
+                                           .region_count = p->current_count});
+        /* Order the clears before the material dispatches; with nothing to
+         * dispatch, the closing write-to-read barrier orders them instead. */
+        if (p->current_count > 0u)
+            optics_material__barrier_compute_write_to_read_write(cmd, out_vk);
     }
 
     for (uint32_t i = 0; i < p->push_count; ++i) {
-        const mica_region *bounds = &p->current[i];
-        uint32_t gx = (bounds->width + OPTICS_MATERIAL_WG - 1u) / OPTICS_MATERIAL_WG;
-        uint32_t gy = (bounds->height + OPTICS_MATERIAL_WG - 1u) / OPTICS_MATERIAL_WG;
+        const optics_material__rect *bounds = &p->current[i];
+        uint32_t gx = optics_material_groups(bounds->width);
+        uint32_t gy = optics_material_groups(bounds->height);
         optics_gfx_compute_dispatch(
             &(optics_gfx_compute_dispatch_opts){.cmd = cmd,
                                                 .pipeline = filter->mica_pipelines[cls],
@@ -494,10 +296,10 @@ static void mica_plan_record(void *raw, VkCommandBuffer cmd) {
                                                 .group_y = gy,
                                                 .group_z = 1});
         if (i + 1 < p->push_count)
-            barrier_compute_write_to_read_write(cmd, out_vk);
+            optics_material__barrier_compute_write_to_read_write(cmd, out_vk);
     }
 
-    barrier_compute_write_to_read(cmd, out_vk);
+    optics_material__barrier_compute_write_to_read(cmd, out_vk);
 }
 
 optics_gfx_result
@@ -522,7 +324,7 @@ optics_material_mica_filter_apply(optics_material_mica_filter *filter,
         optics_gfx_frame_has_active_pass(frame))
         return OPTICS_GFX_ERROR_INVALID_STATE;
 
-    /* ADR-0147: `blurred_wallpaper` is normally a deferred flux_blur_filter
+    /* ADR-0147: `blurred_wallpaper` is normally a deferred optics_gfx_blur_filter
      * output; materialize it so its dispatches precede ours. */
     if (desc->blurred_wallpaper) {
         optics_gfx_result mat = optics_gfx_frame_materialize_image(frame, desc->blurred_wallpaper);
@@ -537,15 +339,15 @@ optics_material_mica_filter_apply(optics_material_mica_filter *filter,
     if (capture_width == 0 || capture_height == 0)
         return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
 
-    OPTICS_GFX_PROFILE_ZONE(z_mica, "prism.mica.apply");
+    OPTICS_GFX_PROFILE_ZONE(z_mica, "material.mica.apply");
 
     uint32_t current_count = 0;
-    mica_region current_regions[MICA_MAX_GROUPS];
+    optics_material__rect current_regions[MICA_MAX_GROUPS];
     uint32_t footprint_x0 = UINT32_MAX, footprint_y0 = UINT32_MAX;
     uint32_t footprint_x1 = 0u, footprint_y1 = 0u;
 
     for (uint32_t i = 0; i < desc->group_count; ++i) {
-        mica_region bounds;
+        optics_material__rect bounds;
         if (mica_group_dispatch_bounds(&desc->groups[i], capture_width, capture_height, &bounds)) {
             current_regions[current_count++] = bounds;
             if (bounds.x < footprint_x0)
@@ -586,7 +388,7 @@ optics_material_mica_filter_apply(optics_material_mica_filter *filter,
     slot->capture_width = capture_width;
     slot->capture_height = capture_height;
 
-    bool is16f = (slot->format == OPTICS_GFX_FORMAT_RGBA16_SFLOAT);
+    bool is16f = (slot->slab.format == OPTICS_GFX_FORMAT_RGBA16_SFLOAT);
 
     r = mica_ensure_pipelines(filter, is16f, slot->initialized || desc->group_count > 0,
                               desc->group_count > 0);
@@ -598,9 +400,9 @@ optics_material_mica_filter_apply(optics_material_mica_filter *filter,
         .filter = filter,
         .wallpaper = desc->wallpaper,
         .blurred_wallpaper = desc->blurred_wallpaper,
-        .output = slot->output,
-        .output_width = slot->width,
-        .output_height = slot->height,
+        .output = slot->slab.image,
+        .output_width = slot->slab.width,
+        .output_height = slot->slab.height,
         .is16f = is16f,
         .clear_full = !slot->initialized || slab_moved,
         .slab_x = slab_x,
@@ -608,9 +410,9 @@ optics_material_mica_filter_apply(optics_material_mica_filter *filter,
         .current_count = current_count,
         .previous_count = (!slot->initialized || slab_moved) ? 0u : slot->previous_count,
     };
-    memcpy(plan.current, current_regions, current_count * sizeof(mica_region));
+    memcpy(plan.current, current_regions, current_count * sizeof(optics_material__rect));
     if (plan.previous_count > 0u)
-        memcpy(plan.previous, slot->previous, plan.previous_count * sizeof(mica_region));
+        memcpy(plan.previous, slot->previous, plan.previous_count * sizeof(optics_material__rect));
 
     uint32_t wp_handle =
         desc->wallpaper ? optics_gfx_image_bindless_handle(desc->wallpaper) : 0xFFFFFFFFu;
@@ -618,11 +420,11 @@ optics_material_mica_filter_apply(optics_material_mica_filter *filter,
                              ? optics_gfx_image_bindless_handle(desc->blurred_wallpaper)
                              : 0xFFFFFFFFu;
     uint32_t samp_handle = optics_gfx_device_default_sampler_handle(filter->device);
-    uint32_t out_handle = optics_gfx_image_bindless_storage_handle(slot->output);
+    uint32_t out_handle = optics_gfx_image_bindless_storage_handle(slot->slab.image);
 
     for (uint32_t i = 0; i < current_count; ++i) {
         const optics_material_mica_group *g = &desc->groups[i];
-        const mica_region *bounds = &plan.current[i];
+        const optics_material__rect *bounds = &plan.current[i];
 
         float eff_tint_opacity = (g->tint_opacity >= 0.0f) ? g->tint_opacity : desc->tint_opacity;
         float eff_lum_plate =
@@ -638,8 +440,8 @@ optics_material_mica_filter_apply(optics_material_mica_filter *filter,
             .blurred_handle = bl_handle,
             .sampler_handle = samp_handle,
             .output_handle = out_handle,
-            .width = slot->width,
-            .height = slot->height,
+            .width = slot->slab.width,
+            .height = slot->slab.height,
             .origin_x = bounds->x,
             .origin_y = bounds->y,
             .bounds = {g->shape.bounds.x, g->shape.bounds.y, g->shape.bounds.w, g->shape.bounds.h},
@@ -673,22 +475,22 @@ optics_material_mica_filter_apply(optics_material_mica_filter *filter,
 
     slot->initialized = true;
     slot->previous_count = current_count;
-    memcpy(slot->previous, current_regions, current_count * sizeof(mica_region));
+    memcpy(slot->previous, current_regions, current_count * sizeof(optics_material__rect));
 
     *out = (optics_material_output){
-        .image = slot->output,
+        .image = slot->slab.image,
         .origin_x = (float)slot->slab_x,
         .origin_y = (float)slot->slab_y,
-        .width = slot->width,
-        .height = slot->height,
+        .width = slot->slab.width,
+        .height = slot->slab.height,
     };
 
     /* Defer the dispatches (ADR-0147). The handle above is valid now; the work
      * replays only if something requires the output. mica reads the wallpaper as
      * an input so the plan orders it after any wallpaper-producing pass. */
     optics_material_deferred_pass pass = OPTICS_MATERIAL_DEFERRED_PASS_INIT;
-    pass.output = slot->output;
-    pass.label = "prism.mica";
+    pass.output = slot->slab.image;
+    pass.label = "material.mica";
     if (desc->wallpaper) {
         pass.inputs[pass.input_count] = desc->wallpaper;
         pass.input_count++;

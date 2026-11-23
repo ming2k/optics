@@ -5,7 +5,7 @@
  * Rendered through the CPU backend (no Vulkan device):
  *
  *  - a replayed segment must produce a pixel-identical framebuffer to
- *    the live-recorded frame, and bump flux_canvas_cache_entries_replayed;
+ *    the live-recorded frame, and bump optics_gfx_canvas_cache_entries_replayed;
  *  - replay must REFUSE (return false, draw nothing) when the canvas
  *    state no longer matches the recording anchor: incoming scissor
  *    (clip), absolute transform (scale), or a released handle;

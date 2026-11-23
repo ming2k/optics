@@ -77,7 +77,7 @@ static bool portal_read_setting(sd_bus *bus, const char *ns, const char *key, ch
     sd_bus_message_unref(reply);
     return ok;
 }
-#endif /* IRIS_HAVE_PORTAL_WATCH */
+#endif /* OPTICS_WINDOW_HAVE_PORTAL_WATCH */
 #endif /* __linux__ */
 
 OPTICS_WINDOW_API optics_window_a11y_prefs optics_window_a11y_prefs_query(void) {
@@ -115,7 +115,7 @@ OPTICS_WINDOW_API optics_window_a11y_prefs optics_window_a11y_prefs_query(void) 
 
         sd_bus_unref(session);
     }
-#endif /* IRIS_HAVE_PORTAL_WATCH */
+#endif /* OPTICS_WINDOW_HAVE_PORTAL_WATCH */
 #endif /* __linux__ */
 
     return p;

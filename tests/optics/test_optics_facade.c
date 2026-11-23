@@ -4,9 +4,9 @@
  * Verifies that:
  *   1. Including <optics/optics.h> alone provides full visibility into all engine
  *      layers without macro collisions or missing typedefs.
- *   2. Header-only motion vocabulary (transit) functions execute correctly.
- *   3. Core mathematical and geometric structures from flux are accessible.
- *   4. L3 state engines (lens, iris) types and version macros are consistent.
+ *   2. Header-only motion vocabulary functions execute correctly.
+ *   3. Core mathematical and geometric structures from gfx are accessible.
+ *   4. L3 state engines (ui, window) types and version macros are consistent.
  *   5. Pure C23 compiler conformance.
  */
 
@@ -18,12 +18,12 @@ int main(void) {
     /* 1. Verify Umbrella Facade Version Macros & Lockstep Invariants */
     static_assert(OPTICS_VERSION_MAJOR == 0, "Optics major version mismatch");
     static_assert(OPTICS_VERSION_MINOR == 0, "Optics minor version mismatch");
-    static_assert(OPTICS_VERSION_PATCH == 82, "Optics patch version mismatch");
-    static_assert(OPTICS_VERSION_NUMBER == 82, "Optics version number mismatch");
+    static_assert(OPTICS_VERSION_PATCH == 83, "Optics patch version mismatch");
+    static_assert(OPTICS_VERSION_NUMBER == 83, "Optics version number mismatch");
 
-    static_assert(OPTICS_GFX_VERSION_MAJOR == OPTICS_VERSION_MAJOR, "Flux/Optics major mismatch");
-    static_assert(OPTICS_GFX_VERSION_MINOR == OPTICS_VERSION_MINOR, "Flux/Optics minor mismatch");
-    static_assert(OPTICS_GFX_VERSION_PATCH == OPTICS_VERSION_PATCH, "Flux/Optics patch mismatch");
+    static_assert(OPTICS_GFX_VERSION_MAJOR == OPTICS_VERSION_MAJOR, "gfx/Optics major mismatch");
+    static_assert(OPTICS_GFX_VERSION_MINOR == OPTICS_VERSION_MINOR, "gfx/Optics minor mismatch");
+    static_assert(OPTICS_GFX_VERSION_PATCH == OPTICS_VERSION_PATCH, "gfx/Optics patch mismatch");
 
 #if defined(OPTICS_TEXT_VERSION_MAJOR)
     static_assert(OPTICS_TEXT_VERSION_MAJOR == OPTICS_VERSION_MAJOR, "Glyph/Optics major mismatch");
@@ -32,41 +32,39 @@ int main(void) {
 
 #if defined(OPTICS_MATERIAL_VERSION_MAJOR)
     static_assert(OPTICS_MATERIAL_VERSION_MAJOR == OPTICS_VERSION_MAJOR,
-                  "Prism/Optics major mismatch");
+                  "material/Optics major mismatch");
     static_assert(OPTICS_MATERIAL_VERSION_PATCH == OPTICS_VERSION_PATCH,
-                  "Prism/Optics patch mismatch");
+                  "material/Optics patch mismatch");
 #endif
 
 #if defined(OPTICS_SCENE_VERSION_MAJOR)
     static_assert(OPTICS_SCENE_VERSION_MAJOR == OPTICS_VERSION_MAJOR,
-                  "Vista/Optics major mismatch");
+                  "scene/Optics major mismatch");
     static_assert(OPTICS_SCENE_VERSION_PATCH == OPTICS_VERSION_PATCH,
-                  "Vista/Optics patch mismatch");
+                  "scene/Optics patch mismatch");
 #endif
 
 #if defined(OPTICS_SVG_VERSION_MAJOR)
-    static_assert(OPTICS_SVG_VERSION_MAJOR == OPTICS_VERSION_MAJOR,
-                  "Reticle/Optics major mismatch");
-    static_assert(OPTICS_SVG_VERSION_PATCH == OPTICS_VERSION_PATCH,
-                  "Reticle/Optics patch mismatch");
+    static_assert(OPTICS_SVG_VERSION_MAJOR == OPTICS_VERSION_MAJOR, "svg/Optics major mismatch");
+    static_assert(OPTICS_SVG_VERSION_PATCH == OPTICS_VERSION_PATCH, "svg/Optics patch mismatch");
 #endif
 
-    static_assert(OPTICS_UI_VERSION_MAJOR == OPTICS_VERSION_MAJOR, "Lens/Optics major mismatch");
-    static_assert(OPTICS_UI_VERSION_PATCH == OPTICS_VERSION_PATCH, "Lens/Optics patch mismatch");
+    static_assert(OPTICS_UI_VERSION_MAJOR == OPTICS_VERSION_MAJOR, "ui/Optics major mismatch");
+    static_assert(OPTICS_UI_VERSION_PATCH == OPTICS_VERSION_PATCH, "ui/Optics patch mismatch");
 
     static_assert(OPTICS_WINDOW_VERSION_MAJOR == OPTICS_VERSION_MAJOR,
-                  "Iris/Optics major mismatch");
+                  "window/Optics major mismatch");
     static_assert(OPTICS_WINDOW_VERSION_PATCH == OPTICS_VERSION_PATCH,
-                  "Iris/Optics patch mismatch");
+                  "window/Optics patch mismatch");
 
-    /* 2. Verify Layer 0 (Flux) structures and versioning */
+    /* 2. Verify Layer 0 (gfx) structures and versioning */
     optics_gfx_vec2 v = {.x = 10.0f, .y = 20.0f};
     OT_EXPECT(v.x == 10.0f && v.y == 20.0f);
 
     optics_gfx_rect r = {.x = 0.0f, .y = 0.0f, .w = 1920.0f, .h = 1080.0f};
     OT_EXPECT(r.w == 1920.0f && r.h == 1080.0f);
 
-    /* 3. Verify Layer 2 (Transit) header-only motion vocabulary */
+    /* 3. Verify the header-only motion vocabulary */
     optics_motion_spring spring = {.value = 0.0f, .velocity = 0.0f};
     optics_motion_spring_params params = {.stiffness = 180.0f, .damping = 12.0f};
     float next_val = optics_motion_spring_advance(&spring, 1.0f, params, 0.016f, false);
@@ -75,9 +73,9 @@ int main(void) {
     float eased = optics_motion_ease_in_out_cubic(0.5f);
     OT_EXPECT(eased == 0.5f);
 
-    /* 4. Verify Layer 3 (Lens & Iris) definitions and versions */
-    static_assert(OPTICS_UI_VERSION_MAJOR == 0, "Lens major version mismatch");
-    static_assert(OPTICS_WINDOW_VERSION_MAJOR == 0, "Iris major version mismatch");
+    /* 4. Verify Layer 3 (ui & window) definitions and versions */
+    static_assert(OPTICS_UI_VERSION_MAJOR == 0, "ui major version mismatch");
+    static_assert(OPTICS_WINDOW_VERSION_MAJOR == 0, "window major version mismatch");
 
     int optics_window_maj = 0;
     int optics_window_min = 0;

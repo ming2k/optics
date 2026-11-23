@@ -1,31 +1,30 @@
 /*
- * flux/canvas_cpu.h — headless software (CPU) canvas.
+ * gfx/canvas_cpu.h — headless software (CPU) canvas.
  *
- * A flux_canvas that renders on the host into a premultiplied-RGBA framebuffer,
+ * A optics_gfx_canvas that renders on the host into a premultiplied-RGBA framebuffer,
  * with no Vulkan device, surface, or GPU required. It shares the entire
- * flux_canvas drawing API (<flux/canvas.h>): once created, record with the same
- * flux_canvas_fill_rect / fill_rrect / fill_path / clip_rect / save / restore
- * verbs, bracketed by flux_canvas_cpu_begin / flux_canvas_cpu_end instead of the
- * frame-based flux_canvas_begin_frame / _end.
+ * optics_gfx_canvas drawing API (<optics/gfx/canvas.h>): once created, record with the same
+ * optics_gfx_canvas_fill_rect / fill_rrect / fill_path / clip_rect / save / restore
+ * verbs, bracketed by optics_gfx_canvas_begin / optics_gfx_canvas_end instead of the
+ * frame-based optics_gfx_canvas_begin / _end.
  *
  * Supported: solid fills, linear/radial gradients, rounded-rect fills and
  * strokes (SDF), arbitrary path fills and strokes, clipping, and glyph runs.
  * Vector geometry renders at 1x resolution with continuous analytic coverage
  * across all four blend modes (ADR-0119/0120). Glyph runs use a host-resident
- * R8 coverage atlas (ADR-0019): pass flux_glyph_run_desc::host_coverage on a
+ * R8 coverage atlas (ADR-0019): pass optics_gfx_glyph_run_desc::host_coverage on a
  * CPU canvas. NOT supported: image draws (need a GPU-resident texture).
  *
  * Example:
- *   flux_canvas *c;
- *   flux_canvas_create(&(flux_canvas_desc){.type = FLUX_TYPE_CANVAS_DESC, .backend =
- * FLUX_CANVAS_BACKEND_CPU, .scale = 1.0f, .width = 256, .height = 256}, &c); flux_color bg =
- * flux_color_rgba_premul(0, 0, 0, 255); flux_canvas_cpu_begin(c, &bg); flux_canvas_fill_rrect(c,
- * (flux_rect){32, 32, 192, 192}, 24.0f, flux_color_rgba_premul(255, 80, 40, 255));
- *   flux_canvas_cpu_end(c);
- *   uint32_t w, h, stride;
- *   const uint8_t *px = flux_canvas_cpu_pixels(c, &w, &h, &stride); // RGBA8
+ *   optics_gfx_canvas *c;
+ *   optics_gfx_canvas_create(&(optics_gfx_canvas_desc){.type = OPTICS_GFX_TYPE_CANVAS_DESC,
+ * .backend = OPTICS_GFX_CANVAS_BACKEND_CPU, .scale = 1.0f, .width = 256, .height = 256}, &c);
+ * optics_gfx_color bg = optics_gfx_color_rgba_premul(0, 0, 0, 255); optics_gfx_canvas_begin(c,
+ * &bg); optics_gfx_canvas_fill_rrect(c, (optics_gfx_rect){32, 32, 192, 192}, 24.0f,
+ * optics_gfx_color_rgba_premul(255, 80, 40, 255)); optics_gfx_canvas_end(c); uint32_t w, h, stride;
+ *   const uint8_t *px = optics_gfx_canvas_cpu_pixels(c, &w, &h, &stride); // RGBA8
  *   ... write px ...
- *   flux_canvas_release(c);
+ *   optics_gfx_canvas_release(c);
  */
 #ifndef OPTICS_GFX_CANVAS_CPU_H
 #define OPTICS_GFX_CANVAS_CPU_H
@@ -53,7 +52,7 @@ OPTICS_GFX_API const uint8_t *optics_gfx_canvas_cpu_pixels(const optics_gfx_canv
  * at that size.
  *
  * The value is the 1x continuous analytic coverage alpha quantised to 8 bits
- * (up to 256 distinct coverage levels, matching flux_canvas_cpu_pixels' alpha
+ * (up to 256 distinct coverage levels, matching optics_gfx_canvas_cpu_pixels' alpha
  * channel).
  *
  * The buffer is refreshed on each call and owned by the canvas; a later draw
@@ -67,4 +66,4 @@ OPTICS_GFX_API const uint8_t *optics_gfx_canvas_cpu_coverage(const optics_gfx_ca
 }
 #endif
 
-#endif /* FLUX_CANVAS_CPU_H */
+#endif /* OPTICS_GFX_CANVAS_CPU_H */

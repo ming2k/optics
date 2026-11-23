@@ -2,14 +2,14 @@
  * Squircle path ↔ field agreement (ADR-0118 INV-SDF-06).
  *
  * This closes the schism the ADR records: a squircle used to be two different
- * shapes — an Apple-style cubic path in flux and an L2/L4 superellipse field
- * in Prism — so the canvas and the materials disagreed for the same
- * `curvature`. Now `flux_path_add_squircle` emits two cubics per corner fitted
- * to `flux_sdf_squircle`'s zero set, and this test asserts that every point of
+ * shapes — an Apple-style cubic path in gfx and an L2/L4 superellipse field
+ * in material — so the canvas and the materials disagreed for the same
+ * `curvature`. Now `optics_gfx_path_add_squircle` emits two cubics per corner fitted
+ * to `optics_gfx_sdf_squircle`'s zero set, and this test asserts that every point of
  * the fitted path actually lies on that zero set.
  *
  * The claim is analytic, not golden-image: for a point p on the path,
- * |flux_sdf_squircle(p − centre, hw, hh, r, c)| is (to within the field's unit
+ * |optics_gfx_sdf_squircle(p − centre, hw, hh, r, c)| is (to within the field's unit
  * gradient) p's distance from the shape the field describes. The measured worst
  * case is 0.12% of the corner radius, and the bound asserted here is 1%.
  *
@@ -122,7 +122,7 @@ static float diagonal_bulge(const optics_gfx_path *p, optics_gfx_point corner_ce
 /* --- Analytic dispatch, end to end (ADR-0118 INV-SDF-03).
  *
  * The same squircle is drawn twice through the CPU canvas: once as
- * FLUX_GEOM_SQUIRCLE, which now takes the analytic SDF path, and once as the
+ * OPTICS_GFX_GEOM_SQUIRCLE, which now takes the analytic SDF path, and once as the
  * equivalent path, which goes through flatten + tessellate + sampled AA. Two
  * independent code paths producing the same coverage is the evidence that the
  * dispatch change is correct — and, specifically, that the software backend's

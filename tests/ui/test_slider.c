@@ -1,8 +1,8 @@
 /* test_slider.c — slider value change detection. */
 
 #include "../../libs/ui/src/internal.h"
-#include "lens_test.h"
 #include "optics_test.h"
+#include "ui_test.h"
 #include <math.h>
 #include <optics/ui.h>
 

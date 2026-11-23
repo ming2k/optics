@@ -1,4 +1,4 @@
-# tests/ui/fuzz — lens-side fuzz harnesses.
+# tests/ui/fuzz — ui-side fuzz harnesses.
 #
 # Same build wiring as tests/gfx/fuzz/meson.build: a standalone main()
 # is pulled in from fuzz_main.c, or replaced by libFuzzer's main() when
@@ -10,22 +10,22 @@
 
 fs = import('fs')
 
-lens_fuzz_inc = include_directories('..')
+optics_ui_fuzz_inc = include_directories('..')
 fuzz_main_src = files('../../gfx/fuzz/fuzz_main.c')
 
-lens_fuzz_harnesses = [
+optics_ui_fuzz_harnesses = [
   {
-    'name': 'fuzz_lens_store',
-    'src': files('fuzz_lens_store.c'),
+    'name': 'fuzz_ui_store',
+    'src': files('fuzz_ui_store.c'),
     'deps': [ui_dep],
-    'corpus': 'corpus/lens_store',
+    'corpus': 'corpus/ui_store',
   },
 ]
 
-foreach h : lens_fuzz_harnesses
+foreach h : optics_ui_fuzz_harnesses
   if libfuzzer_enabled
     exe = executable(h['name'], h['src'],
-      include_directories : lens_fuzz_inc,
+      include_directories : optics_ui_fuzz_inc,
       dependencies        : h['deps'],
       c_args              : libfuzzer_c_args,
       link_args           : libfuzzer_link_args,
@@ -33,7 +33,7 @@ foreach h : lens_fuzz_harnesses
     )
   else
     exe = executable(h['name'], h['src'] + fuzz_main_src,
-      include_directories : lens_fuzz_inc,
+      include_directories : optics_ui_fuzz_inc,
       dependencies        : h['deps'],
       install             : false,
     )

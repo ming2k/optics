@@ -81,7 +81,7 @@ light.
 Drop shadow from a shape mask (ADR-0074): the input's alpha channel is the
 shape coverage; the output is a premultiplied tinted shadow (`rgb = tint * a`)
 of the same extent. Geometry-neutral — building the mask is the caller's job
-(the canvas already draws rounded rects; prism owns its own SDF path).
+(the canvas already draws rounded rects; material owns its own SDF path).
 
 ```c
 OPTICS_GFX_NODISCARD OPTICS_GFX_API optics_gfx_result optics_gfx_effect_shadow(
@@ -201,9 +201,9 @@ released. Positive `sigma` values control bounded sample offsets; they never
 increase the four-dispatch sample count. Sigma 0 records a copy. Release the
 filter only after GPU work that references it has completed.
 
-Named materials do not live in flux: the liquid-glass material moved to the
-prism library with a 1:1 `prism_`-prefixed API, and the descriptor knob
-`glare` is now `rim_light`. See the [prism reference](prism.md) and
+Named materials do not live in gfx: the liquid-glass material moved to the
+material library with a 1:1 `optics_material_`-prefixed API, and the descriptor knob
+`glare` is now `rim_light`. See the [material reference](material.md) and
 [ADR-0063](../adr/0063-liquid-glass-material-library.md).
 
 ## Deferred execution
@@ -218,7 +218,7 @@ Two consequences a caller must know:
 
 | Situation | What to do |
 |-----------|------------|
-| Another effect consumes the output (a Prism material, a custom compute pass) | Nothing. The material materializes its input itself. |
+| Another effect consumes the output (a material, a custom compute pass) | Nothing. The material materializes its input itself. |
 | A canvas pass draws the output | Call `optics_gfx_frame_materialize_image(frame, image)` **before** `optics_gfx_canvas_begin`. Sampling a still-deferred output inside a pass is rejected with `OPTICS_GFX_ERROR_INVALID_STATE`. |
 
 `optics_gfx_frame_materialize_image` requires a pass boundary (no canvas pass active)
@@ -286,6 +286,6 @@ different devices are independent.
 ## See also
 
 - [ADR-0008 — Image-effect pipeline](../adr/0008-image-effect-pipeline.md) — design rationale.
-- [prism reference](prism.md) — named materials (liquid glass) built on the effect runtime.
+- [material reference](material.md) — named materials (liquid glass) built on the effect runtime.
 - [`<optics/gfx/compute.h>` reference](api.md#headers) — the primitive effects build on.
 - [`<optics/gfx/canvas.h>` reference](api.md#headers) — `optics_gfx_image` lifecycle.

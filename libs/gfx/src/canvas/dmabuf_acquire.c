@@ -1,12 +1,12 @@
 /*
- * flux/dmabuf_acquire.c — flux_canvas_wait_dmabuf_acquire, the one dma-buf
- * entry point that needs canvas internals (struct flux_canvas,
+ * gfx/dmabuf_acquire.c — optics_gfx_canvas_wait_dmabuf_acquire, the one dma-buf
+ * entry point that needs canvas internals (struct optics_gfx_canvas,
  * canvas_track_foreign_image). Everything else dma-buf is core-level and
  * lives in src/core/dmabuf.c / dmabuf_stub.c (ADR-0052); this file is
  * compiled with the canvas module on every host and stays free of platform
  * #ifdef by delegating the sync_file import to
- * flux_dmabuf_import_acquire_semaphore, whose stub twin answers
- * FLUX_ERROR_UNSUPPORTED off Linux.
+ * optics_gfx_dmabuf_import_acquire_semaphore, whose stub twin answers
+ * OPTICS_GFX_ERROR_UNSUPPORTED off Linux.
  */
 
 #include "internal.h"

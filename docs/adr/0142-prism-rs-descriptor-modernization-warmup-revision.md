@@ -3,8 +3,8 @@ id: ADR-0142
 title: "Prism-rs safe descriptor modernization, material warmup options, and caller-declared revision caching"
 status: accepted
 date: 2026-11-03
+scope: [material, bindings, architecture]
 superseded_by: null
-scope: [prism, bindings, architecture]
 negative_knowledge: true
 ---
 

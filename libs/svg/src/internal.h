@@ -1,7 +1,7 @@
 /*
- * internal.h — private types and helpers for libreticle.
+ * internal.h — private types and helpers for liboptics_svg.
  *
- * Nothing here is installed. The public surface is <reticle/reticle.h> only.
+ * Nothing here is installed. The public surface is <optics/svg.h> only.
  */
 
 #ifndef OPTICS_SVG_INTERNAL_H
@@ -37,7 +37,7 @@ const char *optics_svg_priv_find(const char *hay, size_t hay_len, const char *ne
         type *data;                                                                                \
         uint32_t count;                                                                            \
         uint32_t cap;                                                                              \
-        /* Ceiling on `count`, 0 = unbounded. Set from `reticle_parse_limits` so the               \
+        /* Ceiling on `count`, 0 = unbounded. Set from `svg_parse_limits` so the                   \
          * limit is enforced as commands are produced, not after the element that                  \
          * produced them has already allocated. */                                                 \
         uint32_t limit;                                                                            \
@@ -103,18 +103,18 @@ typedef struct optics_svg_raw_gradient {
     optics_svg_gradient_kind kind;
     optics_svg_gradient_units units;
     optics_svg_transform transform;
-    uint32_t present; /* reticle_gradient_field bits */
+    uint32_t present; /* optics_svg_gradient_field bits */
     float x1, y1, x2, y2;
     float cx, cy, r;
     uint32_t stop_count;
     optics_svg_stop stops[OPTICS_SVG_INTERNAL_MAX_STOPS];
-    /* Spread is parsed only to be able to say so: flux gradients pad. */
+    /* Spread is parsed only to be able to say so: gfx gradients pad. */
     bool spread_reflect_or_repeat;
 } optics_svg_raw_gradient;
 
 typedef struct optics_svg_raw_paint {
     optics_svg_paint_kind kind;
-    uint8_t r, g, b, a; /* straight, for RETICLE_PAINT_SOLID */
+    uint8_t r, g, b, a; /* straight, for OPTICS_SVG_PAINT_SOLID */
     float opacity;      /* fill-opacity / stroke-opacity at this element */
     char *gradient_id;  /* owned; only for the gradient kinds */
 } optics_svg_raw_paint;
@@ -230,4 +230,4 @@ bool optics_svg_priv_resolve_paints(optics_svg_document *doc);
 bool optics_svg_priv_intern_gradient(optics_svg_document *doc, const optics_svg_gradient *gradient,
                                      uint32_t *index_out);
 
-#endif /* RETICLE_INTERNAL_H */
+#endif /* OPTICS_SVG_INTERNAL_H */

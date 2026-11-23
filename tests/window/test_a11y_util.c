@@ -1,12 +1,12 @@
 /* test_a11y_util.c — pure logic of the AT-SPI bridge (a11y_util.c).
  *
  * Headless: no sd-bus, no display. These predicates decide which AT-SPI
- * interfaces (Action / Text / Value) each lens role exposes, plus the
+ * interfaces (Action / Text / Value) each ui role exposes, plus the
  * slider-readout parser and the UTF-8 code-point counter the Text interface
  * reports offsets in.
  *
  * a11y_util.c is compiled directly into this test (rather than linked from
- * libiris) because the helpers are internal / hidden-visibility.
+ * liboptics_window) because the helpers are internal / hidden-visibility.
  */
 
 #include "a11y_util.h"

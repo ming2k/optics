@@ -3,6 +3,9 @@ id: ADR-0086
 title: "Cross-Platform Drag-and-Drop Subsystem"
 status: accepted
 date: 2026-08-14
+scope: window (L3 toolkit), ui (L2 UI engine), gfx/anim (visual feedback & springs)
+superseded_by: null
+negative_knowledge: false
 ---
 
 # ADR-0086: Cross-Platform Drag-and-Drop Subsystem

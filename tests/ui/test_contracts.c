@@ -1,7 +1,7 @@
 /* Public descriptors must produce observable behaviour, not just avoid crashes. */
 #include "../../libs/ui/src/internal.h"
-#include "lens_test.h"
 #include "optics_test.h"
+#include "ui_test.h"
 
 int main(void) {
     optics_ui *ui = nullptr;
@@ -92,7 +92,7 @@ int main(void) {
 
     /* Submit to CPU canvas and verify replay */
     optics_gfx_canvas_desc cd = OPTICS_GFX_INIT(
-        CANVAS_DESC, .backend = OPTICS_GFX_CANVAS_BACKEND_CPU, .width = 500, .height = 300);
+        canvas_desc, .backend = OPTICS_GFX_CANVAS_BACKEND_CPU, .width = 500, .height = 300);
     optics_gfx_canvas *c = nullptr;
     OT_EXPECT(optics_gfx_canvas_create(&cd, &c) == OPTICS_GFX_OK);
     optics_gfx_color clear = 0;
@@ -109,7 +109,7 @@ int main(void) {
     optics_ui_snapshot_release(first_snapshot);
     optics_gfx_canvas_release(c);
 
-    /* ADR-0094: Lens Scene Snapshot Independence & Survives UI Context Destruction */
+    /* ADR-0094: ui Scene Snapshot Independence & Survives UI Context Destruction */
     optics_ui_scene_snapshot *snapshot = nullptr;
     OT_EXPECT(optics_ui_snapshot_create(ui, &snapshot) == OPTICS_GFX_OK);
     OT_EXPECT(snapshot != nullptr);

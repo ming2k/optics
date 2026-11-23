@@ -1,5 +1,5 @@
 /*
- * lens/patterns.h — high-level interaction patterns and compound protocols.
+ * ui/patterns.h — high-level interaction patterns and compound protocols.
  *
  * Patterns compose primitive widgets into cohesive interaction models:
  *   - Segmented control: contiguous exclusive choice with unified frame.
@@ -24,7 +24,7 @@ extern "C" {
 
 typedef struct optics_ui_segmented_item {
     const char *label;      /* text or label string (NULL if icon-only) */
-    optics_ui_icon_id icon; /* LENS_ICON_INVALID if text-only */
+    optics_ui_icon_id icon; /* OPTICS_UI_ICON_INVALID if text-only */
     bool disabled;
 } optics_ui_segmented_item;
 
@@ -194,7 +194,7 @@ OPTICS_UI_API optics_ui_datagrid_action optics_ui_datagrid(optics_ui *ui,
 
 typedef struct optics_ui_tree_item {
     const char *label;
-    optics_ui_icon_id icon; /* 0 or LENS_ICON_INVALID = none */
+    optics_ui_icon_id icon; /* 0 or OPTICS_UI_ICON_INVALID = none */
     uint32_t depth;         /* Indentation level (0 = root) */
     bool is_leaf;           /* True if leaf (no expansion chevron) */
     bool expanded;          /* In-out: subtree expanded */
@@ -247,7 +247,7 @@ typedef struct optics_ui_menu_opts {
     float item_height; /* Menu item height (0.0 = default 28.0f) */
 } optics_ui_menu_opts;
 
-/* Render an anchored popup menu in LENS_BAND_POPUP with auto-flip and transient dismissal.
+/* Render an anchored popup menu in OPTICS_UI_BAND_POPUP with auto-flip and transient dismissal.
  * Returns activated item index, or -1 if no item was activated this frame. */
 OPTICS_UI_API int32_t optics_ui_popup_menu(optics_ui *ui, const optics_ui_menu_opts *opts);
 
@@ -264,7 +264,7 @@ typedef struct optics_ui_menubar_opts {
 } optics_ui_menubar_opts;
 
 /* Render a horizontal menu bar.
- * When an item is clicked, its corresponding menu_id is opened/toggled in LENS_BAND_POPUP.
+ * When an item is clicked, its corresponding menu_id is opened/toggled in OPTICS_UI_BAND_POPUP.
  * Returns index of currently open menu (or -1 if all closed).
  * `opts->out_anchor` receives the bounding rectangle of the active menubar item for popup
  * placement. */
@@ -274,4 +274,4 @@ OPTICS_UI_API int32_t optics_ui_menubar(optics_ui *ui, const optics_ui_menubar_o
 }
 #endif
 
-#endif /* LENS_PATTERNS_H */
+#endif /* OPTICS_UI_PATTERNS_H */

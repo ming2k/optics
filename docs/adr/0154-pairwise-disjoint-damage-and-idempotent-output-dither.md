@@ -3,7 +3,7 @@ id: ADR-0154
 title: "Pairwise-disjoint damage decomposition, single-pass output blits, and idempotent UNORM8 output dither"
 status: accepted
 date: 2026-11-09
-scope: [flux]
+scope: [gfx]
 superseded_by: null
 negative_knowledge: true
 ---

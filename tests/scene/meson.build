@@ -1,4 +1,4 @@
-# tests/vista — 3D scene hierarchy, TRS node transforms, and glTF asset test suites.
+# tests/scene — 3D scene hierarchy, TRS node transforms, and glTF asset test suites.
 if opt_scene
   test_glb_parse = executable('test_glb_parse',
     'test_glb_parse.c',
@@ -9,7 +9,7 @@ if opt_scene
   bench_sg_worlds = executable('bench_sg_worlds',
     'bench_sg_worlds.c',
     include_directories : include_directories('../gfx/bench'),
-    dependencies : [flux_test_support_dep, scene_dep, gfx_dep],
+    dependencies : [optics_gfx_test_support_dep, scene_dep, gfx_dep],
   )
   test('bench_sg_worlds', bench_sg_worlds, suite : 'bench', is_parallel : false)
 

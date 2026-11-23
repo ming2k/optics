@@ -1,13 +1,13 @@
 /* borrow.c — debug-only borrowed-string registry (ADR-0085).
  *
- * The lens API hands caller-owned strings to widgets (`label`, `box.id`,
+ * The ui API hands caller-owned strings to widgets (`label`, `box.id`,
  * `placeholder`) and documents that they must remain stable through the
  * frame. The failure mode is passing a stack temporary: frame N works,
  * frame N+1 reads freed stack. Nothing else in the library can catch
  * this — the pointer is only stored, never dereferenced at registration
  * time.
  *
- * Mechanism (debug builds only, LENS_DEBUG_BORROWS):
+ * Mechanism (debug builds only, OPTICS_UI_DEBUG_BORROWS):
  *   - every widget's label/id/placeholder pointer is REGISTERED in a
  *     bounded frame-local set when the widget consumes it;
  *   - anything the library itself copies into the frame arena is exempt
@@ -24,22 +24,22 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-void lensi_borrow_register(optics_ui *ui, const char *ptr) {
+void optics_ui__borrow_register(optics_ui *ui, const char *ptr) {
     if (!ui || !ptr)
         return;
     /* Bounded ring: at capacity, drop the oldest. The check below only
      * needs recent registrations (a widget registers and reads within a
      * few hundred builds); wrapping away ancient entries weakens the
      * net, never misfires it. */
-    if (ui->borrow_count == LENSI_BORROW_SET_MAX) {
+    if (ui->borrow_count == OPTICS_UI_BORROW_SET_MAX) {
         memmove(ui->borrow_set, ui->borrow_set + 1,
-                (LENSI_BORROW_SET_MAX - 1) * sizeof ui->borrow_set[0]);
+                (OPTICS_UI_BORROW_SET_MAX - 1) * sizeof ui->borrow_set[0]);
         ui->borrow_count--;
     }
     ui->borrow_set[ui->borrow_count++] = ptr;
 }
 
-void lensi_borrow_check(optics_ui *ui, const char *ptr, const char *what) {
+void optics_ui__borrow_check(optics_ui *ui, const char *ptr, const char *what) {
     if (!ui || !ptr)
         return;
     /* Arena-owned pointers are always fine: the arena lives for the
@@ -55,10 +55,10 @@ void lensi_borrow_check(optics_ui *ui, const char *ptr, const char *what) {
             return;
     }
     fprintf(stderr,
-            "lens borrow-check FAILED: %s pointer %p was not registered this frame\n"
-            "  most likely: a stack temporary or freed buffer passed to a lens widget\n"
+            "ui borrow-check FAILED: %s pointer %p was not registered this frame\n"
+            "  most likely: a stack temporary or freed buffer passed to a ui widget\n"
             "  (label/id/placeholder strings must stay stable through the frame;\n"
-            "  copy into caller-owned storage if they cannot). See lens.h ADR-0085.\n",
+            "  copy into caller-owned storage if they cannot). See ui.h ADR-0085.\n",
             what, (const void *)ptr);
     abort();
 }

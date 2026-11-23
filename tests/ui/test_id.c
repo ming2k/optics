@@ -1,7 +1,7 @@
 /* test_id.c — identity stability and scoping (ADR-0003). CPU-only. */
 
-#include "lens_test.h"
 #include "optics_test.h"
+#include "ui_test.h"
 #include <optics/ui.h>
 
 int main(void) {

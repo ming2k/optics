@@ -29,7 +29,7 @@ foreach t : tests
 endforeach
 
 # drawlist.c is compiled into the test binary directly (same pattern
-# as test_canvas_tess): lensi_drawlist_push is hidden in liblens, so
+# as test_canvas_tess): optics_ui__drawlist_push is hidden in liboptics_ui, so
 # the test needs its own copy to push scripted commands onto a live
 # node and observe subtree_changed across frames.
 test_drawlist_hash = executable('test_drawlist_hash',
@@ -41,7 +41,7 @@ test_drawlist_hash = executable('test_drawlist_hash',
 test('drawlist_hash', test_drawlist_hash, suite : 'unit')
 
 # style.c is compiled into the test binary directly (same pattern as
-# test_drawlist_hash): lensi_style_resolve is a hidden symbol, so the
+# test_drawlist_hash): optics_ui__style_resolve is a hidden symbol, so the
 # resolver unit tests link their own copy.
 test_state_style = executable('test_state_style',
   'test_state_style.c',
@@ -92,12 +92,12 @@ endif
 # separation, device-grid-exact placement at fractional scales, and the run
 # resolver that keeps the mask path and the vector fallback in agreement.
 #
-# icon_mask.c is compiled in directly because lensi_icon_mask_* are hidden in
-# liblens (same direct-link pattern as test_icon_runtime_content), which also
+# icon_mask.c is compiled in directly because optics_ui__icon_mask_* are hidden in
+# liboptics_ui (same direct-link pattern as test_icon_runtime_content), which also
 # means the icon registry must be compiled in — icon_mask.c resolves runs through
 # it. That local registry is why this binary contains no runtime-SVG rendering
 # assertion: a runtime icon registered here would live in this binary's registry,
-# invisible to the liblens replay that draws it. End-to-end runtime-icon
+# invisible to the liboptics_ui replay that draws it. End-to-end runtime-icon
 # rendering is covered by test_icon_mask_render below, which links only the
 # shared library.
 test_icon_mask = executable('test_icon_mask',
@@ -114,7 +114,7 @@ test('icon_mask', test_icon_mask, suite : 'unit')
 # End-to-end runtime-icon rendering through the PUBLIC API only (ADR-0112).
 # Links solely against the shared libraries: compiling any icon registry source
 # here would create a second registry, and a runtime SVG registered into it would
-# be invisible to liblens's replay — the icon would render blank and the pixel
+# be invisible to liboptics_ui's replay — the icon would render blank and the pixel
 # assertions would look like a mask bug. Per-run colour survival on both the mask
 # path and the vector fallback is asserted here because only this link line can
 # observe the real registry.
@@ -127,7 +127,7 @@ test('icon_mask_render', test_icon_mask_render, suite : 'integration')
 
 # Content of registered runtime-icon streams. Compiles the registration
 # sources directly (same pattern as test_drawlist_hash): the registry
-# accessors are hidden symbols that do not link from liblens.so.
+# accessors are hidden symbols that do not link from liboptics_ui.so.
 test_icon_runtime_content = executable('test_icon_runtime_content',
   'test_icon_runtime_content.c',
   '../../libs/ui/src/icon_runtime.c',

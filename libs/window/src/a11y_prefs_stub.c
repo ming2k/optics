@@ -24,4 +24,4 @@ int optics_window_a11y_prefs__watch_backend(optics_window_a11y_prefs_changed_fn 
 
 void optics_window_a11y_prefs__unwatch_backend(void) { /* no-op */ }
 
-#endif /* !IRIS_HAVE_PORTAL_WATCH */
+#endif /* !OPTICS_WINDOW_HAVE_PORTAL_WATCH */

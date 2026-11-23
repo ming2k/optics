@@ -1,6 +1,6 @@
 [package]
 name = "optics-scene"
-description = "Safe Rust bindings for vista — 3D scene hierarchy and glTF 2.0 asset runtime"
+description = "Safe Rust bindings for scene — 3D scene hierarchy and glTF 2.0 asset runtime"
 publish = false
 links = "optics_scene_rs"
 version.workspace = true
@@ -15,3 +15,9 @@ optics-gfx = { workspace = true }
 
 [build-dependencies]
 optics-build = { workspace = true }
+
+[features]
+# Force a static link of the Optics archives; the default links the shared
+# objects (docs/how-to/choose-a-static-or-shared-link.md). OPTICS_STATIC /
+# OPTICS_DYNAMIC in the environment override it.
+static = ["optics-scene-sys/static", "optics-gfx/static"]

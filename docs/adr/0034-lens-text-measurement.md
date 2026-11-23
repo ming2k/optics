@@ -3,6 +3,9 @@ id: ADR-0034
 title: "Lens text measurement — host port + monospace fallback"
 status: accepted
 date: 2026-07-21
+scope: ui (L2 toolkit)
+superseded_by: null
+negative_knowledge: true
 ---
 
 # ADR-0034: Lens text measurement — host port + monospace fallback

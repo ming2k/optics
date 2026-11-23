@@ -3,8 +3,8 @@ id: ADR-0121
 title: "Algorithm vault and unified analytic vector infrastructure"
 status: accepted
 date: 2026-10-25
+scope: libs/gfx, shaders, architecture
 superseded_by: null
-scope: libs/flux, shaders, architecture
 negative_knowledge: true
 ---
 

@@ -1,4 +1,4 @@
-/* test_version.c — iris_version_string matches the compiled version macros.
+/* test_version.c — optics_window_version_string matches the compiled version macros.
  *
  * Headless: pure string compare, no platform deps.
  */

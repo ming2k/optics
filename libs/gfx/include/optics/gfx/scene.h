@@ -1,5 +1,5 @@
 /*
- * flux/scene.h — 3D scene primitives.
+ * gfx/scene.h — 3D scene primitives.
  *
  * Scope: camera, mesh, material, depth-tested renderer. No scene
  * graph, no PBR, no animation in the base library.
@@ -51,7 +51,7 @@ typedef struct optics_gfx_vertex {
 } optics_gfx_vertex;
 
 typedef struct optics_gfx_mesh_desc {
-    optics_gfx_struct_type type; /* FLUX_TYPE_MESH_DESC */
+    optics_gfx_struct_type type; /* OPTICS_GFX_TYPE_MESH_DESC */
     const void *next;
     const optics_gfx_vertex *vertices;
     uint32_t vertex_count;
@@ -61,7 +61,7 @@ typedef struct optics_gfx_mesh_desc {
 
 #define OPTICS_GFX_MESH_DESC_INIT {.type = OPTICS_GFX_TYPE_MESH_DESC}
 
-/* Optional `flux_mesh_desc.next` payload for GPU skinning. Joint indices are
+/* Optional `optics_gfx_mesh_desc.next` payload for GPU skinning. Joint indices are
  * local to the palette supplied at draw time; weights are normalised by the
  * content loader, but the shader defensively handles a zero-sum vertex. */
 typedef struct optics_gfx_skin_vertex {
@@ -70,7 +70,7 @@ typedef struct optics_gfx_skin_vertex {
 } optics_gfx_skin_vertex;
 
 typedef struct optics_gfx_mesh_skin_desc {
-    optics_gfx_struct_type type; /* FLUX_TYPE_MESH_SKIN_DESC */
+    optics_gfx_struct_type type; /* OPTICS_GFX_TYPE_MESH_SKIN_DESC */
     const void *next;
     const optics_gfx_skin_vertex *vertices; /* exactly mesh_desc.vertex_count */
 } optics_gfx_mesh_skin_desc;
@@ -96,11 +96,11 @@ typedef struct optics_gfx_sampler optics_gfx_sampler;
 typedef enum optics_gfx_material_kind : uint32_t {
     OPTICS_GFX_MATERIAL_UNLIT = 0,
     /* Blinn-Phong with one directional light per draw. Light data is
-     * supplied at draw time via flux_scene_draw_mesh_lit; draws made
-     * through flux_scene_draw_mesh use FLUX_SCENE_LIGHT_DEFAULT. */
+     * supplied at draw time via optics_gfx_scene_draw_mesh_opts.light; draws made
+     * through optics_gfx_scene_draw_mesh use OPTICS_GFX_SCENE_LIGHT_DEFAULT. */
     OPTICS_GFX_MATERIAL_PHONG = 1,
     /* ADR-0117: Perspective-correct analytic vector coverage. Consumes
-     * object-space curve segments via flux_material_vector_desc. */
+     * object-space curve segments via optics_gfx_material_vector_desc. */
     OPTICS_GFX_MATERIAL_VECTOR = 2,
     /* PBR will be added at the end when it ships. Append-only —
      * never repurpose existing values. */
@@ -112,12 +112,12 @@ typedef enum optics_gfx_material_alpha_mode : uint32_t {
     OPTICS_GFX_MATERIAL_ALPHA_BLEND = 2,
 } optics_gfx_material_alpha_mode;
 
-/* Optional `flux_material_desc.next` payload for a sampled base-colour
+/* Optional `optics_gfx_material_desc.next` payload for a sampled base-colour
  * texture and glTF-compatible surface state. The material retains image and
- * sampler. A NULL sampler selects Flux's linear clamp-to-edge sampler.
+ * sampler. A NULL sampler selects gfx's linear clamp-to-edge sampler.
  * UV transform order is scale, counter-clockwise rotation, then offset. */
 typedef struct optics_gfx_material_surface_desc {
-    optics_gfx_struct_type type; /* FLUX_TYPE_MATERIAL_SURFACE_DESC */
+    optics_gfx_struct_type type; /* OPTICS_GFX_TYPE_MATERIAL_SURFACE_DESC */
     const void *next;
     optics_gfx_image *base_color_image;     /* optional */
     optics_gfx_sampler *base_color_sampler; /* optional; ignored without image */
@@ -132,10 +132,10 @@ typedef struct optics_gfx_material_surface_desc {
 #define OPTICS_GFX_MATERIAL_SURFACE_DESC_INIT                                                      \
     {.type = OPTICS_GFX_TYPE_MATERIAL_SURFACE_DESC, .uv_scale = {1.0f, 1.0f}, .alpha_cutoff = 0.5f}
 
-/* Optional `flux_material_desc.next` payload for FLUX_MATERIAL_VECTOR (ADR-0117).
+/* Optional `optics_gfx_material_desc.next` payload for OPTICS_GFX_MATERIAL_VECTOR (ADR-0117).
  * Consumes an object-space line/curve segment storage buffer. */
 typedef struct optics_gfx_material_vector_desc {
-    optics_gfx_struct_type type; /* FLUX_TYPE_MATERIAL_VECTOR_DESC */
+    optics_gfx_struct_type type; /* OPTICS_GFX_TYPE_MATERIAL_VECTOR_DESC */
     const void *next;
     optics_gfx_buffer
         *segments_buffer; /* Storage buffer containing object-space segments (x0,y0,x1,y1) */
@@ -146,19 +146,19 @@ typedef struct optics_gfx_material_vector_desc {
 #define OPTICS_GFX_MATERIAL_VECTOR_DESC_INIT {.type = OPTICS_GFX_TYPE_MATERIAL_VECTOR_DESC}
 
 typedef struct optics_gfx_material_desc {
-    optics_gfx_struct_type type; /* FLUX_TYPE_MATERIAL_DESC */
+    optics_gfx_struct_type type; /* OPTICS_GFX_TYPE_MATERIAL_DESC */
     const void *next;
     optics_gfx_material_kind kind;
     optics_gfx_vec4 base_color;
 
     /* Render-target formats the pipeline must be compatible with.
-     * Translate via flux_format_from_vk(flux_surface_vk_format(...))
+     * Translate via optics_gfx_format_from_vk(optics_gfx_surface_vk_format(...))
      * for the colour target; pass the depth format you'll attach in
-     * flux_pass_desc.depth, or FLUX_FORMAT_UNDEFINED for no depth. */
+     * optics_gfx_pass_desc.depth, or OPTICS_GFX_FORMAT_UNDEFINED for no depth. */
     optics_gfx_format color_format;
     optics_gfx_format depth_format;
 
-    /* FLUX_MATERIAL_PHONG only; ignored by UNLIT.
+    /* OPTICS_GFX_MATERIAL_PHONG only; ignored by UNLIT.
      * shininess: Blinn-Phong specular exponent. <= 0 selects the
      *            library default (32).
      * specular:  specular strength in [0, 1]. 0 (the zero-init value)
@@ -203,11 +203,11 @@ typedef struct optics_gfx_scene_light {
 /* ------------------------------------------------------------------ */
 
 /* Records a single mesh+material draw into the frame's currently
- * active pass. Must be called between flux_frame_begin_pass and
- * flux_frame_end_pass on the same frame, and the active pass's
+ * active pass. Must be called between optics_gfx_frame_begin_pass and
+ * optics_gfx_frame_end_pass on the same frame, and the active pass's
  * attachments must match the material's color_format and depth_format
  * exactly. No-op if required arguments are NULL. PHONG materials use
- * `light` if non-NULL, or FLUX_SCENE_LIGHT_DEFAULT when NULL; UNLIT
+ * `light` if non-NULL, or OPTICS_GFX_SCENE_LIGHT_DEFAULT when NULL; UNLIT
  * materials ignore it. When `joint_matrices` is non-NULL and
  * `joint_count > 0` on a skinned mesh, GPU skinning is enabled. */
 typedef struct optics_gfx_scene_draw_mesh_opts {
@@ -227,4 +227,4 @@ OPTICS_GFX_API void optics_gfx_scene_draw_mesh(optics_gfx_frame *f,
 }
 #endif
 
-#endif /* FLUX_SCENE_H */
+#endif /* OPTICS_GFX_SCENE_H */

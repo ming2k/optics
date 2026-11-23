@@ -7,10 +7,10 @@
 #include "../internal.h"
 #include <stdio.h>
 
-/* lensi_set_overflow lives here (not context.c) because drawlist.c is also
+/* optics_ui__set_overflow lives here (not context.c) because drawlist.c is also
  * compiled directly into test binaries (test_drawlist_hash): the single
  * writer for ui->overflow must link wherever the drawlist does. */
-void lensi_set_overflow(optics_ui *ui) {
+void optics_ui__set_overflow(optics_ui *ui) {
     /* Internal contract: callers pass a live context. The guard is
      * analyzer teeth (clang-analyzer-core.NullDereference), not error
      * handling — every internal call site has a non-NULL ui. */
@@ -24,10 +24,23 @@ void lensi_set_overflow(optics_ui *ui) {
     if (!warned) {
         warned = true;
         fprintf(stderr,
-                "lens: frame arena overflowed; draw calls dropped — virtualize large listings "
+                "ui: frame arena overflowed; draw calls dropped — virtualize large listings "
                 "(see docs/adr/0042)\n");
     }
 #endif
+}
+
+const char *optics_ui__arena_strndup(optics_ui *ui, const char *s, size_t len) {
+    if (!s)
+        return nullptr;
+    char *copy = optics_gfx_arena_alloc(&ui->arena, len + 1);
+    if (!copy) {
+        optics_ui__set_overflow(ui);
+        return "";
+    }
+    memcpy(copy, s, len);
+    copy[len] = '\0';
+    return copy;
 }
 
 static uint32_t hash_cmd(const optics_ui_draw_cmd *c) {
@@ -50,23 +63,20 @@ static uint32_t hash_cmd(const optics_ui_draw_cmd *c) {
             h = h * 31 + (unsigned char)*p++;
     }
     h = h * 31 + (uint32_t)c->icon_id;
-    /* kind-specific flags (e.g. connected-tab shoulders) and the
-     * borrowed image pointer also shape the pixels; without them a
-     * flag/weight/image-only change left cmd_hash — and thus
-     * subtree_changed — stale. */
-    h = h * 31 + c->flags;
+    /* The borrowed image pointer shapes the pixels too; without it an
+     * image-only change left cmd_hash (and so subtree_changed) stale. */
     h = h * 31 + (uint32_t)(uintptr_t)c->image;
     return h;
 }
 
-void lensi_drawlist_push(optics_ui *ui, optics_ui_node *n, optics_ui_draw_cmd cmd) {
+void optics_ui__drawlist_push(optics_ui *ui, optics_ui_node *n, optics_ui_draw_cmd cmd) {
     if (!n)
         return;
 
     /* Sanitize geometry and numeric properties: a degenerate command (NaN from a
      * division by a zero-height container, or a negative extent from an
-     * overshooting spring) must not enter the drawlist. Flux's encoder rejects
-     * any non-finite or negative-extent geometry with FLUX_ERROR_INVALID_ARGUMENT,
+     * overshooting spring) must not enter the drawlist. gfx's encoder rejects
+     * any non-finite or negative-extent geometry with OPTICS_GFX_ERROR_INVALID_ARGUMENT,
      * and that failure is sticky for the rest of the frame — so one NaN in one
      * widget destroys the entire scene snapshot. Guarding here keeps the failure
      * local: drop a non-finite command and clamp a negative extent/radius to
@@ -98,17 +108,8 @@ void lensi_drawlist_push(optics_ui *ui, optics_ui_node *n, optics_ui_draw_cmd cm
         cmd.text_family = ui ? ui->text_family : 0;
     }
 
-    if (cmd.kind == OPTICS_UI_DRAW_TEXT && cmd.text) {
-        size_t len = strlen(cmd.text) + 1;
-        char *copy = optics_gfx_arena_alloc(&ui->arena, len);
-        if (copy) {
-            memcpy(copy, cmd.text, len);
-            cmd.text = copy;
-        } else {
-            lensi_set_overflow(ui);
-            cmd.text = "";
-        }
-    }
+    if (cmd.kind == OPTICS_UI_DRAW_TEXT && cmd.text)
+        cmd.text = optics_ui__arena_strndup(ui, cmd.text, strlen(cmd.text));
 
     if (!n->cmds || n->cmd_count == n->cmd_cap) {
         /* The frame reset cleared n->cmds while cmd_cap retained last
@@ -121,7 +122,7 @@ void lensi_drawlist_push(optics_ui *ui, optics_ui_node *n, optics_ui_draw_cmd cm
             nc = nc * 2;
         optics_ui_draw_cmd *na = optics_gfx_arena_alloc(&ui->arena, nc * sizeof *na);
         if (!na) {
-            lensi_set_overflow(ui);
+            optics_ui__set_overflow(ui);
             return;
         }
         if (n->cmds && n->cmd_count)

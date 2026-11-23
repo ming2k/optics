@@ -1,7 +1,7 @@
 /*
  * Refcounted sampler with auto-bindless-registration.
  *
- * Each flux_sampler owns one VkSampler and one bindless slot. The
+ * Each optics_gfx_sampler owns one VkSampler and one bindless slot. The
  * sampler is registered into the device's bindless heap at create
  * time so it can be referenced from any shader by handle. Release
  * defers both the slot release and the VkSampler destruction to the
@@ -51,7 +51,8 @@ optics_gfx_result optics_gfx_sampler_create(optics_gfx_device *d,
     if (!d || !desc || !out)
         return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
     if (desc->type != OPTICS_GFX_TYPE_SAMPLER_DESC) {
-        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT, "desc->type != FLUX_TYPE_SAMPLER_DESC");
+        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT,
+                        "desc->type != OPTICS_GFX_TYPE_SAMPLER_DESC");
         return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
     }
     *out = nullptr;
@@ -105,7 +106,7 @@ optics_gfx_result optics_gfx_sampler_create(optics_gfx_device *d,
 
     *out = s;
     OPTICS_GFX_OBSERVE_ACQUIRE(d, OPTICS_GFX_SCOPE_DEVICE, OPTICS_GFX_LIFETIME_CONTEXT,
-                               "vk_sampler", "flux/core", 0, OPTICS_GFX_SITE_VK_SAMPLER);
+                               "vk_sampler", "gfx/core", 0, OPTICS_GFX_SITE_VK_SAMPLER);
     return OPTICS_GFX_OK;
 }
 
@@ -127,9 +128,9 @@ void optics_gfx_sampler_release(optics_gfx_sampler *s) {
      * in-flight batch still samples through it, and destroying the
      * VkSampler mid-batch is a VUID-vkDestroySampler-sampler-01070
      * violation. Park both on the device retire queue, same contract as
-     * flux_image_release / flux_buffer_release. */
+     * optics_gfx_image_release / optics_gfx_buffer_release. */
     optics_gfx_device_retire_sampler(d, s->sampler, s->bindless);
-    OPTICS_GFX_OBSERVE_RELEASE(d, OPTICS_GFX_SCOPE_DEVICE, "vk_sampler", "flux/core", 0);
+    OPTICS_GFX_OBSERVE_RELEASE(d, OPTICS_GFX_SCOPE_DEVICE, "vk_sampler", "gfx/core", 0);
     optics_gfx_internal_free(d, s);
     optics_gfx_device_release(d);
 }

@@ -1,5 +1,5 @@
 /*
- * flux_buffer: HOST_VISIBLE map round-trip, GPU_LOCAL with initial
+ * optics_gfx_buffer: HOST_VISIBLE map round-trip, GPU_LOCAL with initial
  * upload, device-address request, rejection paths.
  */
 #include "gfx_test.h"

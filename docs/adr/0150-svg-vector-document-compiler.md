@@ -3,8 +3,8 @@ id: ADR-0150
 title: "SVG is a document compiler, not a rendering feature — one library owns the format, every consumer links it"
 status: accepted
 date: 2026-11-06
+scope: [svg, gfx, ui, architecture, build]
 superseded_by: null
-scope: [svg, flux, lens, architecture, build]
 negative_knowledge: true
 ---
 

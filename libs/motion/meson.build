@@ -1,4 +1,4 @@
-# transit — the shared motion and state transition vocabulary (ADR-0077, ADR-0106).
+# motion — the shared motion and state transition vocabulary (ADR-0077, ADR-0106).
 # Pure math on caller-owned state: springs (closed-form, non-divergent by construction),
 # approach/decay, easing, hysteresis, motion-adaptive smoothing. No clock,
 # no timeline, no allocation. Header-only library; depends on nothing but libm.

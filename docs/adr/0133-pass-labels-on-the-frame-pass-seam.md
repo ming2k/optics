@@ -3,7 +3,7 @@ id: ADR-0133
 title: "Pass labels ride the frame pass seam, and the CPU backend is a no-op rather than a special case"
 status: accepted
 date: 2026-11-02
-scope: [flux]
+scope: [gfx]
 superseded_by: null
 negative_knowledge: true
 ---

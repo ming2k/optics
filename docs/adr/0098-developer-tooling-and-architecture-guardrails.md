@@ -3,6 +3,7 @@ id: ADR-0098
 title: "Developer tooling taxonomy, architecture guardrails, and unified verification"
 status: superseded
 date: 2026-09-15
+scope: tools/ directory, CI workflow invocations, and developer pre-commit verification
 superseded_by: ADR-0126
 negative_knowledge: true
 ---

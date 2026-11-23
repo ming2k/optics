@@ -1,5 +1,5 @@
 /*
- * Internal flux_image layout. Images are core GPU resources shared by
+ * Internal optics_gfx_image layout. Images are core GPU resources shared by
  * canvas, scene, and effect. Never installed.
  */
 #ifndef OPTICS_GFX_IMAGE_INTERNAL_H
@@ -61,22 +61,22 @@ struct optics_gfx_image {
     /* True while this image is the output of a registered pass that has not
      * executed (ADR-0147). The plan is the only writer: registration sets it,
      * execution and pruning clear it. It lives on the image rather than only in
-     * the plan because a raw recording path (`flux_effect_*`, a custom compute
+     * the plan because a raw recording path (`optics_gfx_effect_*`, a custom compute
      * pass driven by a bare VkCommandBuffer) has no frame to ask. */
     bool deferred_pending;
 
-    /* ADR-0069/0070 content color space (flux_image_color_space_desc).
+    /* ADR-0069/0070 content color space (optics_gfx_image_color_space_desc).
      * NULL selects the format-derived fast path (sRGB for 8-bit, linear for
      * 16F). Shared with every pixel version derived from this image. */
     optics_gfx_image_color *color;
 };
 
 /* Resolve an image's content color space from a creation desc's `next`
- * chain (ADR-0069/0070 flux_image_color_space_desc) and build the
+ * chain (ADR-0069/0070 optics_gfx_image_color_space_desc) and build the
  * GPU-side params block / baked 3D LUT when tagged. Shared by the
- * upload path (flux_image_create) and the dma-buf import path. */
+ * upload path (optics_gfx_image_create) and the dma-buf import path. */
 optics_gfx_result optics_gfx_image_init_color(optics_gfx_device *d, optics_gfx_image *im,
                                               const void *next_chain);
 void optics_gfx_image_release_color(optics_gfx_device *d, optics_gfx_image_color *color);
 
-#endif /* FLUX_IMAGE_INTERNAL_H */
+#endif /* OPTICS_GFX_IMAGE_INTERNAL_H */

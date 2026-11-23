@@ -1,8 +1,8 @@
-/* test_reduced_motion.c — lens_set_reduced_motion resolves eases in one frame. */
+/* test_reduced_motion.c — optics_ui_set_reduced_motion resolves eases in one frame. */
 
 #include "../../libs/ui/src/internal.h"
-#include "lens_test.h"
 #include "optics_test.h"
+#include "ui_test.h"
 #include <optics/ui.h>
 
 static const optics_ui_input IN0 = {.display_size = {400, 200}, .dt_seconds = 0.016f};
@@ -25,13 +25,13 @@ static void test_reduced_motion_approach_snaps_to_target(void) {
     optics_ui *ui = nullptr;
     OT_EXPECT(optics_ui_create(&(optics_ui_desc){}, &ui) == OPTICS_GFX_OK);
 
-    float eased = lensi_approach(ui, 0.0f, 1.0f, 0.016f, 12.0f);
+    float eased = optics_ui__approach(ui, 0.0f, 1.0f, 0.016f, 12.0f);
     OT_EXPECT(eased < 1.0f);
     OT_EXPECT(optics_ui_anim_pending(ui));
 
     ui->anim_pending = false;
     optics_ui_set_reduced_motion(ui, true);
-    eased = lensi_approach(ui, 0.0f, 1.0f, 0.016f, 12.0f);
+    eased = optics_ui__approach(ui, 0.0f, 1.0f, 0.016f, 12.0f);
     OT_EXPECT_NEAR(eased, 1.0f, 0.0001f);
     OT_EXPECT(!optics_ui_anim_pending(ui));
 
@@ -58,7 +58,7 @@ static void test_approach_terminates_instead_of_converging(void) {
     float value = 0.0f;
     int frames_until_settled = -1;
     for (int i = 0; i < 600; i++) {
-        value = lensi_approach(ui, value, 1.0f, 1.0f / 60.0f, 18.0f);
+        value = optics_ui__approach(ui, value, 1.0f, 1.0f / 60.0f, 18.0f);
         if (value == 1.0f) {
             frames_until_settled = i;
             break;
@@ -71,15 +71,15 @@ static void test_approach_terminates_instead_of_converging(void) {
      * declared static. */
     ui->anim_pending = false;
     for (int i = 0; i < 10; i++) {
-        value = lensi_approach(ui, value, 1.0f, 1.0f / 60.0f, 18.0f);
+        value = optics_ui__approach(ui, value, 1.0f, 1.0f / 60.0f, 18.0f);
         OT_EXPECT(value == 1.0f);
     }
     OT_EXPECT(!optics_ui_anim_pending(ui));
 
     /* A settled value also has zero delta from frame to frame, so a node's
      * `hover_t != last_hover_t` change test stops firing. That equality is the
-     * whole point: `lensi_approach` must be idempotent on its own output. */
-    OT_EXPECT(lensi_approach(ui, 1.0f, 1.0f, 1.0f / 60.0f, 18.0f) == 1.0f);
+     * whole point: `optics_ui__approach` must be idempotent on its own output. */
+    OT_EXPECT(optics_ui__approach(ui, 1.0f, 1.0f, 1.0f / 60.0f, 18.0f) == 1.0f);
 
     optics_ui_release(ui);
 }

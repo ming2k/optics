@@ -1,8 +1,8 @@
 /* Publication, presentation and failure semantics through the public snapshot
  * API. Internal access is used only to inject scratch-allocation failure. */
 #include "../../libs/ui/src/internal.h"
-#include "lens_test.h"
 #include "optics_test.h"
+#include "ui_test.h"
 #include <optics/gfx/canvas_cpu.h>
 #include <optics/ui/icon.h>
 #include <stdlib.h>
@@ -117,7 +117,7 @@ static void capture_failure_is_not_partial_success(void) {
     optics_ui_icon(ui, &(optics_ui_icon_opts){.id = OPTICS_UI_ICON_CHECK, .size = 24});
     optics_ui_end(ui);
     /* Inject a compile failure through the canonical "frame could not be
-     * compiled" flag (lensi_set_overflow), which is what arena exhaustion
+     * compiled" flag (optics_ui__set_overflow), which is what arena exhaustion
      * ultimately surfaces as to compile_visuals. Icons no longer allocate from
      * the frame arena themselves — ADR-0112 bakes their coverage masks once
      * into a heap-backed device-resolution cache — so exhausting the arena

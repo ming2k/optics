@@ -1,9 +1,9 @@
 /* test_clipboard.c — host clipboard interface, paste delivery, caret
  * default, the focused-widget text context (ADR-0036), and the
- * size-aware lens_input copy guard (ADR-0013). */
+ * size-aware optics_ui_input copy guard (ADR-0013). */
 
-#include "lens_test.h"
 #include "optics_test.h"
+#include "ui_test.h"
 #include <optics/ui.h>
 #include <string.h>
 
@@ -74,7 +74,7 @@ static void test_caret_rect_default_zero(void) {
     optics_ui_release(ui);
 }
 
-/* The size guard: a zero-sized lens_input (legacy callers) must still copy
+/* The size guard: a zero-sized optics_ui_input (legacy callers) must still copy
  * cleanly; a partial size must zero everything past it. We can only
  * observe the copy indirectly through behaviour: an input with size set
  * to a small prefix should still drive the frame without UB and leave
@@ -89,7 +89,7 @@ static void test_input_size_guard(void) {
     optics_ui_begin(ui, &legacy);
     optics_ui_test_end(ui);
 
-    /* Forward-compat: size set to sizeof(lens_input). */
+    /* Forward-compat: size set to sizeof(optics_ui_input). */
     optics_ui_input modern = {.display_size = {100, 100}, .dt_seconds = 0.016f};
     modern.size = sizeof(optics_ui_input);
     memcpy(modern.preedit_utf8, "abc", 3);
@@ -102,14 +102,14 @@ static void test_input_size_guard(void) {
     /* Truncated: a partial size only covers the first byte-range. The
      * library must clamp to its own sizeof, never read past, and zero
      * what wasn't supplied. */
-    optics_ui_input small = {.size = 8}; /* far less than sizeof(lens_input) */
+    optics_ui_input small = {.size = 8}; /* far less than sizeof(optics_ui_input) */
     optics_ui_begin(ui, &small);
     optics_ui_test_end(ui);
 
     optics_ui_release(ui);
 }
 
-/* ---- focused-widget text context (lens_text_context_get, ADR-0036) ---- */
+/* ---- focused-widget text context (optics_ui_text_context_get, ADR-0036) ---- */
 
 static void test_text_context_default_null(void) {
     optics_ui *ui = nullptr;

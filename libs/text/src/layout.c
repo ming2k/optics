@@ -6,7 +6,7 @@
  * round(size_px*scale)) and integer-snaps each glyph at draw time; subpixel
  * positioning replaces the snapping in a later phase. */
 
-#include "glyph_internal.h"
+#include "text_internal.h"
 
 #include <math.h>
 #include <stdlib.h>
@@ -623,7 +623,7 @@ optics_text_metrics optics_text_measure(optics_text_ctx *t, const optics_text_me
         return txt_text_measure_mono(utf8, len, size_px, weight);
 
     /* Measure at the context scale — the same key draw (via the canvas
-     * scale, which lens keeps in sync with glyph_set_scale) and the
+     * scale, which ui keeps in sync with glyph_set_scale) and the
      * caret/selection paths use — so a visible string is shaped once per
      * frame, not twice. Hinting makes advances non-linear in scale, so
      * sharing the entry is also the geometrically correct choice: the
@@ -643,7 +643,7 @@ optics_text_metrics optics_text_measure(optics_text_ctx *t, const optics_text_me
 /*  Draw                                                               */
 /* ------------------------------------------------------------------ */
 
-/* Quads per flux_canvas_draw_glyph_run flush. Each flush is one draw
+/* Quads per optics_gfx_canvas_draw_glyph_run flush. Each flush is one draw
  * call; a typical label fits in one flush, long paragraphs take a
  * handful. Stack-resident so the hot path never allocates. */
 #define TEXT_RUN_BATCH 256
@@ -663,7 +663,7 @@ static optics_gfx_result draw_layout_pass(optics_text_ctx *t, optics_gfx_canvas 
      * every glyph shares it so mixed-face runs sit on one baseline. */
     float baseline_dev = roundf((y + L->baseline) * scale);
 
-    /* Whole run batched through flux_canvas_draw_glyph_run (flux
+    /* Whole run batched through optics_gfx_canvas_draw_glyph_run (gfx
      * ADR-0010): one draw call per TEXT_RUN_BATCH glyphs instead of a
      * draw + push-constant update per glyph. */
     optics_gfx_glyph_quad quads[TEXT_RUN_BATCH];
@@ -675,8 +675,8 @@ static optics_gfx_result draw_layout_pass(optics_text_ctx *t, optics_gfx_canvas 
     run.atlas = t->atlas_pages[t->atlas_page];
     /* Hold a reference on the batch's atlas for the duration of the walk:
      * txt_glyph_get below can trigger atlas_clear (page cap reached),
-     * which flux_image_release()s every page — and release frees the
-     * flux_image struct inline once the last reference drops. Without
+     * which optics_gfx_image_release()s every page — and release frees the
+     * optics_gfx_image struct inline once the last reference drops. Without
      * this retain, the pending flush's raw run.atlas would dangle and
      * the clears-change flush would read freed memory. (Batches already
      * handed to the canvas hold their own retains via the frame's
@@ -862,7 +862,7 @@ static optics_gfx_result text_draw_impl(optics_text_ctx *t, optics_gfx_canvas *c
     if (!t || (!canvas && !encoder) || !t->has_backend || !t->atlas_pixels || !utf8 || len == 0)
         return OPTICS_GFX_ERROR_UNSUPPORTED;
 
-    OPTICS_GFX_PROFILE_ZONE(z_draw, "glyph.draw");
+    OPTICS_GFX_PROFILE_ZONE(z_draw, "text.draw");
 
     float size_px, weight;
     bool italic;

@@ -1,8 +1,8 @@
-/* test_tooltip.c — lens_box.tooltip records a tooltip for hovered widgets. */
+/* test_tooltip.c — optics_ui_box.tooltip records a tooltip for hovered widgets. */
 
 #include "../../libs/ui/src/internal.h"
-#include "lens_test.h"
 #include "optics_test.h"
+#include "ui_test.h"
 #include <optics/gfx/canvas_cpu.h>
 #include <optics/ui.h>
 
@@ -38,6 +38,33 @@ static void test_tooltip_hover_does_not_crash(void) {
 
     OT_EXPECT(ui->tooltip.active);
     OT_EXPECT(strcmp(ui->tooltip.text, "Hovered!") == 0);
+    OT_EXPECT(optics_ui_overflowed(ui) == false);
+    optics_ui_release(ui);
+}
+
+/* The tooltip text is copied whole into the frame arena: a long one is not
+ * truncated, and the caller's buffer may change once the widget call returns. */
+static void test_tooltip_long_text_is_copied_whole(void) {
+    optics_ui *ui = nullptr;
+    OT_EXPECT(optics_ui_create(&(optics_ui_desc){}, &ui) == OPTICS_GFX_OK);
+
+    optics_ui_begin(ui, &IN0);
+    optics_ui_button(ui, &(optics_ui_button_opts){.label = "btn"});
+    optics_ui_test_end(ui);
+
+    char tip[301];
+    memset(tip, 'x', sizeof tip - 1);
+    tip[sizeof tip - 1] = '\0';
+    optics_ui_input in = IN0;
+    in.cursor = (optics_gfx_point){20, 15};
+    optics_ui_begin(ui, &in);
+    optics_ui_button(ui, &(optics_ui_button_opts){.label = "btn", .box = {.tooltip = tip}});
+    memset(tip, 'y', sizeof tip - 1);
+    optics_ui_test_end(ui);
+
+    OT_EXPECT(ui->tooltip.active);
+    OT_EXPECT(strlen(ui->tooltip.text) == sizeof tip - 1);
+    OT_EXPECT(ui->tooltip.text[0] == 'x' && ui->tooltip.text[sizeof tip - 2] == 'x');
     OT_EXPECT(optics_ui_overflowed(ui) == false);
     optics_ui_release(ui);
 }
@@ -97,6 +124,7 @@ static void test_tooltip_render_path(void) {
 int main(void) {
     test_tooltip_no_hover_no_crash();
     test_tooltip_hover_does_not_crash();
+    test_tooltip_long_text_is_copied_whole();
     test_tooltip_render_path();
     return OT_REPORT();
 }

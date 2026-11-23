@@ -1,10 +1,10 @@
 /* test_icon_runtime.c — runtime SVG icon registration
- * (lens_icon_register_svg). CPU-only.
+ * (optics_ui_icon_register_svg). CPU-only.
  */
 
 #include "../../libs/ui/src/internal.h"
-#include "lens_test.h"
 #include "optics_test.h"
+#include "ui_test.h"
 #include <optics/ui.h>
 
 static const optics_ui_input IN0 = {.display_size = {200, 100}, .dt_seconds = 0.016f};
@@ -72,7 +72,7 @@ int main(void) {
     child = optics_ui_node_next_sibling(child);
     OT_EXPECT(has_icon_cmd(child, (int32_t)stroke));
 
-    /* The no-icon sentinel must stay icon-less even though LENS_ICON_COUNT
+    /* The no-icon sentinel must stay icon-less even though OPTICS_UI_ICON_COUNT
      * is now a valid runtime id (the first registration took it). */
     optics_ui_begin(ui, &IN0);
     optics_ui_selectable(ui, &(optics_ui_selectable_opts){.label = "plain", .selected = false});

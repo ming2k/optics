@@ -1,7 +1,7 @@
-/* test_repaint.c — lens_frame_needs_repaint: damage-driven repaint query. */
+/* test_repaint.c — optics_ui_frame_needs_repaint: damage-driven repaint query. */
 
-#include "lens_test.h"
 #include "optics_test.h"
+#include "ui_test.h"
 #include <optics/gfx/canvas_cpu.h>
 #include <optics/ui.h>
 #include <stdio.h>
@@ -576,7 +576,7 @@ static void test_overflow_collapses_to_one_bounding_box(void) {
     optics_ui *ui = nullptr;
     optics_gfx_canvas *canvas = nullptr;
     OT_EXPECT(optics_ui_create(&(optics_ui_desc){}, &ui) == OPTICS_GFX_OK);
-    /* Wide enough for more than LENS_DAMAGE_RECTS_CAPACITY disjoint leaves. */
+    /* Wide enough for more than OPTICS_UI_DAMAGE_RECTS_CAPACITY disjoint leaves. */
     const uint32_t columns = OPTICS_UI_DAMAGE_RECTS_CAPACITY + 16;
     OT_EXPECT(
         optics_gfx_canvas_create(&(optics_gfx_canvas_desc){.type = OPTICS_GFX_TYPE_CANVAS_DESC,
@@ -791,7 +791,7 @@ static void test_removed_container_repaints_its_children(void) {
 
 /* The departed region must not depend on what else the frame built.
  *
- * A LEAVING node's command list lives in the per-frame arena, which `lens_begin`
+ * A LEAVING node's command list lives in the per-frame arena, which `optics_ui_begin`
  * rewinds and immediately recycles. Reading damage out of it made the reported
  * region follow whatever this frame happened to allocate there: measured, one
  * unrelated label appearing elsewhere moved a departed row's damage from
@@ -1166,10 +1166,10 @@ static void test_host_owned_caret_reports_no_damage_or_clock(void) {
                                  &canvas) == OPTICS_GFX_OK);
 
     /* An app-owned editing surface (ADR-0151): the app paints its own caret
-     * with its own clock, and lens only records the geometry so the platform
-     * layer can place the IME candidate window. Lens must therefore report
+     * with its own clock, and ui only records the geometry so the platform
+     * layer can place the IME candidate window. ui must therefore report
      * neither damage nor a clock for it — otherwise two clocks drive one
-     * caret, and lens manufactures flips the app's painter never made. */
+     * caret, and ui manufactures flips the app's painter never made. */
     for (int i = 0; i < 3; i++) {
         optics_ui_begin(ui, &IN0);
         optics_ui_label(ui, &(optics_ui_label_opts){.text = "status"});
@@ -1186,8 +1186,8 @@ static void test_host_owned_caret_reports_no_damage_or_clock(void) {
     OT_EXPECT(!optics_ui_caret_clock_live(ui));
     OT_EXPECT(!optics_ui_caret_flip_pending(ui));
 
-    /* Stepping well past a blink half-cycle must not make lens claim a flip:
-     * the phase is not lens's to advance for this caret. */
+    /* Stepping well past a blink half-cycle must not make ui claim a flip:
+     * the phase is not ui's to advance for this caret. */
     optics_ui_input slow = IN0;
     slow.dt_seconds = 0.6f;
     optics_ui_begin(ui, &slow);
@@ -1204,7 +1204,7 @@ static void test_host_caret_does_not_keep_an_unfocused_context_awake(void) {
     optics_ui *ui = nullptr;
     OT_EXPECT(optics_ui_create(&(optics_ui_desc){}, &ui) == OPTICS_GFX_OK);
 
-    /* No widget holds focus, so nothing in lens paints: a host-reported caret
+    /* No widget holds focus, so nothing in ui paints: a host-reported caret
      * rect alone must leave the context quiescent. */
     for (int i = 0; i < 4; i++) {
         optics_ui_begin(ui, &IN0);

@@ -3,7 +3,7 @@ id: ADR-0149
 title: "Damage-scoped frames on a windowed surface — content image and write-epoch history"
 status: accepted
 date: 2026-11-06
-scope: [flux, lens, iris, bindings]
+scope: [gfx, ui, window, bindings]
 superseded_by: null
 negative_knowledge: true
 ---

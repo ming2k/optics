@@ -1,5 +1,5 @@
 /* test_icon_runtime_runs.c — per-shape colour runs recorded by
- * lens_icon_register_svg (lens_icon_run). CPU-only; links icon_runtime.c
+ * optics_ui_icon_register_svg (optics_ui_icon_run). CPU-only; links icon_runtime.c
  * (+ icon_data.c) directly, same as test_icon_runtime_content.
  *
  * Asserts WHAT was registered:
@@ -12,8 +12,8 @@
  */
 
 #include "../../libs/ui/src/internal.h"
-#include "lens_test.h"
 #include "optics_test.h"
+#include "ui_test.h"
 #include <optics/ui.h>
 
 /* Explicit red stroke, one circle. */
@@ -57,7 +57,7 @@ int main(void) {
     optics_ui_icon_id red = optics_ui_icon_register_svg(SVG_RED);
     OT_EXPECT((int)red >= (int)OPTICS_UI_ICON_COUNT);
     {
-        const optics_ui_icon_desc *d = lensi_icon_desc((int32_t)red);
+        const optics_ui_icon_desc *d = optics_ui__icon_desc((int32_t)red);
         OT_EXPECT(d != nullptr);
         OT_EXPECT(d->runs != nullptr);
         OT_EXPECT(d->run_count == 1);
@@ -71,7 +71,7 @@ int main(void) {
     optics_ui_icon_id theme = optics_ui_icon_register_svg(SVG_THEME);
     OT_EXPECT((int)theme >= (int)OPTICS_UI_ICON_COUNT);
     {
-        const optics_ui_icon_desc *d = lensi_icon_desc((int32_t)theme);
+        const optics_ui_icon_desc *d = optics_ui__icon_desc((int32_t)theme);
         OT_EXPECT(d != nullptr);
         OT_EXPECT(d->runs == nullptr);
         OT_EXPECT(d->run_count == 0);
@@ -87,7 +87,7 @@ int main(void) {
     optics_ui_icon_id two = optics_ui_icon_register_svg(SVG_TWO_RED);
     OT_EXPECT((int)two >= (int)OPTICS_UI_ICON_COUNT);
     {
-        const optics_ui_icon_desc *d = lensi_icon_desc((int32_t)two);
+        const optics_ui_icon_desc *d = optics_ui__icon_desc((int32_t)two);
         OT_EXPECT(d != nullptr);
         OT_EXPECT(d->runs != nullptr);
         OT_EXPECT(d->run_count == 1);
@@ -101,7 +101,7 @@ int main(void) {
     optics_ui_icon_id mixed = optics_ui_icon_register_svg(SVG_MIXED);
     OT_EXPECT((int)mixed >= (int)OPTICS_UI_ICON_COUNT);
     {
-        const optics_ui_icon_desc *d = lensi_icon_desc((int32_t)mixed);
+        const optics_ui_icon_desc *d = optics_ui__icon_desc((int32_t)mixed);
         OT_EXPECT(d != nullptr);
         OT_EXPECT(d->runs != nullptr);
         OT_EXPECT(d->run_count == 3);
@@ -127,7 +127,7 @@ int main(void) {
     optics_ui_icon_id theme_mixed = optics_ui_icon_register_svg(SVG_THEME_MIXED);
     OT_EXPECT((int)theme_mixed >= (int)OPTICS_UI_ICON_COUNT);
     {
-        const optics_ui_icon_desc *d = lensi_icon_desc((int32_t)theme_mixed);
+        const optics_ui_icon_desc *d = optics_ui__icon_desc((int32_t)theme_mixed);
         OT_EXPECT(d != nullptr);
         OT_EXPECT(d->runs != nullptr);
         OT_EXPECT(d->run_count == 2);

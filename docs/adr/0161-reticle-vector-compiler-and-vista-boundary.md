@@ -3,7 +3,7 @@ id: ADR-0161
 title: "Reticle Vector Compiler and Vista Subsystem Boundary"
 status: accepted
 date: 2026-11-12
-scope: libs/reticle/, libs/lens/, tests/vista/, tests/reticle/, bindings/crates/reticle/
+scope: libs/svg/, libs/ui/, tests/scene/, tests/svg/, bindings/crates/reticle/
 superseded_by: null
 negative_knowledge: true
 ---

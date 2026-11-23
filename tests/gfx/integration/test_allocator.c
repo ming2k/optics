@@ -1,7 +1,7 @@
 /*
  * Allocator stress test via public APIs.
  *
- * Exercises flux_image_create / flux_mesh_create paths under heavy
+ * Exercises optics_gfx_image_create / optics_gfx_mesh_create paths under heavy
  * churn to validate the GPU memory allocator: pooling, coalescing,
  * dedicated-fallback for oversize, and absence of leaks under ASan.
  *

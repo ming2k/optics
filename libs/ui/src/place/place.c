@@ -3,13 +3,13 @@
  *
  * One tree: a placed container keeps its parent chain and sibling
  * sequence position, but escapes its parent's layout flow and clip and
- * is emitted in a closed z band (LENS_BAND_*). Placement itself — the
+ * is emitted in a closed z band (OPTICS_UI_BAND_*). Placement itself — the
  * EXACT / ANCHORED / CENTERED modes — is resolved by the arrange pass
  * (layout/solve.c); this file owns:
  *
- *   - the public lens_place_begin/end container pair, which links an ABS
+ *   - the public optics_ui_place_begin/end container pair, which links an ABS
  *     node into the tree and stages its placement metadata;
- *   - the band bucketing walk (lensi_place_bucket), the single choke
+ *   - the band bucketing walk (optics_ui__place_bucket), the single choke
  *     point that defines the global emission order consumed by render
  *     (replay.c) and, reversed, by hit-testing (input.c);
  *   - the transient open-set: retained per id, orthogonal to stacking.
@@ -37,14 +37,14 @@ static int find_open_slot(const optics_ui *ui, optics_ui_id id) {
     return -1;
 }
 
-bool lensi_place_is_open_id(const optics_ui *ui, optics_ui_id id) {
+bool optics_ui__place_is_open_id(const optics_ui *ui, optics_ui_id id) {
     return ui && find_open_slot(ui, id) >= 0;
 }
 
-/* Open a transient by a pre-computed lens_id, without the id-generation
- * side effect of lens_place_open. Used by menu.c (ADR-0040), which has
+/* Open a transient by a pre-computed optics_ui_id, without the id-generation
+ * side effect of optics_ui_place_open. Used by menu.c (ADR-0040), which has
  * already derived the trigger id and must not perturb the sibling seq. */
-void lensi_place_open_id_pub(optics_ui *ui, optics_ui_id id, bool dismissable) {
+void optics_ui__place_open_id_pub(optics_ui *ui, optics_ui_id id, bool dismissable) {
     if (!ui)
         return;
     open_id(ui, id, dismissable);
@@ -53,7 +53,7 @@ void lensi_place_open_id_pub(optics_ui *ui, optics_ui_id id, bool dismissable) {
 static void open_id(optics_ui *ui, optics_ui_id id, bool dismissable) {
     if (find_open_slot(ui, id) >= 0)
         return;
-    if (ui->open_transient_count >= LENSI_TRANSIENT_MAX) {
+    if (ui->open_transient_count >= OPTICS_UI_TRANSIENT_MAX) {
         /* drop the oldest to make room; a noisy transient set is a bug we
          * surface via behaviour rather than a crash */
         for (uint32_t i = 0; i + 1 < ui->open_transient_count; i++)
@@ -81,13 +81,13 @@ static void close_id(optics_ui *ui, optics_ui_id id) {
 void optics_ui_place_open(optics_ui *ui, const char *id) {
     if (!ui || !id)
         return;
-    open_id(ui, lensi_gen_widget_id(ui, id), true);
+    open_id(ui, optics_ui__gen_widget_id(ui, id), true);
 }
 
 void optics_ui_place_close(optics_ui *ui, const char *id) {
     if (!ui || !id)
         return;
-    close_id(ui, lensi_gen_widget_id(ui, id));
+    close_id(ui, optics_ui__gen_widget_id(ui, id));
 }
 
 void optics_ui_place_toggle(optics_ui *ui, const char *id) {
@@ -108,19 +108,19 @@ void optics_ui_place_close_all(optics_ui *ui) {
 bool optics_ui_place_is_open(const optics_ui *ui, const char *id) {
     if (!ui || !id)
         return false;
-    /* lens_current_id derives the same id lens_place_begin used, without
+    /* optics_ui_current_id derives the same id optics_ui_place_begin used, without
      * touching any build-side counter — a pure query. */
-    return lensi_place_is_open_id(ui, optics_ui_current_id(ui, id));
+    return optics_ui__place_is_open_id(ui, optics_ui_current_id(ui, id));
 }
 
 bool optics_ui_place_hovered(const optics_ui *ui, const char *id) {
     if (!ui || !id)
         return false;
     optics_ui_id place_id = optics_ui_current_id(ui, id);
-    if (!lensi_place_is_open_id(ui, place_id))
+    if (!optics_ui__place_is_open_id(ui, place_id))
         return false;
-    optics_ui_node *n = lensi_store_find(ui, place_id);
-    return n && n->has_prev && lensi_point_in(ui->input.cursor, n->prev_rect);
+    optics_ui_node *n = optics_ui__store_find(ui, place_id);
+    return n && n->has_prev && optics_ui__point_in(ui->input.cursor, n->prev_rect);
 }
 
 /* ---- place begin / end -------------------------------------------- */
@@ -133,16 +133,16 @@ bool optics_ui_place_begin(optics_ui *ui, const optics_ui_place_opts *opts) {
         opts = &default_opts;
 
     optics_ui_place_opts effective = *opts;
-    effective.layout.box = lensi_merge_box(opts->layout.box, opts->box);
+    effective.layout.box = optics_ui__merge_box(opts->layout.box, opts->box);
     opts = &effective;
 
     const char *id_str =
         opts->box.id ? opts->box.id : (opts->layout.box.id ? opts->layout.box.id : "##place");
-    optics_ui_id id = lensi_gen_widget_id(ui, id_str);
-    if (opts->transient && !lensi_place_is_open_id(ui, id))
+    optics_ui_id id = optics_ui__gen_widget_id(ui, id_str);
+    if (opts->transient && !optics_ui__place_is_open_id(ui, id))
         return false;
 
-    optics_ui_node *n = lensi_store_touch(ui, id);
+    optics_ui_node *n = optics_ui__store_touch(ui, id);
     if (!n)
         return false;
 
@@ -150,13 +150,13 @@ bool optics_ui_place_begin(optics_ui *ui, const optics_ui_place_opts *opts) {
      * its parent chain and sibling sequence position in the one tree
      * (ADR-0060) even though it escapes the parent's flow and clip. Only
      * container sub-roots may be ABS — this begin is the single place that
-     * sets LENS_PLACE_ABS, so leaf widgets cannot place. */
-    lensi_link_child(ui, n);
-    lensi_node_box(ui, n, &opts->layout.box);
+     * sets OPTICS_UI_PLACE_ABS, so leaf widgets cannot place. */
+    optics_ui__link_child(ui, n);
+    optics_ui__node_box(ui, n, &opts->layout.box);
 
     n->is_container = true;
     n->place = OPTICS_UI_PLACE_ABS;
-    /* Band validation. Out-of-range falls back to POPUP. LENS_BAND_BASE is
+    /* Band validation. Out-of-range falls back to POPUP. OPTICS_UI_BAND_BASE is
      * reserved for FLOW content (ADR-0060 item 2): an ABS node asking for
      * BASE is clamped to CHROME — it would render above the base tree, and
      * the "what paints above also hit-tests above" invariant requires it to
@@ -218,28 +218,28 @@ bool optics_ui_place_begin(optics_ui *ui, const optics_ui_place_opts *opts) {
 
     /* Surface fill + border, resolved at replay against final_rect. */
     if ((opts->layout.bg & 0xFF000000u) != 0) {
-        lensi_drawlist_push(ui, n,
-                            (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_RECT,
-                                                 .rel = {0, 0, 0, 0},
-                                                 .color = opts->layout.bg,
-                                                 .radius = opts->layout.radius});
+        optics_ui__drawlist_push(ui, n,
+                                 (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_RECT,
+                                                      .rel = {0, 0, 0, 0},
+                                                      .color = opts->layout.bg,
+                                                      .radius = opts->layout.radius});
     }
     if ((opts->layout.border & 0xFF000000u) != 0 && opts->layout.border_width > 0.0f) {
-        lensi_drawlist_push(ui, n,
-                            (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_BORDER,
-                                                 .rel = {0, 0, 0, 0},
-                                                 .color = opts->layout.border,
-                                                 .radius = opts->layout.radius,
-                                                 .width = opts->layout.border_width});
+        optics_ui__drawlist_push(ui, n,
+                                 (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_BORDER,
+                                                      .rel = {0, 0, 0, 0},
+                                                      .color = opts->layout.border,
+                                                      .radius = opts->layout.radius,
+                                                      .width = opts->layout.border_width});
     }
 
-    lensi_open_container_push(ui, n);
+    optics_ui__open_container_push(ui, n);
     return true;
 }
 
 void optics_ui_place_end(optics_ui *ui) {
     if (ui)
-        lensi_open_container_pop(ui);
+        optics_ui__open_container_pop(ui);
 }
 
 /* ---- band bucketing: the single emission-order choke point -------- */
@@ -252,7 +252,7 @@ static void band_push(optics_ui *ui, optics_ui_band band, optics_ui_node *n) {
         optics_ui_node **na = optics_gfx_arena_alloc(
             &ui->arena, nc * sizeof *na); // NOLINT(bugprone-sizeof-expression)
         if (!na) {
-            lensi_set_overflow(ui);
+            optics_ui__set_overflow(ui);
             return;
         }
         if (ui->bands[band])
@@ -277,7 +277,7 @@ static void band_collect(optics_ui *ui, optics_ui_node *n) {
     }
 }
 
-void lensi_place_bucket(optics_ui *ui) {
+void optics_ui__place_bucket(optics_ui *ui) {
     if (ui && ui->root)
         band_collect(ui, ui->root);
 }
@@ -286,7 +286,7 @@ void lensi_place_bucket(optics_ui *ui) {
 /* Persistent placed nodes are never dismissed; they are not in the
  * open_transients[] slot table, so this pass leaves them alone. */
 
-void lensi_place_dismiss(optics_ui *ui) {
+void optics_ui__place_dismiss(optics_ui *ui) {
     if (!ui || !ui->open_transient_count)
         return;
 
@@ -331,14 +331,14 @@ void lensi_place_dismiss(optics_ui *ui) {
             continue; /* same-frame grace */
         if (!slot->dismissable)
             continue; /* modal-pinned (ADR-0039) */
-        optics_ui_node *n = lensi_store_find(ui, slot->id);
-        bool hit_node = n && n->has_prev && lensi_point_in(cur, n->prev_rect);
+        optics_ui_node *n = optics_ui__store_find(ui, slot->id);
+        bool hit_node = n && n->has_prev && optics_ui__point_in(cur, n->prev_rect);
         /* The anchor is part of the popup interaction. Without this, pressing
          * an open dropdown trigger dismisses on press and the trigger reopens
          * the same popup on release. For ANCHORED nodes place_rect IS the
          * anchor; for the other modes it is degenerate or covered by the
          * node rect, so the check is harmless. */
-        bool hit_anchor = n && lensi_point_in(cur, n->place_rect);
+        bool hit_anchor = n && optics_ui__point_in(cur, n->place_rect);
         if (!hit_node && !hit_anchor) {
             for (uint32_t j = (uint32_t)i; j + 1 < ui->open_transient_count; j++)
                 ui->open_transients[j] = ui->open_transients[j + 1];

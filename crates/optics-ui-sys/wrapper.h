@@ -1,7 +1,7 @@
 /*
- * Bindgen translation unit. Pulls the full public surface of lens.
- * <lens/lens.h> already includes the flux core/math/canvas headers it needs
- * (lens depends on flux via pkg-config Requires: flux >= 0.1.0); the lens
+ * Bindgen translation unit. Pulls the full public surface of ui.
+ * <optics/ui.h> already includes the gfx core/math/canvas headers it needs
+ * (ui depends on gfx via pkg-config Requires: gfx >= 0.1.0); the ui
  * icon header is listed for completeness.
  */
 #include <optics/ui/icon.h>

@@ -6,7 +6,7 @@
  * rendering format info via pNext.
  *
  * Pipeline layout includes the device bindless set at slot 0
- * (matching every other flux pipeline) plus the caller's push range.
+ * (matching every other gfx pipeline) plus the caller's push range.
  */
 #include "internal.h"
 #include <optics/gfx/vulkan.h>
@@ -89,7 +89,7 @@ optics_gfx_result optics_gfx_graphics_pipeline_create(optics_gfx_device *d,
         return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
     if (desc->type != OPTICS_GFX_TYPE_GRAPHICS_PIPELINE_DESC) {
         OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT,
-                        "desc->type != FLUX_TYPE_GRAPHICS_PIPELINE_DESC");
+                        "desc->type != OPTICS_GFX_TYPE_GRAPHICS_PIPELINE_DESC");
         return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
     }
     if (!desc->vertex_spirv || desc->vertex_spirv_word_count == 0 || !desc->fragment_spirv ||
@@ -279,7 +279,7 @@ optics_gfx_result optics_gfx_graphics_pipeline_create(optics_gfx_device *d,
 
     *out = p;
     OPTICS_GFX_OBSERVE_ACQUIRE(d, OPTICS_GFX_SCOPE_DEVICE, OPTICS_GFX_LIFETIME_CONTEXT,
-                               "vk_pipeline", "flux/core", 0, OPTICS_GFX_SITE_VK_PIPELINE);
+                               "vk_pipeline", "gfx/core", 0, OPTICS_GFX_SITE_VK_PIPELINE);
     return OPTICS_GFX_OK;
 
 fail:
@@ -310,7 +310,7 @@ void optics_gfx_graphics_pipeline_release(optics_gfx_graphics_pipeline *p) {
     optics_gfx_device *pd = p->device;
     if (p->layout)
         vkDestroyPipelineLayout(pd->device, p->layout, nullptr);
-    OPTICS_GFX_OBSERVE_RELEASE(pd, OPTICS_GFX_SCOPE_DEVICE, "vk_pipeline", "flux/core", 0);
+    OPTICS_GFX_OBSERVE_RELEASE(pd, OPTICS_GFX_SCOPE_DEVICE, "vk_pipeline", "gfx/core", 0);
     optics_gfx_internal_free(pd, p);
     optics_gfx_device_release(pd);
 }
@@ -345,7 +345,7 @@ void optics_gfx_graphics_pipeline_bind(optics_gfx_frame *f,
     if (push_constants && push_bytes > 0) {
         if (push_bytes > p->push_bytes) {
             OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT,
-                            "flux_graphics_pipeline_bind push_bytes exceeds pipeline range");
+                            "optics_gfx_graphics_pipeline_bind push_bytes exceeds pipeline range");
             return;
         }
         vkCmdPushConstants(cmd, p->layout,

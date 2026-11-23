@@ -3,7 +3,7 @@ id: ADR-0104
 title: "Lens Unified Orthogonal 2D Grid and 1D Flex Layout Subsystem"
 status: accepted
 date: 2026-09-18
-scope: libs/lens, bindings/lens-rs
+scope: libs/ui, bindings/lens-rs
 superseded_by: null
 negative_knowledge: true
 ---

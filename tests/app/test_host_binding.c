@@ -1,6 +1,6 @@
-/* test_host_binding.c — the lens ↔ iris_ui_host seam, driven without a window.
+/* test_host_binding.c — the ui ↔ optics_window_ui_host seam, driven without a window.
  *
- * aperture_app_run is `aperture__bind` handed to iris_app_run. Everything a
+ * optics_app_run is `optics_app__bind` handed to optics_window_run. Everything a
  * platform backend ever does to the UI layer goes through the returned table,
  * so calling that table here in the order a backend does covers the whole
  * shell on every platform — including the two whose backends CI cannot run.
@@ -104,7 +104,7 @@ static void test_lifecycle_input_and_presentation(void) {
         .start = on_start, .stop = on_stop, .build = on_build, .user = &fx};
     const optics_window_ui_host host = optics_app__bind(&app, &opts);
 
-    /* Headless: no device. lens falls back to libc for persistent storage. */
+    /* Headless: no device. ui falls back to libc for persistent storage. */
     OT_REQUIRE(host.start(host.user, &(optics_window_ui_start_info){
                                          .scale = 1.0f,
                                          .dark = true,
@@ -130,7 +130,7 @@ static void test_lifecycle_input_and_presentation(void) {
     in = input_at(bx, by);
     rep = run_frame(&host, &in);
     OT_EXPECT(fx.button.hovered);
-    /* The semantic cursor crosses the seam as an iris cursor. */
+    /* The semantic cursor crosses the seam as a window cursor. */
     OT_EXPECT(rep.cursor == OPTICS_WINDOW_CURSOR_POINTER ||
               rep.cursor == OPTICS_WINDOW_CURSOR_DEFAULT);
 
@@ -151,7 +151,7 @@ static void test_lifecycle_input_and_presentation(void) {
     OT_EXPECT(host.damage_rects(host.user, rects, OPTICS_WINDOW_DAMAGE_RECTS_CAPACITY) <=
               OPTICS_WINDOW_DAMAGE_RECTS_CAPACITY);
 
-    /* Accessibility: the tree crosses the seam with iris roles, and an
+    /* Accessibility: the tree crosses the seam with window roles, and an
      * activation from an assistive client lands as a click next frame. */
     host.a11y_walk(host.user, a11y_visit, &fx);
     OT_EXPECT(fx.a11y_buttons == 1);
@@ -237,7 +237,7 @@ static void test_failed_start_never_calls_stop(void) {
     OT_EXPECT(!host.start(host.user, &(optics_window_ui_start_info){.scale = 1.0f}));
     host.stop(host.user);
     OT_EXPECT(fx.stopped == 0);
-    host.destroy(host.user); /* the lens context created before the failure is released */
+    host.destroy(host.user); /* the ui context created before the failure is released */
     OT_EXPECT(app.ui == nullptr);
 }
 

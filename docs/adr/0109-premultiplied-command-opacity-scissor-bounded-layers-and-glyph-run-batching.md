@@ -3,7 +3,7 @@ id: ADR-0109
 title: "Premultiplied Command Opacity Modulation, Scissor-Bounded Vulkan Layer Passes, and GPU Glyph Run Batching"
 status: accepted
 date: 2026-10-14
-scope: libs/lens, libs/flux, libs/glyph, bindings/lens-rs, tests/lens, tests/flux
+scope: libs/ui, libs/gfx, libs/text, bindings/lens-rs, tests/ui, tests/gfx
 superseded_by: null
 negative_knowledge: true
 ---

@@ -1,12 +1,12 @@
 /*
  * ICC profile parser (ADR-0070).
  *
- * The bounded subset flux consumes: ICC v2/v4 display- and
+ * The bounded subset gfx consumes: ICC v2/v4 display- and
  * scanner-class RGB profiles, either matrix+TRC (rXYZ/gXYZ/bXYZ +
  * rTRC/gTRC/bTRC) or A2B0 LUT (mft1/mft2/mAB). Two products:
  *
  *   - parametric extraction, when the profile maps exactly onto the
- *     {primaries, transfer} model (flux_icc_profile_color_space);
+ *     {primaries, transfer} model (optics_gfx_icc_profile_color_space);
  *   - a baked 65³ 3D LUT (working-space linear RGB) evaluated at parse
  *     time for everything else.
  *
@@ -294,7 +294,7 @@ static bool icc_chad_tag(const uint8_t *data, size_t size, optics_gfx_mat3 *out)
 }
 
 /* Match adapted-D65 colorants against the named primaries; returns the
- * named tag or FLUX_PRIMARIES_CUSTOM (xy filled). */
+ * named tag or OPTICS_GFX_PRIMARIES_CUSTOM (xy filled). */
 static optics_gfx_color_primaries icc_match_primaries(optics_gfx_mat3 rgb_to_xyz_d65,
                                                       float out_xy[8]) {
     /* Columns -> xy chromaticities. */
@@ -794,7 +794,7 @@ OPTICS_GFX_API optics_gfx_result optics_gfx_icc_profile_create(const void *data,
     }
     optics_gfx_mat3 colorants_d65 = optics_gfx_mat3_multiply(adapt, colorants);
 
-    /* Parametric extraction: identical TRCs in the flux transfer set. */
+    /* Parametric extraction: identical TRCs in the gfx transfer set. */
     if (icc_trc_same(&trcs[0], &trcs[1]) && icc_trc_same(&trcs[1], &trcs[2])) {
         const icc_trc *t = &trcs[0];
         optics_gfx_transfer_func tf = OPTICS_GFX_TRANSFER_LINEAR;

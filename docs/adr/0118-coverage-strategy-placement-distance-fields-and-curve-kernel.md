@@ -3,8 +3,8 @@ id: ADR-0118
 title: "Coverage strategy placement — closed-form distance fields as a peer of the curve kernel"
 status: accepted
 date: 2026-10-25
+scope: libs/gfx, libs/material, libs/ui
 superseded_by: null
-scope: libs/flux, libs/prism, libs/lens
 negative_knowledge: true
 ---
 

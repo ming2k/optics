@@ -1,10 +1,10 @@
-/* test_disabled.c — disabled widget state (lens_box.disabled).
+/* test_disabled.c — disabled widget state (optics_ui_box.disabled).
  *
  * Verifies that disabled widgets do not respond to clicks, do not
- * receive focus, and report LENS_A11Y_DISABLED in semantics. */
+ * receive focus, and report OPTICS_UI_A11Y_DISABLED in semantics. */
 
-#include "lens_test.h"
 #include "optics_test.h"
+#include "ui_test.h"
 #include <optics/ui.h>
 #include <string.h>
 

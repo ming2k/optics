@@ -3,7 +3,9 @@ id: ADR-0018
 title: "Meson subprojects for the flux + lens + iris stack"
 status: superseded
 date: 2026-06-23
-superseded_by: "ADR-0023](0023-unified-monorepo-build.md"
+scope: window
+superseded_by: ADR-0023
+negative_knowledge: true
 ---
 
 # ADR-0018: Meson subprojects for the flux + lens + iris stack

@@ -1,6 +1,6 @@
 # Showcase Examples
 
-Flagship composition and material demos built on Optics. Unlike per-library starter examples (`examples/<library>/`), these showcases demonstrate how multiple layers of the stack (Flux rendering + Prism materials + Lens UI + Iris native windowing) compose together to create modern desktop visuals with native Wayland cursor-shape and fractional HiDPI support.
+Flagship composition and material demos built on Optics. Unlike per-library starter examples (`examples/<library>/`), these showcases demonstrate how multiple layers of the stack (gfx rendering + materials + UI + window native windowing) compose together to create modern desktop visuals with native Wayland cursor-shape and fractional HiDPI support.
 
 ```sh
 meson setup build -Dexamples=true
@@ -10,24 +10,24 @@ meson compile -C build
 
 | Demo | Kind | Description |
 |------|------|-------------|
-| [`material_gallery`](#material_gallery) | interactive, visual | All 4 Prism materials side-by-side: Liquid Glass, Frosted, Acrylic, Mica |
+| [`material_gallery`](#material_gallery) | interactive, visual | All 4 materials side-by-side: Liquid Glass, Frosted, Acrylic, Mica |
 
 ---
 
 ## material_gallery
 
-The comparative visual showcase for the entire Optics Prism material library ([ADR-0096](../../docs/adr/0096-prism-mica-foundation-material.md), [ADR-0097](../../docs/adr/0097-canonical-example-taxonomy-and-governance.md)).
+The comparative visual showcase for the entire Optics material library ([ADR-0096](../../docs/adr/0096-prism-mica-foundation-material.md), [ADR-0097](../../docs/adr/0097-canonical-example-taxonomy-and-governance.md)).
 Renders an animated dynamic backdrop (radial color orbs, moving high-contrast
 stripes, geometric rings) and overlays all four modern UI materials side-by-side:
 
-1. **Liquid Glass** (`<prism/liquid_glass.h>`): physical IOR refraction,
+1. **Liquid Glass** (`<optics/material/liquid_glass.h>`): physical IOR refraction,
    chromatic dispersion (RGB split), continuous G2 squircle curvature, and 360° dual-rim optics.
-2. **Frosted Glass** (`<prism/frosted.h>`): high-purity dual-Kawase blur with
+2. **Frosted Glass** (`<optics/material/frosted.h>`): high-purity dual-Kawase blur with
    macOS-style vibrancy color saturation boost.
-3. **Acrylic** (`<prism/acrylic.h>`): Windows Fluent-style dual-Kawase blur,
+3. **Acrylic** (`<optics/material/acrylic.h>`): Windows Fluent-style dual-Kawase blur,
    luminance plate balancing (Smoke / Pearl), 1px SDF border highlight rim, and
    procedural blue-noise grain.
-4. **Mica & Mica Alt** (`<prism/mica.h>`): Windows 11 desktop foundation material
+4. **Mica & Mica Alt** (`<optics/material/mica.h>`): Windows 11 desktop foundation material
    with screen-anchored wallpaper sampling, soft blur, theme tinting, mineral dither,
    and inactive fallback state.
 

@@ -3,7 +3,7 @@
  * frame's RenderPlan while the existing backend remains authoritative.
  *
  * This is the production wiring test, not an IR unit test: the nodes are
- * created by flux_image_create, flux_image_update_region and a Canvas draw,
+ * created by optics_gfx_image_create, optics_gfx_image_update_region and a Canvas draw,
  * then inspected through the frame's plan.
  */
 #include "../../../libs/gfx/src/core/internal.h"

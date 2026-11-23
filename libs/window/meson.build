@@ -1,20 +1,18 @@
-# libiris: the platform shell — native window, event pump, frame cadence.
+# liboptics_window: the platform shell — native window, event pump, frame
+# cadence, clipboard, IME, dialogs and the accessibility bridge.
 #
-# iris depends on flux and nothing above it. iris_app_run drives a windowed
-# event loop and presents host canvas content plus an optional UI layer that
-# plugs in through <iris/host.h>; `aperture` binds lens to that seam. Theme query reads the OS colour-scheme preference at
-# startup and follows it live where supported. File dialogs use
-# xdg-desktop-portal on Linux. The a11y seam is a real AT-SPI bridge on
-# Linux when libsystemd is available, a no-op stub otherwise.
+# window depends on gfx and nothing above it. optics_window_run drives a
+# windowed event loop and presents host canvas content plus an optional UI
+# layer that plugs in through <optics/window/host.h>; `app` binds ui to that
+# seam (ADR-0166). The a11y bridge is AT-SPI on Linux when libsystemd is
+# available and a no-op stub elsewhere.
 #
-# Backend selection is compile-time (ADR-0044): exactly one of the
-# per-OS branches below adds its backend sources and defines
-# IRIS_BACKEND_WAYLAND / IRIS_BACKEND_WIN32 / IRIS_BACKEND_COCOA, which the
-# dispatcher in src/app.c switches on. Platforms without a backend get
-# IRIS_BUILD_NO_BACKEND: a linkable libiris whose iris_app_run returns
-# non-zero, for platform-less CI / bindgen builds. The public headers are
-# identical on every platform.
-#
+# Backend selection is compile-time (ADR-0044): exactly one of the per-OS
+# branches below adds its backend sources and defines
+# OPTICS_WINDOW_BACKEND_{WAYLAND,WIN32,COCOA}, which src/app.c dispatches on.
+# Platforms without a backend get OPTICS_WINDOW_BUILD_NO_BACKEND: a linkable
+# library whose run entry point fails, for platform-less CI and bindgen
+# builds. The public headers are identical on every platform.
 
 window_inc = include_directories('include')
 
@@ -86,28 +84,19 @@ if host_system == 'linux'
     window_c_args += '-DOPTICS_WINDOW_BACKEND_WAYLAND=1'
 
     # Generate wayland protocol glue at build time. cursor-shape-v1
-    # (wayland-protocols ≥ 1.32, Aug 2023) is the modern path: the
-    # compositor renders the cursor with its own configured theme, so
-    # we never load a cursor theme ourselves and the cursor always
-    # matches the user's desktop. GNOME 45+, KDE Plasma 6, and wlroots
-    # 0.18+ all support it; compositors that don't simply don't bind the
-    # global, and iris_set_cursor falls back to no-op (compositor's
-    # default arrow stays).
+    # (wayland-protocols >= 1.32) lets the compositor draw the cursor from the
+    # user's own theme, for the pointer and for tablet tools; compositors
+    # without it don't advertise the global and the cursor calls are no-ops.
+    # Its get_tablet_tool_v2 request references the tablet protocol scanned
+    # below, so the two are generated together.
     #
-    # We ship a local copy of cursor-shape-v1.xml with the
-    # `get_tablet_tool_v2` request stripped: that request references
-    # `zwp_tablet_tool_v2_interface`, which we don't bind, and wayland-
-    # scanner generates an unresolved extern for it. Stripping the
-    # request (we never call it; iris is mouse-only today) avoids the
-    # link error without dragging in tablet-tool-v2.
-    #
-    # text-input-unstable-v3.xml is also vendored: the listener fills every
+    # text-input-unstable-v3.xml is vendored: the listener fills every
     # v2/v3 event slot (libwayland aborts on a NULL slot), while older host
     # protocol packages — including Ubuntu 24.04's — predate `preedit_hint`,
     # `action`, and `language`. Pinning the XML keeps the generated listener
     # and app_wayland.c's slot contract in lockstep.
     wl = import('wayland')
-    iris_proto_src = wl.scan_xml(
+    optics_window_proto_src = wl.scan_xml(
       wl.find_protocol('xdg-shell'),
       wl.find_protocol('xdg-decoration', state : 'unstable', version : 1),
       wl.find_protocol('xdg-foreign', state : 'unstable', version : 2),
@@ -118,16 +107,16 @@ if host_system == 'linux'
       # presentation-time (stable): the compositor's own report of when a
       # frame actually reached the display, plus the real refresh interval.
       # This is one of the two clocks ADR-0122 paces from (the other being
-      # wl_surface.frame); it is what lets iris learn 120/144 Hz instead of
+      # wl_surface.frame); it is what lets window learn 120/144 Hz instead of
       # assuming 60 Hz.
       wl.find_protocol('presentation-time'),
       # Pen/tablet input (tablet_wayland.c): pressure, eraser end, barrel
       # buttons. Compositors without tablets simply don't advertise the
       # global; the bridge stays inert.
       wl.find_protocol('tablet', state : 'unstable', version : 2),
-      'protocol/cursor-shape-v1.xml',
+      wl.find_protocol('cursor-shape', state : 'staging', version : 1),
     )
-    window_sources += iris_proto_src
+    window_sources += optics_window_proto_src
     window_sources += files('src/tablet_wayland.c')
   else
     warning('Wayland backend skipped: wayland-client / xkbcommon / vulkan not found')
@@ -136,12 +125,9 @@ if host_system == 'linux'
 
 elif host_system == 'windows'
   # ---- Windows: Win32 backend -------------------------------------------
-  # The contract these files implement is documented in
-  # src/platform_internal.h (+ the Win32 recipe in
-  # src/platform_wakeup.h). theme_win32.c supplies the theme.h API
-  # (query + callback-based watch); file_dialog_win32.c the file_dialog.h
-  # API; a11y_stub.c keeps the bridge inert until a UI Automation bridge
-  # lands. platform_wakeup.c uses a portable lock (SRWLOCK on _WIN32).
+  # The contract these files implement is src/platform_internal.h (plus the
+  # Win32 notes in src/platform_wakeup.h). a11y uses the stub until a UI
+  # Automation bridge exists.
   window_sources += files(
     'src/app_win32.c',
     'src/theme_win32.c',
@@ -160,8 +146,8 @@ elif host_system == 'windows'
 
 elif host_system == 'darwin'
   # ---- macOS: Cocoa backend ----------------------------------------------
-  # Same situation as the Win32 branch: files land with the Cocoa backend
-  # task. platform_wakeup.c is usable as-is (macOS has native pthreads).
+  # The Vulkan surface is a CAMetalLayer driven through MoltenVK (ADR-0056).
+  # The AT-SPI bridge has no macOS counterpart yet, so a11y uses the stub.
   add_languages('objc', required : true)
   window_sources += files(
     'src/app_cocoa.m',
@@ -231,7 +217,7 @@ pkg.generate(
   libraries   : window_lib,
   name        : 'optics-window',
   filebase    : 'optics-window',
-  description : 'Platform shell: native window, event pump and frame cadence over flux',
+  description : 'Platform shell: native window, event pump and frame cadence over gfx',
   version     : meson.project_version(),
   requires    : ['optics-gfx >= ' + meson.project_version()],
 )

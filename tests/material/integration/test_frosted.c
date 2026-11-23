@@ -1,5 +1,5 @@
 /*
- * test_frosted.c — integration test for prism frosted glass material.
+ * test_frosted.c — integration test for material frosted glass material.
  *
  * Verifies:
  *   - Lifecycle: creation, retention, refcounting, and safe destruction.

@@ -1,10 +1,10 @@
-//! Raw FFI bindings to `libflux`.
+//! Raw FFI bindings to `liboptics_gfx`.
 //!
-//! Generated at build time by bindgen from the flux public headers
+//! Generated at build time by bindgen from the gfx public headers
 //! (`core.h`, `math.h`, `canvas.h`, `vulkan.h`, `dmabuf.h`, `scene.h`,
 //! `compute.h`, `effect.h`), so the bindings always match the C headers
 //! pkg-config resolves. Set `OPTICS_GFX_SOURCE_DIR` to pin a specific checkout.
-//! This crate is `unsafe` by nature; prefer the safe `optics-flux` wrapper crate
+//! This crate is `unsafe` by nature; prefer the safe `optics-gfx` wrapper crate
 //! for application code.
 #![allow(non_upper_case_globals)]
 #![allow(non_camel_case_types)]

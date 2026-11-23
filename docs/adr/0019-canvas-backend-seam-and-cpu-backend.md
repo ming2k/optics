@@ -3,6 +3,9 @@ id: ADR-0019
 title: "Canvas rendering backend seam + software (CPU) backend"
 status: accepted
 date: 2026-07-02
+scope: unrecorded
+superseded_by: null
+negative_knowledge: true
 ---
 
 # ADR-0019: Canvas rendering backend seam + software (CPU) backend

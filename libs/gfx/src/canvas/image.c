@@ -8,9 +8,9 @@
  * std430 layout — keep in sync with the shader. */
 typedef struct optics_gfx_image_color_params {
     float primaries[3][4]; /* content -> working space, column-major mat3 */
-    uint32_t transfer;     /* flux_transfer_func of the content */
-    float gamma;           /* FLUX_TRANSFER_GAMMA exponent */
-    uint32_t lut_handle;   /* bindless 3D LUT, or FLUX_BINDLESS_INVALID */
+    uint32_t transfer;     /* optics_gfx_transfer_func of the content */
+    float gamma;           /* OPTICS_GFX_TRANSFER_GAMMA exponent */
+    uint32_t lut_handle;   /* bindless 3D LUT, or OPTICS_GFX_BINDLESS_INVALID */
     uint32_t lut_size;
 } optics_gfx_image_color_params;
 
@@ -252,22 +252,24 @@ optics_gfx_result optics_gfx_image_create(optics_gfx_device *d, const optics_gfx
     if (!d || !desc || !out)
         return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
     if (desc->type != OPTICS_GFX_TYPE_IMAGE_DESC) {
-        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT, "desc->type != FLUX_TYPE_IMAGE_DESC");
+        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT,
+                        "desc->type != OPTICS_GFX_TYPE_IMAGE_DESC");
         return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
     }
     if (desc->usage != OPTICS_GFX_IMAGE_USAGE_SAMPLED) {
         /* Attachment and storage images start with undefined contents: pixel
          * data and a colour-space tag describe uploads, which they never take. */
         if (desc->initial_data || desc->next) {
-            OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT,
-                            "initial_data / extensions apply to FLUX_IMAGE_USAGE_SAMPLED only");
+            OPTICS_GFX_FAIL(
+                OPTICS_GFX_ERROR_INVALID_ARGUMENT,
+                "initial_data / extensions apply to OPTICS_GFX_IMAGE_USAGE_SAMPLED only");
             return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
         }
         if (desc->usage == OPTICS_GFX_IMAGE_USAGE_COMPUTE_WRITE)
             return image_create_compute_writable(d, desc->width, desc->height, desc->format, out);
         if (desc->usage == OPTICS_GFX_IMAGE_USAGE_RENDER_TARGET)
             return image_create_render_target(d, desc->width, desc->height, desc->format, out);
-        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT, "unknown flux_image_usage");
+        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT, "unknown optics_gfx_image_usage");
         return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
     }
     if (desc->width == 0 || desc->height == 0) {
@@ -321,7 +323,7 @@ optics_gfx_result optics_gfx_image_create(optics_gfx_device *d, const optics_gfx
     /* Ledger-derived per-instance name (ADR-0132): unique, and rendered into
      * storage that outlives the call. */
     optics_gfx_vk_set_name_from_ledger(d, VK_OBJECT_TYPE_IMAGE, (uint64_t)im->image,
-                                       OPTICS_GFX_SCOPE_DEVICE, "vk_image", "flux/core");
+                                       OPTICS_GFX_SCOPE_DEVICE, "vk_image", "gfx/core");
     VkResult vr;
 
     if (desc->initial_data) {
@@ -369,7 +371,7 @@ optics_gfx_result optics_gfx_image_create(optics_gfx_device *d, const optics_gfx
 
     *out = im;
     OPTICS_GFX_OBSERVE_ACQUIRE(d, OPTICS_GFX_SCOPE_DEVICE, OPTICS_GFX_LIFETIME_CONTEXT, "vk_image",
-                               "flux/core", 0, OPTICS_GFX_SITE_VK_IMAGE);
+                               "gfx/core", 0, OPTICS_GFX_SITE_VK_IMAGE);
     return OPTICS_GFX_OK;
 
 fail:
@@ -634,8 +636,8 @@ optics_gfx_image *optics_gfx_image_retain(optics_gfx_image *im) {
 }
 
 /* Shared validation for the update-region family. On success writes the
- * packed byte count the upload needs to `*packed_bytes` and returns FLUX_OK;
- * on failure reports through FLUX_FAIL and returns the error code.
+ * packed byte count the upload needs to `*packed_bytes` and returns OPTICS_GFX_OK;
+ * on failure reports through OPTICS_GFX_FAIL and returns the error code.
  * `row_bytes` == 0 means the packed variant (stride derived from width);
  * otherwise it is the source row pitch and must be at least width * bpp. */
 static optics_gfx_result update_region_validate(const optics_gfx_image *im, uint32_t x, uint32_t y,
@@ -697,7 +699,7 @@ optics_gfx_result optics_gfx_image_update_region(optics_gfx_image *im,
     const size_t bytes = opts->bytes;
     if (opts->premultiply && im->format != OPTICS_GFX_FORMAT_RGBA8_UNORM) {
         OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_UNSUPPORTED,
-                        "premultiply upload requires FLUX_FORMAT_RGBA8_UNORM");
+                        "premultiply upload requires OPTICS_GFX_FORMAT_RGBA8_UNORM");
         return OPTICS_GFX_ERROR_UNSUPPORTED;
     }
     optics_gfx_device *d = im->device;
@@ -731,7 +733,7 @@ optics_gfx_result optics_gfx_image_update_region(optics_gfx_image *im,
                 const uint8_t *s = src + (size_t)px * 4u;
                 uint8_t a = s[3];
                 if (a == 255u || a == 0u) {
-                    memcpy(dst, s, 4); /* fast paths, identical to flux_color_rgba_premul */
+                    memcpy(dst, s, 4); /* fast paths, identical to optics_gfx_color_rgba_premul */
                 } else {
                     dst[0] = (uint8_t)((s[0] * a + 127u) / 255u);
                     dst[1] = (uint8_t)((s[1] * a + 127u) / 255u);
@@ -812,7 +814,7 @@ void optics_gfx_image_release(optics_gfx_image *im) {
     if (retire)
         image_retire_resources(d, im);
     optics_gfx_image_release_color(d, im->color);
-    OPTICS_GFX_OBSERVE_RELEASE(d, OPTICS_GFX_SCOPE_DEVICE, "vk_image", "flux/core", 0);
+    OPTICS_GFX_OBSERVE_RELEASE(d, OPTICS_GFX_SCOPE_DEVICE, "vk_image", "gfx/core", 0);
     bool weak = im->device_weak;
     if (shared && retire)
         optics_gfx_internal_free(d, shared);
@@ -826,7 +828,7 @@ bool optics_gfx_device_supports_image_usage(const optics_gfx_device *d, optics_g
     if (!d)
         return false;
 
-    /* The flux format set maps 1:1 onto these Vulkan formats; the switch
+    /* The gfx format set maps 1:1 onto these Vulkan formats; the switch
      * doubles as the "format exists at all" check. */
     VkFormat vk;
     switch (format) {
@@ -943,7 +945,7 @@ static optics_gfx_result image_create_compute_writable(optics_gfx_device *d, uin
     im->snapshot_allowed = true;
     im->color = nullptr;
     /* Effect-pool transients are owned by the device's effect state
-     * and released by effect_state_destroy inside flux_device_release;
+     * and released by effect_state_destroy inside optics_gfx_device_release;
      * a strong device ref here would cycle and keep the refcount from
      * ever reaching zero (the whole device would leak). */
     im->device = d;
@@ -1014,7 +1016,7 @@ static optics_gfx_result image_create_compute_writable(optics_gfx_device *d, uin
 
     *out = im;
     OPTICS_GFX_OBSERVE_ACQUIRE(d, OPTICS_GFX_SCOPE_DEVICE, OPTICS_GFX_LIFETIME_CONTEXT, "vk_image",
-                               "flux/core", 0, OPTICS_GFX_SITE_VK_IMAGE);
+                               "gfx/core", 0, OPTICS_GFX_SITE_VK_IMAGE);
     return OPTICS_GFX_OK;
 
 fail:
@@ -1037,9 +1039,9 @@ optics_gfx_result optics_gfx_frame_prepare_image_target(optics_gfx_frame *f,
     if (!f || !target)
         return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
     if (!target->render_target) {
-        OPTICS_GFX_FAIL(
-            OPTICS_GFX_ERROR_INVALID_ARGUMENT,
-            "image target was not created with flux_image_create (FLUX_IMAGE_USAGE_RENDER_TARGET)");
+        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT,
+                        "image target was not created with optics_gfx_image_create "
+                        "(OPTICS_GFX_IMAGE_USAGE_RENDER_TARGET)");
         return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
     }
     if (f->state != OPTICS_GFX_FRAME_STATE_RECORDING || optics_gfx_frame_has_active_pass(f)) {
@@ -1088,9 +1090,9 @@ optics_gfx_result optics_gfx_frame_finish_image_target(optics_gfx_frame *f,
     if (!f || !target)
         return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
     if (!target->render_target) {
-        OPTICS_GFX_FAIL(
-            OPTICS_GFX_ERROR_INVALID_ARGUMENT,
-            "image target was not created with flux_image_create (FLUX_IMAGE_USAGE_RENDER_TARGET)");
+        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT,
+                        "image target was not created with optics_gfx_image_create "
+                        "(OPTICS_GFX_IMAGE_USAGE_RENDER_TARGET)");
         return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
     }
     if (f->state != OPTICS_GFX_FRAME_STATE_RECORDING || optics_gfx_frame_has_active_pass(f)) {
@@ -1133,11 +1135,11 @@ optics_gfx_result optics_gfx_frame_finish_image_target(optics_gfx_frame *f,
 /*  Render-target image (ADR-0017)                                    */
 /* ------------------------------------------------------------------ */
 
-/* Create an image suitable as a flux_canvas_begin_target destination:
+/* Create an image suitable as a optics_gfx_canvas_begin destination:
  * COLOR_ATTACHMENT | SAMPLED | TRANSFER_DST, 1 sample. Contents and layout
  * stay undefined until the first caller-recorded target pass; this avoids a
  * synchronous one-shot queue submission during frame recording. Strong device
- * ref (caller-owned, like flux_image_create — not the effect-pool weak ref). */
+ * ref (caller-owned, like optics_gfx_image_create — not the effect-pool weak ref). */
 static optics_gfx_result image_create_render_target(optics_gfx_device *d, uint32_t width,
                                                     uint32_t height, optics_gfx_format fmt,
                                                     optics_gfx_image **out) {
@@ -1218,7 +1220,7 @@ static optics_gfx_result image_create_render_target(optics_gfx_device *d, uint32
 
     *out = im;
     OPTICS_GFX_OBSERVE_ACQUIRE(d, OPTICS_GFX_SCOPE_DEVICE, OPTICS_GFX_LIFETIME_CONTEXT, "vk_image",
-                               "flux/core", 0, OPTICS_GFX_SITE_VK_IMAGE);
+                               "gfx/core", 0, OPTICS_GFX_SITE_VK_IMAGE);
     return OPTICS_GFX_OK;
 
 fail:

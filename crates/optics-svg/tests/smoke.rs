@@ -1,7 +1,7 @@
 //! End-to-end smoke test for the safe bindings: parse, inspect, paint,
 //! rasterize, and prove the document drains.
 //!
-//! Everything here runs headlessly on flux's software canvas, so it needs no GPU
+//! Everything here runs headlessly on gfx's software canvas, so it needs no GPU
 //! and no display — which is the point of the library being device-less.
 
 use optics_svg::{Document, DrawOptions, Error, Fit, PaintMode, PixelFormat, RasterizeOptions};

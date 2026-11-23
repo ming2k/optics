@@ -3,6 +3,9 @@ id: ADR-0089
 title: "Rendering programs and dependency-driven execution"
 status: accepted
 date: 2026-09-14
+scope: Flux, gfx-text, scene producers, Prism, Lens, Iris, C and Rust APIs
+superseded_by: null
+negative_knowledge: true
 ---
 
 # ADR-0089: Rendering programs and dependency-driven execution

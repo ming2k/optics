@@ -7,7 +7,7 @@
 
 #define TAB_DRAG_THRESHOLD_SQ 196.0f /* 14px Euclidean movement threshold (ADR-0086 parity) */
 
-/* Persistent per-strip drag state, stored via lens_node_state on a retained
+/* Persistent per-strip drag state, stored via optics_ui_node_state on a retained
  * node keyed by the strip identity (ADR-0027: zeroed on first touch, lives
  * with the node). The host reorders its model on MOVE; between presses every
  * frame is rebuilt from the caller's tab array, so nothing here owns tab
@@ -58,7 +58,7 @@ optics_ui_tab_action optics_ui_tab_strip(optics_ui *ui, const optics_ui_tab_stri
     /* Drag state hangs on a stable id derived from the strip identity so it
      * survives frame-to-frame rebuilds of the tab list. */
     optics_ui_id drag_state_id = optics_ui_current_id(ui, "drag_state");
-    optics_ui_node *drag_node = lensi_store_touch(ui, drag_state_id);
+    optics_ui_node *drag_node = optics_ui__store_touch(ui, drag_state_id);
     tab_strip_drag *drag =
         drag_node ? (tab_strip_drag *)optics_ui_node_state(drag_node, sizeof(tab_strip_drag))
                   : nullptr;
@@ -105,7 +105,7 @@ optics_ui_tab_action optics_ui_tab_strip(optics_ui *ui, const optics_ui_tab_stri
         };
 
         bool close_hovered =
-            tab->closable && (r.w > 0.0f) && lensi_point_in(ui->input.cursor, close_rect);
+            tab->closable && (r.w > 0.0f) && optics_ui__point_in(ui->input.cursor, close_rect);
         bool tab_hovered = resp.hovered;
 
         /* Press / click on the close button */
@@ -187,7 +187,7 @@ optics_ui_tab_action optics_ui_tab_strip(optics_ui *ui, const optics_ui_tab_stri
         bool show_close = tab->closable &&
                           (tab_hovered || (drag && drag->close_pressed && drag->close_index == i));
         if (show_close) {
-            optics_ui_node *n = lensi_store_touch(ui, resp.id);
+            optics_ui_node *n = optics_ui__store_touch(ui, resp.id);
             if (n) {
                 optics_gfx_rect rel_close = {
                     .x = -pad_right,
@@ -199,48 +199,48 @@ optics_ui_tab_action optics_ui_tab_strip(optics_ui *ui, const optics_ui_tab_stri
                 if (close_hovered) {
                     ui->cursor_hint = OPTICS_UI_CURSOR_POINTER;
                     optics_gfx_color hover_bg = ui->theme.color_hover;
-                    lensi_drawlist_push(ui, n,
-                                        (optics_ui_draw_cmd){
-                                            .kind = OPTICS_UI_DRAW_RECT,
-                                            .rel = rel_close,
-                                            .color = hover_bg,
-                                            .radius = close_size * 0.5f,
-                                        });
+                    optics_ui__drawlist_push(ui, n,
+                                             (optics_ui_draw_cmd){
+                                                 .kind = OPTICS_UI_DRAW_RECT,
+                                                 .rel = rel_close,
+                                                 .color = hover_bg,
+                                                 .radius = close_size * 0.5f,
+                                             });
                 }
 
-                optics_gfx_color close_fg = close_hovered
-                                                ? ui->theme.color_fg
-                                                : lensi_opacity_color(ui->theme.color_fg, 0.65f);
+                optics_gfx_color close_fg =
+                    close_hovered ? ui->theme.color_fg
+                                  : optics_ui__opacity_color(ui->theme.color_fg, 0.65f);
                 if (opts && opts->close_icon != OPTICS_UI_ICON_INVALID) {
-                    lensi_drawlist_push(ui, n,
-                                        (optics_ui_draw_cmd){
-                                            .kind = OPTICS_UI_DRAW_ICON,
-                                            .rel =
-                                                {
-                                                    .x = -pad_right - 2.0f,
-                                                    .y = (tab_h - (close_size - 4.0f)) * 0.5f,
-                                                    .w = close_size - 4.0f,
-                                                    .h = close_size - 4.0f,
-                                                },
-                                            .color = close_fg,
-                                            .icon_id = opts->close_icon,
-                                            .width = 1.5f,
-                                        });
+                    optics_ui__drawlist_push(ui, n,
+                                             (optics_ui_draw_cmd){
+                                                 .kind = OPTICS_UI_DRAW_ICON,
+                                                 .rel =
+                                                     {
+                                                         .x = -pad_right - 2.0f,
+                                                         .y = (tab_h - (close_size - 4.0f)) * 0.5f,
+                                                         .w = close_size - 4.0f,
+                                                         .h = close_size - 4.0f,
+                                                     },
+                                                 .color = close_fg,
+                                                 .icon_id = opts->close_icon,
+                                                 .width = 1.5f,
+                                             });
                 } else {
-                    lensi_drawlist_push(ui, n,
-                                        (optics_ui_draw_cmd){
-                                            .kind = OPTICS_UI_DRAW_TEXT,
-                                            .rel =
-                                                {
-                                                    .x = -pad_right - 4.0f,
-                                                    .y = (tab_h - 12.0f) * 0.5f - 1.0f,
-                                                    .w = 0,
-                                                    .h = 0,
-                                                },
-                                            .color = close_fg,
-                                            .text = "×",
-                                            .text_size = 12.0f,
-                                        });
+                    optics_ui__drawlist_push(ui, n,
+                                             (optics_ui_draw_cmd){
+                                                 .kind = OPTICS_UI_DRAW_TEXT,
+                                                 .rel =
+                                                     {
+                                                         .x = -pad_right - 4.0f,
+                                                         .y = (tab_h - 12.0f) * 0.5f - 1.0f,
+                                                         .w = 0,
+                                                         .h = 0,
+                                                     },
+                                                 .color = close_fg,
+                                                 .text = "×",
+                                                 .text_size = 12.0f,
+                                             });
                 }
             }
         }

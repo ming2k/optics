@@ -1,5 +1,5 @@
 /*
- * flux_image_update_region: bounds checks + happy-path upload of a
+ * optics_gfx_image_update_region: bounds checks + happy-path upload of a
  * sub-region into an existing image. Skips if no Vulkan device.
  */
 #include "gfx_test.h"

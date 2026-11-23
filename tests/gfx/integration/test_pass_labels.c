@@ -4,7 +4,7 @@
  * ADR-0133 was marked Landed while nothing in the tree could tell whether a
  * label had ever reached the driver. That is the same "declared, never observed"
  * failure this ADR family exists to remove, so this file asserts the observable
- * seam directly: `flux_device_labels_emitted` counts every
+ * seam directly: `optics_gfx_device_labels_emitted` counts every
  * vkCmdBeginDebugUtilsLabelEXT the library issued.
  *
  * What is asserted, and why each half matters:
@@ -14,7 +14,7 @@
  *   - With the capability on and a real pass recorded, one label per pass.
  *     Without this the capability is a switch with no observable effect.
  *   - The label does not fire for the CPU backend, which has no command buffer
- *     — verified indirectly: it never calls flux_frame_begin_pass, so the count
+ *     — verified indirectly: it never calls optics_gfx_frame_begin_pass, so the count
  *     stays at zero for a CPU canvas.
  *
  * Skipped (with PASS) when VK_EXT_debug_utils is unavailable, because then the

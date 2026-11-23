@@ -3,7 +3,9 @@ id: ADR-0011
 title: "Hole-bridging ear-clipping tessellator"
 status: superseded
 date: 2026-01-01
-superseded_by: "ADR-0115"
+scope: unrecorded
+superseded_by: ADR-0115
+negative_knowledge: false
 ---
 
 # ADR-0011: Hole-bridging ear-clipping tessellator

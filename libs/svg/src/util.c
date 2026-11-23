@@ -2,9 +2,9 @@
  * algebra the parser and the painter both use.
  *
  * Libreticle is device-less by design (ADR-0136): a parsed document outlives every
- * flux device, so it cannot borrow a device allocator without making document
+ * gfx device, so it cannot borrow a device allocator without making document
  * lifetime depend on device creation order. Allocation therefore goes to libc
- * and is released only by reticle_release. */
+ * and is released only by optics_svg_release. */
 
 #include "internal.h"
 

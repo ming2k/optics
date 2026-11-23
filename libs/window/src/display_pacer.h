@@ -48,7 +48,7 @@
  * ============================================================================
  *
  * `[INV-PACE-03]`: every non-quiescent decision carries `wait_timeout_ns >= 1`.
- * That is a hard postcondition of `iris_pacer_tick` and the reason the old
+ * That is a hard postcondition of `optics_window_pacer_tick` and the reason the old
  * 0 ms-poll spin is structurally impossible: the schedule can only move
  * forward (in whole display intervals), and it is never re-derived from a
  * render timestamp. A zero-render skip advances the cadence exactly like a
@@ -109,36 +109,36 @@ typedef struct optics_window_pace_inputs {
      * Frame-callback and buffer-release traffic must NOT set this. */
     bool input_active;
 
-    /* The host asked for another frame (iris_request_animation_frame). */
+    /* The host asked for another frame (optics_window_request_animation_frame). */
     bool host_animating;
 
-    /* An eased value / spring is still in flight inside lens
-     * (iris_ui_frame.animating). Keeps the cadence warm; it does not by itself
+    /* An eased value / spring is still in flight inside ui
+     * (optics_window_ui_frame.animating). Keeps the cadence warm; it does not by itself
      * force a paint — the chrome damage the build reports does. */
     bool ui_animating;
 
     /* The host declared this frame a zero-render skip
-     * (iris_request_frame_skip_render): canvas unchanged, cadence continues. */
+     * (optics_window_request_frame_skip_render): canvas unchanged, cadence continues. */
     bool host_skip_render;
 
-    /* The host declared this frame's canvas static (iris_record_mark_static). */
+    /* The host declared this frame's canvas static (optics_window_record_mark_static). */
     bool host_static;
 
     /* The host supplies canvas or frame content via cfg->record / cfg->prepare.
-     * Hosts without one only ever paint on lens chrome damage. */
+     * Hosts without one only ever paint on ui chrome damage. */
     bool has_host_content;
 
-    /* iris_ui_frame.damaged: the UI chrome itself changed. This already
-     * includes a caret blink *flip* (ADR-0151), because lens reports the
+    /* optics_window_ui_frame.damaged: the UI chrome itself changed. This already
+     * includes a caret blink *flip* (ADR-0151), because ui reports the
      * transition as damage — so a flip paints through `forced`, exactly like
      * any other chrome change. */
     bool chrome_damaged;
 
     /* A caret blink clock is live: some text widget holds focus and the blink
-     * is enabled (iris_ui_frame.caret_ticking).
+     * is enabled (optics_window_ui_frame.caret_ticking).
      *
      * This is a *level*, and it deliberately does not force a paint. Its only
-     * job is to keep the low idle tick alive, because lens advances the blink
+     * job is to keep the low idle tick alive, because ui advances the blink
      * clock by `dt_seconds` — a contexthat stopped receiving frames could
      * never reach its next phase, and the caret would freeze mid-blink. The
      * paint itself is owed by `chrome_damaged` on the frame a flip lands.
@@ -164,7 +164,7 @@ typedef struct optics_window_pace_decision {
     int64_t sim_time_ns;
 
     /* Poll budget in nanoseconds. Guaranteed `>= 1` unless the action is
-     * IRIS_PACE_QUIESCE, in which case it is 0 and the caller blocks with its
+     * OPTICS_WINDOW_PACE_QUIESCE, in which case it is 0 and the caller blocks with its
      * own cap (INV-PACE-03). */
     int64_t wait_timeout_ns;
 } optics_window_pace_decision;
@@ -207,4 +207,4 @@ int64_t optics_window_pacer_refresh_ns(const optics_window_pacer *p);
 [[nodiscard]] optics_window_pace_decision
 optics_window_pacer_tick(optics_window_pacer *p, const optics_window_pace_inputs *in);
 
-#endif /* IRIS_DISPLAY_PACER_H */
+#endif /* OPTICS_WINDOW_DISPLAY_PACER_H */

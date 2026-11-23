@@ -3,6 +3,9 @@ id: ADR-0056
 title: "Win32 + Cocoa backends and the MoltenVK baseline"
 status: accepted
 date: 2026-08-08
+scope: window platform backends (Windows, macOS) and the gfx device
+superseded_by: null
+negative_knowledge: true
 ---
 
 # ADR-0056: Win32 + Cocoa backends and the MoltenVK baseline

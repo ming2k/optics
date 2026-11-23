@@ -3,6 +3,9 @@ id: ADR-0092
 title: "Resource planning, synchronization, and retirement"
 status: accepted
 date: 2026-09-14
+scope: Flux execution compiler, GPU resources, uploads, and font atlas
+superseded_by: null
+negative_knowledge: true
 ---
 
 # ADR-0092: Resource planning, synchronization, and retirement

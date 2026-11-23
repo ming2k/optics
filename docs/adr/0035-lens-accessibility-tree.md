@@ -3,6 +3,9 @@ id: ADR-0035
 title: "Lens accessibility semantic tree — per-node records and post-end walk"
 status: accepted
 date: 2026-07-21
+scope: ui (L2 toolkit)
+superseded_by: null
+negative_knowledge: true
 ---
 
 # ADR-0035: Lens accessibility semantic tree — per-node records and post-end walk

@@ -1,8 +1,8 @@
 /*
- * flux_image_import_dmabuf: descriptor validation and extension-gating.
+ * optics_gfx_image_import_dmabuf: descriptor validation and extension-gating.
  *
  * This test does not require a real dma-buf producer. It verifies the
- * production-critical ownership rule on failures: flux must not close
+ * production-critical ownership rule on failures: gfx must not close
  * caller-owned fds unless import succeeds.
  */
 #include "gfx_test.h"

@@ -1,4 +1,4 @@
-//! Tests for frosted glass and acrylic materials in the `prism` binding.
+//! Tests for frosted glass and acrylic materials in the `material` binding.
 
 use optics_material::{
     AcrylicGroup, AcrylicParams, AcrylicShape, FrostedGroup, FrostedParams, FrostedShape,

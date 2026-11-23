@@ -1,7 +1,7 @@
 /*
- * flux_material retire: a material released deferred right after a frame
+ * optics_gfx_material retire: a material released deferred right after a frame
  * that drew with it must keep its VkPipeline alive until the GPU provably
- * passes that batch. Churns create -> draw -> flux_material_release_deferred
+ * passes that batch. Churns create -> draw -> optics_gfx_material_release
  * every frame to prove no in-flight use-after-free or validation error.
  */
 #include "gfx_test.h"
@@ -73,7 +73,7 @@ int main(void) {
     OT_EXPECT(mesh != nullptr);
 
     /* Churn: each frame creates a fresh material, records a draw, submits,
-     * and releases the material immediately with flux_material_release_deferred
+     * and releases the material immediately with optics_gfx_material_release
      * while the frame is in flight. */
     for (uint32_t i = 0; i < CHURN_FRAMES; ++i) {
         optics_gfx_material *material = nullptr;

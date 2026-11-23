@@ -3,6 +3,9 @@ id: ADR-0024
 title: "Lens project foundations"
 status: accepted
 date: 2026-07-21
+scope: ui (L2 toolkit)
+superseded_by: null
+negative_knowledge: true
 ---
 
 # ADR-0024: Lens project foundations

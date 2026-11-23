@@ -1,7 +1,7 @@
-/* ui_host.h — null-safe calls into the UI host (iris/host.h).
+/* ui_host.h — null-safe calls into the UI host (window/host.h).
  *
  * Every backend reaches the UI layer through these and nothing else, so a
- * missing host (`iris_app_opts.ui == nullptr`) or a missing entry behaves the
+ * missing host (`optics_window_opts.ui == nullptr`) or a missing entry behaves the
  * same on Wayland, Win32 and Cocoa: a no-op with a neutral result. */
 #ifndef OPTICS_WINDOW_UI_HOST_H
 #define OPTICS_WINDOW_UI_HOST_H
@@ -66,7 +66,7 @@ static inline uint32_t optics_window__ui_damage_rects(const optics_window_ui_hos
     return (ui && ui->damage_rects) ? ui->damage_rects(ui->user, rects, capacity) : 0;
 }
 
-/* FLUX_ERROR_UNSUPPORTED without a UI layer: there is no snapshot to make. */
+/* OPTICS_GFX_ERROR_UNSUPPORTED without a UI layer: there is no snapshot to make. */
 [[nodiscard]] static inline optics_gfx_result
 optics_window__ui_snapshot_create(const optics_window_ui_host *ui,
                                   optics_window_ui_snapshot **out) {
@@ -98,4 +98,4 @@ static inline void optics_window__ui_snapshot_release(const optics_window_ui_hos
         ui->snapshot_release(snapshot);
 }
 
-#endif /* IRIS_UI_HOST_H */
+#endif /* OPTICS_WINDOW_UI_HOST_H */

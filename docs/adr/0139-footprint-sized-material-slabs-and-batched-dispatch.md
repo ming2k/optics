@@ -3,8 +3,8 @@ id: ADR-0139
 title: "Footprint-sized material slabs, batched body dispatch, and the prism_material_output contract"
 status: accepted
 date: 2026-11-02
+scope: libs/material, libs/gfx, architecture
 superseded_by: null
-scope: libs/prism, libs/flux, architecture
 negative_knowledge: true
 ---
 

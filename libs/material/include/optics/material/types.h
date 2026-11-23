@@ -1,5 +1,5 @@
 /*
- * prism/types.h — common types and macros for the prism material library.
+ * material/types.h — common types and macros for the material library.
  */
 
 #ifndef OPTICS_MATERIAL_TYPES_H
@@ -31,21 +31,21 @@
 #define OPTICS_MATERIAL_NODISCARD
 #endif
 
-/* prism release version, kept in lockstep with the stack (see
+/* material release version, kept in lockstep with the stack (see
  * meson.project_version() in the root meson.build). */
 #define OPTICS_MATERIAL_VERSION_MAJOR 0
 #define OPTICS_MATERIAL_VERSION_MINOR 0
-#define OPTICS_MATERIAL_VERSION_PATCH 82
+#define OPTICS_MATERIAL_VERSION_PATCH 83
 
 /* Packed integer version, monotonic — identical layout to
- * FLUX_VERSION_NUMBER (major in bits 16..23, minor 8..15, patch 0..7).
+ * OPTICS_GFX_VERSION_NUMBER (major in bits 16..23, minor 8..15, patch 0..7).
  * The whole stack shares one versioning scheme so a consumer can check
  * every library it loads the same way. */
 #define OPTICS_MATERIAL_VERSION_NUMBER                                                             \
     (((uint32_t)OPTICS_MATERIAL_VERSION_MAJOR << 16) |                                             \
      ((uint32_t)OPTICS_MATERIAL_VERSION_MINOR << 8) | (uint32_t)OPTICS_MATERIAL_VERSION_PATCH)
 
-/* Stringify helpers; PRISM_STRINGIFY_ adds the indirection level required
+/* Stringify helpers; OPTICS_MATERIAL_STRINGIFY_ adds the indirection level required
  * for macro-expansion of literal tokens. */
 #define OPTICS_MATERIAL_STRINGIFY_(x) #x
 #define OPTICS_MATERIAL_STRINGIFY(x) OPTICS_MATERIAL_STRINGIFY_(x)
@@ -64,9 +64,9 @@ OPTICS_MATERIAL_API const char *optics_material_version_string(void);
 extern "C" {
 #endif
 
-/* prism descriptors open with `prism_struct_type type; const void *next;`
- * following the same extension-chain pattern as flux. The registry is
- * prism-local: values are not shared with flux_struct_type. */
+/* material descriptors open with `optics_material_struct_type type; const void *next;`
+ * following the same extension-chain pattern as gfx. The registry is
+ * material-local: values are not shared with optics_gfx_struct_type. */
 typedef enum optics_material_struct_type : uint32_t {
     OPTICS_MATERIAL_TYPE_UNKNOWN = 0,
     OPTICS_MATERIAL_TYPE_LIQUID_GLASS_DESC = 1,
@@ -87,7 +87,7 @@ typedef enum optics_material_quality : uint32_t {
 /*
  * A material's output: a slab-sized image plus where it belongs.
  *
- * A prism material only paints inside its own footprints, so its output image is
+ * A material only paints inside its own footprints, so its output image is
  * sized to those footprints (quantised up a size ladder), NOT to the input
  * capture. That is what keeps a 48-px glass titlebar from allocating three 33 MiB
  * RGBA16F images on a 4K window, and it makes a window resize reuse the same
@@ -96,10 +96,10 @@ typedef enum optics_material_quality : uint32_t {
  * The cost is that `image` no longer covers the input extent, so the caller must
  * place it rather than blit it edge-to-edge:
  *
- *     flux_canvas_draw_image(canvas, out.image,
- *                            (flux_rect){out.origin_x, out.origin_y,
- *                                        (float)flux_image_width(out.image),
- *                                        (float)flux_image_height(out.image)},
+ *     optics_gfx_canvas_draw_image(canvas, out.image,
+ *                            (optics_gfx_rect){out.origin_x, out.origin_y,
+ *                                        (float)optics_gfx_image_width(out.image),
+ *                                        (float)optics_gfx_image_height(out.image)},
  *                            nullptr);
  *
  * The dimensions above are capture pixels; both are whole numbers. `image` is
@@ -123,4 +123,4 @@ typedef struct optics_material_output {
 }
 #endif
 
-#endif /* PRISM_TYPES_H */
+#endif /* OPTICS_MATERIAL_TYPES_H */

@@ -3,7 +3,7 @@ id: ADR-0156
 title: "Slang-first shader architecture — retiring GLSL, modular device code, and clean-break SPIR-V compilation"
 status: accepted
 date: 2026-11-10
-scope: [flux, prism, shaders, build-system, ci]
+scope: [gfx, material, shaders, build-system, ci]
 superseded_by: null
 negative_knowledge: true
 ---

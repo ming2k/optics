@@ -3,7 +3,7 @@ id: ADR-0108
 title: "Motion Sub-stepping Integration and Render Target Bucket Allocation for Realtime Animation Safety"
 status: accepted
 date: 2026-10-06
-scope: libs/transit, libs/flux, bindings/transit-rs, bindings/flux-rs, tests/transit
+scope: libs/motion, libs/gfx, bindings/transit-rs, bindings/flux-rs, tests/motion
 superseded_by: null
 negative_knowledge: true
 ---

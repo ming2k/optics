@@ -17,7 +17,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "canvas_tile_raster_comp_spv.h"
+alignas(uint32_t) static const unsigned char canvas_tile_raster_comp_spv[] = {
+#embed "canvas_tile_raster.comp.spv"
+};
 
 #define W 128u
 #define H 128u
@@ -88,7 +90,7 @@ int main(void) {
     uint32_t total_indices = 0;
     canvas_tile_bin_segments(segs, n_segs, W, H, tiles, nullptr, 0, &total_indices);
 
-    uint32_t *indices = malloc((size_t)(total_indices + 1) * sizeof(uint32_t));
+    uint32_t *indices = calloc((size_t)total_indices + 1u, sizeof(uint32_t));
     OT_EXPECT(tiles && row_bd && indices);
     if (!tiles || !row_bd || !indices) {
         free(tiles);

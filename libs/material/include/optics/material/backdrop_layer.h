@@ -1,5 +1,5 @@
 /*
- * prism/backdrop_layer.h — layered backdrop material compositor.
+ * material/backdrop_layer.h — layered backdrop material compositor.
  *
  * A chrome surface is usually not one material: a frosted sheet (the
  * blurred backdrop, drawn as one or more rectangles) carries analytic
@@ -12,14 +12,14 @@
  * at every glass silhouette.
  *
  * This filter composes the stack in one ordered dispatch sequence against
- * one persistent transparent output (the same contract as the other prism
+ * one persistent transparent output (the same contract as the other material
  * materials):
  *
- *   1. frost: every `prism_base_material` rectangle writes the blurred
+ *   1. frost: every `optics_material_base_material` rectangle writes the blurred
  *      backdrop, source-over, inside its rect (rounded-rect SDF coverage,
  *      per-rect opacity);
- *   2. glass: every `prism_liquid_glass_group` is evaluated exactly as
- *      prism_liquid_glass_filter_apply evaluates it — but the lens samples
+ *   2. glass: every `optics_material_liquid_glass_group` is evaluated exactly as
+ *      optics_material_liquid_glass_filter_apply evaluates it — but the lens samples
  *      the *frosted* layer, so a glass body bends and frosts the frost
  *      beneath it instead of looking past it.
  *
@@ -28,17 +28,17 @@
  * the sharp desktop completes the composite.
  *
  * `input` is the sharp backdrop capture and `blurred_input` is normally
- * the output of flux_blur_filter_apply for the same capture. All three
+ * the output of optics_gfx_blur_filter_apply for the same capture. All three
  * images share one extent. Glass statistics are submitted for the glass
  * groups exactly as the liquid-glass filter does, and are read back with
- * prism_backdrop_layer_filter_stats on the same slot cadence.
+ * optics_material_backdrop_layer_filter_stats on the same slot cadence.
  *
- * Output caching: chain a `prism_backdrop_layer_revision` through
+ * Output caching: chain a `optics_material_backdrop_layer_revision` through
  * `desc->next` to let the filter reuse a frame slot's previous output; see
- * prism_backdrop_layer_filter_apply for the exact contract.
+ * optics_material_backdrop_layer_filter_apply for the exact contract.
  *
  * Threading: filters are not thread-safe per device. Serialize calls per
- * device, as you would for any other flux recording API.
+ * device, as you would for any other gfx recording API.
  */
 
 #ifndef OPTICS_MATERIAL_BACKDROP_LAYER_H
@@ -94,7 +94,7 @@ typedef struct optics_material_base_material {
  *
  *   - `input` is normally one long-lived capture target, so its handle does
  *     not change when the captured content does;
- *   - `blurred_input` is a pooled `flux_blur_filter` output, and the pool
+ *   - `blurred_input` is a pooled `optics_gfx_blur_filter` output, and the pool
  *     hands the same image (same handle) back every frame;
  *   - the descriptor carries pointers (`groups`, `frost`, `shapes`), so a
  *     byte-wise comparison of it is neither stable nor meaningful.
@@ -113,7 +113,7 @@ typedef struct optics_material_base_material {
  * is the simplest correct choice.
  */
 typedef struct optics_material_backdrop_layer_revision {
-    optics_material_struct_type type; /* PRISM_TYPE_BACKDROP_LAYER_REVISION */
+    optics_material_struct_type type; /* OPTICS_MATERIAL_TYPE_BACKDROP_LAYER_REVISION */
     const void *next;
     uint64_t revision; /* 0 disables output caching; else caller-tracked content id */
 } optics_material_backdrop_layer_revision;
@@ -164,7 +164,7 @@ typedef struct optics_material_optical_glass_params {
  * Combines Base Material Layer (plates) beneath Optical Glass Layer (groups).
  */
 typedef struct optics_material_backdrop_layer_desc {
-    optics_material_struct_type type; /* PRISM_TYPE_BACKDROP_LAYER_DESC */
+    optics_material_struct_type type; /* OPTICS_MATERIAL_TYPE_BACKDROP_LAYER_DESC */
     const void *next;
     optics_gfx_image *input;         /* sharp backdrop capture (required) */
     optics_gfx_image *blurred_input; /* blurred backdrop (required, same extent) */
@@ -177,7 +177,7 @@ typedef struct optics_material_backdrop_layer_desc {
     const optics_material_liquid_glass_group *groups; /* may be NULL/0 */
     uint32_t group_count;
 
-    /* Optical Glass policy parameters (mirrors prism_optical_glass_params) */
+    /* Optical Glass policy parameters (mirrors optics_material_optical_glass_params) */
     float refraction;
     float chromatic_aberration;
     float saturation;
@@ -217,9 +217,9 @@ typedef struct optics_material_backdrop_layer_desc {
 
 typedef struct optics_material_backdrop_layer_filter optics_material_backdrop_layer_filter;
 
-/* Options descriptor for prism_backdrop_layer_filter_warmup (ADR-0141). */
+/* Options descriptor for optics_material_backdrop_layer_filter_warmup (ADR-0141). */
 typedef struct optics_material_backdrop_layer_warmup_opts {
-    optics_gfx_format format; /* Target image format (default 0 -> FLUX_FORMAT_RGBA8_UNORM) */
+    optics_gfx_format format; /* Target image format (default 0 -> OPTICS_GFX_FORMAT_RGBA8_UNORM) */
     bool stats;               /* Pre-warm stats reduction pipeline */
 } optics_material_backdrop_layer_warmup_opts;
 
@@ -235,7 +235,7 @@ OPTICS_MATERIAL_NODISCARD OPTICS_MATERIAL_API optics_material_backdrop_layer_fil
 optics_material_backdrop_layer_filter_retain(optics_material_backdrop_layer_filter *filter);
 /* Release only after every submission that references the filter's outputs
  * has completed (its frame-slot fence has signalled, or after
- * flux_device_wait_idle): release destroys the filter's compute pipelines
+ * optics_gfx_device_wait_idle): release destroys the filter's compute pipelines
  * inline. */
 OPTICS_MATERIAL_API void
 optics_material_backdrop_layer_filter_release(optics_material_backdrop_layer_filter *filter);
@@ -243,7 +243,7 @@ optics_material_backdrop_layer_filter_release(optics_material_backdrop_layer_fil
  *
  * Output caching (ADR-0123 / INV-COMP-04). The filter keeps one persistent
  * output image per frame slot. To reuse it, chain a
- * `prism_backdrop_layer_revision` through `desc->next` and bump its
+ * `optics_material_backdrop_layer_revision` through `desc->next` and bump its
  * `revision` whenever anything this submission samples or draws has changed.
  * A repeat call with the same revision on the same slot skips every compute
  * pass and returns the previous image. With no revision extension (or
@@ -262,7 +262,7 @@ optics_material_backdrop_layer_filter_release(optics_material_backdrop_layer_fil
  *
  * The returned output is a slab sized to the union of the layer's footprints
  * (plates and bodies), not to the input capture; `out->origin_x/origin_y` say
- * where it belongs in capture pixels (see prism_material_output). It is
+ * where it belongs in capture pixels (see optics_material_output). It is
  * transparent outside the union of every plate and glass silhouette (including
  * shadow falloff), so drawing the whole slab is always correct.
  *
@@ -281,7 +281,7 @@ optics_material_backdrop_layer_filter_apply(
     const optics_material_backdrop_layer_filter_apply_opts *opts);
 
 /* Reads the glass statistics this frame slot last submitted (see
- * prism_liquid_glass_filter_stats; group i of the stats aligns with group
+ * optics_material_liquid_glass_filter_stats; group i of the stats aligns with group
  * i of that submission's glass array). */
 typedef struct optics_material_backdrop_layer_filter_stats_opts {
     optics_gfx_frame *frame;
@@ -299,4 +299,4 @@ optics_material_backdrop_layer_filter_stats(
 }
 #endif
 
-#endif /* PRISM_BACKDROP_LAYER_H */
+#endif /* OPTICS_MATERIAL_BACKDROP_LAYER_H */

@@ -3,6 +3,9 @@ id: ADR-0030
 title: "Lens damage / redraw tracking — deferred, full-tree repaint today"
 status: accepted
 date: 2026-07-21
+scope: ui (L2 toolkit)
+superseded_by: null
+negative_knowledge: true
 ---
 
 # ADR-0030: Lens damage / redraw tracking — deferred, full-tree repaint today

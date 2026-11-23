@@ -1,9 +1,9 @@
 /*
- * flux_sdf.slang — the single Slang definition of the analytic distance fields
+ * optics_gfx_sdf.slang — the single Slang definition of the analytic distance fields
  * (ADR-0118) and of their derivatives (ADR-0148).
  *
- * <flux/sdf.h> is the host counterpart and evaluates the same expression;
- * tests/flux/unit/test_sdf.c and test_sdf_parity pin the two differentially.
+ * <optics/gfx/sdf.h> is the host counterpart and evaluates the same expression;
+ * tests/gfx/unit/test_sdf.c and test_sdf_parity pin the two differentially.
  */
 
 #ifndef OPTICS_GFX_SDF_SLANG
@@ -137,7 +137,7 @@ float optics_gfx_smooth_union(float2 d, float radius, out float h)
     return lerp(d.y, d.x, h) - radius * h * (1.0f - h);
 }
 
-/* Gradient of flux_smooth_union with respect to p. */
+/* Gradient of optics_gfx_smooth_union with respect to p. */
 float2 optics_gfx_smooth_union_gradient(float2 g_a, float2 g_b, float2 d, float radius)
 {
     if (radius <= 0.001f) return (d.x < d.y) ? g_a : g_b;
@@ -147,4 +147,4 @@ float2 optics_gfx_smooth_union_gradient(float2 g_a, float2 g_b, float2 d, float 
     return (len > 1e-12f) ? blended / len : g_a;
 }
 
-#endif /* FLUX_SDF_SLANG */
+#endif /* OPTICS_GFX_SDF_SLANG */

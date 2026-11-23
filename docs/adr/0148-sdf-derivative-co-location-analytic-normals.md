@@ -3,8 +3,8 @@ id: ADR-0148
 title: "A distance field owns its derivative — analytic normals, pow-free fields, one evaluation"
 status: accepted
 date: 2026-11-04
+scope: [gfx, material, shaders, architecture]
 superseded_by: null
-scope: [flux, prism, shaders, architecture]
 negative_knowledge: true
 ---
 

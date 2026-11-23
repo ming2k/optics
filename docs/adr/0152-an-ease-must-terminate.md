@@ -3,7 +3,7 @@ id: ADR-0152
 title: "An ease must terminate — settled values snap, and a poll cap bounds only what can wake it"
 status: accepted
 date: 2026-11-06
-scope: [lens, iris, app]
+scope: [ui, window, app]
 superseded_by: null
 negative_knowledge: true
 ---

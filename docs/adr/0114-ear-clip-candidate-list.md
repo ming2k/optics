@@ -3,7 +3,9 @@ id: ADR-0114
 title: "Incremental non-convex candidate list for ear clipping (legacy O(n^2) scan removed)"
 status: superseded
 date: 2026-10-17
-superseded_by: "ADR-0115"
+scope: libs/gfx/src/canvas/geometry_tess.c (ear_clip_contour),
+superseded_by: ADR-0115
+negative_knowledge: true
 ---
 
 # ADR-0114: Incremental non-convex candidate list for ear clipping

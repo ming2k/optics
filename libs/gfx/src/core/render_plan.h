@@ -163,4 +163,4 @@ optics_gfx_result optics_gfx_render_plan_node_add_dependency(optics_gfx_render_p
                                                              uint32_t node_index,
                                                              uint32_t dependency);
 
-#endif /* FLUX_CORE_RENDER_PLAN_H */
+#endif /* OPTICS_GFX_CORE_RENDER_PLAN_H */

@@ -3,7 +3,7 @@ id: ADR-0144
 title: "Never partial-paint a swapchain — damage-rect passes and departed subtrees"
 status: accepted
 date: 2026-11-04
-scope: [flux, lens]
+scope: [gfx, ui]
 superseded_by: null
 negative_knowledge: true
 ---

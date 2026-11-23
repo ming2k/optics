@@ -3,6 +3,9 @@ id: ADR-0083
 title: "Flux orthogonal shape-paint model and full C23 baseline"
 status: accepted
 date: 2026-08-26
+scope: gfx (2D/3D GPU rendering core), gfx-rs (Rust bindings)
+superseded_by: null
+negative_knowledge: false
 ---
 
 # ADR-0083: Flux orthogonal shape-paint model and full C23 baseline

@@ -2,8 +2,8 @@
  * interactions aimed at widgets beneath it, while its own children stay
  * interactive (ADR-0060: occlusion IS the hit-test order). */
 
-#include "lens_test.h"
 #include "optics_test.h"
+#include "ui_test.h"
 #include <optics/gfx/canvas_cpu.h>
 #include <optics/ui.h>
 #include <string.h>

@@ -9,29 +9,29 @@ The [root README](../../README.md) contains the shorter build-only path.
 |------|-------------|-----|
 | Meson | `>= 1.0` | Required by the root `meson.build`. |
 | Ninja | Any Meson-supported version | Default build backend. |
-| C compiler | GCC `>= 15` or Clang `>= 19`; MSVC cl / Apple Clang also work | The C23 sources prefer `#embed`; toolchains without it automatically use generated shader headers (`tools/spv2h.py`). |
+| C compiler | GCC `>= 15` or Clang `>= 19` | Shaders are baked into the libraries with C23 `#embed`; configure fails with a clear message on a compiler without it. MSVC `cl` cannot build the tree. |
 | `pkg-config` | Any current version | Finds system libraries. |
 | `slangc` | Slang 2026.17+ (CI pins 2026.21; recent Vulkan SDKs bundle it) | Compiles bundled shaders to SPIR-V ([ADR-0156](../adr/0156-slang-first-shader-architecture.md)). |
 
 **Linux**: the default feature set requires Vulkan headers and loader plus FreeType,
 HarfBuzz, Fontconfig, and FriBidi. `slangc` is provided by recent LunarG Vulkan
-SDKs or the standalone Slang release. GLFW is needed for the windowed `flux`
-examples. The `iris` Wayland backend additionally uses
+SDKs or the standalone Slang release. GLFW is needed for the windowed `gfx`
+examples. The `window` Wayland backend additionally uses
 `wayland-client`, Wayland protocols, and XKB Common. `libsystemd` is optional;
 without it, live theme watching and AT-SPI use their stub implementations.
 
-**Windows**: the Vulkan SDK 1.4+ (headers, loader, slangc) plus clang-cl,
-MSVC, or MinGW. FreeType/HarfBuzz/FriBidi resolve automatically through the
+**Windows**: the Vulkan SDK 1.4+ (headers, loader, slangc) plus MinGW-w64
+GCC 15+ (CI uses MSYS2 UCRT64) or Clang 19+. FreeType/HarfBuzz/FriBidi resolve automatically through the
 bundled `subprojects/*.wrap` fallbacks; font discovery uses DirectWrite, so
 fontconfig is not needed. When forcing the fallbacks, disable two optional
 dependency cycles: `-Dfreetype2:harfbuzz=disabled -Dharfbuzz:cairo=disabled`.
-The iris backend is Win32 (`app_win32.c`).
+The window backend is Win32 (`app_win32.c`).
 
 **macOS**: MoltenVK >= 1.3 (older releases advertise only Vulkan 1.2 and are
 rejected), a Vulkan loader (`vulkan-loader` via Homebrew), the pinned Slang
 release from the official tarball (Homebrew has no `slang` formula), and the
 same three text libraries (wraps also work). Font discovery uses CoreText.
-The iris backend is Cocoa (`app_cocoa.m`); Objective-C is enabled
+The window backend is Cocoa (`app_cocoa.m`); Objective-C is enabled
 automatically by `libs/window/meson.build`. See
 [Cross-platform](cross-platform.md) for the full matrix and invariants.
 
@@ -107,8 +107,8 @@ Run representative binaries from their module directories:
 ./build/examples/showcase/widget_gallery
 ```
 
-The `iris` examples need a Wayland session. The `lens` examples are headless.
-Most `flux` integration tests can use either a physical Vulkan device or
+The `window` examples need a Wayland session. The `ui` examples are headless.
+Most `gfx` integration tests can use either a physical Vulkan device or
 Lavapipe. For a complete catalog of visual effect demos and UI examples,
 see [Interactive examples showcase](../how-to/run-and-explore-examples.md).
 
@@ -117,7 +117,6 @@ see [Interactive examples showcase](../how-to/run-and-explore-examples.md).
 Meson enforces out-of-tree builds. Adhere to these conventions to keep the repository root orderly:
 
 - `build/`: The **canonical local development directory** (Debug + tests + examples). Rust crates under `crates/` probe this directory automatically via `optics-build`; the Cargo workspace manifest is at the repository root.
-- `build-tidy/`: Dedicated build tree for `tools/check-tidy.sh` (created automatically on demand).
 - **Ephemeral matrix builds (`build-fuzz*`, `build-release*`, `build-api*`, etc.)**: Temporary directories created when reproducing CI matrices locally. Treat them as disposable and clean them up after testing:
   ```bash
   rm -rf build-*
@@ -133,9 +132,9 @@ ln -s build/compile_commands.json compile_commands.json
 ```
 
 The root `.clang-format` defines the C formatting style, enforced by
-`tools/check-format.sh` (CI runs it on every push; it pins clang-format 22,
-so a different local major version will refuse rather than produce noise).
-`tools/check-format.sh --fix` reformats the tree in place.
+`./tools/format.sh --check` (CI runs it on every push) and
+`./tools/format.sh` reformats the tree in place. Set `CLANG_FORMAT` to pick a
+specific clang-format binary.
 
 ## Troubleshooting
 
@@ -143,9 +142,9 @@ so a different local major version will refuse rather than produce noise).
 |---------|-------------|
 | Compiler rejects `#embed` | Nothing to do — the generated-header fallback builds automatically. To force it (or verify it), add `-DFLUX_SHADER_NO_EMBED=1` to `c_args`. |
 | `slangc` not found | Install Vulkan SDK 1.4+ or the pinned Slang release from the official tarball, then ensure `slangc` is in PATH. |
-| FreeType, HarfBuzz, Fontconfig, or FriBidi missing | Install the text development packages for a UI build. A deliberately flux-only build disables `canvas`, `glyph`, and `reticle` as a group, which also disables `lens`/`iris`. |
-| GLFW warning and missing windowed `flux` examples | Install GLFW development files and reconfigure. |
-| `iris` reports that its backend was skipped | Install Wayland, XKB Common, and Vulkan development files, then reconfigure. |
+| FreeType, HarfBuzz, Fontconfig, or FriBidi missing | Install the text development packages for a UI build. A deliberately gfx-only build passes `-Dtext=false -Dsvg=false`, which also disables `ui` and `app`; `window` needs only `gfx`. |
+| GLFW warning and missing windowed `gfx` examples | Install GLFW development files and reconfigure. |
+| `window` reports that its backend was skipped | Install Wayland, XKB Common, and Vulkan development files, then reconfigure. |
 | Vulkan integration tests skip | Confirm `vulkaninfo --summary` finds a Vulkan 1.3 device or install Lavapipe. |
 
 ## See Also

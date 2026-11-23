@@ -1,7 +1,7 @@
 /* test_dnd.c — Drag-and-drop subsystem verification (ADR-0086). */
 
-#include "lens_test.h"
 #include "optics_test.h"
+#include "ui_test.h"
 #include <optics/ui.h>
 #include <string.h>
 

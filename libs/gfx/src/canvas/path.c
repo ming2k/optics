@@ -30,7 +30,7 @@ static void push_segment(optics_gfx_path *p, optics_gfx_arena *arena, uint32_t o
         if (!path_grow(p, arena)) {
             if (p->dropped == 0) {
                 OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_OUT_OF_MEMORY,
-                                "flux_path arena exhausted; segments dropped");
+                                "optics_gfx_path arena exhausted; segments dropped");
             }
             p->dropped++;
             return;
@@ -64,14 +64,14 @@ optics_gfx_result optics_gfx_path_create(optics_gfx_path **out, optics_gfx_arena
     *out = nullptr;
     if (!arena) {
         OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT,
-                        "flux_path_create requires a non-NULL arena");
+                        "optics_gfx_path_create requires a non-NULL arena");
         return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
     }
     optics_gfx_path *p =
         optics_gfx_arena_alloc_aligned(arena, sizeof(*p), alignof(optics_gfx_path));
     if (!p) {
         OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_OUT_OF_MEMORY,
-                        "arena exhausted while allocating flux_path");
+                        "arena exhausted while allocating optics_gfx_path");
         return OPTICS_GFX_ERROR_OUT_OF_MEMORY;
     }
     memset(p, 0, sizeof(*p));
@@ -170,7 +170,7 @@ void optics_gfx_path_add_round_rect(optics_gfx_path *p, optics_gfx_rect r, float
 /* ------------------------------------------------------------------ */
 /*  Squircle corner fit (ADR-0118 INV-SDF-06)                         */
 /*                                                                    */
-/*  flux_sdf_squircle (include/flux/sdf.h) defines the squircle corner as */
+/*  optics_gfx_sdf_squircle (<optics/gfx/sdf.h>) defines the squircle corner as      */
 /*  a blend of a circular arc (curvature 0) and an L4 superellipse      */
 /*  (curvature 1). Its zero set is a corner arc that a single cubic     */
 /*  cannot carry: one cubic per corner is 3.1% of the radius off at     */

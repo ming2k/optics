@@ -3,8 +3,8 @@ id: ADR-0115
 title: "Analytic curve kernel — one geometry authority for Bézier fills and strokes"
 status: accepted
 date: 2026-10-25
+scope: libs/gfx, bindings
 superseded_by: null
-scope: libs/flux, bindings
 negative_knowledge: true
 ---
 

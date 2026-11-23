@@ -1,8 +1,9 @@
 /*
  * Canvas — lifecycle, state stack, and public draw entry points.
  *
- * Heavy geometry work (flattening, tessellation, stroking) lives in
- * geometry_*.c; pipeline caching and draw submission live in renderer.c.
+ * Path flattening lives in curve_flatten.c, stroking in geometry_stroke.c,
+ * path-fill dispatch in canvas_dispatch.c; pipeline caching and draw
+ * submission live in renderer.c.
  */
 #include "backend.h"
 #include "internal.h"
@@ -82,6 +83,15 @@ bool canvas_ensure_frames(optics_gfx_canvas *c, uint32_t needed) {
                                 needed, sizeof(*c->scratch_frames));
 }
 
+bool canvas_ensure_outline(optics_gfx_canvas *c, uint32_t needed_pts, uint32_t needed_contours) {
+    return c &&
+           canvas_grow_buf(c->device, (void **)&c->scratch_outline_pts, &c->scratch_outline_pts_cap,
+                           needed_pts, sizeof(*c->scratch_outline_pts)) &&
+           canvas_grow_buf(c->device, (void **)&c->scratch_outline_contours,
+                           &c->scratch_outline_contours_cap, needed_contours,
+                           sizeof(*c->scratch_outline_contours));
+}
+
 static bool canvas_flatten_grow_cb(void *ctx, uint32_t need_pts, uint32_t need_cons,
                                    optics_gfx_point **pts, uint32_t *pts_cap,
                                    optics_gfx_canvas_contour **cons, uint32_t *cons_cap) {
@@ -118,7 +128,16 @@ bool optics_gfx_canvas_alloc_scratch(optics_gfx_canvas *c) {
         optics_gfx_canvas_alloc(d, c->scratch_contours_cap * sizeof(*c->scratch_contours));
     c->scratch_frames =
         optics_gfx_canvas_alloc(d, c->scratch_frames_cap * sizeof(*c->scratch_frames));
-    return c->scratch_pts && c->scratch_verts && c->scratch_contours && c->scratch_frames;
+    /* A stroke body is one 4-point piece per segment; joins and caps add more,
+     * and the buffers grow on demand beyond this. */
+    c->scratch_outline_pts_cap = OPTICS_GFX_CANVAS_PATH_SCRATCH_CAP * 4;
+    c->scratch_outline_contours_cap = OPTICS_GFX_CANVAS_PATH_SCRATCH_CAP * 2;
+    c->scratch_outline_pts =
+        optics_gfx_canvas_alloc(d, c->scratch_outline_pts_cap * sizeof(*c->scratch_outline_pts));
+    c->scratch_outline_contours = optics_gfx_canvas_alloc(
+        d, c->scratch_outline_contours_cap * sizeof(*c->scratch_outline_contours));
+    return c->scratch_pts && c->scratch_verts && c->scratch_contours && c->scratch_frames &&
+           c->scratch_outline_pts && c->scratch_outline_contours;
 }
 
 void optics_gfx_canvas_free_scratch(optics_gfx_canvas *c) {
@@ -127,6 +146,8 @@ void optics_gfx_canvas_free_scratch(optics_gfx_canvas *c) {
     optics_gfx_canvas_free(d, c->scratch_verts);
     optics_gfx_canvas_free(d, c->scratch_contours);
     optics_gfx_canvas_free(d, c->scratch_frames);
+    optics_gfx_canvas_free(d, c->scratch_outline_pts);
+    optics_gfx_canvas_free(d, c->scratch_outline_contours);
 }
 
 optics_gfx_result optics_gfx_canvas_create(const optics_gfx_canvas_desc *desc,
@@ -134,7 +155,8 @@ optics_gfx_result optics_gfx_canvas_create(const optics_gfx_canvas_desc *desc,
     if (!desc || !out)
         return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
     if (desc->type != OPTICS_GFX_TYPE_CANVAS_DESC) {
-        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT, "desc->type != FLUX_TYPE_CANVAS_DESC");
+        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT,
+                        "desc->type != OPTICS_GFX_TYPE_CANVAS_DESC");
         return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
     }
 
@@ -169,7 +191,7 @@ optics_gfx_result optics_gfx_canvas_create(const optics_gfx_canvas_desc *desc,
 
     /* Backend-private GPU state: pipeline-cache warm, formats, and owned
      * working-space targets. Kept entirely inside the backend so struct
-     * flux_canvas carries no Vulkan types. */
+     * optics_gfx_canvas carries no Vulkan types. */
     optics_gfx_result br = c->backend->canvas_init(c->backend, c);
     if (br != OPTICS_GFX_OK) {
         optics_gfx_surface_release(c->surface);
@@ -232,7 +254,7 @@ static optics_gfx_result canvas_begin_pass_impl(optics_gfx_canvas *c, optics_gfx
         return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
     if (desc->type != OPTICS_GFX_TYPE_CANVAS_PASS_DESC) {
         OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT,
-                        "desc->type != FLUX_TYPE_CANVAS_PASS_DESC");
+                        "desc->type != OPTICS_GFX_TYPE_CANVAS_PASS_DESC");
         return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
     }
     /* Only the first rectangle of the set is used as the frame's render area
@@ -287,7 +309,7 @@ static optics_gfx_result canvas_begin_pass_impl(optics_gfx_canvas *c, optics_gfx
      *
      * The descriptor is a *description*, not a lease on the caller's array: the
      * pass consults its scope on every draw and again at end_pass, long after
-     * `flux_canvas_begin` has returned. Bindings routinely build the rect list
+     * `optics_gfx_canvas_begin` has returned. Bindings routinely build the rect list
      * in a temporary container (the Rust binding's `CanvasPassOptions` owns a
      * `Vec`), so retaining the pointer was a use-after-free that silently
      * produced `count == 0` encodes and left stale pixels on screen. Copying
@@ -567,15 +589,15 @@ void optics_gfx_canvas_save(optics_gfx_canvas *c) {
         /* Stack overflow: previously this was a silent no-op, leaving
          * the caller's save/restore pairing stranded with no diagnostic.
          * Surface the failure through both the device logger (visible
-         * in any flux-log-equipped app) and the thread-local error
-         * slot, so the caller can detect via flux_get_last_error. */
+         * in any gfx-log-equipped app) and the thread-local error
+         * slot, so the caller can detect via optics_gfx_get_last_error. */
         if (c->device && c->device->log) {
             char buf[160];
             snprintf(buf, sizeof(buf),
-                     "flux_canvas_save: state stack overflow (depth > %d); "
+                     "optics_gfx_canvas_save: state stack overflow (depth > %d); "
                      "save was a no-op — check for unbalanced save/restore",
                      OPTICS_GFX_CANVAS_MAX_STATES);
-            c->device->log(OPTICS_GFX_LOG_ERROR, "flux_canvas_save", 0, "%s", buf,
+            c->device->log(OPTICS_GFX_LOG_ERROR, "optics_gfx_canvas_save", 0, "%s", buf,
                            c->device->log_user);
         }
         canvas_fail(c, OPTICS_GFX_ERROR_OUT_OF_RANGE, "Canvas state stack overflow");
@@ -614,14 +636,14 @@ void optics_gfx_canvas_save_layer(optics_gfx_canvas *c,
         if (c->device && c->device->log) {
             char buf[160];
             snprintf(buf, sizeof(buf),
-                     "flux_canvas_save_layer: state stack overflow (depth > %d); "
+                     "optics_gfx_canvas_save_layer: state stack overflow (depth > %d); "
                      "save_layer was a no-op — check for unbalanced save/restore",
                      OPTICS_GFX_CANVAS_MAX_STATES);
-            c->device->log(OPTICS_GFX_LOG_ERROR, "flux_canvas_save_layer", 0, "%s", buf,
+            c->device->log(OPTICS_GFX_LOG_ERROR, "optics_gfx_canvas_save_layer", 0, "%s", buf,
                            c->device->log_user);
         }
         OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_OUT_OF_RANGE,
-                        "flux_canvas_save_layer: state stack overflow");
+                        "optics_gfx_canvas_save_layer: state stack overflow");
         c->pass_error = OPTICS_GFX_ERROR_OUT_OF_RANGE;
         return;
     }
@@ -732,7 +754,7 @@ float optics_gfx_canvas_get_scale(const optics_gfx_canvas *c) {
         return 1.0f;
     /* The *effective* scale: the active transform's pixel scale, so callers
      * (e.g. glyph) rasterise to match whether the scale comes from the
-     * content-scale base transform or a manual flux_canvas_scale on top. */
+     * content-scale base transform or a manual optics_gfx_canvas_scale on top. */
     return optics_gfx_canvas_mat3x2_pixel_scale(c->states[c->state_top].transform);
 }
 
@@ -915,7 +937,7 @@ static void frame_release_image(void *resource) {
 /* ADR-0089 1B-2B: a Canvas draw that samples an image produced inside this
  * plan (an UPLOAD node, an earlier Canvas target, an EFFECT output) must name
  * that producer. External images have no writer in this plan and need no edge:
- * their upload completed before the frame began (flux_surface_begin_frame
+ * their upload completed before the frame began (optics_gfx_surface_begin_frame
  * flushes the upload batch). A pass that samples more than the node's access
  * table can state fails closed; silently under-declaring is exactly the hidden
  * read this stage exists to remove. */
@@ -1010,9 +1032,10 @@ void draw_image_with_sampler_handle(optics_gfx_canvas *c, optics_gfx_image *img,
      * before beginning the pass that draws it. Rejecting the draw keeps the
      * failure at the caller's line instead of presenting an unwritten image. */
     if (img && c->frame && optics_gfx_plan_image_pending(&c->frame->plan, img)) {
-        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_STATE,
-                        "canvas sampled a deferred effect output inside a pass; call "
-                        "flux_frame_materialize_image before flux_canvas_begin (ADR-0147)");
+        OPTICS_GFX_FAIL(
+            OPTICS_GFX_ERROR_INVALID_STATE,
+            "canvas sampled a deferred effect output inside a pass; call "
+            "optics_gfx_frame_materialize_image before optics_gfx_canvas_begin (ADR-0147)");
         return;
     }
     optics_gfx_mat3x2 tx = c->states[c->state_top].transform;
@@ -1097,9 +1120,8 @@ void draw_image_with_sampler_handle(optics_gfx_canvas *c, optics_gfx_image *img,
  * The SDF path is exact for these — a rigid motion plus a uniform scale
  * preserves distances, so shape-space evaluation and screen-space evaluation
  * agree — and it also covers the historical axis-aligned case. Shear and
- * anisotropic scale are NOT similarities (distances distort), so those keep
- * going through tessellation rather than being drawn with an approximated
- * field. */
+ * anisotropic scale are NOT similarities (distances distort), so those go
+ * through the path-coverage route rather than an approximated field. */
 static bool canvas_sdf_similarity(const optics_gfx_canvas *c) {
     optics_gfx_mat3x2 t = c->states[c->state_top].transform;
     float s0 = t.m[0] * t.m[0] + t.m[1] * t.m[1];
@@ -1224,7 +1246,7 @@ void optics_gfx_canvas_draw_glyph_run(optics_gfx_canvas *c, const optics_gfx_gly
         return;
     if (desc->type != OPTICS_GFX_TYPE_GLYPH_RUN_DESC) {
         OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT,
-                        "desc->type != FLUX_TYPE_GLYPH_RUN_DESC");
+                        "desc->type != OPTICS_GFX_TYPE_GLYPH_RUN_DESC");
         return;
     }
     if (desc->quad_count == 0)
@@ -1235,7 +1257,7 @@ void optics_gfx_canvas_draw_glyph_run(optics_gfx_canvas *c, const optics_gfx_gly
     }
 
     /* Two atlas sources (ADR-0019, extended by ADR-0112):
-     *   - GPU:   `atlas` (flux_image, bindless). Requires a device.
+     *   - GPU:   `atlas` (optics_gfx_image, bindless). Requires a device.
      *   - Host:  `host_coverage` (R8 buffer). Device-less CPU canvas.
      * When a caller provides both (e.g. an icon mask cache or multi-backend
      * display list), the canvas backend chooses its native source rather than
@@ -1243,7 +1265,7 @@ void optics_gfx_canvas_draw_glyph_run(optics_gfx_canvas *c, const optics_gfx_gly
     const bool host = (c->device == nullptr);
 
     /* Optional producer generation for a host coverage buffer
-     * (flux_glyph_run_host_atlas_desc): recorded with each batch so replay
+     * (optics_gfx_glyph_run_host_atlas_desc): recorded with each batch so replay
      * of a segment captured before an in-place atlas rearrange is refused
      * instead of sampling moved texels. Unknown extensions are ignored for
      * forward compatibility, matching the pass-desc pNext parser. */
@@ -1284,7 +1306,7 @@ void optics_gfx_canvas_draw_glyph_run(optics_gfx_canvas *c, const optics_gfx_gly
         /* Ownership: the atlas must live on the canvas's device, else the
          * batch would carry a bindless handle from a foreign heap. Void
          * entry point, so the failure surfaces through the pass's sticky
-         * error (first error wins) as well as flux_get_last_error. */
+         * error (first error wins) as well as optics_gfx_get_last_error. */
         if (desc->atlas->device != c->device) {
             if (c->pass_error == OPTICS_GFX_OK)
                 c->pass_error = OPTICS_GFX_ERROR_INVALID_ARGUMENT;
@@ -1585,8 +1607,8 @@ void optics_gfx_canvas_draw_geometry(optics_gfx_canvas *c,
     case OPTICS_GFX_GEOM_SQUIRCLE: {
         optics_gfx_rect r = geom->squircle.rect;
         /* A continuous-curvature corner has an exact distance field
-         * (flux_sdf_squircle), so it takes the analytic path on the same
-         * terms as a rounded rectangle: no flattening, no tessellation, and
+         * (optics_gfx_sdf_squircle), so it takes the analytic path on the same
+         * terms as a rounded rectangle: no flattening, no coverage pass, and
          * resolution-independent coverage (ADR-0118 INV-SDF-03). */
         if (p.kind == CANVAS_PAINT_SOLID && p.blend == OPTICS_GFX_BLEND_SRC_OVER &&
             canvas_sdf_similarity(c)) {

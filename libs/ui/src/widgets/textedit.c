@@ -449,7 +449,7 @@ static size_t hit_test_line(optics_ui *ui, const char *line, size_t line_len, fl
 }
 
 /* ------------------------------------------------------------------ */
-/*  Main lens_textedit widget                                         */
+/*  Main optics_ui_textedit widget                                         */
 /* ------------------------------------------------------------------ */
 
 optics_ui_response optics_ui_textedit(optics_ui *ui, const optics_ui_textedit_opts *opts) {
@@ -457,27 +457,27 @@ optics_ui_response optics_ui_textedit(optics_ui *ui, const optics_ui_textedit_op
     if (!opts)
         opts = &default_opts;
 
-    lensi_apply_box(ui, opts->box);
+    optics_ui__apply_box(ui, opts->box);
     const optics_ui_theme *t = &ui->theme;
     bool disabled = ui->next_disabled;
-    for (optics_ui_node *parent = lensi_open_container(ui); parent; parent = parent->parent)
+    for (optics_ui_node *parent = optics_ui__open_container(ui); parent; parent = parent->parent)
         disabled = disabled || parent->box_disabled;
     bool error = ui->next_error || opts->box.error;
     const char *placeholder = opts->placeholder;
     ui->next_disabled = false;
     ui->next_error = false;
     ui->next_placeholder = nullptr;
-    optics_ui_style eff = lensi_style_effective(ui);
-    float font_size = lensi_style_font_size(ui, &eff, t);
-    float padding = lensi_style_padding(&eff, t);
+    optics_ui_style eff = optics_ui__style_effective(ui);
+    float font_size = optics_ui__style_font_size(ui, &eff, t);
+    float padding = optics_ui__style_padding(&eff, t);
 
     const char *label = opts->box.id ? opts->box.id : "##textedit";
-    optics_ui_id id = lensi_gen_widget_id(ui, label);
-    optics_ui_node *n = lensi_store_touch(ui, id);
+    optics_ui_id id = optics_ui__gen_widget_id(ui, label);
+    optics_ui_node *n = optics_ui__store_touch(ui, id);
     if (!n)
         return (optics_ui_response){};
-    lensi_link_child(ui, n);
-    lensi_node_box(ui, n, &opts->box);
+    optics_ui__link_child(ui, n);
+    optics_ui__node_box(ui, n, &opts->box);
     n->is_container = false;
 
     char *buf = opts->buf;
@@ -496,7 +496,7 @@ optics_ui_response optics_ui_textedit(optics_ui *ui, const optics_ui_textedit_op
     if (ts->sel_anchor != UINT32_MAX && ts->sel_anchor > len)
         ts->sel_anchor = (uint32_t)len;
 
-    optics_ui_text_metrics fm = lensi_text_measure_label(ui, "Ag", font_size, 0.0f);
+    optics_ui_text_metrics fm = optics_ui__text_measure_label(ui, "Ag", font_size, 0.0f);
     float line_h = fm.height > 0.0f ? fm.height : font_size;
     float line_height = line_h * OPTICS_UI_TEXTEDIT_LINE_HEIGHT;
     uint32_t rows = opts->rows > 0 ? opts->rows : (multiline ? 4 : 1);
@@ -507,13 +507,13 @@ optics_ui_response optics_ui_textedit(optics_ui *ui, const optics_ui_textedit_op
     float w = (n->fixed_w > 0) ? n->fixed_w : 200.0f;
     n->measured = (optics_gfx_point){w, h};
 
-    optics_ui_response r = lensi_interact(ui, n, true, disabled);
+    optics_ui_response r = optics_ui__interact(ui, n, true, disabled);
 
     /* Text cursor hint on hover or drag */
     if (!disabled && (r.hovered || ts->dragging))
         ui->cursor_hint = OPTICS_UI_CURSOR_TEXT;
 
-    optics_ui_style_resolved rs = lensi_style_resolve(ui, &eff, t, r.state);
+    optics_ui_style_resolved rs = optics_ui__style_resolve(ui, &eff, t, r.state);
 
     /* Concentric padding: when corner radius is large (e.g. pill/capsule),
      * inset the text horizontally so it never collides with the circular corner arc. */
@@ -922,7 +922,7 @@ optics_ui_response optics_ui_textedit(optics_ui *ui, const optics_ui_textedit_op
 
         /* Handle paste payload */
         uint32_t paste_len = 0;
-        const char *paste = lensi_take_paste(ui, &paste_len);
+        const char *paste = optics_ui__take_paste(ui, &paste_len);
         if (paste && paste_len > 0) {
             uint32_t lo = sel_active(ts) ? sel_lo(ts) : ts->cursor;
             uint32_t hi = sel_active(ts) ? sel_hi(ts) : ts->cursor;
@@ -1029,50 +1029,50 @@ optics_ui_response optics_ui_textedit(optics_ui *ui, const optics_ui_textedit_op
     }
 
     /* Skin emission */
-    lensi_skin_emit(ui, n,
-                    &(optics_ui_widget_record){
-                        .kind = OPTICS_UI_WIDGET_TEXTEDIT,
-                        .state = r.state,
-                        .bounds = {0, 0, w, h},
-                        .last_bounds = n->prev_rect,
-                        .style = rs,
-                        .style_fields = eff.fields,
-                        .content =
-                            {
-                                .multiline = multiline,
-                                .edit_text = multiline ? nullptr : display_text,
-                                .edit_text_x = pad_x,
-                                .edit_text_y = text_y,
-                                .show_placeholder = show_placeholder,
-                                .lines = lines,
-                                .line_count = line_count,
-                                .sel_rects = &sel_rect,
-                                .sel_rect_count = sel_rect_count,
-                                .caret = caret_rect,
-                                .show_caret = r.focused && !disabled,
-                                .preedit_underline = preedit_underline,
-                                .has_preedit = has_preedit,
-                                .preedit_clause = preedit_clause,
-                                .error = error,
-                            },
-                    });
+    optics_ui__skin_emit(ui, n,
+                         &(optics_ui_widget_record){
+                             .kind = OPTICS_UI_WIDGET_TEXTEDIT,
+                             .state = r.state,
+                             .bounds = {0, 0, w, h},
+                             .last_bounds = n->prev_rect,
+                             .style = rs,
+                             .style_fields = eff.fields,
+                             .content =
+                                 {
+                                     .multiline = multiline,
+                                     .edit_text = multiline ? nullptr : display_text,
+                                     .edit_text_x = pad_x,
+                                     .edit_text_y = text_y,
+                                     .show_placeholder = show_placeholder,
+                                     .lines = lines,
+                                     .line_count = line_count,
+                                     .sel_rects = &sel_rect,
+                                     .sel_rect_count = sel_rect_count,
+                                     .caret = caret_rect,
+                                     .show_caret = r.focused && !disabled,
+                                     .preedit_underline = preedit_underline,
+                                     .has_preedit = has_preedit,
+                                     .preedit_clause = preedit_clause,
+                                     .error = error,
+                                 },
+                         });
 
     /* Platform caret and context reporting */
     if (!disabled && r.focused && buf && buf_cap > 1) {
-        lensi_set_caret_rect(ui, (optics_gfx_rect){
-                                     n->prev_rect.x + caret_rect.x,
-                                     n->prev_rect.y + caret_rect.y,
-                                     2.0f,
-                                     caret_rect.h,
-                                 });
-        lensi_set_text_context(ui, buf, (uint32_t)len, ts->cursor, multiline);
+        optics_ui__set_caret_rect(ui, (optics_gfx_rect){
+                                          n->prev_rect.x + caret_rect.x,
+                                          n->prev_rect.y + caret_rect.y,
+                                          2.0f,
+                                          caret_rect.h,
+                                      });
+        optics_ui__set_text_context(ui, buf, (uint32_t)len, ts->cursor, multiline);
     }
 
     uint32_t sem_flags = (r.focused ? OPTICS_UI_A11Y_FOCUSED : 0) |
                          (disabled ? OPTICS_UI_A11Y_DISABLED : 0) |
                          (opts->readonly ? OPTICS_UI_A11Y_READONLY : 0);
-    lensi_node_semantics(ui, n, multiline ? OPTICS_UI_ROLE_TEXTAREA : OPTICS_UI_ROLE_TEXTFIELD,
-                         label, buf, sem_flags);
+    optics_ui__node_semantics(ui, n, multiline ? OPTICS_UI_ROLE_TEXTAREA : OPTICS_UI_ROLE_TEXTFIELD,
+                              label, buf, sem_flags);
 
     r.changed = changed;
     r.submitted = submitted;

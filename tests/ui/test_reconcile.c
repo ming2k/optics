@@ -1,7 +1,7 @@
 /* test_reconcile.c — phase transitions: enter/stable/leave/reap (ADR-0004). */
 
-#include "lens_test.h"
 #include "optics_test.h"
+#include "ui_test.h"
 #include <optics/ui.h>
 
 int main(void) {

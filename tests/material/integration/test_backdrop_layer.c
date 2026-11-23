@@ -1,5 +1,5 @@
 /*
- * Layered backdrop compositor (prism): frosted rectangles carrying analytic
+ * Layered backdrop compositor (material): frosted rectangles carrying analytic
  * liquid-glass bodies, composed in one dispatch into one transparent image.
  *
  * This is the pixel gate for the layer relation itself: a glass body must
@@ -50,7 +50,7 @@ static optics_gfx_result stats_layer(optics_material_backdrop_layer_filter *filt
         filter, &(optics_material_backdrop_layer_filter_stats_opts){
                     .frame = frame, .out = out, .max_groups = max_groups, .out_count = out_count});
 }
-#define TEST_FRAME_SLOTS 3u /* mirrors FLUX_MAX_FRAMES_IN_FLIGHT */
+#define TEST_FRAME_SLOTS 3u /* mirrors OPTICS_GFX_MAX_FRAMES_IN_FLIGHT */
 
 int main(void) {
     optics_gfx_device *d = optics_gfx_test_make_headless_device();
@@ -786,7 +786,7 @@ int main(void) {
         OT_EXPECT(apply_layer(layer_filter, frame, &ld, &out4) == OPTICS_GFX_OK);
         OT_EXPECT(out4.image == out1.image);
 
-        /* An extension tag prism does not define is rejected instead of being
+        /* An extension tag material does not define is rejected instead of being
          * silently ignored: a dropped revision would quietly turn a
          * cache-enabled call into a stale-content call. */
         optics_material_backdrop_layer_revision bogus =

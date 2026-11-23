@@ -3,13 +3,14 @@
 
 #include "../internal.h"
 
-void lensi_skin_separator(optics_ui *ui, optics_ui_node *n, const optics_ui_widget_record *rec) {
+void optics_ui__skin_separator(optics_ui *ui, optics_ui_node *n,
+                               const optics_ui_widget_record *rec) {
     const optics_ui_style_resolved *rs = &rec->style;
     float w = rec->bounds.w;
     float h = rec->bounds.h;
 
     if (rec->content.vertical) {
-        lensi_drawlist_push(
+        optics_ui__drawlist_push(
             ui, n,
             (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_RECT,
                                  .rel = {0, rs->padding, 1.0f,
@@ -17,7 +18,7 @@ void lensi_skin_separator(optics_ui *ui, optics_ui_node *n, const optics_ui_widg
                                  .color = rs->border,
                                  .radius = 0.5f});
     } else {
-        lensi_drawlist_push(
+        optics_ui__drawlist_push(
             ui, n,
             (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_RECT,
                                  .rel = {rs->padding, 0,

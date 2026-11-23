@@ -8,7 +8,7 @@
  *      gsettings covers the dominant case and subprocess fork is faster than a
  *      full D-Bus round-trip.
  *   3. GTK_THEME env var (legacy hint, prefix "dark:" or ":dark" suffix).
- *   4. Fall back to IRIS_COLOR_SCHEME_PREFER_DARK — a UI library defaulting
+ *   4. Fall back to OPTICS_WINDOW_COLOR_SCHEME_PREFER_DARK — a UI library defaulting
  *      to dark is safer than defaulting to light (dark is the lower-glare
  *      choice when the user's preference is unknown).
  *
@@ -68,7 +68,7 @@ OPTICS_WINDOW_API optics_window_color_scheme optics_window_query_system_color_sc
         }
     }
 #else
-    /* On non-Linux platforms today's iris has no backend at all; fall
+    /* On non-Linux platforms today's window has no backend at all; fall
      * through to the dark default. */
 #endif
 

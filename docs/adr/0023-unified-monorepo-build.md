@@ -3,6 +3,9 @@ id: ADR-0023
 title: "Unified Monorepo Build"
 status: accepted
 date: 2026-07-18
+scope: unrecorded
+superseded_by: null
+negative_knowledge: true
 ---
 
 # ADR-0023: Unified Monorepo Build

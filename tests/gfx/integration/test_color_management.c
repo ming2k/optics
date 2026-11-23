@@ -15,7 +15,7 @@
  *      ramp's midpoint is ~187, not 128.
  *
  * Expected values are computed from the public math API
- * (flux_color_space_transform_matrix / flux_transfer_encode) rather than
+ * (optics_gfx_color_space_transform_matrix / optics_gfx_transfer_encode) rather than
  * hard-coded, so the test tracks the parametric model, not a driver.
  * Tolerances absorb the ±1 LSB TPDF output dither and 8-bit quantisation.
  */

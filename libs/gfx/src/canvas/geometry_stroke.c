@@ -1,3 +1,4 @@
+#include "backend.h"
 #include "internal.h"
 
 #include <math.h>
@@ -5,16 +6,19 @@
 /* ------------------------------------------------------------------ */
 /*  Stroker                                                           */
 /*                                                                    */
-/*  Polyline -> outline polygon -> triangle strip via bisector        */
-/*  offsetting. Per-vertex normals computed from the segments on      */
-/*  either side; offset distance is half-width times the miter        */
-/*  factor (1/cos(theta/2)). When miter_factor exceeds miter_limit    */
-/*  we break the vertex into two offset positions and emit join       */
-/*  geometry (bevel triangle or round arc fan) between them.          */
-/*  Endpoints get cap geometry (none / square / round).               */
+/*  Polyline -> stroke outline as a set of pieces -> analytic         */
+/*  coverage. Per-vertex offset frames come from the bisector of the  */
+/*  adjacent segment normals (offset half-width times the miter       */
+/*  factor 1/cos(theta/2)); a vertex whose factor exceeds the miter   */
+/*  limit splits into two offsets and gets join geometry (bevel,      */
+/*  clamped miter or round fan). Open ends get caps.                  */
 /*                                                                    */
-/*  Both sides offset symmetrically; for translucent strokes this     */
-/*  produces no overdraw at joins.                                    */
+/*  Each piece -- segment body, join, cap -- is one closed contour    */
+/*  oriented to positive area. The non-zero union of positively       */
+/*  oriented simple polygons is exactly their union, so pieces that   */
+/*  overlap at a join cover each pixel once and a translucent stroke  */
+/*  never double-blends. The pieces go to the same submit_cover the   */
+/*  fills use, in physical pixels.                                    */
 /* ------------------------------------------------------------------ */
 
 /* Per-vertex offset frame derived from incoming + outgoing tangents. */
@@ -47,10 +51,9 @@ stroke_frame compute_frame(optics_gfx_point prev, optics_gfx_point pt, optics_gf
     optics_gfx_point bisector_sum = pt_add(f.n_in, f.n_out);
     float bis_len = sqrtf(bisector_sum.x * bisector_sum.x + bisector_sum.y * bisector_sum.y);
 
-    /* Cross product of tangents tells us turn direction:
-     *   d_in × d_out > 0 → turning left (outside on left)
-     *   d_in × d_out < 0 → turning right
-     * Used to pick which side gets the join geometry. */
+    /* Turn direction: d_in x d_out > 0 turns toward the left normals, so the
+     * left side is the inside of the turn (clamped below) and the right side
+     * the outside (where the join goes). */
     float cross = d_in.x * d_out.y - d_in.y * d_out.x;
     f.turning_left = cross > 0.0f;
 
@@ -85,48 +88,111 @@ stroke_frame compute_frame(optics_gfx_point prev, optics_gfx_point pt, optics_gf
     return f;
 }
 
-/* Emit one triangle into canvas scratch_verts, growing dynamically on demand. */
-static void stroke_emit_tri(optics_gfx_canvas *c, uint32_t *v_count, optics_gfx_mat3x2 tx,
-                            optics_gfx_color color, optics_gfx_point a, optics_gfx_point b,
-                            optics_gfx_point e) {
-    if (*v_count + 3 > c->scratch_verts_cap && !canvas_ensure_verts(c, *v_count + 3))
-        return;
-    emit_tri(c->scratch_verts, v_count, c->scratch_verts_cap, tx, color, a, b, e);
+/* Largest piece the stroker builds: a 32-step round join or a 16-step round
+ * cap fan plus its centre. */
+#define STROKE_PIECE_MAX 40u
+
+/* Outline being accumulated for one stroke call. */
+typedef struct stroke_outline {
+    optics_gfx_canvas *c;
+    optics_gfx_mat3x2 tx; /* user space -> physical pixels */
+    uint32_t pt_count;
+    uint32_t contour_count;
+    bool failed; /* scratch growth failed; the canvas error is already set */
+} stroke_outline;
+
+static float polygon_area2(const optics_gfx_point *p, uint32_t n) {
+    float a = 0.0f;
+    for (uint32_t i = 0; i < n; ++i) {
+        const optics_gfx_point u = p[i];
+        const optics_gfx_point v = p[(i + 1) % n];
+        a += u.x * v.y - v.x * u.y;
+    }
+    return a;
 }
 
-/* Emit a circular arc (fan from `centre`) sweeping from start_angle
- * to end_angle (radians). Caller picks the angular step. */
-void emit_arc(optics_gfx_canvas_vertex *verts, uint32_t *count, uint32_t cap, optics_gfx_mat3x2 tx,
-              optics_gfx_color color, optics_gfx_point centre, float radius, float start_angle,
-              float sweep, uint32_t steps) {
-    if (steps == 0)
+/* Convex, allowing collinear runs (a round cap's centre lies on its diameter). */
+static bool polygon_convex(const optics_gfx_point *p, uint32_t n, float area2) {
+    const float tol = -1e-6f * fabsf(area2);
+    for (uint32_t i = 0; i < n; ++i) {
+        const optics_gfx_point a = p[i];
+        const optics_gfx_point b = p[(i + 1) % n];
+        const optics_gfx_point e = p[(i + 2) % n];
+        float turn = (b.x - a.x) * (e.y - b.y) - (b.y - a.y) * (e.x - b.x);
+        if (area2 < 0.0f)
+            turn = -turn;
+        if (turn < tol)
+            return false;
+    }
+    return true;
+}
+
+/* Append `p[0..n)` (physical pixels) as one positively oriented contour. */
+static void outline_push(stroke_outline *o, const optics_gfx_point *p, uint32_t n, bool reverse) {
+    optics_gfx_canvas *c = o->c;
+    if (!canvas_ensure_outline(c, o->pt_count + n, o->contour_count + 1u)) {
+        o->failed = true;
         return;
-    float step = sweep / (float)steps;
-    optics_gfx_point prev = {
-        centre.x + radius * cosf(start_angle),
-        centre.y + radius * sinf(start_angle),
-    };
-    for (uint32_t i = 1; i <= steps; ++i) {
-        float a = start_angle + step * (float)i;
-        optics_gfx_point cur = {
-            centre.x + radius * cosf(a),
-            centre.y + radius * sinf(a),
-        };
-        emit_tri(verts, count, cap, tx, color, centre, prev, cur);
-        prev = cur;
+    }
+    const uint32_t start = o->pt_count;
+    for (uint32_t i = 0; i < n; ++i)
+        c->scratch_outline_pts[start + i] = p[reverse ? n - 1u - i : i];
+    c->scratch_outline_contours[o->contour_count++] =
+        (optics_gfx_canvas_contour){.start = start, .count = n, .closed = true};
+    o->pt_count += n;
+}
+
+/* Add one outline piece given in user space. A convex piece becomes a single
+ * contour. A non-convex one -- only a body quad whose inner offsets crossed
+ * can be -- would wind its two lobes in opposite directions and cut a hole
+ * under the non-zero rule, so it is split into a fan of triangles, each
+ * oriented on its own. Degenerate pieces add nothing. */
+static void stroke_piece(stroke_outline *o, const optics_gfx_point *user, uint32_t n) {
+    if (o->failed || n < 3 || n > STROKE_PIECE_MAX)
+        return;
+    optics_gfx_point p[STROKE_PIECE_MAX];
+    for (uint32_t i = 0; i < n; ++i)
+        p[i] = optics_gfx_mat3x2_transform_point(o->tx, user[i]);
+    const float area2 = polygon_area2(p, n);
+    if (fabsf(area2) < 1e-9f)
+        return;
+    if (polygon_convex(p, n, area2)) {
+        outline_push(o, p, n, area2 < 0.0f);
+        return;
+    }
+    for (uint32_t i = 1; i + 1 < n; ++i) {
+        const optics_gfx_point tri[3] = {p[0], p[i], p[i + 1]};
+        const float tri_area2 = polygon_area2(tri, 3);
+        if (fabsf(tri_area2) >= 1e-9f)
+            outline_push(o, tri, 3, tri_area2 < 0.0f);
     }
 }
 
-static void stroke_emit_arc(optics_gfx_canvas *c, uint32_t *v_count, optics_gfx_mat3x2 tx,
-                            optics_gfx_color color, optics_gfx_point centre, float radius,
-                            float start_angle, float sweep, uint32_t steps) {
-    if (steps == 0)
+static void stroke_tri(stroke_outline *o, optics_gfx_point a, optics_gfx_point b,
+                       optics_gfx_point e) {
+    stroke_piece(o, (const optics_gfx_point[]){a, b, e}, 3);
+}
+
+static void stroke_quad(stroke_outline *o, optics_gfx_point a, optics_gfx_point b,
+                        optics_gfx_point e, optics_gfx_point f) {
+    stroke_piece(o, (const optics_gfx_point[]){a, b, e, f}, 4);
+}
+
+/* Circular sector centred on `centre` sweeping `sweep` radians from
+ * `start_angle`: the fan of a round join or a round cap. |sweep| <= pi, so
+ * the sector is convex and lands as one contour. */
+static void stroke_sector(stroke_outline *o, optics_gfx_point centre, float radius,
+                          float start_angle, float sweep, uint32_t steps) {
+    if (steps == 0 || steps + 2u > STROKE_PIECE_MAX)
         return;
-    uint32_t need = *v_count + steps * 3u;
-    if (need > c->scratch_verts_cap && !canvas_ensure_verts(c, need))
-        return;
-    emit_arc(c->scratch_verts, v_count, c->scratch_verts_cap, tx, color, centre, radius,
-             start_angle, sweep, steps);
+    optics_gfx_point p[STROKE_PIECE_MAX];
+    p[0] = centre;
+    const float step = sweep / (float)steps;
+    for (uint32_t i = 0; i <= steps; ++i) {
+        const float a = start_angle + step * (float)i;
+        p[i + 1] = (optics_gfx_point){centre.x + radius * cosf(a), centre.y + radius * sinf(a)};
+    }
+    stroke_piece(o, p, steps + 2u);
 }
 
 /* Local radius of curvature of the flattened polyline at `pt`, estimated as
@@ -190,16 +256,12 @@ static void clamp_inner_offset(stroke_frame *f, optics_gfx_point pt, optics_gfx_
         f->right = clamped;
 }
 
-/* Stroke a single flattened contour (`pts[0..count)`) into the shared
- * `verts` buffer. Factored out of flux_canvas_stroke_path so a path with
- * several subpaths (a move_to starts a new one — e.g. the divider line in a
- * sidebar glyph, or a gear's hub circle plus its body) strokes every subpath,
- * not just the first. */
-static void stroke_one_contour(optics_gfx_canvas *c, const canvas_paint *paint,
-                               optics_gfx_mat3x2 tx, optics_gfx_color color, float half,
+/* Add the outline pieces of one flattened subpath (`pts[0..count)`). Every
+ * subpath of a path is stroked, not only the first. */
+static void stroke_one_contour(stroke_outline *o, const canvas_paint *paint, float half,
                                float miter_limit, optics_gfx_point *pts, uint32_t count,
-                               bool contour_closed, float first_x, float first_y,
-                               uint32_t *v_count_io) {
+                               bool contour_closed, float first_x, float first_y) {
+    optics_gfx_canvas *c = o->c;
     uint32_t n = count;
     if (n < 2)
         return;
@@ -219,8 +281,6 @@ static void stroke_one_contour(optics_gfx_canvas *c, const canvas_paint *paint,
     if (n < 2)
         return;
 
-    uint32_t v_count = *v_count_io;
-
     /* Build per-vertex frames first so segment body can reference
      * both endpoints' offsets, growing c->scratch_frames dynamically. */
     if (!canvas_ensure_frames(c, n))
@@ -236,14 +296,26 @@ static void stroke_one_contour(optics_gfx_canvas *c, const canvas_paint *paint,
             clamp_inner_offset(&frames[i], pts[i], prev, next);
     }
 
-    /* Body strip: between consecutive vertices i and i+1, emit two
-     * triangles forming the quad (a.right, a.left, b.left, b.right). */
+    /* Body: one quad per segment. A mitred vertex shares its bisector offsets
+     * between the two segments. A vertex whose miter overflowed has none: the
+     * segment ending there stops at its own normal (n_in) and the one leaving
+     * starts at its own (n_out); the join fills the outer wedge between them
+     * and the inner sides overlap, which the union covers once. */
     uint32_t seg_count = closed ? n : (n > 0 ? n - 1 : 0);
     for (uint32_t s = 0; s < seg_count; ++s) {
-        const stroke_frame *a = &frames[s];
-        const stroke_frame *b = &frames[(s + 1) % n];
-        stroke_emit_tri(c, &v_count, tx, color, a->right, a->left, b->left);
-        stroke_emit_tri(c, &v_count, tx, color, a->right, b->left, b->right);
+        const uint32_t ia = s;
+        const uint32_t ib = (s + 1) % n;
+        const stroke_frame *a = &frames[ia];
+        const stroke_frame *b = &frames[ib];
+        const optics_gfx_point a_left =
+            a->miter_ok ? a->left : pt_add(pts[ia], pt_scale(a->n_out, +half));
+        const optics_gfx_point a_right =
+            a->miter_ok ? a->right : pt_add(pts[ia], pt_scale(a->n_out, -half));
+        const optics_gfx_point b_left =
+            b->miter_ok ? b->left : pt_add(pts[ib], pt_scale(b->n_in, +half));
+        const optics_gfx_point b_right =
+            b->miter_ok ? b->right : pt_add(pts[ib], pt_scale(b->n_in, -half));
+        stroke_quad(o, a_right, a_left, b_left, b_right);
     }
 
     /* Joins at interior vertices where miter overflowed. */
@@ -254,20 +326,16 @@ static void stroke_one_contour(optics_gfx_canvas *c, const canvas_paint *paint,
         if (f->miter_ok)
             continue;
 
-        /* Outer side depends on turn direction. The frame's
-         * n_in/n_out give the segment normals at point i. */
+        /* The join fills the outer side of the turn: away from the left
+         * normals when turning left, along them when turning right. */
         optics_gfx_point pt = pts[i];
-        /* Per-segment outer points: incoming side and outgoing side. */
-        optics_gfx_point in_outer = pt_add(
-            pt, pt_scale(f->turning_left ? f->n_in : (optics_gfx_point){-f->n_in.x, -f->n_in.y},
-                         +half));
-        optics_gfx_point out_outer = pt_add(
-            pt, pt_scale(f->turning_left ? f->n_out : (optics_gfx_point){-f->n_out.x, -f->n_out.y},
-                         +half));
+        const float outer = f->turning_left ? -half : +half;
+        optics_gfx_point in_outer = pt_add(pt, pt_scale(f->n_in, outer));
+        optics_gfx_point out_outer = pt_add(pt, pt_scale(f->n_out, outer));
 
         switch (paint->join) {
         case OPTICS_GFX_JOIN_BEVEL:
-            stroke_emit_tri(c, &v_count, tx, color, pt, in_outer, out_outer);
+            stroke_tri(o, pt, in_outer, out_outer);
             break;
         case OPTICS_GFX_JOIN_MITER: {
             /* Miter — extend in_outer and out_outer to meeting point.
@@ -278,16 +346,15 @@ static void stroke_one_contour(optics_gfx_canvas *c, const canvas_paint *paint,
             optics_gfx_point bisector = pt_add(f->n_in, f->n_out);
             float bl = sqrtf(bisector.x * bisector.x + bisector.y * bisector.y);
             if (bl < 1e-6f) {
-                stroke_emit_tri(c, &v_count, tx, color, pt, in_outer, out_outer);
+                stroke_tri(o, pt, in_outer, out_outer);
                 break;
             }
             bisector = pt_scale(bisector, 1.0f / bl);
-            if (!f->turning_left)
+            if (f->turning_left)
                 bisector = pt_scale(bisector, -1.0f);
             /* miter cap distance = half * miter_limit along bisector. */
             optics_gfx_point miter = pt_add(pt, pt_scale(bisector, half * miter_limit));
-            stroke_emit_tri(c, &v_count, tx, color, pt, in_outer, miter);
-            stroke_emit_tri(c, &v_count, tx, color, pt, miter, out_outer);
+            stroke_quad(o, pt, in_outer, miter, out_outer);
             break;
         }
         case OPTICS_GFX_JOIN_ROUND: {
@@ -304,7 +371,7 @@ static void stroke_one_contour(optics_gfx_canvas *c, const canvas_paint *paint,
                 steps = 2;
             if (steps > 32)
                 steps = 32;
-            stroke_emit_arc(c, &v_count, tx, color, pt, half, a0, sweep, steps);
+            stroke_sector(o, pt, half, a0, sweep, steps);
             break;
         }
         }
@@ -329,10 +396,8 @@ static void stroke_one_contour(optics_gfx_canvas *c, const canvas_paint *paint,
             optics_gfx_point sr0 = pt_add(f0->right, pt_scale(t0, -half));
             optics_gfx_point slN = pt_add(fN->left, pt_scale(tN, +half));
             optics_gfx_point srN = pt_add(fN->right, pt_scale(tN, +half));
-            stroke_emit_tri(c, &v_count, tx, color, sl0, sr0, f0->right);
-            stroke_emit_tri(c, &v_count, tx, color, sl0, f0->right, f0->left);
-            stroke_emit_tri(c, &v_count, tx, color, fN->left, fN->right, srN);
-            stroke_emit_tri(c, &v_count, tx, color, fN->left, srN, slN);
+            stroke_quad(o, sl0, sr0, f0->right, f0->left);
+            stroke_quad(o, fN->left, fN->right, srN, slN);
             break;
         }
         case OPTICS_GFX_CAP_ROUND: {
@@ -340,16 +405,13 @@ static void stroke_one_contour(optics_gfx_canvas *c, const canvas_paint *paint,
              * the right offset to the left offset around the OUTSIDE
              * of the cap (i.e. opposite the tangent direction). */
             float a_start = atan2f(f0->right.y - p0.y, f0->right.x - p0.x);
-            stroke_emit_arc(c, &v_count, tx, color, p0, half, a_start,
-                            3.14159265359f /* π half-sweep, picks outside */, 16);
+            stroke_sector(o, p0, half, a_start, 3.14159265359f /* outside half-turn */, 16);
             float a_end = atan2f(fN->left.y - pN.y, fN->left.x - pN.x);
-            stroke_emit_arc(c, &v_count, tx, color, pN, half, a_end, 3.14159265359f, 16);
+            stroke_sector(o, pN, half, a_end, 3.14159265359f, 16);
             break;
         }
         }
     }
-
-    *v_count_io = v_count;
 }
 
 void canvas_stroke_path_internal(optics_gfx_canvas *c, const optics_gfx_path *p,
@@ -360,6 +422,11 @@ void canvas_stroke_path_internal(optics_gfx_canvas *c, const optics_gfx_path *p,
         return;
     if (paint->stroke_width <= 0.0f)
         return;
+    if (!c->backend || !c->backend->submit_cover) {
+        canvas_fail(c, OPTICS_GFX_ERROR_UNSUPPORTED,
+                    "analytic stroke coverage unsupported by canvas backend");
+        return;
+    }
 
     optics_gfx_mat3x2 tx = c->states[c->state_top].transform;
     float pixel_scale = optics_gfx_canvas_mat3x2_pixel_scale(tx);
@@ -367,24 +434,26 @@ void canvas_stroke_path_internal(optics_gfx_canvas *c, const optics_gfx_path *p,
     const float half = paint->stroke_width * 0.5f;
     const float miter_limit = paint->miter_limit > 0.0f ? paint->miter_limit : 4.0f;
 
-    /* Flatten into every subpath (contour), growing c->scratch_pts /
-     * c->scratch_contours dynamically so arbitrary-length paths stroke intact. */
+    /* Flatten every subpath into c->scratch_pts / c->scratch_contours (grown
+     * as needed); the outline goes to its own scratch so the two never alias. */
     flatten_multi fm = canvas_flatten_path(c, p, pixel_scale);
     if (fm.contour_count == 0)
         return;
 
-    optics_gfx_point *pts = c->scratch_pts;
-    optics_gfx_canvas_contour *cons = c->scratch_contours;
-    optics_gfx_color color = paint->color;
-    uint32_t v_count = 0;
-
-    for (uint32_t ci = 0; ci < fm.contour_count; ++ci) {
-        optics_gfx_canvas_contour *co = &cons[ci];
+    stroke_outline o = {.c = c, .tx = tx};
+    for (uint32_t ci = 0; ci < fm.contour_count && !o.failed; ++ci) {
+        const optics_gfx_canvas_contour *co = &c->scratch_contours[ci];
         if (co->count < 2)
             continue;
-        stroke_one_contour(c, paint, tx, color, half, miter_limit, pts + co->start, co->count,
-                           co->closed, co->first_x, co->first_y, &v_count);
+        stroke_one_contour(&o, paint, half, miter_limit, c->scratch_pts + co->start, co->count,
+                           co->closed, co->first_x, co->first_y);
     }
+    if (o.failed || o.contour_count == 0)
+        return;
 
-    submit_triangles_covered(c, paint, c->scratch_verts, v_count);
+    optics_gfx_result r = c->backend->submit_cover(
+        c->backend, c, c->scratch_outline_pts, c->scratch_outline_contours, o.contour_count,
+        OPTICS_GFX_FILL_NON_ZERO, paint, c->states[c->state_top].scissor);
+    if (r != OPTICS_GFX_OK)
+        canvas_fail(c, r, "analytic stroke submission failed");
 }

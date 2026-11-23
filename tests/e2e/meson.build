@@ -12,13 +12,13 @@
 
 e2e_common_deps = [optics_dep, optics_test_dep, m_dep]
 
-# Always present: the umbrella/flux version contract works in every feature
-# configuration, including a flux-only distribution.
-test_e2e_flux_version = executable('test_e2e_flux_version',
-  'test_e2e_flux_version.c',
+# Always present: the umbrella/gfx version contract works in every feature
+# configuration, including a gfx-only distribution.
+test_e2e_gfx_version = executable('test_e2e_gfx_version',
+  'test_e2e_gfx_version.c',
   dependencies : e2e_common_deps,
 )
-test('e2e_gfx_version', test_e2e_flux_version, suite : 'e2e')
+test('e2e_gfx_version', test_e2e_gfx_version, suite : 'e2e')
 
 if opt_ui
   test_e2e_public_api = executable('test_e2e_public_api',

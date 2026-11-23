@@ -1,7 +1,7 @@
 /* test_datagrid.c — verification for high-performance interactive data grid pattern. */
 
-#include "lens_test.h"
 #include "optics_test.h"
+#include "ui_test.h"
 #include <optics/ui/patterns.h>
 
 /* The fixed arguments of every case in this file, merged into a copy of the

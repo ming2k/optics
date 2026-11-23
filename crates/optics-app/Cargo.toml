@@ -1,6 +1,6 @@
 [package]
 name = "optics-app"
-description = "Safe Rust bindings to aperture: the application shell that runs a lens UI in an iris window"
+description = "Safe Rust bindings to app: the application shell that runs a UI in a native window"
 publish = false
 links = "optics_app_rs"
 version.workspace = true
@@ -20,3 +20,9 @@ optics-build = { workspace = true }
 
 [[example]]
 name = "hello"
+
+[features]
+# Force a static link of the Optics archives; the default links the shared
+# objects (docs/how-to/choose-a-static-or-shared-link.md). OPTICS_STATIC /
+# OPTICS_DYNAMIC in the environment override it.
+static = ["optics-app-sys/static", "optics-window/static", "optics-ui/static", "optics-gfx/static"]

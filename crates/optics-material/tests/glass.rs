@@ -1,8 +1,8 @@
 //! Compile-and-link coverage for the liquid-glass wrapper: the safe types
 //! keep their documented shape, defaults match `OPTICS_MATERIAL_LIQUID_GLASS_DESC_INIT`,
-//! and the prism + flux shared libraries link and run. The filter itself
+//! and the material + gfx shared libraries link and run. The filter itself
 //! needs a recording Vulkan frame, so GPU coverage stays with the C tests
-//! (`meson test`) — mirroring the flux crate, whose effect wrappers are also
+//! (`meson test`) — mirroring the gfx crate, whose effect wrappers are also
 //! covered at compile level only.
 
 use optics_material::{LiquidGlassFocus, LiquidGlassGroup, LiquidGlassParams, LiquidGlassShape};
@@ -120,21 +120,21 @@ fn stats_method_signature_and_stat_layout() {
 }
 
 #[test]
-fn error_is_flux_error_and_displays() {
+fn error_is_gfx_error_and_displays() {
     // optics_material::Error re-exports optics_gfx::Error; Display resolves the code through
-    // libflux's optics_gfx_result_string — so this also proves the link.
+    // liboptics_gfx's optics_gfx_result_string — so this also proves the link.
     let err = optics_material::Error(
         optics_material::sys::optics_gfx_result::OPTICS_GFX_ERROR_INVALID_ARGUMENT,
     );
     let text = err.to_string();
-    assert!(text.starts_with("flux error:"), "unexpected: {text}");
+    assert!(text.starts_with("gfx error:"), "unexpected: {text}");
 }
 
 #[test]
 fn version_string_is_wellformed() {
     // The runtime string must parse as three numeric components; a drifted
-    // build (bindings compiled against a different libprism) should fail
-    // loudly. Mirrors the iris binding's version tripwire.
+    // build (bindings compiled against a different liboptics_material) should fail
+    // loudly. Mirrors the window binding's version tripwire.
     let v = optics_material::version();
     assert_eq!(v.split('.').count(), 3, "malformed version: {v}");
     assert!(v.chars().all(|c| c.is_ascii_digit() || c == '.'), "{v}");

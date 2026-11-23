@@ -48,7 +48,7 @@ meson test -C build-release-asan --no-suite bench --no-suite fuzz
 Point the binding build scripts at `build-release` and run the repository-root
 Cargo workspace as described in [Testing](testing.md#rust-workspaces). Follow the
 [Pre-release smoke verification checklist](manual-testing.md#7-pre-release-smoke-verification-checklist)
-to manually verify interactive `flux`, `prism`, and `iris` applications.
+to manually verify interactive `gfx`, `material`, and `window` applications.
 
 ## Create the Source Artifact
 
@@ -82,7 +82,7 @@ consumer's build host.
 - The tag resolves to the tested commit.
 - A fresh checkout of the tag passes the release build.
 - The source archive checksum matches the published artifact.
-- `pkg-config --modversion flux lens iris` reports the intended installed
+- `pkg-config --modversion gfx ui window` reports the intended installed
   metadata after installing into a temporary prefix.
 - Runtime C version helpers and published Rust crate versions match the release
   notes.

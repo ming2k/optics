@@ -1,6 +1,6 @@
 [package]
 name = "optics-gfx"
-description = "Safe Rust bindings to flux: a Vulkan-first 2D/3D graphics library"
+description = "Safe Rust bindings to gfx: a Vulkan-first 2D/3D graphics library"
 publish = false
 links = "optics_gfx_rs"
 version.workspace = true
@@ -14,3 +14,9 @@ optics-gfx-sys = { workspace = true }
 
 [build-dependencies]
 optics-build = { workspace = true }
+
+[features]
+# Force a static link of the Optics archives; the default links the shared
+# objects (docs/how-to/choose-a-static-or-shared-link.md). OPTICS_STATIC /
+# OPTICS_DYNAMIC in the environment override it.
+static = ["optics-gfx-sys/static"]

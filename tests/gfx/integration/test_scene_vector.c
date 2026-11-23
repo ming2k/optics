@@ -1,7 +1,7 @@
 /*
  * Scene vector coverage material integration (ADR-0117).
  *
- * Exercises FLUX_MATERIAL_VECTOR in a 3D perspective scene:
+ * Exercises OPTICS_GFX_MATERIAL_VECTOR in a 3D perspective scene:
  *   - Object-space input (INV-SCV-02) via segments storage buffer
  *   - No bake (INV-SCV-01): pure mathematical evaluation, no atlas or texture
  *   - Projective correctness (INV-SCV-03): crisp analytic coverage under strong

@@ -1,5 +1,5 @@
 /*
- * iris/dnd.h — Cross-platform Drag-and-Drop (DnD) Subsystem.
+ * window/dnd.h — Cross-platform Drag-and-Drop (DnD) Subsystem.
  *
  * Provides cross-process drag source initiation and drop target reception.
  * See ADR-0086 for architectural background.
@@ -54,7 +54,7 @@ typedef enum optics_window_dnd_action : uint32_t {
 typedef struct optics_window_dnd_source_callbacks {
     /* Called when a target requests payload data for a negotiated MIME type.
      * The implementation writes data to `write_fd` and closes it or leaves it
-     * for Iris to manage. */
+     * for window to manage. */
     void (*provide_data)(const char *mime, int write_fd, void *user);
 
     /* Called when the drop completes successfully with the negotiated action. */
@@ -67,9 +67,10 @@ typedef struct optics_window_dnd_source_callbacks {
     void *user;
 } optics_window_dnd_source_callbacks;
 
-/* Drag source specification passed to iris_dnd_start(). */
+/* Drag source specification passed to optics_window_dnd_start(). */
 typedef struct optics_window_dnd_source {
-    /* Bitmask of allowed actions (e.g. IRIS_DND_ACTION_COPY | IRIS_DND_ACTION_MOVE). */
+    /* Bitmask of allowed actions (e.g. OPTICS_WINDOW_DND_ACTION_COPY |
+     * OPTICS_WINDOW_DND_ACTION_MOVE). */
     uint32_t actions;
 
     /* Array of offered MIME type strings. */
@@ -102,4 +103,4 @@ OPTICS_WINDOW_API void optics_window_dnd_cancel(void);
 }
 #endif
 
-#endif /* IRIS_DND_H */
+#endif /* OPTICS_WINDOW_DND_H */

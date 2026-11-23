@@ -1,8 +1,8 @@
 /* tablet_wayland.c — zwp_tablet_v2 (tablet-tool-unstable-v2) pen input.
  *
  * Bridges Wayland tablet events into the pointer accumulator: pen motion
- * drives the same cursor coordinates, tip contact drives IRIS_BUTTON_LEFT,
- * and pressure/eraser ride along in the new size-guarded iris_input pen
+ * drives the same cursor coordinates, tip contact drives OPTICS_WINDOW_BUTTON_LEFT,
+ * and pressure/eraser ride along in the new size-guarded optics_window_input pen
  * fields. The tablet-tool protocol state machine (manager → seat →
  * per-tool objects) lives entirely here; app_wayland.c only registers the
  * global and forwards seat creation.
@@ -20,7 +20,7 @@
 
 #include "platform_internal.h"
 
-/* Generated protocol glue (meson wayland module, see libs/iris/meson.build). */
+/* Generated protocol glue (meson wayland module, see libs/window/meson.build). */
 #include "tablet-unstable-v2-client-protocol.h"
 #include "wayland-client-protocol.h"
 
@@ -53,9 +53,9 @@ static struct wl_seat *g_pending_seat;
 /* ------------------------------------------------------------------ */
 /*  Pre-fold seam (ADR-0107) for pen state                             */
 /* ------------------------------------------------------------------ */
-/* Motion and tip/barrel buttons reach lens as POINTER_MOVE/BUTTON via
+/* Motion and tip/barrel buttons reach ui as POINTER_MOVE/BUTTON via
  * g_host (app_wayland.c routes those through the seam). The remaining
- * pen state lens consumes — pen_active / pen_pressure / pen_eraser — is
+ * pen state ui consumes — pen_active / pen_pressure / pen_eraser — is
  * gated here so the host can observe or rewrite it before the fold. */
 
 static bool tablet_emit_pressure(double pressure) {
@@ -119,6 +119,8 @@ static void tablet_tool_proximity_in(void *data, struct zwp_tablet_tool_v2 *tool
     g_tablet.proximity_serial = serial;
     if (g_host.serial)
         g_host.serial(g_host.user, serial); /* selection ops may be pen-initiated */
+    if (g_host.tool_proximity)
+        g_host.tool_proximity(g_host.user, tool, serial, true);
 }
 
 static void tablet_tool_proximity_out(void *data, struct zwp_tablet_tool_v2 *tool) {
@@ -128,6 +130,8 @@ static void tablet_tool_proximity_out(void *data, struct zwp_tablet_tool_v2 *too
         return;
     tool_apply_down(false);
     (void)tablet_emit_proximity(false);
+    if (g_host.tool_proximity && g_tablet.active_tool)
+        g_host.tool_proximity(g_host.user, g_tablet.active_tool, 0, false);
     g_tablet.active_tool = nullptr;
     g_tablet.eraser = false;
     g_tablet.pressure = 0.0;
@@ -184,7 +188,7 @@ static void tablet_tool_button(void *data, struct zwp_tablet_tool_v2 *tool, uint
     if (g_host.serial)
         g_host.serial(g_host.user, serial);
     /* Barrel buttons map onto mouse semantics: BTN_STYLUS → RIGHT,
-     * BTN_STYLUS2 → MIDDLE, matching the evdev conventions lens's mouse
+     * BTN_STYLUS2 → MIDDLE, matching the evdev conventions ui's mouse
      * contract is built from. The tip contact keeps LEFT. */
     int i = -1;
     if (button == 0x14b) /* BTN_STYLUS */
@@ -315,4 +319,4 @@ bool optics_window_wayland__tablet_in_proximity(void) {
     return g_tablet.in_proximity;
 }
 
-#endif /* IRIS_BACKEND_WAYLAND */
+#endif /* OPTICS_WINDOW_BACKEND_WAYLAND */

@@ -1,5 +1,5 @@
 /*
- * main.c — Iris application lifecycle, frame orchestration, and entry point for material_gallery.
+ * main.c — window application lifecycle, frame orchestration, and entry point for material_gallery.
  */
 
 #include "gallery.h"
@@ -330,7 +330,7 @@ int main(int argc, char **argv) {
 
     if (!app.smoke_mode) {
         printf("=================================================================\n");
-        printf(" Optics Prism Material Gallery (Native Iris Showcase)\n");
+        printf(" Optics Material Gallery (Native window Showcase)\n");
         printf(" Native Wayland cursor (wp_cursor_shape_v1) & fractional HiDPI\n");
         printf(" Hotkeys: [1:Raw 2:Glass 3:Frosted 4:Acrylic 5:Mica], [B] Backdrop, [D] "
                "Dark/Light, [Space] Play/Pause\n");
@@ -338,7 +338,7 @@ int main(int argc, char **argv) {
     }
 
     return optics_app_run(&(optics_app_opts){
-        .title = "Optics Prism Material Gallery (1:Raw 2:Glass 3:Frosted 4:Acrylic 5:Mica)",
+        .title = "Optics Material Gallery (1:Raw 2:Glass 3:Frosted 4:Acrylic 5:Mica)",
         .app_id = "org.optics.showcase.material-gallery",
         .width = 1280,
         .height = 800,

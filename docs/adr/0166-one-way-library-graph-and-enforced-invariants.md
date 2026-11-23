@@ -3,7 +3,7 @@ id: ADR-0166
 title: "One-Way Library Graph and Enforced Invariants"
 status: accepted
 date: 2026-11-15
-scope: libs/iris, libs/aperture, libs/flux/meson.build, tools/check_api.py, tests/lens/test_zero_alloc.c, docs/dev/standards
+scope: libs/window, libs/app, libs/gfx/meson.build, tools/check_api.py, tests/ui/test_zero_alloc.c, docs/dev/standards
 superseded_by: null
 negative_knowledge: true
 ---

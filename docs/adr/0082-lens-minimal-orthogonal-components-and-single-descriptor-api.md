@@ -3,6 +3,9 @@ id: ADR-0082
 title: "Lens minimal orthogonal components and single descriptor API"
 status: accepted
 date: 2026-08-26
+scope: ui (C core library), ui-rs (Rust binding layer)
+superseded_by: null
+negative_knowledge: false
 ---
 
 # ADR-0082: Lens minimal orthogonal components and single descriptor API

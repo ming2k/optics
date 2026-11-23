@@ -3,7 +3,7 @@ id: ADR-0129
 title: "The observation plane: one allocation ledger for every library, scope tag, and the end of ad-hoc leak triage"
 status: accepted
 date: 2026-11-02
-scope: [flux, glyph, lens, vista, prism, iris, bindings, tools]
+scope: [gfx, text, ui, scene, material, window, bindings, tools]
 superseded_by: null
 negative_knowledge: true
 ---

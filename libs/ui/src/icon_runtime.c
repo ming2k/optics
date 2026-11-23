@@ -1,10 +1,10 @@
-/* icon_runtime.c — runtime SVG icon registration (lens_icon_register_svg).
+/* icon_runtime.c — runtime SVG icon registration (optics_ui_icon_register_svg).
  *
- * Built-in icons ship as generated lens_icon_cmd tables (icon_data.c); this
+ * Built-in icons ship as generated optics_ui_icon_cmd tables (icon_data.c); this
  * file lets applications register their own SVG assets at runtime and use
  * them through every icon widget exactly like a built-in.
  *
- * Implemented via the reticle vector-document compiler (ADR-0150, ADR-0161).
+ * Implemented via the svg vector-document compiler (ADR-0150, ADR-0161).
  */
 
 #include "internal.h"
@@ -15,22 +15,22 @@
 #include <string.h>
 
 enum {
-    LENSI_ICON_MAX_CMDS = 8192u,         /* per-icon verb cap */
-    LENSI_ICON_MAX_RUNTIME = 4096u,      /* registry slot cap */
-    LENSI_ICON_MAX_SVG_BYTES = 1u << 20, /* input sanity bound */
+    OPTICS_UI_ICON_MAX_CMDS = 8192u,         /* per-icon verb cap */
+    OPTICS_UI_ICON_MAX_RUNTIME = 4096u,      /* registry slot cap */
+    OPTICS_UI_ICON_MAX_SVG_BYTES = 1u << 20, /* input sanity bound */
 };
 
-typedef struct lensi_runtime_icon {
+typedef struct optics_ui__runtime_icon {
     optics_ui_icon_desc desc; /* cmds and runs owned by the entry, never freed */
-    uint8_t mode;             /* LENSI_ICON_RENDER_* */
-} lensi_runtime_icon;
+    uint8_t mode;             /* OPTICS_UI_ICON_RENDER_* */
+} optics_ui__runtime_icon;
 
-/* Process-global registry: icons outlive any lens context. */
-static lensi_runtime_icon *g_runtime_icons;
+/* Process-global registry: icons outlive any ui context. */
+static optics_ui__runtime_icon *g_runtime_icons;
 static uint32_t g_runtime_count;
 static uint32_t g_runtime_cap;
 
-bool lensi_icon_valid(int32_t id) {
+bool optics_ui__icon_valid(int32_t id) {
     if (id < 0)
         return false;
     if (id < (int32_t)OPTICS_UI_ICON_COUNT)
@@ -38,7 +38,7 @@ bool lensi_icon_valid(int32_t id) {
     return (uint32_t)(id - (int32_t)OPTICS_UI_ICON_COUNT) < g_runtime_count;
 }
 
-const optics_ui_icon_desc *lensi_icon_desc(int32_t id) {
+const optics_ui_icon_desc *optics_ui__icon_desc(int32_t id) {
     if (id < 0)
         return nullptr;
     if (id < (int32_t)OPTICS_UI_ICON_COUNT)
@@ -49,22 +49,22 @@ const optics_ui_icon_desc *lensi_icon_desc(int32_t id) {
     return &g_runtime_icons[index].desc;
 }
 
-uint8_t lensi_icon_mode(int32_t id) {
+uint8_t optics_ui__icon_mode(int32_t id) {
     if (id >= 0 && id < (int32_t)OPTICS_UI_ICON_COUNT)
         return optics_ui_icon_render_modes[id];
     if (id >= 0 && (uint32_t)(id - (int32_t)OPTICS_UI_ICON_COUNT) < g_runtime_count)
         return g_runtime_icons[id - (int32_t)OPTICS_UI_ICON_COUNT].mode;
-    return LENSI_ICON_RENDER_STROKE;
+    return OPTICS_UI_ICON_RENDER_STROKE;
 }
 
 OPTICS_UI_API const optics_ui_icon_desc *optics_ui_icon_info(optics_ui_icon_id icon,
                                                              uint8_t *mode) {
     const int32_t id = (int32_t)icon;
-    if (!lensi_icon_valid(id))
+    if (!optics_ui__icon_valid(id))
         return nullptr;
     if (mode)
-        *mode = lensi_icon_mode(id);
-    return lensi_icon_desc(id);
+        *mode = optics_ui__icon_mode(id);
+    return optics_ui__icon_desc(id);
 }
 
 optics_ui_icon_id optics_ui_icon_register_svg(const char *svg_text) {
@@ -72,10 +72,10 @@ optics_ui_icon_id optics_ui_icon_register_svg(const char *svg_text) {
         return OPTICS_UI_ICON_INVALID;
 
     size_t len = strlen(svg_text);
-    if (len == 0 || len > LENSI_ICON_MAX_SVG_BYTES)
+    if (len == 0 || len > OPTICS_UI_ICON_MAX_SVG_BYTES)
         return OPTICS_UI_ICON_INVALID;
 
-    if (g_runtime_count >= LENSI_ICON_MAX_RUNTIME)
+    if (g_runtime_count >= OPTICS_UI_ICON_MAX_RUNTIME)
         return OPTICS_UI_ICON_INVALID;
 
     optics_svg_parse_opts parse_opts = {
@@ -117,7 +117,7 @@ optics_ui_icon_id optics_ui_icon_register_svg(const char *svg_text) {
         }
     }
 
-    if (total_cmds == 0 || total_cmds > LENSI_ICON_MAX_CMDS) {
+    if (total_cmds == 0 || total_cmds > OPTICS_UI_ICON_MAX_CMDS) {
         optics_svg_release(doc);
         return OPTICS_UI_ICON_INVALID;
     }
@@ -268,8 +268,9 @@ optics_ui_icon_id optics_ui_icon_register_svg(const char *svg_text) {
 
     if (g_runtime_count == g_runtime_cap) {
         uint32_t cap = g_runtime_cap ? g_runtime_cap * 2u : 8u;
-        lensi_runtime_icon *grown = (lensi_runtime_icon *)realloc( // RAW_ALLOC_OK(process-registry)
-            g_runtime_icons, cap * sizeof *grown);                 // RAW_ALLOC_OK(process-registry)
+        optics_ui__runtime_icon *grown =
+            (optics_ui__runtime_icon *)realloc(        // RAW_ALLOC_OK(process-registry)
+                g_runtime_icons, cap * sizeof *grown); // RAW_ALLOC_OK(process-registry)
         if (!grown) {
             free(cmds); // RAW_ALLOC_OK(process-registry)
             free(runs); // RAW_ALLOC_OK(process-registry)
@@ -279,7 +280,7 @@ optics_ui_icon_id optics_ui_icon_register_svg(const char *svg_text) {
         g_runtime_cap = cap;
     }
 
-    g_runtime_icons[g_runtime_count] = (lensi_runtime_icon){
+    g_runtime_icons[g_runtime_count] = (optics_ui__runtime_icon){
         .desc =
             {
                 .cmds = cmds,
@@ -287,7 +288,7 @@ optics_ui_icon_id optics_ui_icon_register_svg(const char *svg_text) {
                 .runs = runs,
                 .run_count = run_count,
             },
-        .mode = has_any_fill ? LENSI_ICON_RENDER_FILL : LENSI_ICON_RENDER_STROKE,
+        .mode = has_any_fill ? OPTICS_UI_ICON_RENDER_FILL : OPTICS_UI_ICON_RENDER_STROKE,
     };
 
     return (optics_ui_icon_id)((int32_t)OPTICS_UI_ICON_COUNT + (int32_t)g_runtime_count++);

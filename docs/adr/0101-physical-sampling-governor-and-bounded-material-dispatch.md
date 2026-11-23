@@ -3,6 +3,9 @@ id: ADR-0101
 title: "Physical Sampling Governor and Bounded Material Dispatch"
 status: accepted
 date: 2026-09-18
+scope: libs/gfx (effect blur, compute dispatch), libs/material (all surface materials: Liquid Glass, Frosted, Acrylic, Mica, and future materials), examples/showcase (material gallery)
+superseded_by: null
+negative_knowledge: false
 ---
 
 # ADR-0101: Physical Sampling Governor and Bounded Material Dispatch

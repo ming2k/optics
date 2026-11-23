@@ -1,11 +1,11 @@
 /*
- * lens/export.h — single source of truth for symbol visibility.
+ * ui/export.h — single source of truth for symbol visibility.
  *
- * Every public lens header includes this instead of restating the macro
- * (icon.h once carried a private copy guarded by #ifndef LENS_API; two
+ * Every public ui header includes this instead of restating the macro
+ * (icon.h once carried a private copy guarded by #ifndef OPTICS_UI_API; two
  * spellings of one macro drift, and a drifted export macro is a Windows
- * link error). lens.h and icon.h both include this file; neither defines
- * LENS_API itself.
+ * link error). ui.h and icon.h both include this file; neither defines
+ * OPTICS_UI_API itself.
  */
 #ifndef OPTICS_UI_EXPORT_H
 #define OPTICS_UI_EXPORT_H
@@ -22,7 +22,7 @@
 #define OPTICS_UI_API
 #endif
 
-/* LENS_NODISCARD: mark a function whose return value must be checked. */
+/* OPTICS_UI_NODISCARD: mark a function whose return value must be checked. */
 #if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 202311L
 #define OPTICS_UI_NODISCARD [[nodiscard]]
 #elif defined(__GNUC__) || defined(__clang__)
@@ -33,4 +33,4 @@
 #define OPTICS_UI_NODISCARD
 #endif
 
-#endif /* LENS_EXPORT_H */
+#endif /* OPTICS_UI_EXPORT_H */

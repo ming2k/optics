@@ -3,6 +3,9 @@ id: ADR-0100
 title: "Liquid Glass dual-rim TIR and screen-space environmental optics"
 status: accepted
 date: 2026-09-18
+scope: Compute shader (libs/material/src/shaders/liquid_glass.comp), Prism material runtime, and showcase exhibits
+superseded_by: null
+negative_knowledge: true
 ---
 
 # ADR-0100: Liquid Glass dual-rim TIR and screen-space environmental optics

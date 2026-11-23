@@ -24,13 +24,13 @@ fn main() {
 
     let bindings = probed
         .bindgen_builder()
-        // Public flux surface only; Vk* types are pulled transitively as needed.
+        // Public gfx surface only; Vk* types are pulled transitively as needed.
         .allowlist_function("optics_gfx_.*")
         .allowlist_type("optics_gfx_.*")
         .allowlist_var("OPTICS_GFX_.*")
         .layout_tests(true)
         .generate()
-        .expect("bindgen failed to generate flux bindings");
+        .expect("bindgen failed to generate gfx bindings");
 
     write_bindings(&bindings);
 }

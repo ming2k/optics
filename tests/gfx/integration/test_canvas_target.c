@@ -1,7 +1,7 @@
 /*
  * Render-target capture (ADR-0017): render canvas content into a
- * flux_image via flux_canvas_begin_target, then feed that image to
- * flux_effect_blur, then draw the blurred result back onto a frame.
+ * optics_gfx_image via optics_gfx_canvas_begin, then feed that image to
+ * optics_gfx_effect_blur, then draw the blurred result back onto a frame.
  *
  * This is the capture -> effect -> composite round trip that real
  * backdrop blur needs. Asserts:

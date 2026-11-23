@@ -3,7 +3,7 @@ id: ADR-0147
 title: "Deferred effect passes — register, require, flush, prune"
 status: accepted
 date: 2026-11-04
-scope: [flux, prism]
+scope: [gfx, material]
 superseded_by: null
 negative_knowledge: true
 ---

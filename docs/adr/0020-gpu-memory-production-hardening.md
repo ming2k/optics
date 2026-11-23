@@ -3,6 +3,9 @@ id: ADR-0020
 title: "GPU memory production hardening (amends ADR-0007)"
 status: accepted
 date: 2026-07-17
+scope: unrecorded
+superseded_by: null
+negative_knowledge: false
 ---
 
 # ADR-0020: GPU memory production hardening (amends ADR-0007)

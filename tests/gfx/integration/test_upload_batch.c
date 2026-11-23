@@ -1,12 +1,12 @@
 /*
- * Batched uploads (flux_uploads_begin / flux_uploads_flush).
+ * Batched uploads (optics_gfx_uploads_begin / optics_gfx_uploads_flush).
  *
  * Verifies the batch fast path end to end:
  *   - flush without an open batch is a no-op; a nested begin joins the
  *     open batch and only the outermost flush submits
  *   - images/meshes/buffers created inside a batch land correctly after
  *     one flush (pixel-asserted via offscreen canvas readback)
- *   - flux_surface_begin_frame auto-flushes an unflushed batch, so a
+ *   - optics_gfx_surface_begin_frame auto-flushes an unflushed batch, so a
  *     frame can never sample unsubmitted data
  *   - allocator stats settle to the same steady state afterwards
  *     (no staging or zombie leakage from the batch path)
@@ -146,7 +146,7 @@ int main(void) {
         OT_EXPECT(optics_gfx_uploads_begin(d) == OPTICS_GFX_OK);
         optics_gfx_image *yellow = make_solid(d, 255, 255, 0);
         OT_EXPECT(yellow != nullptr);
-        /* deliberately no flux_uploads_flush */
+        /* deliberately no optics_gfx_uploads_flush */
 
         optics_gfx_frame *frame = nullptr;
         OT_EXPECT(optics_gfx_surface_begin_frame(s, nullptr, &frame) == OPTICS_GFX_OK);

@@ -3,8 +3,8 @@ id: ADR-0122
 title: "Compositor-driven presentation pacing and hardware-locked display synchronization"
 status: accepted
 date: 2026-10-28
+scope: libs/window, libs/motion, libs/ui, architecture
 superseded_by: null
-scope: libs/iris, libs/transit, libs/lens, architecture
 negative_knowledge: true
 ---
 

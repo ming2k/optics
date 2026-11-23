@@ -43,7 +43,7 @@ fn main() {
         .newtype_enum("optics_svg_pixel_format")
         .layout_tests(true)
         .generate()
-        .expect("bindgen failed to generate reticle bindings");
+        .expect("bindgen failed to generate svg bindings");
 
     write_bindings(&bindings);
 }

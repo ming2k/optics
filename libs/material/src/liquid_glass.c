@@ -2,20 +2,20 @@
  * Analytic liquid-glass material — the convex-lens model of ADR-0046 with
  * the focus field of ADR-0050.
  *
- * prism is a separate library from flux: this file is implemented entirely
- * on flux's public API (compute pipelines, compute-writable images,
+ * material is a separate library from gfx: this file is implemented entirely
+ * on gfx's public API (compute pipelines, compute-writable images,
  * frame-slot queries, the bindless heap, raw Vulkan handle accessors).
- * flux owns the effect runtime; the material — its shader, the regions
+ * gfx owns the effect runtime; the material — its shader, the regions
  * policy below, and this dispatch machinery — lives here (ADR-0063).
  *
  * Layout:
- *   - shader bytecode (#embed or generated headers, same idiom as flux)
+ *   - shader bytecode (#embed or generated headers, same idiom as gfx)
  *   - push-constant blocks matching the shaders
- *   - barrier helpers (raw Vulkan over flux_image_vk_image)
+ *   - barrier helpers (raw Vulkan over optics_gfx_image_vk_image)
  *   - the frame-slot filter: per-slot output, footprint clearing, dispatch
  */
 
-#include "prism_observe.h"
+#include "material_observe.h"
 #include <optics/gfx/profile.h>
 #include <optics/material/liquid_glass.h>
 
@@ -36,41 +36,8 @@ uint32_t optics_material_liquid_glass_max_shapes(void) {
 #include <stdlib.h>
 #include <string.h>
 
-/* Shader bytecode embedded via native C23 #embed. */
-alignas(uint32_t) static const unsigned char liquid_glass_spv[] = {
-#embed "liquid_glass.comp.spv"
-};
-
-alignas(uint32_t) static const unsigned char storage_clear_spv[] = {
-#embed "storage_clear.comp.spv"
-};
-
-alignas(uint32_t) static const unsigned char backdrop_stats_spv[] = {
-#embed "backdrop_stats.comp.spv"
-};
-
-/* ADR-0069: rgba16f storage variants for working-space (16F) inputs. */
-alignas(uint32_t) static const unsigned char liquid_glass_16f_spv[] = {
-#embed "liquid_glass_16f.comp.spv"
-};
-
-alignas(uint32_t) static const unsigned char storage_clear_16f_spv[] = {
-#embed "storage_clear_16f.comp.spv"
-};
-
-/* Push-constant block — must match storage_clear.comp exactly. */
-typedef struct storage_clear_push {
-    uint32_t output_handle;
-    uint32_t width;
-    uint32_t height;
-    uint32_t origin_x;
-    uint32_t origin_y;
-    uint32_t region_width;
-    uint32_t region_height;
-} storage_clear_push;
-
 /* Push-constant block — must match backdrop_stats.comp exactly. The stats
- * buffer's 64-bit device address rides as two u32s because flux devices do
+ * buffer's 64-bit device address rides as two u32s because gfx devices do
  * not guarantee shaderInt64. */
 typedef struct backdrop_stats_push {
     uint32_t input_handle;
@@ -87,32 +54,19 @@ typedef struct backdrop_stats_push {
     uint32_t stats_address_hi;
 } backdrop_stats_push;
 
-/* flux requires every device to accept 160 push-constant bytes, so the
- * material can rely on that budget on any flux device. */
-static_assert(sizeof(storage_clear_push) == 28,
-              "storage_clear_push no longer matches its shader block");
+/* gfx requires every device to accept 160 push-constant bytes, so the
+ * material can rely on that budget on any gfx device. */
 static_assert(sizeof(backdrop_stats_push) == 48,
               "backdrop_stats_push no longer matches its shader block");
 
-/* Per-slot stats buffer: one prism_backdrop_stat per group. */
+/* Per-slot stats buffer: one optics_material_backdrop_stat per group. */
 #define OPTICS_MATERIAL_STATS_BYTES (LIQUID_GLASS_MAX_GROUPS * 2u * sizeof(float))
 
 /* The material output container follows the input (ADR-0069): 8-bit SDR
  * inputs produce the historic RGBA8 output; 16F working-space inputs a
  * 16F output, so the material composites in linear light. */
-static optics_gfx_format optics_material_output_format(const optics_gfx_image *input) {
-    return optics_gfx_image_format(input) == OPTICS_GFX_FORMAT_RGBA16_SFLOAT
-               ? OPTICS_GFX_FORMAT_RGBA16_SFLOAT
-               : OPTICS_GFX_FORMAT_RGBA8_UNORM;
-}
-
 typedef struct liquid_glass_filter_slot {
-    /* Slab extent: sized to the material's footprints on the size ladder, not to
-     * the capture. See prism_material_frame.h. */
-    uint32_t width;
-    uint32_t height;
-    optics_gfx_format format; /* of `output` */
-    optics_gfx_image *output;
+    optics_material__slab slab; /* the output, on the slab ladder (material_frame.h) */
     bool initialized;
     /* Where this slab sits in capture space. */
     uint32_t slab_x;
@@ -120,9 +74,9 @@ typedef struct liquid_glass_filter_slot {
     uint32_t capture_width;
     uint32_t capture_height;
     uint32_t previous_count;
-    liquid_glass_region previous[LIQUID_GLASS_MAX_GROUPS];
+    optics_material__rect previous[LIQUID_GLASS_MAX_GROUPS];
     /* Per-slot backdrop statistics: one HOST_VISIBLE storage buffer written
-     * by the stats dispatch and read back FLUX_MAX_FRAMES_IN_FLIGHT frames
+     * by the stats dispatch and read back OPTICS_GFX_MAX_FRAMES_IN_FLIGHT frames
      * later, once begin_frame has waited this slot's fence. */
     optics_gfx_buffer *stats;
     bool stats_submitted;
@@ -146,119 +100,23 @@ struct optics_material_liquid_glass_filter {
 };
 
 /* ------------------------------------------------------------------ */
-/*  Barrier helpers (raw Vulkan over flux_image_vk_image)             */
+/*  Barrier helpers (raw Vulkan over optics_gfx_image_vk_image)             */
 /* ------------------------------------------------------------------ */
 
 /* Emit a compute-write → compute-read barrier on `image`, no layout
  * transition (image stays in GENERAL). Makes the output sampleable by any
  * later shader stage. */
-static void barrier_compute_write_to_read(VkCommandBuffer cmd, VkImage image) {
-    VkImageMemoryBarrier2 b = {
-        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-        .srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-        .srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
-        .dstStageMask =
-            VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-        .dstAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_READ_BIT,
-        .oldLayout = VK_IMAGE_LAYOUT_GENERAL,
-        .newLayout = VK_IMAGE_LAYOUT_GENERAL,
-        .image = image,
-        .subresourceRange =
-            {
-                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-                .levelCount = 1,
-                .layerCount = 1,
-            },
-    };
-    VkDependencyInfo di = {
-        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-        .imageMemoryBarrierCount = 1,
-        .pImageMemoryBarriers = &b,
-    };
-    vkCmdPipelineBarrier2(cmd, &di);
-}
-
 /* A reusable frame-slot image may have been sampled by the slot's previous
  * submission. begin_frame waited that slot's fence; this barrier expresses
  * the device-side read/write dependency before the next compute overwrite. */
-static void barrier_reuse_to_compute_write(VkCommandBuffer cmd, VkImage image) {
-    VkImageMemoryBarrier2 b = {
-        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-        .srcStageMask =
-            VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-        .srcAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
-        .dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-        .dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
-        .oldLayout = VK_IMAGE_LAYOUT_GENERAL,
-        .newLayout = VK_IMAGE_LAYOUT_GENERAL,
-        .image = image,
-        .subresourceRange =
-            {
-                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-                .levelCount = 1,
-                .layerCount = 1,
-            },
-    };
-    VkDependencyInfo di = {
-        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-        .imageMemoryBarrierCount = 1,
-        .pImageMemoryBarriers = &b,
-    };
-    vkCmdPipelineBarrier2(cmd, &di);
-}
-
 /* Groups source-over the persistent storage image. Make an earlier group's
  * write visible to both imageLoad and imageStore in the next group; a
  * write-only dependency lets a later shadow replace the body below it
  * instead of compositing over it. */
-static void barrier_compute_write_to_read_write(VkCommandBuffer cmd, VkImage image) {
-    VkImageMemoryBarrier2 barrier = {
-        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-        .srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-        .srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
-        .dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-        .dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
-        .oldLayout = VK_IMAGE_LAYOUT_GENERAL,
-        .newLayout = VK_IMAGE_LAYOUT_GENERAL,
-        .image = image,
-        .subresourceRange =
-            {
-                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-                .levelCount = 1,
-                .layerCount = 1,
-            },
-    };
-    VkDependencyInfo info = {
-        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-        .imageMemoryBarrierCount = 1,
-        .pImageMemoryBarriers = &barrier,
-    };
-    vkCmdPipelineBarrier2(cmd, &info);
-}
-
 /* Make a stats-buffer compute write visible to the next submission's
  * compute read/write on the same buffer. Host visibility needs no barrier
  * here: the slot's frame fence plus the HOST_COHERENT mapping cover the
  * CPU readback path. */
-static void barrier_stats_write_to_compute(VkCommandBuffer cmd, VkBuffer buffer) {
-    VkBufferMemoryBarrier2 b = {
-        .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
-        .srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-        .srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
-        .dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-        .dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
-        .buffer = buffer,
-        .offset = 0,
-        .size = VK_WHOLE_SIZE,
-    };
-    VkDependencyInfo di = {
-        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-        .bufferMemoryBarrierCount = 1,
-        .pBufferMemoryBarriers = &b,
-    };
-    vkCmdPipelineBarrier2(cmd, &di);
-}
-
 /* ------------------------------------------------------------------ */
 /*  Filter lifecycle                                                  */
 /* ------------------------------------------------------------------ */
@@ -269,7 +127,7 @@ optics_material_liquid_glass_filter_create(optics_gfx_device *device,
     if (!device || !out)
         return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
     *out = nullptr;
-    /* Caller's allocator, attributed to prism (ADR-0135). */
+    /* Caller's allocator, attributed to material (ADR-0135). */
     optics_material_liquid_glass_filter *filter = nullptr;
     if (optics_gfx_device_alloc(device,
                                 &(optics_gfx_device_alloc_opts){
@@ -301,12 +159,11 @@ void optics_material_liquid_glass_filter_release(optics_material_liquid_glass_fi
         return;
     optics_gfx_device *device = filter->device;
     for (uint32_t i = 0; i < OPTICS_GFX_MAX_FRAMES_IN_FLIGHT; ++i) {
-        if (filter->slots[i].output)
-            optics_gfx_image_release(filter->slots[i].output);
+        optics_material__slab_release(&filter->slots[i].slab);
         if (filter->slots[i].stats)
             optics_gfx_buffer_release(filter->slots[i].stats);
     }
-    /* Pipelines are destroyed inline by flux; the header's release
+    /* Pipelines are destroyed inline by gfx; the header's release
      * contract (all referencing GPU work completed) covers this. */
     for (int i = 0; i < 2; ++i) {
         if (filter->glass_pipelines[i])
@@ -336,7 +193,7 @@ liquid_glass_ensure_stats_buffer(optics_material_liquid_glass_filter *filter,
     optics_gfx_buffer_desc bdesc = OPTICS_GFX_BUFFER_DESC_INIT;
     bdesc.size = OPTICS_MATERIAL_STATS_BYTES;
     bdesc.usage = OPTICS_GFX_BUFFER_USAGE_STORAGE;
-    /* HOST_VISIBLE is HOST_COHERENT in flux: the shader's writes are
+    /* HOST_VISIBLE is HOST_COHERENT in gfx: the shader's writes are
      * visible to the CPU after the slot's fence, no flush/invalidate. */
     bdesc.location = OPTICS_GFX_BUFFER_HOST_VISIBLE;
     bdesc.device_address = true; /* stats shader writes via buffer reference */
@@ -353,97 +210,51 @@ static optics_gfx_result liquid_glass_ensure_slot(optics_material_liquid_glass_f
                                                   uint32_t footprint_w, uint32_t footprint_h,
                                                   bool need_stats) {
     liquid_glass_filter_slot *slot = &filter->slots[index];
-    uint32_t width = 0u;
-    uint32_t height = 0u;
-    optics_material_slab_for_footprint(footprint_w, footprint_h, &width, &height);
-    optics_gfx_format format = optics_material_output_format(input);
-    if (slot->output && slot->width == width && slot->height == height && slot->format == format)
-        return need_stats ? liquid_glass_ensure_stats_buffer(filter, slot) : OPTICS_GFX_OK;
-    if (slot->output)
-        optics_gfx_image_release(slot->output);
-    if (slot->stats)
-        optics_gfx_buffer_release(slot->stats);
-    *slot = (liquid_glass_filter_slot){};
-    optics_gfx_result r = optics_gfx_image_create(
-        filter->device,
-        &(optics_gfx_image_desc){.type = OPTICS_GFX_TYPE_IMAGE_DESC,
-                                 .width = width,
-                                 .height = height,
-                                 .format = format,
-                                 .usage = OPTICS_GFX_IMAGE_USAGE_COMPUTE_WRITE},
-        &slot->output);
+    bool recreated = false;
+    optics_gfx_result r = optics_material__slab_ensure(
+        filter->device, &slot->slab,
+        &(optics_material__slab_opts){
+            .input = input, .footprint_width = footprint_w, .footprint_height = footprint_h},
+        &recreated);
+    if (recreated) {
+        /* The previous regions and the stats buffer described the old image. */
+        if (slot->stats)
+            optics_gfx_buffer_release(slot->stats);
+        *slot = (liquid_glass_filter_slot){.slab = slot->slab};
+    }
     if (r != OPTICS_GFX_OK)
         return r;
-    slot->width = width;
-    slot->height = height;
-    slot->format = format;
-    if (need_stats) {
-        r = liquid_glass_ensure_stats_buffer(filter, slot);
-        if (r != OPTICS_GFX_OK)
-            return r;
-    }
-    return OPTICS_GFX_OK;
+    return need_stats ? liquid_glass_ensure_stats_buffer(filter, slot) : OPTICS_GFX_OK;
 }
 
-/* The material pipelines are per-filter and lazily built: prism has no
- * per-device module state of its own, and the filter contract already
- * requires callers to serialize per device. Pipelines are per storage
- * class (rgba8 / rgba16f); the stats shader samples only and is shared. */
 static optics_gfx_result liquid_glass_ensure_pipelines(optics_material_liquid_glass_filter *filter,
                                                        bool is16f, bool need_clear, bool need_glass,
                                                        bool need_stats) {
     const int cls = is16f ? 1 : 0;
-    const bool missing = (need_clear && !filter->clear_pipelines[cls]) ||
-                         (need_glass && !filter->glass_pipelines[cls]) ||
-                         (need_stats && !filter->stats_pipeline);
-    if (!missing)
-        return OPTICS_GFX_OK;
-
-    OPTICS_GFX_PROFILE_ZONE(z_compile, "prism.liquid_glass.compile_pipelines");
-
-    if (need_clear && !filter->clear_pipelines[cls]) {
-        optics_gfx_compute_pipeline_desc pdesc = OPTICS_GFX_COMPUTE_PIPELINE_DESC_INIT;
-        pdesc.spirv = (const uint32_t *)(is16f ? storage_clear_16f_spv : storage_clear_spv);
-        pdesc.spirv_word_count =
-            (is16f ? sizeof(storage_clear_16f_spv) : sizeof(storage_clear_spv)) / sizeof(uint32_t);
-        pdesc.entry_point = "main";
-        pdesc.push_constant_bytes = sizeof(storage_clear_push);
-        optics_gfx_result r = optics_gfx_compute_pipeline_create(filter->device, &pdesc,
-                                                                 &filter->clear_pipelines[cls]);
-        if (r != OPTICS_GFX_OK) {
-            OPTICS_GFX_PROFILE_ZONE_END(z_compile);
-            return r;
-        }
-    }
-    if (need_glass && !filter->glass_pipelines[cls]) {
-        optics_gfx_compute_pipeline_desc pdesc = OPTICS_GFX_COMPUTE_PIPELINE_DESC_INIT;
-        pdesc.spirv = (const uint32_t *)(is16f ? liquid_glass_16f_spv : liquid_glass_spv);
-        pdesc.spirv_word_count =
-            (is16f ? sizeof(liquid_glass_16f_spv) : sizeof(liquid_glass_spv)) / sizeof(uint32_t);
-        pdesc.entry_point = "main";
-        pdesc.push_constant_bytes = sizeof(liquid_glass_push);
-        optics_gfx_result r = optics_gfx_compute_pipeline_create(filter->device, &pdesc,
-                                                                 &filter->glass_pipelines[cls]);
-        if (r != OPTICS_GFX_OK) {
-            OPTICS_GFX_PROFILE_ZONE_END(z_compile);
-            return r;
-        }
-    }
-    if (need_stats && !filter->stats_pipeline) {
-        optics_gfx_compute_pipeline_desc pdesc = OPTICS_GFX_COMPUTE_PIPELINE_DESC_INIT;
-        pdesc.spirv = (const uint32_t *)backdrop_stats_spv;
-        pdesc.spirv_word_count = sizeof(backdrop_stats_spv) / sizeof(uint32_t);
-        pdesc.entry_point = "main";
-        pdesc.push_constant_bytes = sizeof(backdrop_stats_push);
-        optics_gfx_result r =
-            optics_gfx_compute_pipeline_create(filter->device, &pdesc, &filter->stats_pipeline);
-        if (r != OPTICS_GFX_OK) {
-            OPTICS_GFX_PROFILE_ZONE_END(z_compile);
-            return r;
-        }
-    }
-    OPTICS_GFX_PROFILE_ZONE_END(z_compile);
-    return OPTICS_GFX_OK;
+    optics_gfx_result r = OPTICS_GFX_OK;
+    if (need_clear)
+        r = optics_material__pipeline_ensure(
+            filter->device, &filter->clear_pipelines[cls],
+            &(optics_material__pipeline_opts){
+                .shader = OPTICS_MATERIAL__SHADER_STORAGE_CLEAR,
+                .is16f = is16f,
+                .push_constant_bytes = optics_material__storage_clear_push_bytes(),
+            });
+    if (r == OPTICS_GFX_OK && need_glass)
+        r = optics_material__pipeline_ensure(filter->device, &filter->glass_pipelines[cls],
+                                             &(optics_material__pipeline_opts){
+                                                 .shader = OPTICS_MATERIAL__SHADER_LIQUID_GLASS,
+                                                 .is16f = is16f,
+                                                 .push_constant_bytes = sizeof(liquid_glass_push),
+                                             });
+    /* The stats shader only samples, so one pipeline serves both classes. */
+    if (r == OPTICS_GFX_OK && need_stats)
+        r = optics_material__pipeline_ensure(filter->device, &filter->stats_pipeline,
+                                             &(optics_material__pipeline_opts){
+                                                 .shader = OPTICS_MATERIAL__SHADER_BACKDROP_STATS,
+                                                 .push_constant_bytes = sizeof(backdrop_stats_push),
+                                             });
+    return r;
 }
 
 optics_gfx_result
@@ -494,34 +305,6 @@ static bool valid_liquid_glass_desc(const optics_material_liquid_glass_desc *des
     return true;
 }
 
-static void record_storage_clear_regions(optics_material_liquid_glass_filter *filter,
-                                         VkCommandBuffer command, optics_gfx_image *output,
-                                         const liquid_glass_region *regions, uint32_t region_count,
-                                         bool is16f) {
-    optics_gfx_compute_pipeline *clear_pipeline = filter->clear_pipelines[is16f ? 1 : 0];
-    for (uint32_t i = 0; i < region_count; ++i) {
-        liquid_glass_region region = regions[i];
-        storage_clear_push push = {
-            .output_handle = optics_gfx_image_bindless_storage_handle(output),
-            .width = optics_gfx_image_width(output),
-            .height = optics_gfx_image_height(output),
-            .origin_x = region.x,
-            .origin_y = region.y,
-            .region_width = region.width,
-            .region_height = region.height,
-        };
-        uint32_t gx = (region.width + OPTICS_MATERIAL_GLASS_WG - 1u) / OPTICS_MATERIAL_GLASS_WG;
-        uint32_t gy = (region.height + OPTICS_MATERIAL_GLASS_WG - 1u) / OPTICS_MATERIAL_GLASS_WG;
-        optics_gfx_compute_dispatch(&(optics_gfx_compute_dispatch_opts){.cmd = command,
-                                                                        .pipeline = clear_pipeline,
-                                                                        .push_constants = &push,
-                                                                        .push_bytes = sizeof(push),
-                                                                        .group_x = gx,
-                                                                        .group_y = gy,
-                                                                        .group_z = 1u});
-    }
-}
-
 /* Everything one liquid-glass submission needs to replay its dispatches later
  * (ADR-0147). Body rows and id lists are NOT here: they upload into host-visible
  * buffers that outlive the call, so the replay reads them through the addresses
@@ -545,14 +328,14 @@ typedef struct glass_plan {
     uint64_t bodies_address;
     uint64_t ids_address;
 
-    liquid_glass_region clear_regions[OPTICS_MATERIAL_MAX_BATCHES];
+    optics_material__rect clear_regions[OPTICS_MATERIAL_MAX_BATCHES];
     uint32_t clear_count;
 
     optics_material_region_batch batches[OPTICS_MATERIAL_MAX_BATCHES];
     uint32_t batch_count;
 
     /* Per-group statistic windows, in capture space. */
-    liquid_glass_region stats_bounds[LIQUID_GLASS_MAX_GROUPS];
+    optics_material__rect stats_bounds[LIQUID_GLASS_MAX_GROUPS];
     uint32_t stats_group_count;
     uint64_t stats_address;
     VkBuffer stats_buffer;
@@ -567,16 +350,20 @@ static void glass_plan_record(void *raw, VkCommandBuffer command) {
     bool dispatched = false;
 
     if (p->clear_count > 0u) {
-        barrier_reuse_to_compute_write(command, output_image);
-        record_storage_clear_regions(filter, command, p->output, p->clear_regions, p->clear_count,
-                                     p->is16f);
+        optics_material__barrier_reuse_to_compute_write(command, output_image);
+        optics_material__clear_regions(
+            &(optics_material__clear_opts){.cmd = command,
+                                           .pipeline = filter->clear_pipelines[p->is16f ? 1 : 0],
+                                           .image = p->output,
+                                           .regions = p->clear_regions,
+                                           .region_count = p->clear_count});
         if (p->batch_count > 0u)
-            barrier_compute_write_to_read_write(command, output_image);
+            optics_material__barrier_compute_write_to_read_write(command, output_image);
     }
 
     if (p->stats_group_count > 0u) {
         for (uint32_t i = 0; i < p->stats_group_count; ++i) {
-            const liquid_glass_region *rect = &p->stats_bounds[i];
+            const optics_material__rect *rect = &p->stats_bounds[i];
             backdrop_stats_push spush = {
                 .input_handle = optics_gfx_image_bindless_handle(p->input),
                 .blurred_handle = optics_gfx_image_bindless_handle(p->blurred),
@@ -601,13 +388,13 @@ static void glass_plan_record(void *raw, VkCommandBuffer command) {
                                                     .group_z = 1u});
         }
         if (p->stats_buffer != VK_NULL_HANDLE)
-            barrier_stats_write_to_compute(command, p->stats_buffer);
+            optics_material__barrier_buffer_compute_write_to_compute(command, p->stats_buffer);
     }
 
     for (uint32_t r = 0; r < p->batch_count; ++r) {
         const optics_material_region_batch *b = &p->batches[r];
         if (!liquid_glass_region_is_dispatchable(
-                (liquid_glass_region){b->x, b->y, b->width, b->height}, p->output_width,
+                (optics_material__rect){b->x, b->y, b->width, b->height}, p->output_width,
                 p->output_height))
             continue;
         optics_material_glass_record_batch(command, filter->glass_pipelines[p->is16f ? 1 : 0],
@@ -620,7 +407,7 @@ static void glass_plan_record(void *raw, VkCommandBuffer command) {
     /* Make the persistent output visible to the Canvas sample that follows,
      * including a clear-only submission after every body disappeared. */
     if (p->clear_count > 0u || dispatched)
-        barrier_compute_write_to_read(command, output_image);
+        optics_material__barrier_compute_write_to_read(command, output_image);
 }
 
 optics_gfx_result optics_material_liquid_glass_filter_apply(
@@ -639,7 +426,7 @@ optics_gfx_result optics_material_liquid_glass_filter_apply(
         return OPTICS_GFX_ERROR_INVALID_STATE;
     optics_gfx_image *input = desc->input;
     optics_gfx_image *blurred = desc->blurred_input;
-    /* ADR-0147: `blurred` is normally a deferred flux_blur_filter output.
+    /* ADR-0147: `blurred` is normally a deferred optics_gfx_blur_filter output.
      * Materialize it before this dispatch is recorded, so the blur's
      * dispatches precede the material's in the command stream. */
     optics_gfx_result mat = optics_gfx_frame_materialize_image(frame, blurred);
@@ -650,7 +437,7 @@ optics_gfx_result optics_material_liquid_glass_filter_apply(
         optics_gfx_image_device(blurred) != filter->device)
         return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
     /* ADR-0069: 8-bit SDR inputs keep the historic RGBA8 path (blurred
-     * input is the flux blur filter's RGBA8 output); 16F working-space
+     * input is the gfx blur filter's RGBA8 output); 16F working-space
      * inputs run the material in 16F end to end, and the blurred input
      * must be the matching 16F blur output. */
     const bool is16f = optics_gfx_image_format(input) == OPTICS_GFX_FORMAT_RGBA16_SFLOAT;
@@ -668,14 +455,14 @@ optics_gfx_result optics_material_liquid_glass_filter_apply(
     if (index >= OPTICS_GFX_MAX_FRAMES_IN_FLIGHT)
         return OPTICS_GFX_ERROR_OUT_OF_RANGE;
 
-    OPTICS_GFX_PROFILE_ZONE(z_glass, "prism.liquid_glass_apply");
+    OPTICS_GFX_PROFILE_ZONE(z_glass, "material.liquid_glass_apply");
 
     const uint32_t capture_width = optics_gfx_image_width(input);
     const uint32_t capture_height = optics_gfx_image_height(input);
     liquid_glass_filter_slot *slot = &filter->slots[index];
 
     /* 1. Footprints, in capture space. */
-    liquid_glass_region current[LIQUID_GLASS_MAX_GROUPS];
+    optics_material__rect current[LIQUID_GLASS_MAX_GROUPS];
     uint32_t current_body_ids[LIQUID_GLASS_MAX_GROUPS];
     uint32_t current_count = 0u;
     uint32_t footprint_x0 = UINT32_MAX, footprint_y0 = UINT32_MAX;
@@ -686,7 +473,7 @@ optics_gfx_result optics_material_liquid_glass_filter_apply(
         float shadow_reach = group->shadow_alpha > 0.0f ? fmaxf(group->shadow_offset_y, 0.0f) +
                                                               2.0f * fmaxf(group->shadow_blur, 0.0f)
                                                         : 0.0f;
-        liquid_glass_region region;
+        optics_material__rect region;
         if (!liquid_glass_group_dispatch_bounds(group, shadow_reach, capture_width, capture_height,
                                                 &region))
             continue;
@@ -711,7 +498,7 @@ optics_gfx_result optics_material_liquid_glass_filter_apply(
         footprint_w = footprint_x1 - footprint_x0;
         footprint_h = footprint_y1 - footprint_y0;
     }
-    OPTICS_GFX_PROFILE_ZONE(z_slot, "prism.liquid_glass.ensure_slot");
+    OPTICS_GFX_PROFILE_ZONE(z_slot, "material.liquid_glass.ensure_slot");
     optics_gfx_result result = liquid_glass_ensure_slot(filter, index, input, footprint_w,
                                                         footprint_h, desc->group_count > 0u);
     OPTICS_GFX_PROFILE_ZONE_END(z_slot);
@@ -734,11 +521,12 @@ optics_gfx_result optics_material_liquid_glass_filter_apply(
     slot->capture_height = capture_height;
 
     /* 3. Clear previous + current footprints (slab space) to transparent. */
-    liquid_glass_region clear_regions[LIQUID_GLASS_MAX_CLEAR_REGIONS];
+    optics_material__rect clear_regions[LIQUID_GLASS_MAX_CLEAR_REGIONS];
     uint32_t clear_count = 0u;
-    if (!liquid_glass_build_clear_regions(
-            slot->initialized, slot->width, slot->height, slot->previous, slot->previous_count,
-            current, current_count, clear_regions, LIQUID_GLASS_MAX_CLEAR_REGIONS, &clear_count))
+    if (!liquid_glass_build_clear_regions(slot->initialized, slot->slab.width, slot->slab.height,
+                                          slot->previous, slot->previous_count, current,
+                                          current_count, clear_regions,
+                                          LIQUID_GLASS_MAX_CLEAR_REGIONS, &clear_count))
         return OPTICS_GFX_ERROR_INVALID_STATE;
 
     /**
@@ -755,7 +543,7 @@ optics_gfx_result optics_material_liquid_glass_filter_apply(
     optics_material_region_batch batches[OPTICS_MATERIAL_MAX_BATCHES];
     uint32_t batch_ids[OPTICS_MATERIAL_MAX_BODIES];
     uint32_t batch_ids_used = 0u;
-    liquid_glass_region merged[OPTICS_MATERIAL_MAX_BATCHES];
+    optics_material__rect merged[OPTICS_MATERIAL_MAX_BATCHES];
     uint32_t merged_count = 0u;
     for (uint32_t i = 0; i < current_count; ++i) {
         if (!liquid_glass_add_clear_region(current[i], merged, OPTICS_MATERIAL_MAX_BATCHES,
@@ -763,7 +551,7 @@ optics_gfx_result optics_material_liquid_glass_filter_apply(
             /* Cannot coalesce into the budget: one region covering the slab. Every
              * body lands in it, which is correct (the shader intersects each body
              * with its own SDF anyway) and is still a single dispatch. */
-            merged[0] = (liquid_glass_region){0u, 0u, slot->width, slot->height};
+            merged[0] = (optics_material__rect){0u, 0u, slot->slab.width, slot->slab.height};
             merged_count = 1u;
             break;
         }
@@ -802,7 +590,7 @@ optics_gfx_result optics_material_liquid_glass_filter_apply(
         };
     }
 
-    OPTICS_GFX_PROFILE_ZONE(z_pipe, "prism.liquid_glass.ensure_pipelines");
+    OPTICS_GFX_PROFILE_ZONE(z_pipe, "material.liquid_glass.ensure_pipelines");
     result = liquid_glass_ensure_pipelines(filter, is16f, clear_count > 0u, batch_count > 0u,
                                            desc->group_count > 0u);
     OPTICS_GFX_PROFILE_ZONE_END(z_pipe);
@@ -853,9 +641,9 @@ optics_gfx_result optics_material_liquid_glass_filter_apply(
         .filter = filter,
         .input = input,
         .blurred = blurred,
-        .output = slot->output,
-        .output_width = slot->width,
-        .output_height = slot->height,
+        .output = slot->slab.image,
+        .output_width = slot->slab.width,
+        .output_height = slot->slab.height,
         .capture_width = capture_width,
         .capture_height = capture_height,
         .is16f = is16f,
@@ -896,19 +684,19 @@ optics_gfx_result optics_material_liquid_glass_filter_apply(
      * honestly reports zero groups for this slot's last submission. */
     slot->stats_group_count = desc->group_count;
     *out = (optics_material_output){
-        .image = slot->output,
+        .image = slot->slab.image,
         .origin_x = (float)slab_x,
         .origin_y = (float)slab_y,
-        .width = slot->width,
-        .height = slot->height,
+        .width = slot->slab.width,
+        .height = slot->slab.height,
     };
 
     /* Defer the dispatches (ADR-0147): the handle above is valid now, the work
      * replays only if something requires the output. Recording eagerly on a
      * registration failure keeps correctness independent of pruning. */
     optics_material_deferred_pass pass = OPTICS_MATERIAL_DEFERRED_PASS_INIT;
-    pass.output = slot->output;
-    pass.label = "prism.liquid_glass";
+    pass.output = slot->slab.image;
+    pass.label = "material.liquid_glass";
     pass.inputs[0] = input;
     pass.inputs[1] = blurred;
     pass.input_count = 2;
@@ -932,11 +720,11 @@ optics_gfx_result optics_material_liquid_glass_filter_apply(
      * honestly reports zero groups for this slot's last submission. */
     slot->stats_group_count = desc->group_count;
     *out = (optics_material_output){
-        .image = slot->output,
+        .image = slot->slab.image,
         .origin_x = (float)slab_x,
         .origin_y = (float)slab_y,
-        .width = slot->width,
-        .height = slot->height,
+        .width = slot->slab.width,
+        .height = slot->slab.height,
     };
     OPTICS_GFX_PROFILE_ZONE_END(z_glass);
     return OPTICS_GFX_OK;

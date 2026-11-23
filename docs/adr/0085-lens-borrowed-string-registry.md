@@ -3,6 +3,9 @@ id: ADR-0085
 title: "lens borrowed-string registry (debug borrow checker)"
 status: accepted
 date: 2026-01-01
+scope: ui
+superseded_by: null
+negative_knowledge: false
 ---
 
 # ADR-0085: lens borrowed-string registry (debug borrow checker)

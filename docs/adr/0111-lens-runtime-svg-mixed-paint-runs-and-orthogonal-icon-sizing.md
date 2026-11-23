@@ -3,7 +3,7 @@ id: ADR-0111
 title: "Lens Runtime SVG Mixed Paint Runs and Orthogonal Icon Sizing"
 status: accepted
 date: 2026-10-22
-scope: libs/lens, bindings/lens-rs, docs/reference
+scope: libs/ui, bindings/lens-rs, docs/reference
 superseded_by: null
 negative_knowledge: true
 ---

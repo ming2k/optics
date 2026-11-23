@@ -1,30 +1,22 @@
 /*
  * icon_mask.c — baked device-resolution coverage masks for icons (ADR-0112).
  *
- * Why this exists, precisely:
+ * Why this exists:
  *
- *   An icon is a vector command stream in a 24×24 box. Drawn live, it is
- *   rasterised through the canvas's attachment MSAA, which the canvas pins at
- *   4× (FLUX_CANVAS_SAMPLES). A resolved 4× pixel can only carry coverage in
- *   {0, ¼, ½, ¾, 1} — five levels, three of them partial. A 14 px icon with the
- *   standard 2/24 stroke is a 1.17 px line; its whole edge budget is one or two
- *   pixels, so it lands on two of those levels and reads as a staircase. Adding
- *   MSAA samples shifts the problem but never removes it: the banding is
- *   quantisation of coverage, and it is baked into every frame.
+ *   An icon is a vector command stream in a 24x24 box. Drawn live, every frame
+ *   would flatten and rasterize each of its paint runs again. A mask does that
+ *   ONCE per (icon, device size, stroke): the geometry is rasterized through
+ *   the CPU canvas's analytic coverage into a device-resolution coverage plane,
+ *   and every later draw is a single 1:1 blit of that plane. The plane is
+ *   already at the final device resolution, so the blit needs no resampling or
+ *   filtering.
  *
- *   A mask removes it at the source. The geometry is rasterised ONCE per
- *   (icon, device size, stroke) into a device-free canvas supersampled 8×8 per
- *   pixel, and the resolved coverage plane is kept. That plane carries 65
- *   levels per pixel — visually continuous — and is already at the final
- *   device resolution, so the blit is 1:1: no resampling, no filtering, no
- *   dependence on the draw-time MSAA budget.
- *
- * The three consequences that make this correct rather than a workaround:
+ * The three properties the cache depends on:
  *   - 1:1 blit. The quad origin and extent are integers in device pixels and
  *     the sampler is NEAREST. Fractional placement or LINEAR here would blur
  *     the mask and reintroduce exactly the softness the design removes.
  *   - Per-paint-run white ink. A run's mask holds geometry only; colour comes
- *     from the per-quad tint at draw time (flux_glyph_quad::color), so one
+ *     from the per-quad tint at draw time (optics_gfx_glyph_quad::color), so one
  *     cached mask serves every theme state, hover tint, and opacity.
  *   - Device scale is in the key. HiDPI (scale 2) bakes at 2× and still blits
  *     1:1, so the mask is as sharp as the display, not upscaled to it.
@@ -40,48 +32,47 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* Analytical 1x coverage bake requires no supersample multiplier. */
-
 /* Bounded pool. Sized for the realistic working set: a nav rail plus toolbar
  * plus menu (well under 100 distinct icons) at two states/sizes each. Eviction
  * is LRU, and eviction is safe for published snapshots because every recorded
  * glyph-run segment retains the image it draws. The capacity lives in
- * internal.h (LENSI_ICON_MASK_POOL_CAP) so the pool's inline sizing and this
+ * internal.h (OPTICS_UI_ICON_MASK_POOL_CAP) so the pool's inline sizing and this
  * module cannot drift apart. */
 
 /* Halo around the icon box, in device pixels: enough for half the stroke, its
  * round cap, and the analytic fringe. Caps the clamp so a pathological
  * replacement-stroke width cannot explode the mask extent. */
-#define LENSI_ICON_MASK_MAX_PAD 64u
+#define OPTICS_UI_ICON_MASK_MAX_PAD 64u
 
 /* Largest device-pixel icon box we will bake. Beyond this the vector path is
  * both cheap and high-resolution enough that the mask buys nothing, and the
  * sample buffer would be large. */
-#define LENSI_ICON_MASK_MAX_PX 256u
+#define OPTICS_UI_ICON_MASK_MAX_PX 256u
 
-void lensi_icon_mask_pool_init(optics_ui *ui) {
+void optics_ui__icon_mask_pool_init(optics_ui *ui) {
     if (!ui)
         return;
-    ui->icon_masks.cap = LENSI_ICON_MASK_POOL_CAP;
+    ui->icon_masks.cap = OPTICS_UI_ICON_MASK_POOL_CAP;
     ui->icon_masks.tick = 0;
     ui->icon_masks.count = 0;
     ui->icon_masks.sampler = nullptr;
-    ui->icon_masks.entries = lensi_alloc(ui, ui->icon_masks.cap * sizeof(lensi_icon_mask));
+    ui->icon_masks.entries =
+        optics_ui__alloc(ui, ui->icon_masks.cap * sizeof(optics_ui__icon_mask));
     if (!ui->icon_masks.entries)
         ui->icon_masks.cap = 0; /* baking degrades to the live-vector fallback */
 }
 
-void lensi_icon_mask_pool_destroy(optics_ui *ui) {
+void optics_ui__icon_mask_pool_destroy(optics_ui *ui) {
     if (!ui)
         return;
     for (uint32_t i = 0; i < ui->icon_masks.count; ++i) {
-        lensi_icon_mask *m = &ui->icon_masks.entries[i];
-        lensi_free(ui, m->host);
+        optics_ui__icon_mask *m = &ui->icon_masks.entries[i];
+        optics_ui__free(ui, m->host);
         if (m->image)
             optics_gfx_image_release(m->image);
-        *m = (lensi_icon_mask){};
+        *m = (optics_ui__icon_mask){};
     }
-    lensi_free(ui, ui->icon_masks.entries);
+    optics_ui__free(ui, ui->icon_masks.entries);
     ui->icon_masks.entries = nullptr;
     ui->icon_masks.count = 0;
     ui->icon_masks.cap = 0;
@@ -124,16 +115,16 @@ static optics_gfx_sampler *mask_sampler(optics_ui *ui) {
  * in: one emitter, so the bake and the vector fallback can never draw different
  * shapes for the same icon. */
 static void bake_run_layer(optics_gfx_canvas *canvas, optics_gfx_arena *arena,
-                           const optics_ui_icon_desc *desc, const lensi_icon_run_span *span,
+                           const optics_ui_icon_desc *desc, const optics_ui__icon_run_span *span,
                            float scale, float halo, float stroke_dev, float outline_dev,
-                           lensi_icon_mask_layer layer) {
+                           optics_ui__icon_mask_layer layer) {
     optics_gfx_path *p = nullptr;
     if (optics_gfx_path_create(&p, arena) != OPTICS_GFX_OK)
         return;
-    lensi_emit_run_path(p, desc->cmds, span->first_cmd, span->count, scale, halo, halo);
+    optics_ui__emit_run_path(p, desc->cmds, span->first_cmd, span->count, scale, halo, halo);
 
     optics_gfx_geometry g = {.kind = OPTICS_GFX_GEOM_PATH, .path = {.path = p}};
-    if (layer == LENSI_ICON_MASK_OUTLINE) {
+    if (layer == OPTICS_UI_ICON_MASK_OUTLINE) {
         /* Outline: the body's own width plus the outline on both sides. A fill
          * run has no stroke, so its outline starts from zero. */
         g.stroke.width = (span->fill ? 0.0f : stroke_dev) + outline_dev * 2.0f;
@@ -151,8 +142,8 @@ static void bake_run_layer(optics_gfx_canvas *canvas, optics_gfx_arena *arena,
         canvas, &(optics_gfx_canvas_draw_geometry_opts){.geom = &g, .brush = &b});
 }
 
-uint32_t lensi_icon_run_spans(const optics_ui_icon_desc *desc, uint8_t mode,
-                              lensi_icon_run_span *out, uint32_t cap) {
+uint32_t optics_ui__icon_run_spans(const optics_ui_icon_desc *desc, uint8_t mode,
+                                   optics_ui__icon_run_span *out, uint32_t cap) {
     if (!desc || !desc->cmds || desc->count == 0 || !out || cap == 0)
         return 0;
     if (desc->runs && desc->run_count > 0) {
@@ -161,7 +152,7 @@ uint32_t lensi_icon_run_spans(const optics_ui_icon_desc *desc, uint8_t mode,
             const optics_ui_icon_run *r = &desc->runs[i];
             if (r->first_cmd > desc->count || r->count > desc->count - r->first_cmd)
                 return 0;
-            out[i] = (lensi_icon_run_span){
+            out[i] = (optics_ui__icon_run_span){
                 .first_cmd = r->first_cmd,
                 .count = r->count,
                 .color = r->color,
@@ -170,17 +161,17 @@ uint32_t lensi_icon_run_spans(const optics_ui_icon_desc *desc, uint8_t mode,
         }
         return n;
     }
-    out[0] = (lensi_icon_run_span){
+    out[0] = (optics_ui__icon_run_span){
         .first_cmd = 0,
         .count = desc->count,
         .color = 0,
-        .fill = mode == LENSI_ICON_RENDER_FILL,
+        .fill = mode == OPTICS_UI_ICON_RENDER_FILL,
     };
     return 1;
 }
 
-void lensi_emit_run_path(optics_gfx_path *p, const optics_ui_icon_cmd *cmds, uint32_t first,
-                         uint32_t count, float s, float ox, float oy) {
+void optics_ui__emit_run_path(optics_gfx_path *p, const optics_ui_icon_cmd *cmds, uint32_t first,
+                              uint32_t count, float s, float ox, float oy) {
     for (uint32_t i = first; i < first + count; ++i) {
         const optics_ui_icon_cmd *cmd = &cmds[i];
         const float *pp = cmd->params;
@@ -215,7 +206,7 @@ void lensi_emit_run_path(optics_gfx_path *p, const optics_ui_icon_cmd *cmds, uin
     }
 }
 
-optics_gfx_color lensi_icon_run_color(uint32_t run_color, optics_gfx_color theme_color) {
+optics_gfx_color optics_ui__icon_run_color(uint32_t run_color, optics_gfx_color theme_color) {
     if (run_color == 0)
         return theme_color;
     uint8_t r = (uint8_t)(run_color >> 16);
@@ -225,11 +216,11 @@ optics_gfx_color lensi_icon_run_color(uint32_t run_color, optics_gfx_color theme
     return optics_gfx_color_rgba_premul(r, g, b, a);
 }
 
-static lensi_icon_mask *pool_find(optics_ui *ui, int32_t icon_id, uint32_t dev_px,
-                                  uint32_t dev_stroke_q, uint32_t outline_q, uint32_t run_index,
-                                  lensi_icon_mask_layer layer) {
+static optics_ui__icon_mask *pool_find(optics_ui *ui, int32_t icon_id, uint32_t dev_px,
+                                       uint32_t dev_stroke_q, uint32_t outline_q,
+                                       uint32_t run_index, optics_ui__icon_mask_layer layer) {
     for (uint32_t i = 0; i < ui->icon_masks.count; ++i) {
-        lensi_icon_mask *m = &ui->icon_masks.entries[i];
+        optics_ui__icon_mask *m = &ui->icon_masks.entries[i];
         if (m->icon_id == icon_id && m->dev_px == dev_px && m->dev_stroke_q == dev_stroke_q &&
             m->outline_q == outline_q && m->run_index == run_index && m->layer == (uint8_t)layer)
             return m;
@@ -239,7 +230,7 @@ static lensi_icon_mask *pool_find(optics_ui *ui, int32_t icon_id, uint32_t dev_p
 
 /* Open a slot for a new mask, evicting the least recently used entry when the
  * pool is full. Returns NULL when the pool has no storage. */
-static lensi_icon_mask *pool_open(optics_ui *ui) {
+static optics_ui__icon_mask *pool_open(optics_ui *ui) {
     if (ui->icon_masks.cap == 0)
         return nullptr;
     if (ui->icon_masks.count < ui->icon_masks.cap)
@@ -250,11 +241,11 @@ static lensi_icon_mask *pool_open(optics_ui *ui) {
         if (ui->icon_masks.entries[i].last_used < ui->icon_masks.entries[victim].last_used)
             victim = i;
     }
-    lensi_icon_mask *m = &ui->icon_masks.entries[victim];
-    lensi_free(ui, m->host);
+    optics_ui__icon_mask *m = &ui->icon_masks.entries[victim];
+    optics_ui__free(ui, m->host);
     if (m->image)
         optics_gfx_image_release(m->image);
-    *m = (lensi_icon_mask){};
+    *m = (optics_ui__icon_mask){};
     return m;
 }
 
@@ -265,20 +256,21 @@ static uint32_t quantize_16(float v) {
     return q > UINT16_MAX ? UINT16_MAX : q;
 }
 
-lensi_icon_mask *lensi_icon_mask_acquire(optics_ui *ui, int32_t icon_id, uint32_t dev_px,
-                                         float dev_stroke, float outline, uint32_t run_index,
-                                         lensi_icon_mask_layer layer) {
-    if (!ui || dev_px == 0 || dev_px > LENSI_ICON_MASK_MAX_PX || ui->icon_masks.cap == 0)
+optics_ui__icon_mask *optics_ui__icon_mask_acquire(optics_ui *ui, int32_t icon_id, uint32_t dev_px,
+                                                   float dev_stroke, float outline,
+                                                   uint32_t run_index,
+                                                   optics_ui__icon_mask_layer layer) {
+    if (!ui || dev_px == 0 || dev_px > OPTICS_UI_ICON_MASK_MAX_PX || ui->icon_masks.cap == 0)
         return nullptr;
 
-    const optics_ui_icon_desc *desc = lensi_icon_desc(icon_id);
-    lensi_icon_run_span spans[LENSI_ICON_MAX_RUNS];
-    uint32_t span_count =
-        lensi_icon_run_spans(desc, lensi_icon_mode(icon_id), spans, LENSI_ICON_MAX_RUNS);
+    const optics_ui_icon_desc *desc = optics_ui__icon_desc(icon_id);
+    optics_ui__icon_run_span spans[OPTICS_UI_ICON_MAX_RUNS];
+    uint32_t span_count = optics_ui__icon_run_spans(desc, optics_ui__icon_mode(icon_id), spans,
+                                                    OPTICS_UI_ICON_MAX_RUNS);
     if (run_index >= span_count)
         return nullptr;
-    const lensi_icon_run_span *run = &spans[run_index];
-    if (layer == LENSI_ICON_MASK_OUTLINE && !(outline > 0.0f))
+    const optics_ui__icon_run_span *run = &spans[run_index];
+    if (layer == OPTICS_UI_ICON_MASK_OUTLINE && !(outline > 0.0f))
         return nullptr; /* asking for an outline layer with no outline */
 
     /* Quantise stroke and outline into the key so the pool has bounded
@@ -291,11 +283,11 @@ lensi_icon_mask *lensi_icon_mask_acquire(optics_ui *ui, int32_t icon_id, uint32_
     float stroke_dev = (float)dev_stroke_q / 16.0f;
     if (!run->fill && stroke_dev <= 0.0f)
         return nullptr; /* a stroke run with no width draws nothing */
-    uint32_t outline_q = (layer == LENSI_ICON_MASK_OUTLINE) ? quantize_16(outline) : 0u;
+    uint32_t outline_q = (layer == OPTICS_UI_ICON_MASK_OUTLINE) ? quantize_16(outline) : 0u;
     float outline_dev = (float)outline_q / 16.0f;
 
     uint64_t tick = ++ui->icon_masks.tick;
-    lensi_icon_mask *hit =
+    optics_ui__icon_mask *hit =
         pool_find(ui, icon_id, dev_px, dev_stroke_q, outline_q, run_index, layer);
     if (hit) {
         hit->last_used = tick;
@@ -306,13 +298,13 @@ lensi_icon_mask *lensi_icon_mask_acquire(optics_ui *ui, int32_t icon_id, uint32_
      * plus the full outline for the outline layer, half the body stroke for the
      * body layer, plus the AA fringe. */
     float widest = run->fill ? 0.0f : stroke_dev;
-    if (layer == LENSI_ICON_MASK_OUTLINE)
+    if (layer == OPTICS_UI_ICON_MASK_OUTLINE)
         widest += outline_dev * 2.0f;
     uint32_t halo = (uint32_t)(widest * 0.5f + 1.999f);
     if (halo < 1u)
         halo = 1u;
-    if (halo > LENSI_ICON_MASK_MAX_PAD)
-        halo = LENSI_ICON_MASK_MAX_PAD;
+    if (halo > OPTICS_UI_ICON_MASK_MAX_PAD)
+        halo = OPTICS_UI_ICON_MASK_MAX_PAD;
     uint32_t extent = dev_px + 2u * halo;
     if (extent == 0 || extent > 4096u)
         return nullptr;
@@ -359,7 +351,7 @@ lensi_icon_mask *lensi_icon_mask_acquire(optics_ui *ui, int32_t icon_id, uint32_
         return nullptr;
     }
 
-    lensi_icon_mask *m = pool_open(ui);
+    optics_ui__icon_mask *m = pool_open(ui);
     if (!m) {
         optics_gfx_canvas_release(canvas);
         return nullptr;
@@ -370,7 +362,7 @@ lensi_icon_mask *lensi_icon_mask_acquire(optics_ui *ui, int32_t icon_id, uint32_
      * retaining them in RAM allows the same compiled display list to replay into
      * both GPU canvases and CPU canvases (headless snapshots, offscreen export)
      * without branching at the call site or baking twice. */
-    uint8_t *host_plane = lensi_alloc(ui, (size_t)w * h);
+    uint8_t *host_plane = optics_ui__alloc(ui, (size_t)w * h);
     if (!host_plane) {
         ui->icon_masks.count--;
         optics_gfx_canvas_release(canvas);
@@ -388,7 +380,7 @@ lensi_icon_mask *lensi_icon_mask_acquire(optics_ui *ui, int32_t icon_id, uint32_
         id.height = h;
         id.format = OPTICS_GFX_FORMAT_R8_UNORM;
         if (optics_gfx_image_create(ui->device, &id, &img) != OPTICS_GFX_OK) {
-            lensi_free(ui, host_plane);
+            optics_ui__free(ui, host_plane);
             ui->icon_masks.count--;
             optics_gfx_canvas_release(canvas);
             return nullptr;
@@ -402,7 +394,7 @@ lensi_icon_mask *lensi_icon_mask_acquire(optics_ui *ui, int32_t icon_id, uint32_
                                                 });
         if (up != OPTICS_GFX_OK) {
             optics_gfx_image_release(img);
-            lensi_free(ui, host_plane);
+            optics_ui__free(ui, host_plane);
             ui->icon_masks.count--;
             optics_gfx_canvas_release(canvas);
             return nullptr;
@@ -427,6 +419,6 @@ lensi_icon_mask *lensi_icon_mask_acquire(optics_ui *ui, int32_t icon_id, uint32_
     return m;
 }
 
-optics_gfx_sampler *lensi_icon_mask_sampler(optics_ui *ui) {
+optics_gfx_sampler *optics_ui__icon_mask_sampler(optics_ui *ui) {
     return mask_sampler(ui);
 }

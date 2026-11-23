@@ -1,8 +1,8 @@
 /* test_widgets.c — widget behaviours: scrollbar thumb dragging,
  * label sizing, outlines, and text wrapping. */
 
-#include "lens_test.h"
 #include "optics_test.h"
+#include "ui_test.h"
 #include <optics/ui.h>
 
 static void test_scroll_thumb_drag(void) {

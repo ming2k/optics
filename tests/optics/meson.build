@@ -86,6 +86,42 @@ test(
 )
 
 test(
+  'leak_coverage',
+  py,
+  args : [files('../../tools/check_leaks.py')],
+  workdir : meson.project_source_root(),
+  suite : ['lint', 'tooling'],
+  timeout : 120,
+)
+
+test(
+  'leaks_guardrail_selftest',
+  py,
+  args : [files('test_leaks_guardrail.py')],
+  workdir : meson.project_source_root(),
+  suite : 'tooling',
+  timeout : 30,
+)
+
+test(
+  'adr_registry',
+  py,
+  args : [files('../../tools/check_adr.py')],
+  workdir : meson.project_source_root(),
+  suite : 'lint',
+  timeout : 30,
+)
+
+test(
+  'symbol_reference',
+  py,
+  args : [files('../../tools/gen_symbols.py'), '--check'],
+  workdir : meson.project_source_root(),
+  suite : 'lint',
+  timeout : 30,
+)
+
+test(
   'naming_guardrail_selftest',
   py,
   args : [files('test_naming_guardrail.py')],
@@ -128,7 +164,7 @@ test(
 )
 
 # Umbrella Facade and Integrated Dependencies (ADR-0160). The facade test
-# exercises lens/iris/transit through the umbrella, so it is meaningless when
+# exercises ui/window/motion through the umbrella, so it is meaningless when
 # the selected distribution omits any of them.
 if opt_ui and opt_motion
   test_optics_facade_bin = executable(

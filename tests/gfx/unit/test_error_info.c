@@ -1,20 +1,20 @@
 /*
  * Structured error slot: message lifetime.
  *
- * `flux_error_info.message` is a borrowed pointer, and the public contract in
- * <flux/core.h> says it stays readable until the next non-OK return on the same
+ * `optics_gfx_error_info.message` is a borrowed pointer, and the public contract in
+ * <optics/gfx/core.h> says it stays readable until the next non-OK return on the same
  * thread. That contract is only true if every producer hands the slot storage
  * that outlives the producer's stack frame.
  *
  * The failure it guards against is concrete: the transient-pool budget
  * diagnostics compose a "N MiB resident, requesting WxH" line with snprintf
  * into a local `char why[192]`, then publish it. The slot kept the pointer, the
- * frame died, and `flux_get_last_error` handed the caller a dangling read —
+ * frame died, and `optics_gfx_get_last_error` handed the caller a dangling read —
  * visible as garbage text or a use-after-scope ASan fault, never as a failed
- * assertion elsewhere. FLUX_FAILF renders into the slot's own thread-local
+ * assertion elsewhere. OPTICS_GFX_FAILF renders into the slot's own thread-local
  * buffer instead.
  *
- * `result.c` has hidden visibility in libflux.so, so the test compiles it in
+ * `result.c` has hidden visibility in liboptics_gfx.so, so the test compiles it in
  * directly (same precedent as test_canvas_tess / test_canvas_flatten).
  */
 #include "../../../libs/gfx/src/core/internal.h"

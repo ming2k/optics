@@ -35,8 +35,8 @@ typedef struct canvas_paint {
     canvas_paint_kind kind;
     optics_gfx_color color; /* SOLID: fill colour; IMAGE: tint; gradient: ignored */
 
-    /* Extension chain head; FLUX_TYPE-tagged (flux_struct_type). NULL for
-     * every paint produced by the constructors below and by zero-init. */
+    /* Extension chain head; tagged with an OPTICS_GFX_TYPE_* value (optics_gfx_struct_type). NULL
+     * for every paint produced by the constructors below and by zero-init. */
 
     /* Stroke parameters — apply to every stroke_path regardless of kind. */
     float stroke_width;
@@ -96,7 +96,7 @@ typedef struct optics_gfx_canvas_state {
 
 /* Internal, ABI-independent pass policy. The public descriptor is parsed exactly
  * once by canvas.c; backends consume this normalized value and never inspect
- * extension memory themselves. Declared here because `flux_canvas` carries the
+ * extension memory themselves. Declared here because `optics_gfx_canvas` carries the
  * active pass's copy. */
 typedef struct canvas_pass_config {
     const optics_gfx_color *clear_color;
@@ -114,7 +114,7 @@ typedef struct canvas_pass_config {
  * borrowed pointer to a stateless singleton; see backend_vk.c. */
 typedef struct optics_gfx_canvas_backend optics_gfx_canvas_backend;
 
-/* Forward declared so flux_canvas can hold a pointer-array to it
+/* Forward declared so optics_gfx_canvas can hold a pointer-array to it
  * without depending on geometry layout. */
 typedef struct optics_gfx_canvas_contour optics_gfx_canvas_contour;
 typedef struct stroke_frame stroke_frame;
@@ -123,9 +123,8 @@ typedef struct stroke_frame stroke_frame;
  * the (intentionally private) vertex layout from canvas.c. */
 typedef struct optics_gfx_canvas_vertex optics_gfx_canvas_vertex;
 
-/* Path verb stream. Kept above struct flux_canvas so the tessellation
- * cache can embed a copy of the stream in its entries. The full
- * struct flux_path stays in the Path section below. */
+/* Path verb stream. The full struct optics_gfx_path is in the Path section
+ * below. */
 typedef enum optics_gfx_path_op : uint32_t {
     OPTICS_GFX_PATH_MOVE = 0,
     OPTICS_GFX_PATH_LINE = 1,
@@ -135,7 +134,7 @@ typedef enum optics_gfx_path_op : uint32_t {
 } optics_gfx_path_op;
 
 typedef struct optics_gfx_path_segment {
-    uint32_t op;  /* flux_path_op */
+    uint32_t op;  /* optics_gfx_path_op */
     float pts[6]; /* up to a cubic's 3 control points */
 } optics_gfx_path_segment;
 
@@ -144,13 +143,13 @@ typedef struct optics_gfx_path_segment {
 /*                                                                    */
 /*  A segment captures every backend submit (pipeline id, push        */
 /*  constants, scissor, blend, vertex bytes) emitted between          */
-/*  flux_canvas_cache_begin / flux_canvas_cache_end so an unchanged */
+/*  optics_gfx_canvas_cache_begin / optics_gfx_canvas_cache_end so an unchanged */
 /*  subtree can be re-submitted later without re-running the emitter  */
-/*  (text shaping, tessellation, measure). Recording is passive: the  */
+/*  (text shaping, flattening, measure). Recording is passive: the  */
 /*  draws are submitted live as usual while being captured.           */
 /*                                                                    */
 /*  Ownership: slots live in a fixed pool owned by the canvas, freed  */
-/*  at flux_canvas_release. The public handle is a {slot, generation} */
+/*  at optics_gfx_canvas_release. The public handle is a {slot, generation} */
 /*  pair; release or LRU eviction bumps the generation so stale       */
 /*  handles fail validation instead of replaying a reused slot. Total */
 /*  recorded bytes are capped (LRU eviction), as is each segment.     */
@@ -182,8 +181,8 @@ enum optics_gfx_record_slot_state {
     OPTICS_GFX_RECORD_SLOT_POISONED, /* recording aborted (budget/alloc); end_record discards */
 };
 
-/* Full definitions sit below flux_canvas_push (flux_record_op embeds it).
- * struct flux_canvas only holds pointers to these. */
+/* Full definitions sit below optics_gfx_canvas_push (optics_gfx_record_op embeds it).
+ * struct optics_gfx_canvas only holds pointers to these. */
 typedef struct optics_gfx_record_op optics_gfx_record_op;
 typedef struct optics_gfx_canvas_record_slot optics_gfx_canvas_record_slot;
 
@@ -234,7 +233,7 @@ struct optics_gfx_canvas {
 
     /* Content scale (device-pixel ratio). The base transform at index 0 is
      * this scale, so callers draw in logical units; 1.0 means logical ==
-     * physical. glyph reads it via flux_canvas_get_scale. */
+     * physical. glyph reads it via optics_gfx_canvas_get_scale. */
     float content_scale;
 
     /* Transform / clip stack. Index 0 is the content-scale base transform. */
@@ -243,8 +242,8 @@ struct optics_gfx_canvas {
 
     /* The active pass's damage scope (ADR-0149). Copied from the normalized
      * config at begin_pass. `pass_damage_rects` is the canvas-owned backing
-     * store: the caller's `flux_damage` array is only promised for the
-     * `flux_canvas_begin` call, and every draw and `end_pass` consults this
+     * store: the caller's `optics_gfx_damage` array is only promised for the
+     * `optics_gfx_canvas_begin` call, and every draw and `end_pass` consults this
      * scope long after that call returns. */
     canvas_pass_config pass_damage;
     optics_gfx_rect pass_damage_rects[OPTICS_GFX_DAMAGE_CAPACITY];
@@ -260,6 +259,12 @@ struct optics_gfx_canvas {
     uint32_t scratch_verts_cap;
     uint32_t scratch_contours_cap;
     uint32_t scratch_frames_cap;
+    /* Stroke outline pieces in physical pixels (geometry_stroke.c). Separate
+     * from scratch_pts, which holds the flattened input while they are built. */
+    optics_gfx_point *scratch_outline_pts;
+    optics_gfx_canvas_contour *scratch_outline_contours;
+    uint32_t scratch_outline_pts_cap;
+    uint32_t scratch_outline_contours_cap;
 
     /* Diagnostics: cumulative count of draw calls dropped due to
      * transient ring exhaustion. Reset to 0 at canvas creation. */
@@ -282,14 +287,14 @@ struct optics_gfx_canvas {
     uint32_t pending_host_atlas_w;
     uint32_t pending_host_atlas_h;
     /* Producer content generation for pending_host_atlas, from the
-     * flux_glyph_run_host_atlas_desc extension; FLUX_HOST_ATLAS_UNVERSIONED
+     * optics_gfx_glyph_run_host_atlas_desc extension; OPTICS_GFX_HOST_ATLAS_UNVERSIONED
      * when the run carried none. Captured into record ops so replay can
      * refuse segments whose baked UVs predate an in-place rearrange. */
     uint64_t pending_host_atlas_gen;
 
     /* Newest content generation seen per host atlas buffer (see
-     * flux_glyph_run_host_atlas_desc). draw_glyph_run refreshes an entry,
-     * flux_canvas_cache_replay refuses a segment whose recorded generation is
+     * optics_gfx_glyph_run_host_atlas_desc). draw_glyph_run refreshes an entry,
+     * optics_gfx_canvas_cache_replay refuses a segment whose recorded generation is
      * older. Fixed-size, round-robin: one entry per live producer. */
     optics_gfx_host_atlas_gen host_atlas_gens[OPTICS_GFX_CANVAS_HOST_ATLAS_GEN_CAP];
     uint32_t host_atlas_gen_next; /* round-robin insert slot */
@@ -302,7 +307,7 @@ struct optics_gfx_canvas {
     optics_gfx_blend_mode pending_blend;
 
     /* Display-list segments (see "Display-list segments" above). The
-     * slot pool is allocated lazily on the first flux_canvas_cache_begin
+     * slot pool is allocated lazily on the first optics_gfx_canvas_cache_begin
      * and freed at destroy; the stack tracks nested recordings. */
     optics_gfx_canvas_record_slot *record_slots;
     optics_gfx_canvas_record_slot *record_stack[OPTICS_GFX_CANVAS_RECORD_DEPTH_CAP];
@@ -602,7 +607,7 @@ typedef struct optics_gfx_canvas_gradient_stop_pc {
 typedef struct optics_gfx_canvas_push {
     uint64_t verts_address;        /* offset  0 */
     float inv_window_size[2];      /* offset  8 */
-    uint64_t color_params_address; /* offset 16 — flux_image_color_params BDA,
+    uint64_t color_params_address; /* offset 16 — optics_gfx_image_color_params BDA,
                                     * 0 = format-default content space (ADR-0069) */
     uint32_t kind;                 /* offset 24 (0 solid, 1 linear, 2 radial, 3 image) */
     uint32_t num_stops;            /* offset 28 */
@@ -623,7 +628,7 @@ typedef struct optics_gfx_canvas_push {
             float image_src[4];      /* offset 144 — u, v, du, dv (normalised) */
         };
         struct {
-            uint64_t tile_dispatch;  /* offset 120 — BDA to flux_gpu_tile_dispatch */
+            uint64_t tile_dispatch;  /* offset 120 — BDA to optics_gfx_gpu_tile_dispatch */
             uint32_t image_handle;   /* offset 128 — image pattern bindless handle */
             uint32_t sampler_handle; /* offset 132 — image pattern sampler handle */
             float uv_row0[2];        /* offset 136 — du/dx, du/dy */
@@ -640,9 +645,9 @@ typedef struct optics_gfx_output_push {
     float primaries[3][4]; /* column-major mat3, one column per vec4 */
     uint32_t image_handle;
     uint32_t sampler_handle;
-    uint32_t transfer;    /* flux_transfer_func of the encoded side */
+    uint32_t transfer;    /* optics_gfx_transfer_func of the encoded side */
     uint32_t flags;       /* bit0 decode, bit1 no-dither */
-    float gamma;          /* FLUX_TRANSFER_GAMMA exponent */
+    float gamma;          /* OPTICS_GFX_TRANSFER_GAMMA exponent */
     float dither_levels;  /* 255 / 1023; ignored when no-dither */
     float sdr_white_nits; /* Phase 3 tone mapping; 203 default */
     /* Was `_pad`. The bucketed target-attachment pool can serve a pass
@@ -669,7 +674,7 @@ struct optics_gfx_record_op {
     /* Host R8 glyph atlas borrowed by the CPU backend (ADR-0019); NULL for
      * non-glyph ops. Points into glyph's persistent atlas buffer.
      * host_atlas_gen is the producer generation at capture time
-     * (FLUX_HOST_ATLAS_UNVERSIONED when the run carried no extension):
+     * (OPTICS_GFX_HOST_ATLAS_UNVERSIONED when the run carried no extension):
      * replay refuses the segment when the canvas has since seen a newer
      * generation for this buffer (texels rearranged, baked UVs stale). */
     const uint8_t *host_atlas;
@@ -682,7 +687,7 @@ struct optics_gfx_canvas_record_slot {
     optics_gfx_canvas *owner;
     uint64_t generation; /* bumped on release/evict/discard; invalidates handles */
     uint64_t last_used;  /* LRU tick */
-    uint32_t state;      /* enum flux_record_slot_state */
+    uint32_t state;      /* enum optics_gfx_record_slot_state */
 
     /* Replay anchor: the segment is only valid under the exact canvas state
      * it was recorded against — same framebuffer extent (push constants bake
@@ -710,7 +715,8 @@ struct optics_gfx_canvas_record_slot {
 /* ------------------------------------------------------------------ */
 /*  Image (internal)                                                  */
 /*                                                                      */
-/*  struct flux_image + flux_image_create (FLUX_IMAGE_USAGE_COMPUTE_WRITE) live in     */
+/*  struct optics_gfx_image + optics_gfx_image_create (OPTICS_GFX_IMAGE_USAGE_COMPUTE_WRITE) live in
+ */
 /*  image_internal.h so the effect module can depend on the image      */
 /*  struct without dragging in canvas pipelines, push constants,       */
 /*  geometry helpers, or path/paint internals.                         */
@@ -722,8 +728,7 @@ struct optics_gfx_canvas_record_slot {
 /*  Path                                                              */
 /* ------------------------------------------------------------------ */
 
-/* flux_path_op / flux_path_segment live above struct flux_canvas
- * (the tess cache embeds them). */
+/* optics_gfx_path_op / optics_gfx_path_segment are declared near the top. */
 struct optics_gfx_path {
     optics_gfx_path_segment *segments;
     uint32_t capacity;
@@ -754,7 +759,7 @@ typedef enum canvas_pipe_id : uint32_t {
     CANVAS_PIPE_COUNT,
 } canvas_pipe_id;
 
-/* flux_canvas_push.kind high bits: content decode hints (ADR-0069).
+/* optics_gfx_canvas_push.kind high bits: content decode hints (ADR-0069).
  * Set when the sampled 8-bit UNORM image holds sRGB-encoded content
  * that hardware views cannot decode for us. */
 #define OPTICS_GFX_CANVAS_PUSH_DECODE_SRGB 0x100u
@@ -777,7 +782,7 @@ optics_gfx_result
 canvas_get_tile_compute_pipelines(optics_gfx_device *device,
                                   optics_gfx_compute_pipeline *out[CANVAS_TILE_PIPE_COUNT]);
 
-/* Software-backend constructor behind flux_canvas_create (backend_cpu.c). */
+/* Software-backend constructor behind optics_gfx_canvas_create (backend_cpu.c). */
 OPTICS_GFX_NODISCARD optics_gfx_result optics_gfx_canvas_cpu_create(uint32_t width, uint32_t height,
                                                                     float scale,
                                                                     optics_gfx_canvas **out);
@@ -798,8 +803,6 @@ bool ensure_pipeline_bound(optics_gfx_canvas *c, canvas_paint_kind kind);
 bool ensure_pipeline_bound_id(optics_gfx_canvas *c, canvas_pipe_id id);
 void submit_triangles(optics_gfx_canvas *c, const canvas_paint *paint,
                       const optics_gfx_canvas_vertex *verts, uint32_t vertex_count);
-void submit_triangles_covered(optics_gfx_canvas *c, const canvas_paint *paint,
-                              const optics_gfx_canvas_vertex *verts, uint32_t vertex_count);
 void submit_triangles_id(optics_gfx_canvas *c, const canvas_paint *paint, canvas_pipe_id id,
                          const optics_gfx_canvas_vertex *verts, uint32_t vertex_count);
 void draw_image_with_sampler_handle(optics_gfx_canvas *c, optics_gfx_image *img,
@@ -832,12 +835,12 @@ bool canvas_track_sampler(optics_gfx_canvas *c, optics_gfx_sampler *sampler);
 bool canvas_track_display_list(optics_gfx_canvas *c, const optics_gfx_display_list *list);
 
 /* Record the newest producer generation seen for a host coverage buffer
- * (flux_glyph_run_host_atlas_desc); replay consults it to refuse segments
+ * (optics_gfx_glyph_run_host_atlas_desc); replay consults it to refuse segments
  * captured before an in-place atlas rearrange. */
 void canvas_host_atlas_gen_track(optics_gfx_canvas *c, const uint8_t *ptr, uint64_t gen);
 
 /* Release every slot's buffers + retained images and free the pool.
- * Called from flux_canvas_release. */
+ * Called from optics_gfx_canvas_release. */
 void canvas_record_pool_destroy(optics_gfx_canvas *c);
 
 /* ------------------------------------------------------------------ */
@@ -857,7 +860,7 @@ typedef struct flatten_multi {
 } flatten_multi;
 
 /* Coverage rasterizer (ADR-0119 S1): exact per-pixel area of the region the
- * fill rule selects, from flattened contours. Returns FLUX_OK, or an explicit
+ * fill rule selects, from flattened contours. Returns OPTICS_GFX_OK, or an explicit
  * error when the split budget is exhausted (never silently wrong coverage). */
 OPTICS_GFX_NODISCARD optics_gfx_result canvas_coverage_rasterize(
     const optics_gfx_point *pts, const optics_gfx_canvas_contour *cons, uint32_t ncons,
@@ -881,6 +884,7 @@ bool canvas_ensure_pts(optics_gfx_canvas *c, uint32_t needed);
 bool canvas_ensure_contours(optics_gfx_canvas *c, uint32_t needed);
 bool canvas_ensure_verts(optics_gfx_canvas *c, uint32_t needed);
 bool canvas_ensure_frames(optics_gfx_canvas *c, uint32_t needed);
+bool canvas_ensure_outline(optics_gfx_canvas *c, uint32_t needed_pts, uint32_t needed_contours);
 
 /* Operator-norm upper bound of `m`'s 2×2 linear part. Callers pass
  * the result as `pixel_scale` to the flatteners so the per-pixel
@@ -903,10 +907,6 @@ typedef struct stroke_frame {
 stroke_frame compute_frame(optics_gfx_point prev, optics_gfx_point pt, optics_gfx_point next,
                            float half, float miter_limit, bool has_prev, bool has_next);
 
-void emit_arc(optics_gfx_canvas_vertex *verts, uint32_t *count, uint32_t cap, optics_gfx_mat3x2 tx,
-              optics_gfx_color color, optics_gfx_point centre, float radius, float start_angle,
-              float sweep, uint32_t steps);
-
 /* ------------------------------------------------------------------ */
 /*  Point helpers                                                     */
 /* ------------------------------------------------------------------ */
@@ -922,13 +922,6 @@ static inline optics_gfx_point pt_scale(optics_gfx_point a, float k) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Vertex helpers (defined in canvas.c)                              */
-/* ------------------------------------------------------------------ */
-
-void emit_tri(optics_gfx_canvas_vertex *verts, uint32_t *count, uint32_t cap, optics_gfx_mat3x2 tx,
-              optics_gfx_color color, optics_gfx_point a, optics_gfx_point b, optics_gfx_point e);
-
-/* ------------------------------------------------------------------ */
 /*  Internal rasterization primitives (RFC-0094)                      */
 /* ------------------------------------------------------------------ */
 
@@ -938,4 +931,4 @@ void canvas_fill_path_internal(optics_gfx_canvas *c, const optics_gfx_path *p,
 void canvas_stroke_path_internal(optics_gfx_canvas *c, const optics_gfx_path *p,
                                  const canvas_paint *paint);
 
-#endif /* FLUX_CANVAS_INTERNAL_H */
+#endif /* OPTICS_GFX_CANVAS_INTERNAL_H */

@@ -3,6 +3,9 @@ id: ADR-0097
 title: "Canonical example taxonomy, legacy pruning, and lifecycle governance"
 status: accepted
 date: 2026-09-15
+scope: examples/ across the entire Optics monorepo, Meson targets, and CI verification
+superseded_by: null
+negative_knowledge: false
 ---
 
 # ADR-0097: Canonical example taxonomy, legacy pruning, and lifecycle governance

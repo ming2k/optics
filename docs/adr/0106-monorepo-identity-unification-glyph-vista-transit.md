@@ -3,7 +3,7 @@ id: ADR-0106
 title: "Monorepo Identity Unification — glyph, vista, and transit"
 status: accepted
 date: 2026-09-27
-scope: libs/glyph, libs/vista, libs/transit, libs/flux, libs/lens, tools, bindings
+scope: libs/text, libs/scene, libs/motion, libs/gfx, libs/ui, tools, bindings
 superseded_by: null
 negative_knowledge: true
 ---

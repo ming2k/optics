@@ -3,7 +3,7 @@ id: ADR-0146
 title: "Composed layers advance in lockstep — synchronized subsurfaces, single present point"
 status: accepted
 date: 2026-11-04
-scope: [iris]
+scope: [window]
 superseded_by: null
 negative_knowledge: true
 ---

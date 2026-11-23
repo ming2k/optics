@@ -2,7 +2,7 @@
  * Surface + swapchain / offscreen target + per-frame state.
  *
  * Caller creates VkSurfaceKHR via GLFW/SDL/raw platform code and
- * hands it in via flux_surface_desc.vk_surface_khr. flux owns the
+ * hands it in via optics_gfx_surface_desc.vk_surface_khr. gfx owns the
  * VkSwapchainKHR (or, for an offscreen surface, the per-frame color
  * images per ADR-0013 — 8-bit by default, deep-color/HDR containers
  * via the color-space and offscreen-format extensions) and the
@@ -19,13 +19,14 @@
 #include <unistd.h> /* close() on exported dma-buf / sync fds */
 #endif
 
-/* FLUX_DRM_FORMAT_MOD_LINEAR == 0 (see drm_fourcc.h). We avoid the libdrm header
+/* OPTICS_GFX_DRM_FORMAT_MOD_LINEAR == 0 (see drm_fourcc.h). We avoid the libdrm header
  * dependency here because the modifier value is all we need for export, and
  * dmabuf.c (the import side) already keeps the same convention. */
 #define OPTICS_GFX_DRM_FORMAT_MOD_LINEAR 0ULL
 #include <optics/gfx/vulkan.h>
 
 #include <math.h>
+#include <stdckdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -43,7 +44,7 @@ typedef struct optics_gfx_surface_image_storage {
     optics_gfx_vk_alloc *allocs;
     /* Bindless sampled-image handles for the views (ADR-0069): the canvas
      * LOAD seed blit samples the previous contents of the very image it
-     * will overwrite. FLUX_BINDLESS_INVALID while unregistered. */
+     * will overwrite. OPTICS_GFX_BINDLESS_INVALID while unregistered. */
     uint32_t *bindless;
 } optics_gfx_surface_image_storage;
 
@@ -82,7 +83,7 @@ static void image_storage_free(optics_gfx_device *d, optics_gfx_surface_image_st
 
 static void *image_storage_alloc_array(optics_gfx_device *d, uint32_t count, size_t element_size) {
     size_t bytes = 0;
-    if (!optics_gfx_platform_mul_size((size_t)count, element_size, &bytes))
+    if (ckd_mul(&bytes, (size_t)count, element_size))
         return nullptr;
     return optics_gfx_internal_alloc(d, bytes);
 }
@@ -173,7 +174,7 @@ static void surface_free_image_storage(optics_gfx_surface *s) {
 /*  Swapchain format / present-mode selection                          */
 /* ------------------------------------------------------------------ */
 
-/* ADR-0069: a requested flux_color_space is mapped to its Vulkan
+/* ADR-0069: a requested optics_gfx_color_space is mapped to its Vulkan
  * (colorSpace, format) candidates; negotiation walks the caller's
  * preference list in order. Spaces with no VkColorSpaceKHR
  * representation (SDR BT.2020 gamma, custom primaries) are unmappable
@@ -580,7 +581,7 @@ optics_gfx_result optics_gfx_surface_create_swapchain(optics_gfx_surface *s, uin
     s->output_color_space = actual_space;
     s->content_space = s->has_output_override ? s->output_override : actual_space;
     s->extent = extent;
-    /* "HDR" per flux_surface_info.hdr: PQ, HLG, or extended-linear.
+    /* "HDR" per optics_gfx_surface_info.hdr: PQ, HLG, or extended-linear.
      * Wide-gamut SDR spaces (Display P3, Adobe RGB) are not HDR. */
     s->hdr_actual = (fmt.colorSpace == VK_COLOR_SPACE_HDR10_ST2084_EXT ||
                      fmt.colorSpace == VK_COLOR_SPACE_HDR10_HLG_EXT ||
@@ -606,7 +607,7 @@ optics_gfx_result optics_gfx_surface_create_swapchain(optics_gfx_surface *s, uin
         optics_gfx_result cr = content_image_create(s, extent.width, extent.height, fmt.format);
         if (cr != OPTICS_GFX_OK) {
             /* Non-fatal: the surface renders full-extent into the acquired
-             * image instead (see flux_surface_render_image). */
+             * image instead (see optics_gfx_surface_render_image). */
             s->content = (typeof(s->content)){.bindless = OPTICS_GFX_BINDLESS_INVALID};
             s->content.layout = VK_IMAGE_LAYOUT_UNDEFINED;
         }
@@ -660,7 +661,7 @@ static void content_image_destroy(optics_gfx_surface *s) {
  * the present-time copy into a swapchain image (TRANSFER_SRC). No TRANSFER_DST:
  * nothing else writes it.
  *
- * On failure the surface keeps working — `flux_surface_render_image` falls back
+ * On failure the surface keeps working — `optics_gfx_surface_render_image` falls back
  * to the per-slot image, which makes each frame a full-extent render. That is
  * the pre-ADR-0149 behaviour, and it is correct, just not localised. */
 static optics_gfx_result content_image_create(optics_gfx_surface *s, uint32_t w, uint32_t h,
@@ -842,7 +843,7 @@ static bool offscreen_format_suitable(optics_gfx_transfer_func tf, VkFormat f) {
 }
 
 /* Default container preference per transfer function when no
- * flux_surface_offscreen_format_desc constrains it: the historic 8-bit
+ * optics_gfx_surface_offscreen_format_desc constrains it: the historic 8-bit
  * default for gamma encodings, 10-bit then float for HDR, float for
  * linear. */
 static uint32_t offscreen_default_formats(optics_gfx_transfer_func tf, VkFormat out[2]) {
@@ -957,8 +958,8 @@ static optics_gfx_result readback_staging_size(uint32_t width, uint32_t height, 
     if (!width || !height)
         return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
     size_t needed;
-    if (!optics_gfx_platform_mul_size((size_t)width, (size_t)height, &needed) ||
-        !optics_gfx_platform_mul_size(needed, surface_format_staging_bytes(format), &needed))
+    if (ckd_mul(&needed, (size_t)width, (size_t)height) ||
+        ckd_mul(&needed, needed, surface_format_staging_bytes(format)))
         return OPTICS_GFX_ERROR_OUT_OF_RANGE;
     *out = needed;
     return OPTICS_GFX_OK;
@@ -993,9 +994,9 @@ static optics_gfx_result offscreen_create_images(optics_gfx_surface *s, uint32_t
      * requires the device's external-memory / DRM-modifier extensions and an
      * exportable modifier that supports colour-attachment + transfer. When
      * the host wants zero-copy presentation via linux-dmabuf, it enables the
-     * extensions at flux_device_create and we pick the exportable path here.
+     * extensions at optics_gfx_device_create and we pick the exportable path here.
      * Otherwise we fall back to the original OPTIMAL-tiling slab-allocated
-     * image (read back via flux_surface_read_pixels). */
+     * image (read back via optics_gfx_surface_read_pixels). */
     optics_gfx_device *d = s->device;
     bool want_export = optics_gfx_dmabuf_supported(d) && !s->offscreen_require_readback;
     s->offscreen_exportable = false;
@@ -1413,7 +1414,8 @@ optics_gfx_result optics_gfx_surface_create(optics_gfx_device *device,
     if (!device || !desc || !out)
         return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
     if (desc->type != OPTICS_GFX_TYPE_SURFACE_DESC) {
-        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT, "desc->type != FLUX_TYPE_SURFACE_DESC");
+        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT,
+                        "desc->type != OPTICS_GFX_TYPE_SURFACE_DESC");
         return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
     }
     *out = nullptr;
@@ -1422,7 +1424,7 @@ optics_gfx_result optics_gfx_surface_create(optics_gfx_device *device,
     if (!s)
         return OPTICS_GFX_ERROR_OUT_OF_MEMORY;
     /* content_image_destroy() runs before the first content image exists:
-     * flux_surface_create_swapchain() commits by tearing the previous
+     * optics_gfx_surface_create_swapchain() commits by tearing the previous
      * generation down after registering the new swapchain images. Zeroed
      * storage would make content.bindless == 0 look like a live handle and
      * release the slot the new image 0 just allocated, aliasing the content
@@ -1470,8 +1472,7 @@ optics_gfx_result optics_gfx_surface_create(optics_gfx_device *device,
                     }
                 }
                 size_t bytes;
-                if (!optics_gfx_platform_mul_size((size_t)color->space_count,
-                                                  sizeof(*s->requested_spaces), &bytes)) {
+                if (ckd_mul(&bytes, (size_t)color->space_count, sizeof(*s->requested_spaces))) {
                     r = OPTICS_GFX_ERROR_OUT_OF_RANGE;
                     goto fail;
                 }
@@ -1545,8 +1546,7 @@ optics_gfx_result optics_gfx_surface_create(optics_gfx_device *device,
                     goto fail;
                 }
                 size_t bytes;
-                if (!optics_gfx_platform_mul_size((size_t)dmabuf->modifier_count, sizeof(uint64_t),
-                                                  &bytes)) {
+                if (ckd_mul(&bytes, (size_t)dmabuf->modifier_count, sizeof(uint64_t))) {
                     r = OPTICS_GFX_ERROR_OUT_OF_RANGE;
                     goto fail;
                 }
@@ -1583,8 +1583,7 @@ optics_gfx_result optics_gfx_surface_create(optics_gfx_device *device,
                     }
                 }
                 size_t bytes;
-                if (!optics_gfx_platform_mul_size((size_t)fmt->format_count,
-                                                  sizeof(*s->offscreen_formats), &bytes)) {
+                if (ckd_mul(&bytes, (size_t)fmt->format_count, sizeof(*s->offscreen_formats))) {
                     r = OPTICS_GFX_ERROR_OUT_OF_RANGE;
                     goto fail;
                 }
@@ -1683,7 +1682,7 @@ static void surface_wait_quiescent(optics_gfx_surface *s) {
     optics_gfx_device *d = s->device;
     if (!s->offscreen) {
         /* Host access to the queue: serialised against concurrent
-         * submits, same rule as flux_vk_wait_idle. */
+         * submits, same rule as optics_gfx_vk_wait_idle. */
         optics_gfx_platform_mutex_lock(&d->queue_lock);
         vkQueueWaitIdle(d->graphics_queue);
         optics_gfx_platform_mutex_unlock(&d->queue_lock);
@@ -1864,8 +1863,7 @@ static optics_gfx_result readback_byte_size(uint32_t width, uint32_t height, siz
     if (!width || !height)
         return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
     size_t needed;
-    if (!optics_gfx_platform_mul_size((size_t)width, (size_t)height, &needed) ||
-        !optics_gfx_platform_mul_size(needed, 4u, &needed))
+    if (ckd_mul(&needed, (size_t)width, (size_t)height) || ckd_mul(&needed, needed, 4u))
         return OPTICS_GFX_ERROR_OUT_OF_RANGE;
     *out = needed;
     return OPTICS_GFX_OK;
@@ -2022,9 +2020,8 @@ optics_gfx_result optics_gfx_readback_read_pixels(const optics_gfx_readback *rea
     if (!readback || !dst)
         return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
     size_t needed;
-    if (!optics_gfx_platform_mul_size((size_t)readback->region.width,
-                                      (size_t)readback->region.height, &needed) ||
-        !optics_gfx_platform_mul_size(needed, 4u, &needed))
+    if (ckd_mul(&needed, (size_t)readback->region.width, (size_t)readback->region.height) ||
+        ckd_mul(&needed, needed, 4u))
         return OPTICS_GFX_ERROR_OUT_OF_RANGE;
     if (bytes < needed) {
         OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT, "dst too small for readback pixels");
@@ -2067,7 +2064,7 @@ optics_gfx_result optics_gfx_surface_read_pixels(optics_gfx_surface *s, void *ds
     }
     if (!persistent_staging && !s->offscreen) {
         OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_UNSUPPORTED,
-                        "windowed readback requires flux_frame_request_readback");
+                        "windowed readback requires optics_gfx_frame_request_readback");
         return OPTICS_GFX_ERROR_UNSUPPORTED;
     }
     uint32_t read_width = persistent_staging ? s->last_readback_region.width : s->extent.width;
@@ -2090,7 +2087,7 @@ optics_gfx_result optics_gfx_surface_read_pixels(optics_gfx_surface *s, void *ds
         return OPTICS_GFX_ERROR_INVALID_STATE;
     }
 
-    /* flux_frame_submit's barrier left the image in TRANSFER_SRC_OPTIMAL;
+    /* optics_gfx_frame_submit's barrier left the image in TRANSFER_SRC_OPTIMAL;
      * the fence wait makes that write visible to this copy. */
     VkResult vr =
         vkWaitForFences(d->device, 1, &pf->in_flight, VK_TRUE, OPTICS_GFX_DEFAULT_FRAME_TIMEOUT_NS);
@@ -2199,8 +2196,8 @@ uint32_t optics_gfx_surface_dmabuf_stride(const optics_gfx_surface *s) {
 
 /* The fd-based export machinery is Linux-only (dma-buf + sync_file). On
  * other platforms the public entry points remain, but report
- * FLUX_ERROR_UNSUPPORTED; surfaces are simply never created exportable
- * there (flux_dmabuf_supported is false, see the dmabuf stub). */
+ * OPTICS_GFX_ERROR_UNSUPPORTED; surfaces are simply never created exportable
+ * there (optics_gfx_dmabuf_supported is false, see the dmabuf stub). */
 #ifdef OPTICS_GFX_HAVE_DMABUF
 static optics_gfx_result export_surface_memory_fd(optics_gfx_surface *s, uint32_t slot,
                                                   int *out_fd) {
@@ -2272,9 +2269,9 @@ static optics_gfx_result export_lease_acquire(optics_gfx_surface *s, uint32_t sl
 
 /* Export the most recently submitted frame's image memory as a dma-buf fd.
  * The caller owns the returned fd and must close() it. Waits for the frame's
- * GPU work to complete first (same fence as flux_surface_read_pixels), so the
+ * GPU work to complete first (same fence as optics_gfx_surface_read_pixels), so the
  * written pixels are visible. No GPU->CPU pixel copy occurs — this is a zero-
- * copy handle export. Returns FLUX_ERROR_UNSUPPORTED if the surface was not
+ * copy handle export. Returns OPTICS_GFX_ERROR_UNSUPPORTED if the surface was not
  * created exportable. */
 void optics_gfx_surface_dmabuf_lease_release(optics_gfx_surface_dmabuf_lease *lease) {
     if (!lease)
@@ -2297,7 +2294,7 @@ optics_gfx_result optics_gfx_surface_export_dmabuf(optics_gfx_surface *s, int *o
     *out_lease = nullptr;
     if (!s->offscreen || !s->offscreen_exportable) {
         OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_UNSUPPORTED,
-                        "flux_surface_export_dmabuf needs an exportable offscreen surface");
+                        "optics_gfx_surface_export_dmabuf needs an exportable offscreen surface");
         return OPTICS_GFX_ERROR_UNSUPPORTED;
     }
     if (s->last_submitted_slot == UINT32_MAX) {
@@ -2314,7 +2311,7 @@ optics_gfx_result optics_gfx_surface_export_dmabuf(optics_gfx_surface *s, int *o
     optics_gfx_per_frame *pf = &s->frames[slot];
 
     /* Wait for the frame's GPU work to finish before handing the memory to a
-     * foreign consumer. Same fence wait as flux_surface_read_pixels. */
+     * foreign consumer. Same fence wait as optics_gfx_surface_read_pixels. */
     VkResult vr =
         vkWaitForFences(d->device, 1, &pf->in_flight, VK_TRUE, OPTICS_GFX_DEFAULT_FRAME_TIMEOUT_NS);
     if (vr == VK_TIMEOUT)
@@ -2468,7 +2465,7 @@ optics_gfx_result optics_gfx_surface_export_dmabuf_pooled_explicit(optics_gfx_su
     return result;
 }
 
-#else  /* !FLUX_HAVE_DMABUF */
+#else  /* !OPTICS_GFX_HAVE_DMABUF */
 void optics_gfx_surface_dmabuf_lease_release(optics_gfx_surface_dmabuf_lease *lease) {
     if (!lease)
         return;
@@ -2521,7 +2518,7 @@ optics_gfx_result optics_gfx_surface_export_dmabuf_pooled_explicit(optics_gfx_su
     OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_UNSUPPORTED, "dma-buf export is only available on Linux");
     return OPTICS_GFX_ERROR_UNSUPPORTED;
 }
-#endif /* FLUX_HAVE_DMABUF */
+#endif /* OPTICS_GFX_HAVE_DMABUF */
 
 /* Damage history is platform-neutral state; keep it outside the dma-buf
  * branch so macOS/Windows export the symbols too. */

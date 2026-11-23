@@ -1,5 +1,5 @@
 //! End-to-end smoke test: proves the whole chain works — bindgen generated the
-//! bindings, the linker resolved liblens + libflux, and a real headless
+//! bindings, the linker resolved liboptics_ui + liboptics_gfx, and a real headless
 //! frame drives the widget set through the safe wrapper. No GPU required.
 
 use optics_ui::{Input, TextBuf, Ui};
@@ -29,7 +29,7 @@ fn headless_frame_drives_widgets() {
     let mut wrap = true;
     let mut zoom = 1.5f32;
     let mut choice = 0i32;
-    let mut name = TextBuf::new(64, "flux");
+    let mut name = TextBuf::new(64, "gfx");
 
     let input = Input::new((800.0, 600.0), 1.0 / 60.0);
 
@@ -58,7 +58,7 @@ fn headless_frame_drives_widgets() {
         })
     });
     assert!(!clicked, "no input was supplied, nothing should click");
-    assert_eq!(name.as_str(), "flux");
+    assert_eq!(name.as_str(), "gfx");
 
     for _ in 0..3 {
         ui.frame(&input, |f| {
@@ -227,17 +227,17 @@ fn patterns_datagrid_tree_and_menu() {
     });
 }
 
-/// A failed lens call must carry flux's own diagnostic, not just the result code.
+/// A failed ui call must carry gfx's own diagnostic, not just the result code.
 ///
 /// `OPTICS_GFX_ERROR_INVALID_ARGUMENT` alone cannot distinguish a degenerate rect from
 /// an out-of-bounds one from a double-begun pass, and each needs a different fix.
-/// Flux records *which entry point* rejected the call and *why* in a
+/// gfx records *which entry point* rejected the call and *why* in a
 /// thread-local slot that the next failing call overwrites — so the only moment
 /// the detail can be captured is at the failure site, inside the wrapper. This
 /// test exists because losing it is otherwise a silent regression: the error
 /// still reports a plausible code, and nothing complains.
 #[test]
-fn a_failed_call_carries_the_flux_diagnostic() {
+fn a_failed_call_carries_the_gfx_diagnostic() {
     // A null ui is rejected by `optics_ui_snapshot_activate`, and the rejection goes
     // through `Error::from_result`, which is the seam under test.
     let rc = unsafe {
@@ -249,7 +249,7 @@ fn a_failed_call_carries_the_flux_diagnostic() {
         "null arguments must be rejected"
     );
 
-    let diagnostic = optics_ui::FluxDiagnostic::for_test(rc);
+    let diagnostic = optics_ui::GfxDiagnostic::for_test(rc);
     let rendered = diagnostic.to_string();
     assert!(
         rendered.contains("OPTICS_GFX_ERROR"),
@@ -268,7 +268,7 @@ fn a_failed_call_carries_the_flux_diagnostic() {
      * future refactor from quietly reverting to a code-only error — the shape
      * would still compile and every "did it fail" test would still pass. */
     assert!(
-        rendered.contains("lens_snapshot_activate"),
+        rendered.contains("optics_ui_snapshot_activate"),
         "the diagnostic must name the entry point that rejected the call: {rendered}"
     );
     assert!(

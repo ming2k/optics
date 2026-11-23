@@ -3,6 +3,9 @@ id: ADR-0066
 title: "Keyboard cursor, icons, and host-owned selection for lens_table"
 status: accepted
 date: 2026-08-12
+scope: ui (L2 toolkit)
+superseded_by: null
+negative_knowledge: true
 ---
 
 # ADR-0066: Keyboard cursor, icons, and host-owned selection for lens_table

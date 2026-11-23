@@ -24,7 +24,7 @@ fn main() {
         )
         .layout_tests(true)
         .generate()
-        .expect("bindgen failed to generate prism bindings");
+        .expect("bindgen failed to generate material bindings");
 
     write_bindings(&bindings);
 }

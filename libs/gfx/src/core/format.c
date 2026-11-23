@@ -1,5 +1,5 @@
 /*
- * flux_format ↔ VkFormat mapping. Lives in core so canvas / scene /
+ * optics_gfx_format ↔ VkFormat mapping. Lives in core so canvas / scene /
  * any module can translate without each owning the table.
  */
 #include <optics/gfx/vulkan.h>

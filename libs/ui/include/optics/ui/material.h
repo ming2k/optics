@@ -1,13 +1,13 @@
 /*
- * lens/material.h — semantic material tokens and recipe models for Lens.
+ * ui/material.h — semantic material tokens and recipe models for ui.
  *
- * Materials in Lens represent physical and styled surfaces (Mica, Acrylic,
+ * Materials in ui represent physical and styled surfaces (Mica, Acrylic,
  * Frosted Glass, Liquid Glass) integrated into the design token system and
  * style cascade.
  *
  * Design Invariants:
- *   1. Domain Boundary: Prism owns physical shader permutations, optical
- *      refraction, and BRDF models. Lens owns theme tokens, semantic roles,
+ *   1. Domain Boundary: material owns physical shader permutations, optical
+ *      refraction, and BRDF models. ui owns theme tokens, semantic roles,
  *      and component style cascade resolution.
  *   2. Thematic Symmetry: Material recipes define dual-polarity recipes:
  *      Smoke plate (0.0) for dark theme contrast, Pearl plate (1.0) for light
@@ -20,7 +20,7 @@
 #define OPTICS_UI_MATERIAL_H
 
 #include <optics/gfx/core.h>
-#include <optics/gfx/math.h> /* flux_color */
+#include <optics/gfx/math.h> /* optics_gfx_color */
 #include <optics/ui/export.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -54,7 +54,7 @@ typedef struct optics_ui_material_recipe {
     float ambient_fresnel;     /* 360-degree isotropic environmental Fresnel sheen [0, 1] */
 } optics_ui_material_recipe;
 
-/* Design token group for materials attached to lens_theme. */
+/* Design token group for materials attached to optics_ui_theme. */
 typedef struct optics_ui_theme_materials {
     optics_ui_material_recipe foundation;     /* Window foundation / desktop root (Mica Base) */
     optics_ui_material_recipe command;        /* Commanding bars, headers, tab strips (Mica Alt) */
@@ -70,4 +70,4 @@ optics_ui_material_recipe_default(optics_ui_material_kind kind, bool dark);
 }
 #endif
 
-#endif /* LENS_MATERIAL_H */
+#endif /* OPTICS_UI_MATERIAL_H */

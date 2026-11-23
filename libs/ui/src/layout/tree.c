@@ -2,15 +2,15 @@
 
 #include "../internal.h"
 
-optics_ui_node *lensi_open_container(optics_ui *ui) {
+optics_ui_node *optics_ui__open_container(optics_ui *ui) {
     return ui->cont_top ? ui->cont_stack[ui->cont_top - 1] : nullptr;
 }
 
-void lensi_link_child(optics_ui *ui, optics_ui_node *n) {
-    optics_ui_node *parent = lensi_open_container(ui);
+void optics_ui__link_child(optics_ui *ui, optics_ui_node *n) {
+    optics_ui_node *parent = optics_ui__open_container(ui);
     if (!parent || !n || n == parent)
         return;
-    ui->last_node = n; /* lens_a11y target */
+    ui->last_node = n; /* optics_ui_a11y target */
     if (n->parent == parent && n->last_seen == ui->frame) {
         /* Reusing one retained id for two siblings makes the latter silently
          * disappear: there is only one node to link and one draw list to
@@ -28,7 +28,7 @@ void lensi_link_child(optics_ui *ui, optics_ui_node *n) {
     parent->last_child = n;
     parent->child_count++;
     /* Fold the child id sequence into a per-frame hash so the damage pass
-     * (lensi_mark_subtree_changed) notices removed/reordered children even
+     * (optics_ui__mark_subtree_changed) notices removed/reordered children even
      * when every remaining child is individually unchanged — otherwise a
      * stale display-list record would replay ghost content. */
     parent->child_hash = parent->child_hash * 31 + (uint32_t)(n->id ^ (n->id >> 32));
@@ -58,23 +58,23 @@ void lensi_link_child(optics_ui *ui, optics_ui_node *n) {
     }
 }
 
-void lensi_open_container_push(optics_ui *ui, optics_ui_node *n) {
+void optics_ui__open_container_push(optics_ui *ui, optics_ui_node *n) {
     /* Internal contract: callers pass a live context and a stored node.
      * The guards are analyzer teeth, not error handling — a NULL here is
      * a library bug, and the overflow path keeps the diagnostic. */
     if (!ui || !n)
         return;
-    if (ui->cont_top < LENSI_CONTAINER_STACK_MAX)
+    if (ui->cont_top < OPTICS_UI_CONTAINER_STACK_MAX)
         ui->cont_stack[ui->cont_top++] = n;
     else
-        lensi_set_overflow(ui);
-    if (ui->id_top < LENSI_ID_STACK_MAX)
+        optics_ui__set_overflow(ui);
+    if (ui->id_top < OPTICS_UI_ID_STACK_MAX)
         ui->id_stack[ui->id_top++] = n->id; /* children scope under it */
     else
-        lensi_set_overflow(ui);
+        optics_ui__set_overflow(ui);
 }
 
-void lensi_open_container_pop(optics_ui *ui) {
+void optics_ui__open_container_pop(optics_ui *ui) {
     if (ui->cont_top > 1)
         ui->cont_top--; /* never pop the root */
     if (ui->id_top > 1)
@@ -87,13 +87,13 @@ static optics_ui_node *open_flex(optics_ui *ui, optics_ui_axis axis, optics_ui_l
     /* Explicit box.id gives the container a stable, label-independent
      * identity; otherwise fall back to the sibling-sequence id. */
     optics_ui_id id = (opts.box.id && opts.box.id[0])
-                          ? lensi_gen_widget_id(ui, opts.box.id)
-                          : lensi_gen_container_id(ui, axis == OPTICS_UI_ROW ? "row" : "col");
-    optics_ui_node *n = lensi_store_touch(ui, id);
+                          ? optics_ui__gen_widget_id(ui, opts.box.id)
+                          : optics_ui__gen_container_id(ui, axis == OPTICS_UI_ROW ? "row" : "col");
+    optics_ui_node *n = optics_ui__store_touch(ui, id);
     if (!n)
         return nullptr;
-    lensi_link_child(ui, n); /* link into parent BEFORE pushing */
-    lensi_node_box(ui, n, &opts.box);
+    optics_ui__link_child(ui, n); /* link into parent BEFORE pushing */
+    optics_ui__node_box(ui, n, &opts.box);
     n->is_container = true;
     n->axis = axis;
     n->align = opts.align;
@@ -105,25 +105,25 @@ static optics_ui_node *open_flex(optics_ui *ui, optics_ui_axis axis, optics_ui_l
 
     /* Optional panel background — painted at replay against final_rect,
      * so it fills the container after layout has solved its size.
-     * flux_color is ARGB-packed (alpha in bits 31..24); any non-zero
+     * optics_gfx_color is ARGB-packed (alpha in bits 31..24); any non-zero
      * alpha enables the fill. */
     if ((opts.bg >> 24) != 0) {
-        lensi_drawlist_push(ui, n,
-                            (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_RECT,
-                                                 .rel = {0, 0, 0, 0},
-                                                 .color = opts.bg,
-                                                 .radius = opts.radius});
+        optics_ui__drawlist_push(ui, n,
+                                 (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_RECT,
+                                                      .rel = {0, 0, 0, 0},
+                                                      .color = opts.bg,
+                                                      .radius = opts.radius});
     }
     if ((opts.border >> 24) != 0 && opts.border_width > 0.0f) {
-        lensi_drawlist_push(ui, n,
-                            (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_BORDER,
-                                                 .rel = {0, 0, 0, 0},
-                                                 .color = opts.border,
-                                                 .radius = opts.radius,
-                                                 .width = opts.border_width});
+        optics_ui__drawlist_push(ui, n,
+                                 (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_BORDER,
+                                                      .rel = {0, 0, 0, 0},
+                                                      .color = opts.border,
+                                                      .radius = opts.radius,
+                                                      .width = opts.border_width});
     }
 
-    lensi_open_container_push(ui, n);
+    optics_ui__open_container_push(ui, n);
     return n;
 }
 
@@ -133,7 +133,7 @@ void optics_ui_row_begin(optics_ui *ui, const optics_ui_layout_opts *opts) {
     open_flex(ui, OPTICS_UI_ROW, opts ? *opts : default_opts);
 }
 void optics_ui_row_end(optics_ui *ui) {
-    lensi_open_container_pop(ui);
+    optics_ui__open_container_pop(ui);
 }
 void optics_ui_column_begin(optics_ui *ui, const optics_ui_layout_opts *opts) {
     optics_ui_layout_opts default_opts = {
@@ -141,7 +141,7 @@ void optics_ui_column_begin(optics_ui *ui, const optics_ui_layout_opts *opts) {
     open_flex(ui, OPTICS_UI_COLUMN, opts ? *opts : default_opts);
 }
 void optics_ui_column_end(optics_ui *ui) {
-    lensi_open_container_pop(ui);
+    optics_ui__open_container_pop(ui);
 }
 
 void optics_ui_wrap_begin(optics_ui *ui, const optics_ui_layout_opts *opts) {
@@ -152,17 +152,17 @@ void optics_ui_wrap_begin(optics_ui *ui, const optics_ui_layout_opts *opts) {
     open_flex(ui, OPTICS_UI_ROW, o);
 }
 void optics_ui_wrap_end(optics_ui *ui) {
-    lensi_open_container_pop(ui);
+    optics_ui__open_container_pop(ui);
 }
 
 static optics_ui_node *open_stack(optics_ui *ui, optics_ui_layout_opts opts) {
-    optics_ui_id id = (opts.box.id && opts.box.id[0]) ? lensi_gen_widget_id(ui, opts.box.id)
-                                                      : lensi_gen_container_id(ui, "stack");
-    optics_ui_node *n = lensi_store_touch(ui, id);
+    optics_ui_id id = (opts.box.id && opts.box.id[0]) ? optics_ui__gen_widget_id(ui, opts.box.id)
+                                                      : optics_ui__gen_container_id(ui, "stack");
+    optics_ui_node *n = optics_ui__store_touch(ui, id);
     if (!n)
         return nullptr;
-    lensi_link_child(ui, n);
-    lensi_node_box(ui, n, &opts.box);
+    optics_ui__link_child(ui, n);
+    optics_ui__node_box(ui, n, &opts.box);
     n->is_container = true;
     n->is_stack = true;
     n->align = opts.align;
@@ -170,22 +170,22 @@ static optics_ui_node *open_stack(optics_ui *ui, optics_ui_layout_opts opts) {
     n->pad = opts.pad;
 
     if ((opts.bg >> 24) != 0) {
-        lensi_drawlist_push(ui, n,
-                            (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_RECT,
-                                                 .rel = {0, 0, 0, 0},
-                                                 .color = opts.bg,
-                                                 .radius = opts.radius});
+        optics_ui__drawlist_push(ui, n,
+                                 (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_RECT,
+                                                      .rel = {0, 0, 0, 0},
+                                                      .color = opts.bg,
+                                                      .radius = opts.radius});
     }
     if ((opts.border >> 24) != 0 && opts.border_width > 0.0f) {
-        lensi_drawlist_push(ui, n,
-                            (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_BORDER,
-                                                 .rel = {0, 0, 0, 0},
-                                                 .color = opts.border,
-                                                 .radius = opts.radius,
-                                                 .width = opts.border_width});
+        optics_ui__drawlist_push(ui, n,
+                                 (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_BORDER,
+                                                      .rel = {0, 0, 0, 0},
+                                                      .color = opts.border,
+                                                      .radius = opts.radius,
+                                                      .width = opts.border_width});
     }
 
-    lensi_open_container_push(ui, n);
+    optics_ui__open_container_push(ui, n);
     return n;
 }
 
@@ -194,17 +194,17 @@ void optics_ui_stack_begin(optics_ui *ui, const optics_ui_layout_opts *opts) {
     open_stack(ui, opts ? *opts : default_opts);
 }
 void optics_ui_stack_end(optics_ui *ui) {
-    lensi_open_container_pop(ui);
+    optics_ui__open_container_pop(ui);
 }
 
 static optics_ui_node *open_grid(optics_ui *ui, optics_ui_grid_opts opts) {
-    optics_ui_id id = (opts.box.id && opts.box.id[0]) ? lensi_gen_widget_id(ui, opts.box.id)
-                                                      : lensi_gen_container_id(ui, "grid");
-    optics_ui_node *n = lensi_store_touch(ui, id);
+    optics_ui_id id = (opts.box.id && opts.box.id[0]) ? optics_ui__gen_widget_id(ui, opts.box.id)
+                                                      : optics_ui__gen_container_id(ui, "grid");
+    optics_ui_node *n = optics_ui__store_touch(ui, id);
     if (!n)
         return nullptr;
-    lensi_link_child(ui, n);
-    lensi_node_box(ui, n, &opts.box);
+    optics_ui__link_child(ui, n);
+    optics_ui__node_box(ui, n, &opts.box);
     n->is_container = true;
     n->is_grid = true;
     n->grid_columns = opts.columns > 0 ? (uint32_t)opts.columns : 1;
@@ -216,22 +216,22 @@ static optics_ui_node *open_grid(optics_ui *ui, optics_ui_grid_opts opts) {
     n->cross = opts.cross != 0 ? opts.cross : OPTICS_UI_STRETCH;
 
     if ((opts.bg >> 24) != 0) {
-        lensi_drawlist_push(ui, n,
-                            (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_RECT,
-                                                 .rel = {0, 0, 0, 0},
-                                                 .color = opts.bg,
-                                                 .radius = opts.radius});
+        optics_ui__drawlist_push(ui, n,
+                                 (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_RECT,
+                                                      .rel = {0, 0, 0, 0},
+                                                      .color = opts.bg,
+                                                      .radius = opts.radius});
     }
     if ((opts.border >> 24) != 0 && opts.border_width > 0.0f) {
-        lensi_drawlist_push(ui, n,
-                            (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_BORDER,
-                                                 .rel = {0, 0, 0, 0},
-                                                 .color = opts.border,
-                                                 .radius = opts.radius,
-                                                 .width = opts.border_width});
+        optics_ui__drawlist_push(ui, n,
+                                 (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_BORDER,
+                                                      .rel = {0, 0, 0, 0},
+                                                      .color = opts.border,
+                                                      .radius = opts.radius,
+                                                      .width = opts.border_width});
     }
 
-    lensi_open_container_push(ui, n);
+    optics_ui__open_container_push(ui, n);
     return n;
 }
 
@@ -245,11 +245,11 @@ void optics_ui_grid_begin(optics_ui *ui, const optics_ui_grid_opts *opts) {
     open_grid(ui, opts ? *opts : default_opts);
 }
 void optics_ui_grid_end(optics_ui *ui) {
-    lensi_open_container_pop(ui);
+    optics_ui__open_container_pop(ui);
 }
 
 void optics_ui_close(optics_ui *ui) {
-    lensi_open_container_pop(ui);
+    optics_ui__open_container_pop(ui);
 }
 
 optics_ui_response optics_ui_pressable_begin(optics_ui *ui, const optics_ui_pressable_opts *opts) {
@@ -262,7 +262,7 @@ optics_ui_response optics_ui_pressable_begin(optics_ui *ui, const optics_ui_pres
         opts = &default_opts;
 
     optics_ui_layout_opts lopts = opts->layout;
-    lopts.box = lensi_merge_box(lopts.box, opts->box);
+    lopts.box = optics_ui__merge_box(lopts.box, opts->box);
 
     optics_ui_node *n = open_flex(ui, OPTICS_UI_ROW, lopts);
     if (!n)
@@ -271,22 +271,22 @@ optics_ui_response optics_ui_pressable_begin(optics_ui *ui, const optics_ui_pres
     bool disabled = lopts.box.disabled;
     for (optics_ui_node *parent = n->parent; parent; parent = parent->parent)
         disabled = disabled || parent->box_disabled;
-    optics_ui_response r = lensi_interact(ui, n, true, disabled);
+    optics_ui_response r = optics_ui__interact(ui, n, true, disabled);
     if (opts->mouse_button == OPTICS_UI_MOUSE_RIGHT)
         r.clicked = r.right_clicked;
     else if (opts->mouse_button == OPTICS_UI_MOUSE_MIDDLE)
         r.clicked = r.middle_clicked;
     uint32_t sem_flags =
         (r.focused ? OPTICS_UI_A11Y_FOCUSED : 0) | (disabled ? OPTICS_UI_A11Y_DISABLED : 0);
-    lensi_node_semantics(ui, n, OPTICS_UI_ROLE_BUTTON, opts->label ? opts->label : "", nullptr,
-                         sem_flags);
+    optics_ui__node_semantics(ui, n, OPTICS_UI_ROLE_BUTTON, opts->label ? opts->label : "", nullptr,
+                              sem_flags);
 
     if (!disabled) {
         float dt = ui->input.dt_seconds;
         n->hover_t =
-            lensi_approach(ui, n->hover_t, (r.hovered || r.focused) ? 1.0f : 0.0f, dt, 14.0f);
+            optics_ui__approach(ui, n->hover_t, (r.hovered || r.focused) ? 1.0f : 0.0f, dt, 14.0f);
         n->active_t =
-            lensi_approach(ui, n->active_t, (ui->active_id == n->id) ? 1.0f : 0.0f, dt, 18.0f);
+            optics_ui__approach(ui, n->active_t, (ui->active_id == n->id) ? 1.0f : 0.0f, dt, 18.0f);
     }
 
     float emphasis = fmaxf(n->hover_t * 0.72f, n->active_t);
@@ -294,21 +294,21 @@ optics_ui_response optics_ui_pressable_begin(optics_ui *ui, const optics_ui_pres
         optics_gfx_color transparent = optics_gfx_color_rgba(0, 0, 0, 0);
         optics_gfx_color target =
             n->active_t > n->hover_t * 0.72f ? ui->theme.color_active : ui->theme.color_hover;
-        lensi_drawlist_push(
+        optics_ui__drawlist_push(
             ui, n,
             (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_RECT,
                                  .rel = {0, 0, 0, 0},
-                                 .color = lensi_lerp_color(transparent, target, emphasis),
+                                 .color = optics_ui__lerp_color(transparent, target, emphasis),
                                  .radius = lopts.radius});
     }
     if (r.focused) {
         float bw = ui->theme.border_width > 0.0f ? ui->theme.border_width : 1.5f;
-        lensi_drawlist_push(ui, n,
-                            (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_BORDER,
-                                                 .rel = {0, 0, 0, 0},
-                                                 .color = ui->theme.color_accent,
-                                                 .radius = lopts.radius,
-                                                 .width = bw});
+        optics_ui__drawlist_push(ui, n,
+                                 (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_BORDER,
+                                                      .rel = {0, 0, 0, 0},
+                                                      .color = ui->theme.color_accent,
+                                                      .radius = lopts.radius,
+                                                      .width = bw});
     }
 
     ui->last_response = r;
@@ -322,7 +322,7 @@ void optics_ui_pressable_end(optics_ui *ui) {
 
 /* Descriptor fields are applied by every node builder. Legacy layout
  * hints remain supported; explicit nonzero descriptor values take precedence. */
-optics_ui_box lensi_merge_box(optics_ui_box base, optics_ui_box override) {
+optics_ui_box optics_ui__merge_box(optics_ui_box base, optics_ui_box override) {
 #define OVERRIDE(field)                                                                            \
     if (override.field)                                                                            \
     base.field = override.field
@@ -354,29 +354,26 @@ optics_ui_box lensi_merge_box(optics_ui_box base, optics_ui_box override) {
  * Both parts matter. `active` is what replay keys on, and `painted` is what
  * damage reports — the painted box sits *below* the anchor with `2*pad` padding,
  * so the anchor is neither a subset of it nor a superset. Measuring here is
- * forced: the damage walk is a `const lens *` pass and must not re-shape text,
+ * forced: the damage walk is a `const ui *` pass and must not re-shape text,
  * because shaping mutates glyph-cache state the next submit depends on.
  *
- * `painted` deliberately survives the `active = false` reset at `lens_begin`, so a
+ * `painted` deliberately survives the `active = false` reset at `optics_ui_begin`, so a
  * dismissed tooltip still knows which band it vacated. */
-static void lensi_tooltip_arm(optics_ui *ui, const char *text, optics_gfx_rect anchor) {
+static void optics_ui__tooltip_arm(optics_ui *ui, const char *text, optics_gfx_rect anchor) {
     const float pad = 4.0f;
     ui->tooltip.active = true;
     ui->tooltip.anchor = anchor;
     ui->tooltip.opacity = ui->opacity;
-    size_t len = strlen(text);
-    if (len >= sizeof ui->tooltip.text)
-        len = sizeof ui->tooltip.text - 1;
-    memcpy(ui->tooltip.text, text, len);
-    ui->tooltip.text[len] = '\0';
+    ui->tooltip.text = optics_ui__arena_strndup(ui, text, strlen(text));
 
-    const float size = lensi_font_px(ui, ui->theme.font_size * 0.85f);
-    const optics_ui_text_metrics tm = lensi_text_measure_label(ui, ui->tooltip.text, size, 0.0f);
+    const float size = optics_ui__font_px(ui, ui->theme.font_size * 0.85f);
+    const optics_ui_text_metrics tm =
+        optics_ui__text_measure_label(ui, ui->tooltip.text, size, 0.0f);
     ui->tooltip.painted = (optics_gfx_rect){anchor.x, anchor.y + anchor.h + pad,
                                             tm.width + 2.0f * pad, tm.height + 2.0f * pad};
 }
 
-void lensi_node_box(optics_ui *ui, optics_ui_node *n, const optics_ui_box *box) {
+void optics_ui__node_box(optics_ui *ui, optics_ui_node *n, const optics_ui_box *box) {
     n->min_w = box->min_width;
     n->max_w = box->max_width;
     n->min_h = box->min_height;
@@ -400,20 +397,21 @@ void lensi_node_box(optics_ui *ui, optics_ui_node *n, const optics_ui_box *box) 
         n->fixed_w = box->width;
     if (box->height > 0)
         n->fixed_h = box->height;
-    if (box->tooltip && n->has_prev && lensi_point_in(ui->input.cursor, n->prev_rect) &&
-        !lensi_point_clipped_by_scroll(n, ui->input.cursor) && !lensi_widget_occluded(ui, n)) {
-        lensi_tooltip_arm(ui, box->tooltip, n->prev_rect);
+    if (box->tooltip && n->has_prev && optics_ui__point_in(ui->input.cursor, n->prev_rect) &&
+        !optics_ui__point_clipped_by_scroll(n, ui->input.cursor) &&
+        !optics_ui__widget_occluded(ui, n)) {
+        optics_ui__tooltip_arm(ui, box->tooltip, n->prev_rect);
     }
 }
 
 void optics_ui_space_between(optics_ui *ui) {
-    optics_ui_node *n = ui ? lensi_open_container(ui) : nullptr;
+    optics_ui_node *n = ui ? optics_ui__open_container(ui) : nullptr;
     if (n)
         n->space_between = true;
 }
 
 void optics_ui_fit(optics_ui *ui) {
-    optics_ui_node *n = ui ? lensi_open_container(ui) : nullptr;
+    optics_ui_node *n = ui ? optics_ui__open_container(ui) : nullptr;
     if (n)
         n->fit = true;
 }
@@ -452,7 +450,7 @@ void optics_ui_grid_at(optics_ui *ui, int32_t col, int32_t row) {
     ui->have_next_grid_pos = true;
 }
 
-void lensi_apply_box(optics_ui *ui, optics_ui_box box) {
+void optics_ui__apply_box(optics_ui *ui, optics_ui_box box) {
     if (box.flex != 0.0f) {
         if (isfinite(box.flex) && box.flex > 0.0f) {
             ui->next_flex = box.flex;
@@ -485,40 +483,35 @@ void lensi_apply_box(optics_ui *ui, optics_ui_box box) {
         ui->next_error = true;
     /* Per-call style atoms (ADR-0061): staged unconditionally; a zero
      * fields mask is a no-op in the cascade merge, so the box's zeroed
-     * default needs no guard flag. Drained by lensi_style_effective. */
+     * default needs no guard flag. Drained by optics_ui__style_effective. */
     ui->next_style = box.style;
 }
 
-void lensi_set_placeholder(optics_ui *ui, const char *text) {
+void optics_ui__set_placeholder(optics_ui *ui, const char *text) {
     if (!ui || !text)
         return;
-    size_t len = strlen(text) + 1;
-    char *copy = optics_gfx_arena_alloc(&ui->arena, len);
-    if (copy) {
-        memcpy(copy, text, len);
-        ui->next_placeholder = copy;
-    }
+    ui->next_placeholder = optics_ui__arena_strndup(ui, text, strlen(text));
 }
 
 /* Raise a tooltip anchored to the most-recently built widget, shown only
  * while it is hovered. Called by the *_ex wrappers after the body runs. */
-void lensi_tooltip(optics_ui *ui, const char *text) {
+void optics_ui__tooltip(optics_ui *ui, const char *text) {
     if (!ui || !text || !text[0])
         return;
     optics_ui_response r = optics_ui_get_response(ui);
     if (!r.hovered)
         return;
-    lensi_tooltip_arm(ui, text, r.rect);
+    optics_ui__tooltip_arm(ui, text, r.rect);
 }
 
 void optics_ui_spacer(optics_ui *ui, float size) {
     /* a leaf with a fixed main-axis extent and no draw commands */
-    optics_ui_node *parent = lensi_open_container(ui);
-    optics_ui_id id = lensi_gen_container_id(ui, "spacer"); /* sibling-seq unique */
-    optics_ui_node *n = lensi_store_touch(ui, id);
+    optics_ui_node *parent = optics_ui__open_container(ui);
+    optics_ui_id id = optics_ui__gen_container_id(ui, "spacer"); /* sibling-seq unique */
+    optics_ui_node *n = optics_ui__store_touch(ui, id);
     if (!n)
         return;
-    lensi_link_child(ui, n);
+    optics_ui__link_child(ui, n);
     n->is_container = false;
     bool row = parent && parent->axis == OPTICS_UI_ROW;
     n->fixed_w = row ? size : 0;

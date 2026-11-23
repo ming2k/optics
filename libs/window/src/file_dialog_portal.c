@@ -1,7 +1,7 @@
 /* file_dialog_portal.c — synchronous wrapper around the asynchronous
  * xdg-desktop-portal FileChooser request.
  *
- * The public Iris API is deliberately blocking, but the portal protocol is
+ * The public window API is deliberately blocking, but the portal protocol is
  * not: OpenFile returns a Request object path and the selection arrives in a
  * later Response signal. Keep both operations on one sd-bus connection so the
  * request remains alive, and pump that connection until the user accepts or
@@ -27,7 +27,7 @@
 #include <time.h>
 
 /* mode: 0 = OpenFile (single), 1 = OpenFile (multiple), 2 = OpenFile (folder), 3 = SaveFile
- * Defined outside the IRIS_HAVE_PORTAL_WATCH gate: the stub pick_uri below
+ * Defined outside the OPTICS_WINDOW_HAVE_PORTAL_WATCH gate: the stub pick_uri below
  * uses the same type. */
 typedef enum : uint32_t {
     PICK_OPEN,
@@ -45,7 +45,7 @@ typedef enum : uint32_t {
 #ifdef OPTICS_WINDOW_BACKEND_WAYLAND
 #include <wayland-client.h>
 
-/* Implemented by app_wayland.c (hidden visibility within libiris). */
+/* Implemented by app_wayland.c (hidden visibility within liboptics_window). */
 struct wl_display *optics_window_wayland__display(void);
 const char *optics_window_wayland__foreign_handle(void);
 #endif
@@ -288,7 +288,7 @@ static int pick_uri(const optics_window_file_dialog_opts *opts, pick_mode mode,
     struct timespec now = {};
     (void)clock_gettime(CLOCK_MONOTONIC, &now);
     char token[64];
-    (void)snprintf(token, sizeof token, "iris_%ld_%ld", (long)now.tv_sec, now.tv_nsec);
+    (void)snprintf(token, sizeof token, "optics_%ld_%ld", (long)now.tv_sec, now.tv_nsec);
     rc = append_string_option(call, "handle_token", token);
     if (rc >= 0 && mode == PICK_FOLDER)
         rc = append_bool_option(call, "directory", 1);
@@ -435,7 +435,7 @@ static int pick_uri(const optics_window_file_dialog_opts *opts, pick_mode mode,
 
 /* Uniform wrapper policy (file_dialog.h contract): a single-file picker
  * never widens into a multi-select because the caller happened to leave
- * multiple_selection set — the option belongs to iris_pick_files. */
+ * multiple_selection set — the option belongs to optics_window_pick_files. */
 static optics_window_file_dialog_opts
 irisi_single_opts(const optics_window_file_dialog_opts *opts) {
     optics_window_file_dialog_opts o = opts ? *opts : (optics_window_file_dialog_opts){};
@@ -466,7 +466,7 @@ OPTICS_WINDOW_API int optics_window_pick_save_path(const optics_window_file_dial
 }
 
 /* Success path returns the count; every documented failure propagates its
- * code (IRIS_PICK_*). The old wrapper folded every non-zero rc into 0,
+ * code (OPTICS_WINDOW_PICK_*). The old wrapper folded every non-zero rc into 0,
  * which made buffer-overflow indistinguishable from a user cancel. */
 OPTICS_WINDOW_API int optics_window_pick_files(const optics_window_file_dialog_opts *opts) {
     if (!opts)

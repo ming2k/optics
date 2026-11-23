@@ -3,8 +3,8 @@ id: ADR-0123
 title: "Multi-layer compositing, hardware subsurfaces, and incremental damage presentation"
 status: accepted
 date: 2026-10-28
+scope: libs/gfx, libs/ui, libs/window, libs/material, architecture
 superseded_by: null
-scope: libs/flux, libs/lens, libs/iris, libs/prism, architecture
 negative_knowledge: true
 ---
 

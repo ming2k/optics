@@ -1,7 +1,7 @@
 /*
  * GPU-bound liquid-glass microbenchmark (ADR-0148 evidence).
  *
- * The `prism.liquid_glass_apply` Tracy zone measures CPU *recording* latency: it
+ * The `material.liquid_glass_apply` Tracy zone measures CPU *recording* latency: it
  * does not contain the dispatch's execution, and on a 64x64 target there is
  * almost no execution to contain. This harness renders many overlapping bodies
  * onto a large attachment and forces a device idle before stopping the clock, so
@@ -9,7 +9,7 @@
  *
  * Not part of the test suite: it reports, it does not assert. Run it directly:
  *
- *     ./build/tests/prism/integration/bench_liquid_glass_gpu [bodies]
+ *     ./build/tests/material/integration/bench_liquid_glass_gpu [bodies]
  *
  * Output is one labelled line so a number can be quoted as evidence without
  * needing the invocation beside it. An unlabelled float is not evidence.

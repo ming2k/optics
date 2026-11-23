@@ -3,7 +3,7 @@ id: ADR-0138
 title: "Unified Tracy profiler telemetry, dual-thread lifecycle markers, and zero-overhead C23 instrumentation facade"
 status: accepted
 date: 2026-11-02
-scope: [flux, lens, iris, build, tools]
+scope: [gfx, ui, window, build, tools]
 superseded_by: null
 negative_knowledge: true
 ---

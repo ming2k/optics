@@ -2,8 +2,8 @@
  * arena pressure, store growth. Deterministic boundary tests (no timing,
  * no randomised soak — that shape lives in test_store_spike.c). */
 
-#include "lens_test.h"
 #include "optics_test.h"
+#include "ui_test.h"
 #include <optics/ui.h>
 
 static const optics_ui_input IN0 = {.display_size = {800, 600}, .dt_seconds = 0.016f};
@@ -201,11 +201,11 @@ static void test_id_collision_reuses_node(void) {
     optics_ui_node *root = optics_ui_root(ui);
     optics_ui_node *first = optics_ui_node_first_child(root);
     optics_ui_node *second = optics_ui_node_next_sibling(first);
-    /* Same label in the same scope derives the same lens_id (ADR-0026),
+    /* Same label in the same scope derives the same optics_ui_id (ADR-0026),
      * so the second call re-touched the SAME node instead of creating a
      * sibling — the tree holds one child. NOTE: this pins the
      * reconciler's merge behaviour as contract; a caller wanting two
-     * buttons must disambiguate the id (lens_push_id). */
+     * buttons must disambiguate the id (optics_ui_push_id). */
     OT_EXPECT(second == nullptr);
     OT_EXPECT(first != nullptr);
 

@@ -1,9 +1,9 @@
 /*
- * vista/vista.h — glTF 2.0 3D scene hierarchy, TRS transforms, and asset runtime (ADR-0016,
+ * scene/scene.h — glTF 2.0 3D scene hierarchy, TRS transforms, and asset runtime (ADR-0016,
  * ADR-0106).
  *
- * Sibling library to libflux: it parses glTF, builds flux mesh resources, and
- * records 3D scene draws. It feeds the flux_scene_draw_mesh primitive.
+ * Sibling library to liboptics_gfx: it parses glTF, builds gfx mesh resources, and
+ * records 3D scene draws. It feeds the optics_gfx_scene_draw_mesh primitive.
  *
  * Supported subset:
  *   - Binary glTF (.glb) with embedded buffer (the BIN chunk).
@@ -19,9 +19,9 @@
 #ifndef OPTICS_SCENE_H
 #define OPTICS_SCENE_H
 
-#include <optics/gfx/core.h>  /* flux_device, flux_frame, flux_result        */
-#include <optics/gfx/math.h>  /* flux_mat4, flux_vec3                         */
-#include <optics/gfx/scene.h> /* flux_camera, flux_material, flux_scene_light*/
+#include <optics/gfx/core.h>  /* optics_gfx_device, optics_gfx_frame, optics_gfx_result        */
+#include <optics/gfx/math.h>  /* optics_gfx_mat4, optics_gfx_vec3                         */
+#include <optics/gfx/scene.h> /* optics_gfx_camera, optics_gfx_material, optics_gfx_scene_light*/
 
 #include <stddef.h>
 #include <stdint.h>
@@ -48,10 +48,10 @@ extern "C" {
 
 #define OPTICS_SCENE_VERSION_MAJOR 0
 #define OPTICS_SCENE_VERSION_MINOR 0
-#define OPTICS_SCENE_VERSION_PATCH 82
+#define OPTICS_SCENE_VERSION_PATCH 83
 
 /* Packed integer version, monotonic — identical layout to
- * FLUX_VERSION_NUMBER (major in bits 16..23, minor 8..15, patch 0..7). */
+ * OPTICS_GFX_VERSION_NUMBER (major in bits 16..23, minor 8..15, patch 0..7). */
 #define OPTICS_SCENE_VERSION_NUMBER                                                                \
     (((uint32_t)OPTICS_SCENE_VERSION_MAJOR << 16) | ((uint32_t)OPTICS_SCENE_VERSION_MINOR << 8) |  \
      (uint32_t)OPTICS_SCENE_VERSION_PATCH)
@@ -98,7 +98,7 @@ typedef struct optics_scene_data_build_opts {
     optics_scene **out;
 } optics_scene_data_build_opts;
 
-/* Upload a parsed scene onto `device`: one flux_mesh per primitive. */
+/* Upload a parsed scene onto `device`: one optics_gfx_mesh per primitive. */
 OPTICS_GFX_NODISCARD OPTICS_SCENE_API optics_gfx_result
 optics_scene_data_build(optics_gfx_device *device, const optics_scene_data_build_opts *opts);
 
@@ -198,4 +198,4 @@ OPTICS_SCENE_API void optics_scene_draw(optics_gfx_frame *frame,
 }
 #endif
 
-#endif /* VISTA_H */
+#endif /* OPTICS_SCENE_H */

@@ -2,10 +2,10 @@
  * One-shot GPU submission helpers.
  *
  * Used by:
- *   - flux_vk_upload_to_buffer / flux_vk_upload_to_image (initial mesh /
+ *   - optics_gfx_vk_upload_to_buffer / optics_gfx_vk_upload_to_image (initial mesh /
  *     image uploads and image sub-region updates)
- *   - flux_vk_transition_image_layout (no-data layout transitions)
- *   - flux_surface_read_pixels (offscreen readback in surface.c)
+ *   - optics_gfx_vk_transition_image_layout (no-data layout transitions)
+ *   - optics_gfx_surface_read_pixels (offscreen readback in surface.c)
  *
  * The submit-and-wait + transient command-buffer allocators are
  * exported through internal.h because readback (in surface.c) and the
@@ -129,7 +129,7 @@ bool optics_gfx_vk_prefer_transfer_queue(const optics_gfx_device *d) {
 /*  the reset on return can never clobber in-flight commands. The      */
 /*  idle list shares staging_lock (a leaf lock taken by the same       */
 /*  recycle paths) and is drained at device teardown by               */
-/*  flux_vk_staging_pool_destroy. Command buffers allocated from a     */
+/*  optics_gfx_vk_staging_pool_destroy. Command buffers allocated from a     */
 /*  cached pool are freed before the pool is parked: a reset pool      */
 /*  keeps its allocated buffers alive, and re-allocating on re-acquire */
 /*  then grows per-buffer driver state without bound on Intel ANV.     */
@@ -208,7 +208,7 @@ static VkCommandPool transient_pool_acquire(optics_gfx_device *d, uint32_t famil
 }
 
 /* Teardown only (device idle): destroy every parked pool. Called from
- * flux_vk_staging_pool_destroy, which device teardown already runs. */
+ * optics_gfx_vk_staging_pool_destroy, which device teardown already runs. */
 static void transient_pool_cache_destroy(optics_gfx_device *d) {
     optics_gfx_transient_pool *idle = d->transient_pool_idle;
     d->transient_pool_idle = nullptr;
@@ -328,7 +328,7 @@ optics_gfx_result optics_gfx_vk_staging_acquire(optics_gfx_device *d, VkDeviceSi
      * so the per-instance name is what makes one distinguishable from another
      * in a capture; the size is already in the ledger's byte column. */
     optics_gfx_vk_set_name_from_ledger(d, VK_OBJECT_TYPE_BUFFER, (uint64_t)sb->buffer,
-                                       OPTICS_GFX_SCOPE_DEVICE, "vk_staging", "flux/core");
+                                       OPTICS_GFX_SCOPE_DEVICE, "vk_staging", "gfx/core");
     *out = sb;
     return OPTICS_GFX_OK;
 }
@@ -549,7 +549,7 @@ VkResult optics_gfx_vk_submit_upload(optics_gfx_device *d, VkQueue queue, VkComm
 }
 
 /* ------------------------------------------------------------------ */
-/*  Upload batch (public flux_uploads_begin / flux_uploads_flush)     */
+/*  Upload batch (public optics_gfx_uploads_begin / optics_gfx_uploads_flush)     */
 /* ------------------------------------------------------------------ */
 
 void optics_gfx_vk_upload_batch_attach_staging(optics_gfx_device *d, optics_gfx_staging_buf *sb) {
@@ -643,7 +643,7 @@ optics_gfx_result optics_gfx_uploads_flush(optics_gfx_device *d) {
 /* ------------------------------------------------------------------ */
 
 /* Make a vkCmdCopyBuffer's transfer write visible to every later read
- * consumer of a flux buffer (vertex/index fetches, uniform/storage reads,
+ * consumer of a gfx buffer (vertex/index fetches, uniform/storage reads,
  * buffer-reference loads). Same-queue submission order alone orders
  * execution but carries no memory visibility, so the copy needs an explicit
  * transfer-write -> shader-read dependency — the buffer counterpart of
@@ -1268,12 +1268,12 @@ fail:
 }
 
 /* ------------------------------------------------------------------ */
-/*  Public one-shot submission (flux_oneshot_*, vulkan.h)             */
+/*  Public one-shot submission (optics_gfx_oneshot_*, vulkan.h)             */
 /* ------------------------------------------------------------------ */
 /* Thin, safe publication of the sequence this file already implements:
  * transient pool -> ONE_TIME_SUBMIT begin -> graphics-queue submit with
  * a finite fence wait -> recycle. Headless effect users previously had
- * no flux path for this at all (effect.h demanded a caller-supplied
+ * no gfx path for this at all (effect.h demanded a caller-supplied
  * one-shot command buffer and a prior vkQueueWaitIdle while owning the
  * only queues). */
 
@@ -1288,7 +1288,7 @@ OPTICS_GFX_API optics_gfx_result optics_gfx_oneshot_begin(optics_gfx_device *d,
     VkResult vr = optics_gfx_vk_new_transient_cmd(d, d->graphics_family, &pool, &cmd);
     if (vr != VK_SUCCESS) {
         optics_gfx_result r = submit_result(vr);
-        OPTICS_GFX_FAIL_VK(r, "flux_oneshot_begin: transient command buffer failed", vr);
+        OPTICS_GFX_FAIL_VK(r, "optics_gfx_oneshot_begin: transient command buffer failed", vr);
         return r;
     }
 
@@ -1357,7 +1357,7 @@ static optics_gfx_result fluxi_oneshot_take(optics_gfx_device *d, VkCommandBuffe
         }
     }
     optics_gfx_platform_mutex_unlock(&d->staging_lock);
-    return OPTICS_GFX_ERROR_INVALID_ARGUMENT; /* not from flux_oneshot_begin */
+    return OPTICS_GFX_ERROR_INVALID_ARGUMENT; /* not from optics_gfx_oneshot_begin */
 }
 
 OPTICS_GFX_API optics_gfx_result optics_gfx_oneshot_submit_and_end(optics_gfx_device *d,
@@ -1365,7 +1365,8 @@ OPTICS_GFX_API optics_gfx_result optics_gfx_oneshot_submit_and_end(optics_gfx_de
     VkCommandPool pool = VK_NULL_HANDLE;
     optics_gfx_result take = fluxi_oneshot_take(d, cmd, &pool);
     if (take != OPTICS_GFX_OK) {
-        OPTICS_GFX_FAIL(take, "flux_oneshot_submit_and_end: cmd not from flux_oneshot_begin");
+        OPTICS_GFX_FAIL(take,
+                        "optics_gfx_oneshot_submit_and_end: cmd not from optics_gfx_oneshot_begin");
         return take;
     }
 
@@ -1373,7 +1374,7 @@ OPTICS_GFX_API optics_gfx_result optics_gfx_oneshot_submit_and_end(optics_gfx_de
     if (vr != VK_SUCCESS) {
         transient_pool_release(d, pool, d->graphics_family, cmd, VK_NULL_HANDLE);
         optics_gfx_result r = submit_result(vr);
-        OPTICS_GFX_FAIL_VK(r, "flux_oneshot_submit_and_end: vkEndCommandBuffer failed", vr);
+        OPTICS_GFX_FAIL_VK(r, "optics_gfx_oneshot_submit_and_end: vkEndCommandBuffer failed", vr);
         return r;
     }
 
@@ -1384,7 +1385,7 @@ OPTICS_GFX_API optics_gfx_result optics_gfx_oneshot_submit_and_end(optics_gfx_de
     transient_pool_release(d, pool, d->graphics_family, cmd, VK_NULL_HANDLE);
     if (vr != VK_SUCCESS) {
         optics_gfx_result r = submit_result(vr);
-        OPTICS_GFX_FAIL_VK(r, "flux_oneshot_submit_and_end: submit/wait failed", vr);
+        OPTICS_GFX_FAIL_VK(r, "optics_gfx_oneshot_submit_and_end: submit/wait failed", vr);
         return r;
     }
     return OPTICS_GFX_OK;

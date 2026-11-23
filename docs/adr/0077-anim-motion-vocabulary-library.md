@@ -3,6 +3,9 @@ id: ADR-0077
 title: "The `anim` motion vocabulary library — provable math, host-owned clocks"
 status: accepted
 date: 2026-08-23
+scope: new sibling library libs/anim (+ anim-rs binding)
+superseded_by: null
+negative_knowledge: true
 ---
 
 # ADR-0077: The `anim` motion vocabulary library — provable math, host-owned clocks

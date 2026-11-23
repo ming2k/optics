@@ -18,18 +18,27 @@ It supersedes the tessellation authority (ADR-0005, ADR-0011, ADR-0014,
 ADR-0113, ADR-0114) and the MSAA/coverage-bake anti-aliasing authority
 (ADR-0071, ADR-0112).
 
-**Those superseded mechanisms are still the live rendering code.** The geometry
-kernel (ADR-0115) has landed and is tested, but its consumers are not migrated;
-ADR-0116 and ADR-0117 are design-only. Read the superseded records as
-"replaced by decision, still implemented pending migration", and see
-[the implementation matrix](../dev/architecture-implementation-status.md) for
-what is actually in the tree.
+Those superseded mechanisms are retired: no fill, stroke or draw reaches
+ear clipping, stencil-then-cover or MSAA any more (ADR-0173 removed the last
+copy). See [the implementation matrix](../dev/architecture-implementation-status.md)
+for what is in the tree.
 
 [ADR-0118](0118-coverage-strategy-placement-distance-fields-and-curve-kernel.md)
 places the *other* half of the geometry model: closed-form distance fields for
 the analytic primitive classes are a first-class peer of the curve kernel, not a
 casualty of it, and a *baked* field is a deposited explicit opt-in rather than a
 silent fallback. Its primitives have landed.
+
+## Former module codenames
+
+ADRs before ADR-0170 use the original codenames. They are history and keep
+them; the current names are:
+
+| Codename | Module | Codename | Module | Codename | Module |
+|---|---|---|---|---|---|
+| `flux` | `gfx` | `glyph` | `text` | `reticle` | `svg` |
+| `vista` | `scene` | `prism` | `material` | `transit` | `motion` |
+| `iris` | `window` | `lens` | `ui` | `aperture` | `app` |
 
 | #    | Title                                                                          | Status   |
 |------|--------------------------------------------------------------------------------|----------|
@@ -43,7 +52,7 @@ silent fallback. Its primitives have landed.
 | 0008 | [Image-effect pipeline as the home for blur and friends](0008-image-effect-pipeline.md) | Accepted |
 | 0009 | [Canvas sample count joins the pipeline-cache key](0009-canvas-msaa-pipeline-key.md) | Superseded by ADR-0071 |
 | 0010 | [Glyph-blit primitive — text rendering at the canvas seam](0010-glyph-blit-primitive.md) | Accepted |
-| 0011 | [Hole-bridging ear-clipping tessellator](0011-hole-bridging-tessellator.md) | Accepted |
+| 0011 | [Hole-bridging ear-clipping tessellator](0011-hole-bridging-tessellator.md) | Superseded by ADR-0115 |
 | 0012 | [Phong lighting parameters ride a transient buffer-device-address block](0012-phong-light-transient-block.md) | Accepted |
 | 0013 | [Offscreen rendering is a surface mode, not a new object](0013-offscreen-surface.md) | Accepted |
 | 0014 | [Stencil-then-cover fallback for self-intersecting fills](0014-stencil-then-cover.md) | Superseded by [ADR-0115](0115-analytic-curve-kernel-single-geometry-authority.md) |
@@ -85,7 +94,7 @@ silent fallback. Its primitives have landed.
 | 0050 | [Single-body liquid-glass focus field](0050-single-body-liquid-glass-focus-field.md) | Accepted |
 | 0051 | [Independent rounded image clip for composed previews](0051-independent-rounded-image-clip.md) | Accepted |
 | 0052 | [flux platform abstraction layer + Linux-only dma-buf gate](0052-flux-platform-layer-and-dmabuf-gate.md) | Accepted |
-| 0053 | [Shader embedding — C23 #embed with generated-header fallback](0053-shader-embed-fallback.md) | Accepted |
+| 0053 | [Shader embedding — C23 #embed with generated-header fallback](0053-shader-embed-fallback.md) | Superseded by ADR-0173 |
 | 0054 | [Font discovery as a platform layer (fontconfig / DirectWrite / CoreText)](0054-font-discovery-platform-layer.md) | Accepted |
 | 0055 | [Callback-driven watch APIs + the backend wakeup seam](0055-watch-apis-and-wakeup-seam.md) | Accepted |
 | 0056 | [Win32 + Cocoa backends and the MoltenVK baseline](0056-win32-cocoa-backends-and-moltenvk.md) | Accepted (Decision 2 superseded by [0122](0122-compositor-driven-presentation-pacing.md)) |
@@ -120,7 +129,7 @@ silent fallback. Its primitives have landed.
 | 0085 | [Lens borrowed-string registry — always-on debug borrow checker](0085-lens-borrowed-string-registry.md) | Accepted |
 | 0128 | [Lens box model orthogonality, legacy layout cleanup, and C23 baseline](0128-lens-box-model-orthogonality-legacy-layout-cleanup-and-c23-baseline.md) | Accepted (renumbered from the duplicate 0085) |
 | 0086 | [Cross-platform drag-and-drop subsystem](0086-cross-platform-drag-and-drop-subsystem.md) | Accepted |
-| 0087 | [Flux architecture consistency, lifecycle contracts, and orthogonal refactoring](0087-flux-architecture-consistency-lifecycle-and-orthogonal-refactoring.md) | Accepted (amended in part by [0089](0089-rendering-program-and-execution-plan.md)) |
+| 0087 | [Flux architecture consistency, lifecycle contracts, and orthogonal refactoring](0087-flux-architecture-consistency-lifecycle-and-orthogonal-refactoring.md) | Superseded by ADR-0095 (amended in part by [0089](0089-rendering-program-and-execution-plan.md) first) |
 | 0088 | [Optics clean-break architecture — immutable display lists, orthogonal brushes, and transient graphs](0088-optics-clean-break-architecture-display-lists-orthogonal-brushes-and-transient-graphs.md) | Superseded by [ADR-0089](0089-rendering-program-and-execution-plan.md) through [ADR-0094](0094-lens-scene-snapshots-and-invalidation.md) |
 | 0089 | [Rendering programs and dependency-driven execution](0089-rendering-program-and-execution-plan.md) | Accepted |
 | 0090 | [DisplayList snapshots and resource ownership](0090-display-list-resource-ownership.md) | Accepted |
@@ -206,3 +215,4 @@ silent fallback. Its primitives have landed.
 | 0170 | [Semantic Module Naming and Unified `optics` Namespace](0170-semantic-module-naming-and-optics-namespace.md) | Accepted |
 | 0171 | [Curated Examples Taxonomy and Showcase Design System](0171-curated-examples-taxonomy-and-showcase-design-system.md) | Accepted |
 | 0172 | [Zero-Stutter Public C API and Clean `window` vs. `app` Runtime Boundary](0172-zero-stutter-api-and-window-app-boundary.md) | Accepted |
+| 0173 | [Retire the algorithm vault and compatibility scaffolding; strokes as coverage contours](0173-retire-vault-and-compat-scaffolding-strokes-as-contours.md) | Accepted |

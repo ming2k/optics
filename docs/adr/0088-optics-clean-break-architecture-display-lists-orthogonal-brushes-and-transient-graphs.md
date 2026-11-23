@@ -3,7 +3,9 @@ id: ADR-0088
 title: "Optics Clean-Break Architecture — Immutable Display Lists, Pure Algebraic Geometry-Brush Model, and Transient FrameGraph"
 status: superseded
 date: 2026-08-27
-superseded_by: "ADR-0089 through ADR-0094"
+scope: gfx (core, canvas, compute, effect), gfx-text, gfx-scene-graph, material, ui, window, and Rust bindings (gfx-rs, ui-rs, window-rs)
+superseded_by: ADR-0089
+negative_knowledge: false
 ---
 
 # ADR-0088: Optics Clean-Break Architecture — Immutable Display Lists, Pure Algebraic Geometry-Brush Model, and Transient FrameGraph

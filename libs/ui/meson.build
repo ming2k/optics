@@ -1,4 +1,4 @@
-# liblens depends on libflux (rendering) and libglyph (shaping) — both
+# liboptics_ui depends on liboptics_gfx (rendering) and liboptics_text (shaping) — both
 # are siblings in this monorepo (ADR-0023). The gfx_dep / text_dep
 # variables are declared by libs/gfx/meson.build when it is subdir()'d
 # earlier from the root meson.build.
@@ -63,11 +63,11 @@ ui_sources = files(
 ui_lib = library('optics_ui',
   ui_sources,
   include_directories   : ui_inc,
-  # LENS_DEBUG_BORROWS (ADR-0084): the borrowed-string registry is always
+  # OPTICS_UI_DEBUG_BORROWS (ADR-0084): the borrowed-string registry is always
   # on in the shipped library — its cost is one bounded array walk per
   # label (nanoseconds) and its abort-on-violation catches the single
-  # most common lens misuse (stack temporaries) in debug AND release
-  # alike. Builds that must not abort can define LENS_NO_BORROW_CHECK.
+  # most common ui misuse (stack temporaries) in debug AND release
+  # alike. Builds that must not abort can define OPTICS_UI_NO_BORROW_CHECK.
   c_args                : ['-DOPTICS_UI_BUILDING=1', '-DOPTICS_UI_DEBUG_BORROWS=1'],
   dependencies          : [gfx_dep, text_dep, svg_dep, m_dep],
   gnu_symbol_visibility : 'hidden',
@@ -95,7 +95,7 @@ pkg.generate(
   libraries   : ui_lib,
   name        : 'optics-ui',
   filebase    : 'optics-ui',
-  description : 'Immediate-mode UI over a retained core, built on flux',
+  description : 'Immediate-mode UI over a retained core, built on gfx',
   version     : meson.project_version(),
   requires    : ['optics-gfx >= ' + meson.project_version(), 'optics-text >= ' + meson.project_version(), 'optics-svg >= ' + meson.project_version()],
 )

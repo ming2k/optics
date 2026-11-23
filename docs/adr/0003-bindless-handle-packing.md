@@ -3,6 +3,9 @@ id: ADR-0003
 title: "Bindless handles pack binding type into the high bits"
 status: accepted
 date: 2026-01-01
+scope: unrecorded
+superseded_by: null
+negative_knowledge: true
 ---
 
 # ADR-0003: Bindless handles pack binding type into the high bits

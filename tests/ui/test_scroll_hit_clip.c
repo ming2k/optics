@@ -2,8 +2,8 @@
  * must not be hoverable/clickable: the render clips them, hit-testing
  * must clip identically. */
 
-#include "lens_test.h"
 #include "optics_test.h"
+#include "ui_test.h"
 #include <optics/gfx/canvas_cpu.h>
 #include <optics/ui.h>
 #include <string.h>

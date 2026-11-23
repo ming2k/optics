@@ -221,7 +221,7 @@ int main(void) {
         OT_EXPECT_NEAR((double)px_at(108, 20)[1], (double)px_at(64, 20)[1], 2.0);
     }
 
-    /* Fractional FLUX_GEOM_RECT routes through analytic coverage as well. */
+    /* Fractional OPTICS_GFX_GEOM_RECT routes through analytic coverage as well. */
     (void)measure(s, gpu, &arena, draw_rect_fractional_geom);
     {
         const double expect = 255.0 * (1.055 * pow(0.75, 1.0 / 2.4) - 0.055);

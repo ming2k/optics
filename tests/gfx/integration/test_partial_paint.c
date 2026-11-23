@@ -186,7 +186,7 @@ int main(void) {
     OT_EXPECT(is_green(px_at(px, W / 2, H / 2)));
 
     /* The damage scope is a description borrowed only for the
-     * `flux_canvas_begin` call. A caller (the Rust binding's
+     * `optics_gfx_canvas_begin` call. A caller (the Rust binding's
      * `CanvasPassOptions`, in production) routinely owns the rectangle list in
      * a temporary container that is gone before the pass ends. Reusing the
      * caller's array immediately after begin therefore must not change the

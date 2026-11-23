@@ -3,6 +3,9 @@ id: ADR-0099
 title: "Desktop Platform Integration — Extended Function Keys, Focus Activation, and MIME Clipboard Interop"
 status: accepted
 date: 2026-09-17
+scope: ui (L2 UI engine), window (L3 platform toolkit)
+superseded_by: null
+negative_knowledge: true
 ---
 
 # ADR-0099: Desktop Platform Integration — Extended Function Keys, Focus Activation, and MIME Clipboard Interop

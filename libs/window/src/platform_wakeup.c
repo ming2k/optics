@@ -2,10 +2,10 @@
  *
  * See platform_wakeup.h for the contract. This file is deliberately
  * tiny: a lock-protected FIFO of (fn, user) pairs plus the registered
- * kick. The lock is a portable shim in the flux_platform_mutex style
- * (libs/flux/src/core/platform.h): SRWLOCK on Windows, pthread_mutex
+ * kick. The lock is a portable shim in the optics_gfx_platform_mutex style
+ * (libs/gfx/src/core/platform.h): SRWLOCK on Windows, pthread_mutex
  * elsewhere — only the three-function contract in the header matters
- * to the rest of iris.
+ * to the rest of window.
  */
 
 #include "platform_wakeup.h"
@@ -14,7 +14,7 @@
 #include <stdlib.h>
 
 #if defined(_WIN32)
-/* Keep the windows.h surface minimal, mirroring flux's platform.h. */
+/* Keep the windows.h surface minimal, mirroring gfx's platform.h. */
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif

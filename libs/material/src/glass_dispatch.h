@@ -4,14 +4,14 @@
 /*
  * Shared glass-dispatch recording between the standalone liquid-glass
  * material (liquid_glass.c) and the layered backdrop compositor
- * (backdrop_layer.c). Both materials must evaluate a prism_liquid_glass_group
+ * (backdrop_layer.c). Both materials must evaluate a optics_material_liquid_glass_group
  * with the identical reference recipe — the layer filter exists precisely so
  * a glass body in a layer stack samples the frosted sheet beneath it rather
  * than the sharp capture, and any divergence between the two dispatch
  * recorders would make a layered body render differently from a standalone
  * one.
  *
- * This header is prism-internal (not installed) and holds no state: every
+ * This header is material-internal (not installed) and holds no state: every
  * entry is a pure function of its arguments.
  */
 
@@ -20,7 +20,7 @@
 #include <optics/gfx/compute.h>
 #include <optics/gfx/vulkan.h>
 
-#include "prism_material_frame.h"
+#include "material_frame.h"
 #include "regions.h"
 
 #include <math.h>
@@ -30,7 +30,7 @@
 
 /* Push-constant block — must match liquid_glass.comp exactly.
  *
- * Per-BODY state lives in the body table (prism_material_frame.h), not here: the
+ * Per-BODY state lives in the body table (material_frame.h), not here: the
  * block is a hard 160 bytes and this material previously consumed all of them
  * with one body's parameters, which is why cost used to scale linearly with
  * body count. What remains is genuinely per-DISPATCH: the sources, the output,
@@ -56,8 +56,8 @@ typedef struct liquid_glass_push {
     float slab_origin_y;
     float capture_width;
     float capture_height;
-    /* Address of the body table (rows of prism_glass_body_row) and of this
-     * region's body-id list. Split lo/hi: flux devices do not guarantee
+    /* Address of the body table (rows of optics_material_glass_body_row) and of this
+     * region's body-id list. Split lo/hi: gfx devices do not guarantee
      * shaderInt64. */
     uint32_t bodies_address_lo;
     uint32_t bodies_address_hi;
@@ -65,7 +65,7 @@ typedef struct liquid_glass_push {
     uint32_t ids_address_hi;
     uint32_t id_count;
     uint32_t reserved0;
-    /* Dispatch-wide optical policy (prism_glass_policy). */
+    /* Dispatch-wide optical policy (optics_material_glass_policy). */
     float refraction;
     float chromatic_aberration;
     float saturation;
@@ -85,7 +85,7 @@ typedef struct liquid_glass_push {
 } liquid_glass_push;
 
 static_assert(sizeof(liquid_glass_push) == 144,
-              "liquid_glass_push exceeds the 160-byte push budget flux guarantees");
+              "liquid_glass_push exceeds the 160-byte push budget gfx guarantees");
 static_assert(offsetof(liquid_glass_push, slab_origin_x) == 40,
               "liquid_glass_push capture offset no longer matches its shader block");
 static_assert(offsetof(liquid_glass_push, refraction) == 80,
@@ -123,27 +123,28 @@ typedef struct optics_material_glass_body_row {
     uint32_t shape_count;
     uint32_t has_focus; /* 1 when focus_strength > 0 */
     uint32_t reserved;
-    /* Pad to PRISM_BODY_STRIDE. The shader's GlassBody pads identically: the row
+    /* Pad to OPTICS_MATERIAL_BODY_STRIDE. The shader's GlassBody pads identically: the row
      * stride is one number shared by both sides, and a mismatch reads the wrong
      * row. Asserted below on both the payload and the total. */
     uint32_t pad0[2];  /* payload 136 -> 144, matching 16-byte alignment of GlassBody (ADR-0156) */
-    uint32_t pad1[28]; /* 112 more -> 256 == PRISM_BODY_STRIDE */
+    uint32_t pad1[28]; /* 112 more -> 256 == OPTICS_MATERIAL_BODY_STRIDE */
 } optics_material_glass_body_row;
 
 static_assert(offsetof(optics_material_glass_body_row, pad0) == 136,
-              "prism_glass_body_row payload changed; re-pad the shader's GlassBody");
+              "optics_material_glass_body_row payload changed; re-pad the shader's GlassBody");
 static_assert(offsetof(optics_material_glass_body_row, pad1) == 144,
               "the shader 16-aligns GlassBody's payload to 144; keep the C row in step");
 static_assert(sizeof(optics_material_glass_body_row) == OPTICS_MATERIAL_BODY_STRIDE,
-              "prism_glass_body_row must be exactly PRISM_BODY_STRIDE bytes: the shader's "
+              "optics_material_glass_body_row must be exactly OPTICS_MATERIAL_BODY_STRIDE bytes: "
+              "the shader's "
               "GlassBody array stride is its sizeof, so the two must agree");
 
 /* Bounds of a body's footprint in capture pixels, in output space, clipped to
  * the output slab. */
-static inline liquid_glass_region
-optics_material_glass_output_region(liquid_glass_region capture_region, uint32_t slab_x,
+static inline optics_material__rect
+optics_material_glass_output_region(optics_material__rect capture_region, uint32_t slab_x,
                                     uint32_t slab_y, uint32_t slab_w, uint32_t slab_h) {
-    liquid_glass_region out = capture_region;
+    optics_material__rect out = capture_region;
     /* Capture region is already clipped to the capture, and the slab covers every
      * footprint, so this only guards degenerate slabs. */
     if (out.x < slab_x)
@@ -366,4 +367,4 @@ static inline void optics_material_glass_record_batch(
                                                                     .group_z = 1u});
 }
 
-#endif /* PRISM_GLASS_DISPATCH_H */
+#endif /* OPTICS_MATERIAL_GLASS_DISPATCH_H */

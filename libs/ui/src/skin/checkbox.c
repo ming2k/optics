@@ -4,7 +4,8 @@
 #include "../internal.h"
 #include <math.h>
 
-void lensi_skin_checkbox(optics_ui *ui, optics_ui_node *n, const optics_ui_widget_record *rec) {
+void optics_ui__skin_checkbox(optics_ui *ui, optics_ui_node *n,
+                              const optics_ui_widget_record *rec) {
     const optics_ui_style_resolved *rs = &rec->style;
     bool disabled = (rec->state & OPTICS_UI_STATE_DISABLED) != 0;
     bool on =
@@ -24,56 +25,57 @@ void lensi_skin_checkbox(optics_ui *ui, optics_ui_node *n, const optics_ui_widge
 
         /* Row hover wash */
         if (rec->hover_t > 0.001f && !disabled) {
-            optics_gfx_color wash = lensi_lerp_color(0, rs->bg_hover, rec->hover_t * 0.35f);
-            lensi_drawlist_push(ui, n,
-                                (optics_ui_draw_cmd){
-                                    .kind = OPTICS_UI_DRAW_RECT,
-                                    .rel = {0, 0, 0, 0},
-                                    .color = wash,
-                                    .radius = rs->corner_radius > 0 ? rs->corner_radius : 4.0f,
-                                });
+            optics_gfx_color wash = optics_ui__lerp_color(0, rs->bg_hover, rec->hover_t * 0.35f);
+            optics_ui__drawlist_push(ui, n,
+                                     (optics_ui_draw_cmd){
+                                         .kind = OPTICS_UI_DRAW_RECT,
+                                         .rel = {0, 0, 0, 0},
+                                         .color = wash,
+                                         .radius = rs->corner_radius > 0 ? rs->corner_radius : 4.0f,
+                                     });
         }
 
         /* Label */
         if (rec->content.label && rec->content.label[0]) {
             optics_gfx_color fg = disabled ? rs->disabled : rs->fg;
-            lensi_drawlist_push(ui, n,
-                                (optics_ui_draw_cmd){
-                                    .kind = OPTICS_UI_DRAW_TEXT,
-                                    .rel = {rs->padding, text_y, 0, 0},
-                                    .color = fg,
-                                    .text = rec->content.label,
-                                    .text_size = rs->font_size,
-                                });
+            optics_ui__drawlist_push(ui, n,
+                                     (optics_ui_draw_cmd){
+                                         .kind = OPTICS_UI_DRAW_TEXT,
+                                         .rel = {rs->padding, text_y, 0, 0},
+                                         .color = fg,
+                                         .text = rec->content.label,
+                                         .text_size = rs->font_size,
+                                     });
         }
 
         /* Track */
         optics_gfx_color track_off = rs->bg;
         optics_gfx_color track_on = rs->accent;
         optics_gfx_color track_col =
-            disabled ? rs->disabled
-                     : (on ? track_on : lensi_lerp_color(track_off, rs->bg_hover, rec->hover_t));
+            disabled
+                ? rs->disabled
+                : (on ? track_on : optics_ui__lerp_color(track_off, rs->bg_hover, rec->hover_t));
 
-        lensi_drawlist_push(ui, n,
-                            (optics_ui_draw_cmd){
-                                .kind = OPTICS_UI_DRAW_RECT,
-                                .rel = {track_x, track_y, track_w, track_h},
-                                .color = track_col,
-                                .radius = track_h * 0.5f,
-                            });
+        optics_ui__drawlist_push(ui, n,
+                                 (optics_ui_draw_cmd){
+                                     .kind = OPTICS_UI_DRAW_RECT,
+                                     .rel = {track_x, track_y, track_w, track_h},
+                                     .color = track_col,
+                                     .radius = track_h * 0.5f,
+                                 });
 
         /* Knob */
         float knob_x = track_x + 3.0f + (on ? travel : 0.0f);
         float knob_y = track_y + 3.0f;
         optics_gfx_color knob_col = disabled ? rs->disabled : rs->fg;
 
-        lensi_drawlist_push(ui, n,
-                            (optics_ui_draw_cmd){
-                                .kind = OPTICS_UI_DRAW_RECT,
-                                .rel = {knob_x, knob_y, knob_d, knob_d},
-                                .color = knob_col,
-                                .radius = knob_d * 0.5f,
-                            });
+        optics_ui__drawlist_push(ui, n,
+                                 (optics_ui_draw_cmd){
+                                     .kind = OPTICS_UI_DRAW_RECT,
+                                     .rel = {knob_x, knob_y, knob_d, knob_d},
+                                     .color = knob_col,
+                                     .radius = knob_d * 0.5f,
+                                 });
         return;
     }
 
@@ -86,22 +88,22 @@ void lensi_skin_checkbox(optics_ui *ui, optics_ui_node *n, const optics_ui_widge
         optics_gfx_color ring = disabled ? rs->border : (on ? rs->accent : rs->fg);
         optics_gfx_color radio_bg =
             (rs->border_width > 0.0f) ? rs->bg : ui->theme.color_surface_sunken;
-        lensi_drawlist_push(ui, n,
-                            (optics_ui_draw_cmd){
-                                .kind = OPTICS_UI_DRAW_RECT,
-                                .rel = {rs->padding, circle_y, circle, circle},
-                                .color = radio_bg,
-                                .radius = circle * 0.5f,
-                            });
+        optics_ui__drawlist_push(ui, n,
+                                 (optics_ui_draw_cmd){
+                                     .kind = OPTICS_UI_DRAW_RECT,
+                                     .rel = {rs->padding, circle_y, circle, circle},
+                                     .color = radio_bg,
+                                     .radius = circle * 0.5f,
+                                 });
         if (rs->border_width > 0.0f && (ring & 0xFF000000u) != 0) {
-            lensi_drawlist_push(ui, n,
-                                (optics_ui_draw_cmd){
-                                    .kind = OPTICS_UI_DRAW_BORDER,
-                                    .rel = {rs->padding, circle_y, circle, circle},
-                                    .color = ring,
-                                    .width = rs->border_width,
-                                    .radius = circle * 0.5f,
-                                });
+            optics_ui__drawlist_push(ui, n,
+                                     (optics_ui_draw_cmd){
+                                         .kind = OPTICS_UI_DRAW_BORDER,
+                                         .rel = {rs->padding, circle_y, circle, circle},
+                                         .color = ring,
+                                         .width = rs->border_width,
+                                         .radius = circle * 0.5f,
+                                     });
         }
 
         if (on) {
@@ -109,25 +111,25 @@ void lensi_skin_checkbox(optics_ui *ui, optics_ui_node *n, const optics_ui_widge
             float dot_x = rs->padding + roundf((circle - dot) * 0.5f);
             float dot_y = circle_y + roundf((circle - dot) * 0.5f);
             optics_gfx_color dot_col = disabled ? rs->disabled : rs->accent;
-            lensi_drawlist_push(ui, n,
-                                (optics_ui_draw_cmd){
-                                    .kind = OPTICS_UI_DRAW_RECT,
-                                    .rel = {dot_x, dot_y, dot, dot},
-                                    .color = dot_col,
-                                    .radius = dot * 0.5f,
-                                });
+            optics_ui__drawlist_push(ui, n,
+                                     (optics_ui_draw_cmd){
+                                         .kind = OPTICS_UI_DRAW_RECT,
+                                         .rel = {dot_x, dot_y, dot, dot},
+                                         .color = dot_col,
+                                         .radius = dot * 0.5f,
+                                     });
         }
 
         if (rec->content.label && rec->content.label[0]) {
             optics_gfx_color fg = disabled ? rs->disabled : rs->fg;
-            lensi_drawlist_push(ui, n,
-                                (optics_ui_draw_cmd){
-                                    .kind = OPTICS_UI_DRAW_TEXT,
-                                    .rel = {label_x, text_y, 0, 0},
-                                    .color = fg,
-                                    .text = rec->content.label,
-                                    .text_size = rs->font_size,
-                                });
+            optics_ui__drawlist_push(ui, n,
+                                     (optics_ui_draw_cmd){
+                                         .kind = OPTICS_UI_DRAW_TEXT,
+                                         .rel = {label_x, text_y, 0, 0},
+                                         .color = fg,
+                                         .text = rec->content.label,
+                                         .text_size = rs->font_size,
+                                     });
         }
         return;
     }
@@ -142,24 +144,24 @@ void lensi_skin_checkbox(optics_ui *ui, optics_ui_node *n, const optics_ui_widge
     optics_gfx_color off_bg = (rs->border_width > 0.0f) ? rs->bg : ui->theme.color_surface_sunken;
     optics_gfx_color box_bg = on ? (disabled ? rs->disabled : rs->accent) : off_bg;
 
-    lensi_drawlist_push(ui, n,
-                        (optics_ui_draw_cmd){
-                            .kind = OPTICS_UI_DRAW_RECT,
-                            .rel = {rs->padding, box_y, box, box},
-                            .color = box_bg,
-                            .radius = radius,
-                        });
+    optics_ui__drawlist_push(ui, n,
+                             (optics_ui_draw_cmd){
+                                 .kind = OPTICS_UI_DRAW_RECT,
+                                 .rel = {rs->padding, box_y, box, box},
+                                 .color = box_bg,
+                                 .radius = radius,
+                             });
 
     optics_gfx_color border_col = disabled ? rs->border : rs->fg;
     if (rs->border_width > 0.0f && (border_col & 0xFF000000u) != 0 && !on) {
-        lensi_drawlist_push(ui, n,
-                            (optics_ui_draw_cmd){
-                                .kind = OPTICS_UI_DRAW_BORDER,
-                                .rel = {rs->padding, box_y, box, box},
-                                .color = border_col,
-                                .width = rs->border_width,
-                                .radius = radius,
-                            });
+        optics_ui__drawlist_push(ui, n,
+                                 (optics_ui_draw_cmd){
+                                     .kind = OPTICS_UI_DRAW_BORDER,
+                                     .rel = {rs->padding, box_y, box, box},
+                                     .color = border_col,
+                                     .width = rs->border_width,
+                                     .radius = radius,
+                                 });
     }
 
     if (on) {
@@ -168,24 +170,24 @@ void lensi_skin_checkbox(optics_ui *ui, optics_ui_node *n, const optics_ui_widge
         float mark_y = box_y + roundf((box - mark) * 0.5f);
         optics_gfx_color mark_col =
             disabled ? rs->disabled : optics_gfx_color_rgba_premul(255, 255, 255, 255);
-        lensi_drawlist_push(ui, n,
-                            (optics_ui_draw_cmd){
-                                .kind = OPTICS_UI_DRAW_RECT,
-                                .rel = {mark_x, mark_y, mark, mark},
-                                .color = mark_col,
-                                .radius = 1.0f,
-                            });
+        optics_ui__drawlist_push(ui, n,
+                                 (optics_ui_draw_cmd){
+                                     .kind = OPTICS_UI_DRAW_RECT,
+                                     .rel = {mark_x, mark_y, mark, mark},
+                                     .color = mark_col,
+                                     .radius = 1.0f,
+                                 });
     }
 
     if (rec->content.label && rec->content.label[0]) {
         optics_gfx_color fg = disabled ? rs->disabled : rs->fg;
-        lensi_drawlist_push(ui, n,
-                            (optics_ui_draw_cmd){
-                                .kind = OPTICS_UI_DRAW_TEXT,
-                                .rel = {label_x, text_y, 0, 0},
-                                .color = fg,
-                                .text = rec->content.label,
-                                .text_size = rs->font_size,
-                            });
+        optics_ui__drawlist_push(ui, n,
+                                 (optics_ui_draw_cmd){
+                                     .kind = OPTICS_UI_DRAW_TEXT,
+                                     .rel = {label_x, text_y, 0, 0},
+                                     .color = fg,
+                                     .text = rec->content.label,
+                                     .text_size = rs->font_size,
+                                 });
     }
 }

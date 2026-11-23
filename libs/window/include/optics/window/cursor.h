@@ -1,22 +1,22 @@
 /*
- * iris/cursor.h — host-driven cursor appearance.
+ * window/cursor.h — host-driven cursor appearance.
  *
- * iris owns the window, so it owns the cursor surface. Hosts tell iris
- * what cursor to show via iris_set_cursor(); iris loads the matching
+ * window owns the window, so it owns the cursor surface. Hosts tell window
+ * what cursor to show via optics_window_set_cursor(); window loads the matching
  * image from the system cursor theme (wayland-cursor on Linux) and
  * attaches it to the seat's pointer surface.
  *
  * The enum is intentionally small: covering the common desktop cursors
  * lets an app (editor, browser, tool) drive UX affordances without
  * owning any window-system code. New values can be added without
- * breaking the ABI (callers default to IRIS_CURSOR_DEFAULT).
+ * breaking the ABI (callers default to OPTICS_WINDOW_CURSOR_DEFAULT).
  */
 #ifndef OPTICS_WINDOW_CURSOR_H
 #define OPTICS_WINDOW_CURSOR_H
 
 #include <stdint.h>
 
-/* IRIS_API lives in <iris/app.h>. Every declaring iris header includes
+/* OPTICS_WINDOW_API lives in <optics/window/loop.h>. Every declaring window header includes
  * it so each header is self-contained: including any single one, alone,
  * must compile (a header that only works when another header happened to
  * be included first is a latent consumer break). */
@@ -30,9 +30,9 @@ extern "C" {
 /*  Cursor enum                                                       */
 /* ================================================================== */
 
-/* The cursor appearance iris currently shows for the app's window.
- * Pass IRIS_CURSOR_DEFAULT to reset to the platform's arrow. Unknown
- * values (forward-compat from a newer libiris) fall back to DEFAULT. */
+/* The cursor appearance window currently shows for the app's window.
+ * Pass OPTICS_WINDOW_CURSOR_DEFAULT to reset to the platform's arrow. Unknown
+ * values (forward-compat from a newer liboptics_window) fall back to DEFAULT. */
 typedef enum : uint32_t {
     OPTICS_WINDOW_CURSOR_DEFAULT = 0, /* arrow                                    */
     OPTICS_WINDOW_CURSOR_TEXT,        /* I-beam — over text the user can edit    */
@@ -52,11 +52,11 @@ typedef enum : uint32_t {
  *
  * No-op on backends without cursor-theme support (e.g. a build without
  * wayland-cursor linked). Thread-affine: call from the same thread that
- * drives iris_app_run. */
+ * drives optics_window_run. */
 OPTICS_WINDOW_API void optics_window_set_cursor(optics_window_cursor cursor);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* IRIS_CURSOR_H */
+#endif /* OPTICS_WINDOW_CURSOR_H */

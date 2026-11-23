@@ -3,7 +3,7 @@ id: ADR-0155
 title: "Frame damage is a native epoch ledger, not a caller-side per-image history"
 status: accepted
 date: 2026-11-09
-scope: [flux, canvas, bindings]
+scope: [gfx, canvas, bindings]
 superseded_by: null
 negative_knowledge: true
 ---

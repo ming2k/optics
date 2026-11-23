@@ -1,4 +1,4 @@
-/* test_a11y_prefs.c — iris_a11y_prefs contract (ADR-0075).
+/* test_a11y_prefs.c — optics_window_a11y_prefs contract (ADR-0075).
  *
  * Headless: the public query/watch API is driven directly. The query's
  * platform sources (gsettings/kreadconfig, SPI_*, NSWorkspace) are

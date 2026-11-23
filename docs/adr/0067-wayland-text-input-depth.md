@@ -3,6 +3,9 @@ id: ADR-0067
 title: "Wayland text-input depth — key repeat, compose, per-widget IME sessions"
 status: accepted
 date: 2026-08-12
+scope: unrecorded
+superseded_by: null
+negative_knowledge: true
 ---
 
 # ADR-0067: Wayland text-input depth — key repeat, compose, per-widget IME sessions

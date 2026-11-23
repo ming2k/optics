@@ -1,7 +1,7 @@
 /*
- * flux_image_update_region_strided / _premultiply: bounds + stride
+ * optics_gfx_image_update_region with stride_bytes / premultiply: bounds + stride
  * validation, strided repack correctness, and premultiply math parity with
- * flux_color_rgba_premul (bit-exact, via an offscreen blit + readback).
+ * optics_gfx_color_rgba_premul (bit-exact, via an offscreen blit + readback).
  * Skips if no Vulkan device.
  */
 #include "gfx_test.h"
@@ -16,7 +16,7 @@
 #define SURF_W 16u
 #define SURF_H 16u
 
-/* RGBA8_UNORM texel bytes are R,G,B,A; flux_color is 0xAARRGGBB. */
+/* RGBA8_UNORM texel bytes are R,G,B,A; optics_gfx_color is 0xAARRGGBB. */
 static uint32_t straight_rgba(uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
     return (uint32_t)r | ((uint32_t)g << 8) | ((uint32_t)b << 16) | ((uint32_t)a << 24);
 }
@@ -249,7 +249,7 @@ int main(void) {
         optics_gfx_image_release(grey);
     }
 
-    /* --- premultiply: bit-exact parity with flux_color_rgba_premul across
+    /* --- premultiply: bit-exact parity with optics_gfx_color_rgba_premul across
      * alpha buckets and channels, from a strided source region. --- */
     {
         static const uint8_t chans[6] = {0, 1, 127, 128, 254, 255};
@@ -305,7 +305,7 @@ int main(void) {
                                                           .bytes = sizeof(src),
                                                           .premultiply = true}) == OPTICS_GFX_OK);
         BLIT_AND_READ();
-        /* straight RGBA(200,100,50,128) -> premul per flux_color_rgba_premul */
+        /* straight RGBA(200,100,50,128) -> premul per optics_gfx_color_rgba_premul */
         uint32_t want = optics_gfx_color_rgba_premul(200, 100, 50, 128);
         uint8_t wr = (uint8_t)((want >> 16) & 0xff), wg = (uint8_t)((want >> 8) & 0xff),
                 wb = (uint8_t)(want & 0xff);

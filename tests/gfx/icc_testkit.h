@@ -345,4 +345,4 @@ static inline size_t icc_build_mft1_constant_white(uint8_t *data, icc_tag_def *d
     return t.len;
 }
 
-#endif /* FLUX_TEST_ICC_KIT_H */
+#endif /* OPTICS_GFX_TEST_ICC_KIT_H */

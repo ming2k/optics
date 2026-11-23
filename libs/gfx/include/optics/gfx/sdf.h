@@ -1,11 +1,11 @@
 /*
- * flux/sdf.h — signed distance fields for the analytic geometry classes
+ * gfx/sdf.h — signed distance fields for the analytic geometry classes
  * (ADR-0118), and their derivatives (ADR-0148).
  *
  * A closed-form distance field is exact and resolution-independent: coverage
  * is a smooth function of the screen-space distance from the boundary, so the
  * anti-aliasing is analytic instead of sampled. This is the peer of the curve
- * kernel (<flux/curve.h>): the kernel covers *parametric* geometry (Bézier
+ * kernel (<optics/gfx/curve.h>): the kernel covers *parametric* geometry (Bézier
  * curves, which have no closed-form distance), this covers geometry for which
  * a closed-form distance does exist (circles, rounded rectangles, boxes).
  *
@@ -15,7 +15,7 @@
  *
  *   analytic primitive -> distance field (this header). Exact, and cheaper
  *                         than flattening a shape that has an exact form.
- *   parametric curve   -> flux_curve kernel. The distance to a cubic has no
+ *   parametric curve   -> the curve kernel (<optics/gfx/curve.h>). The distance to a cubic has no
  *                         closed form, so the kernel reduces, offsets and
  *                         computes winding instead.
  *
@@ -36,8 +36,8 @@
  * The one place a field genuinely has no gradient is the interior region of a
  * rounded rectangle, where it degenerates to `max(q.x, q.y) - r` and flips by
  * 90 degrees across the diagonal. That is a sampling question, not a
- * differentiation one: flux_sdf_squircle_gradient returns the continuum limit,
- * and flux_sdf_squircle_sample resolves the same crease over the caller's pixel
+ * differentiation one: optics_gfx_sdf_squircle_gradient returns the continuum limit,
+ * and optics_gfx_sdf_squircle_sample resolves the same crease over the caller's pixel
  * footprint. Shade with the latter.
  *
  * Sign convention: negative inside, positive outside, zero on the boundary;
@@ -80,25 +80,25 @@ typedef struct optics_gfx_sdf_sample {
 
 /* Squircle / continuous-curvature field: a rounded rectangle whose corner arc
  * blends a circular arc (`curvature == 0`, where this is *exactly*
- * flux_sdf_round_rect) with an L4 superellipse corner (`curvature == 1`, the
- * "G2 squircle"). Same conventions as flux_sdf_round_rect.
+ * optics_gfx_sdf_round_rect) with an L4 superellipse corner (`curvature == 1`, the
+ * "G2 squircle"). Same conventions as optics_gfx_sdf_round_rect.
  *
- * This is the definition the Prism materials have shipped since ADR-0046; it
+ * This is the definition the materials have shipped since ADR-0046; it
  * is stated here, once, so the field has a single owner (ADR-0118 INV-SDF-02)
  * rather than living inside a material shader. See ADR-0118 for the open half
- * of INV-SDF-06: `flux_path_add_squircle` still draws a *different* corner
+ * of INV-SDF-06: `optics_gfx_path_add_squircle` still draws a *different* corner
  * shape, so a caller must not assume the path and the field agree yet. */
 OPTICS_GFX_API float optics_gfx_sdf_squircle(optics_gfx_point p, float half_w, float half_h,
                                              float radius, float curvature);
 
-/* Analytic unit gradient of flux_sdf_squircle with respect to `p` — the outward
+/* Analytic unit gradient of optics_gfx_sdf_squircle with respect to `p` — the outward
  * surface normal of the field. Exact, and free of the four field evaluations a
  * finite-difference normal costs.
  *
  * The returned normal is the *continuum* gradient, so it is discontinuous
  * across the interior diagonal where the field degenerates to a `max()` of two
  * planes. That is the correct limit and the wrong thing to shade with; shade
- * with flux_sdf_squircle_sample. */
+ * with optics_gfx_sdf_squircle_sample. */
 OPTICS_GFX_API optics_gfx_sdf_sample optics_gfx_sdf_squircle_gradient(optics_gfx_point p,
                                                                       float half_w, float half_h,
                                                                       float radius,
@@ -107,7 +107,7 @@ OPTICS_GFX_API optics_gfx_sdf_sample optics_gfx_sdf_squircle_gradient(optics_gfx
 /* Field and shading normal from ONE evaluation.
  *
  * `aa` is the sampling footprint in the field's own units (how many caller
- * units one pixel spans — the same quantity flux_sdf_coverage takes). It is
+ * units one pixel spans — the same quantity optics_gfx_sdf_coverage takes). It is
  * read in exactly one place: the interior, where it resolves the crease over
  * one pixel footprint instead of flipping across zero width. That is the
  * continuous limit of what a central difference of the same span measures, and
@@ -121,14 +121,14 @@ OPTICS_GFX_API optics_gfx_sdf_sample optics_gfx_sdf_squircle_sample(optics_gfx_p
 
 /* Composition: the polynomial smooth-minimum of two fields — the metaball union
  * a fused body is made of. `radius <= 0` is a hard min. Returns the field;
- * flux_sdf_smooth_union_gradient returns its unit gradient.
+ * optics_gfx_sdf_smooth_union_gradient returns its unit gradient.
  *
  * The composition lives here, not in a material, for the same reason the fields
  * do: a fused body is one field, and a material that carried its own union
  * would be a second definition of it (ADR-0148). */
 OPTICS_GFX_API float optics_gfx_sdf_smooth_union(float a, float b, float radius);
 
-/* Unit gradient of flux_sdf_smooth_union with respect to position, from the two
+/* Unit gradient of optics_gfx_sdf_smooth_union with respect to position, from the two
  * fields' unit gradients and their values.
  *
  * The blend's own `h` definition gives `a - b == radius*(1 - 2h)` exactly, so the
@@ -151,4 +151,4 @@ OPTICS_GFX_API float optics_gfx_sdf_coverage(float d, float aa);
 }
 #endif
 
-#endif /* FLUX_SDF_H */
+#endif /* OPTICS_GFX_SDF_H */

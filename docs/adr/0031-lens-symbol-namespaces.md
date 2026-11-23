@@ -3,6 +3,9 @@ id: ADR-0031
 title: "Lens symbol namespaces — public `lens_*`, internal `lensi_*`"
 status: accepted
 date: 2026-07-21
+scope: ui (L2 toolkit)
+superseded_by: null
+negative_knowledge: true
 ---
 
 # ADR-0031: Lens symbol namespaces — public `lens_*`, internal `lensi_*`

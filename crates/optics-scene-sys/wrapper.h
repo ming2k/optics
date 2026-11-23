@@ -1,4 +1,4 @@
 /*
- * Bindgen translation unit for the vista bindings.
+ * Bindgen translation unit for the scene bindings.
  */
 #include <optics/scene.h>

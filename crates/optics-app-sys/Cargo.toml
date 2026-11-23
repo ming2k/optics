@@ -1,6 +1,6 @@
 [package]
 name = "optics-app-sys"
-description = "Raw FFI bindings to aperture (libaperture), generated from <aperture/aperture.h>"
+description = "Raw FFI bindings to app (liboptics_app), generated from <optics/app.h>"
 publish = false
 links = "optics_app"
 version.workspace = true
@@ -10,7 +10,7 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-# The types aperture's API speaks are owned by these crates and re-exported,
+# The types app's API speaks are owned by these crates and re-exported,
 # so each has ONE Rust definition across the stack.
 optics-gfx-sys = { workspace = true }
 optics-window-sys = { workspace = true }
@@ -18,3 +18,9 @@ optics-ui-sys = { workspace = true }
 
 [build-dependencies]
 optics-build = { workspace = true }
+
+[features]
+# Force a static link of the Optics archives; the default links the shared
+# objects (docs/how-to/choose-a-static-or-shared-link.md). OPTICS_STATIC /
+# OPTICS_DYNAMIC in the environment override it.
+static = ["optics-gfx-sys/static", "optics-window-sys/static", "optics-ui-sys/static"]

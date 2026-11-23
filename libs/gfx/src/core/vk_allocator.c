@@ -15,7 +15,7 @@
  *     BDA-capable buffers never share a block with non-BDA buffers,
  *     side-stepping the bufferImageGranularity rule with zero per-
  *     alloc cost.
- *   - Oversize requests (>= FLUX_VK_DEDICATED_THRESH) go to a
+ *   - Oversize requests (>= OPTICS_GFX_VK_DEDICATED_THRESH) go to a
  *     standalone VkDeviceMemory and are tagged via block==NULL.
  *   - Pooled blocks set MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT iff the
  *     caller asked for a device address; dedicated allocations set
@@ -27,7 +27,7 @@
  * Safety:
  *   - Every pooled dealloc is validated against the owning block's
  *     `allocated_bytes` mirror. A double-free (or a stale copy of
- *     the caller's flux_vk_alloc struct) is logged and rejected
+ *     the caller's optics_gfx_vk_alloc struct) is logged and rejected
  *     instead of corrupting the free-list.
  *   - `lost_bytes` per block tracks ranges whose free-list reinsert
  *     failed due to host OOM. Such blocks are still reclaimable
@@ -149,8 +149,8 @@ static bool block_try_alloc(optics_gfx_vk_block *b, VkDeviceSize size, VkDeviceS
 /*  Block lifecycle                                                   */
 /* ------------------------------------------------------------------ */
 
-/* Map a vkAllocateMemory / vkMapMemory failure to a flux_result. GPU
- * and host OOM both surface as FLUX_ERROR_OUT_OF_MEMORY so callers can
+/* Map a vkAllocateMemory / vkMapMemory failure to a optics_gfx_result. GPU
+ * and host OOM both surface as OPTICS_GFX_ERROR_OUT_OF_MEMORY so callers can
  * react (reclaim, retry, evict) instead of seeing a generic backend
  * fault; anything else stays BACKEND_FAILURE. */
 static optics_gfx_result result_from_vk_memory_failure(VkResult vr) {
@@ -215,7 +215,7 @@ static optics_gfx_vk_block *block_create(optics_gfx_device *d, uint32_t memory_t
      * no longer formatted into a temporary: it lives in the ledger row, which
      * owns the string the driver receives. */
     optics_gfx_vk_set_name_from_ledger(d, VK_OBJECT_TYPE_DEVICE_MEMORY, (uint64_t)b->memory,
-                                       OPTICS_GFX_SCOPE_DEVICE, "vk_memory", "flux/core");
+                                       OPTICS_GFX_SCOPE_DEVICE, "vk_memory", "gfx/core");
     return b;
 }
 
@@ -282,7 +282,7 @@ void optics_gfx_vk_allocator_destroy(optics_gfx_device *d) {
      * leak attribution (ADR-0129 decision 3): a bare "possible resource
      * leak" byte total cannot name the resource, the owner, or the creation
      * site, and it fires from a place where the device is already being
-     * torn down. flux_device_release emits the structured report before
+     * torn down. optics_gfx_device_release emits the structured report before
      * vkDestroyDevice instead. */
 
     for (optics_gfx_vk_block *b = a->blocks; b;) {
@@ -374,7 +374,7 @@ static optics_gfx_result do_dedicated(optics_gfx_device *d, VkDeviceSize size, u
     out->mapped = mapped;
     out->block = nullptr;
     optics_gfx_vk_set_name_from_ledger(d, VK_OBJECT_TYPE_DEVICE_MEMORY, (uint64_t)mem,
-                                       OPTICS_GFX_SCOPE_DEVICE, "vk_memory", "flux/core");
+                                       OPTICS_GFX_SCOPE_DEVICE, "vk_memory", "gfx/core");
     return OPTICS_GFX_OK;
 }
 
@@ -450,7 +450,7 @@ optics_gfx_result optics_gfx_vk_allocate(optics_gfx_device *d, VkMemoryRequireme
             a->bytes_reserved += size;
             a->live_allocations++;
             OPTICS_GFX_OBSERVE_ACQUIRE(d, OPTICS_GFX_SCOPE_DEVICE, OPTICS_GFX_LIFETIME_CONTEXT,
-                                       "vk_memory", "flux/core", size, OPTICS_GFX_SITE_VK_MEMORY);
+                                       "vk_memory", "gfx/core", size, OPTICS_GFX_SITE_VK_MEMORY);
         }
         optics_gfx_platform_mutex_unlock(&a->lock);
         return r;
@@ -536,7 +536,7 @@ optics_gfx_result optics_gfx_vk_allocate(optics_gfx_device *d, VkMemoryRequireme
     a->live_allocations++;
     optics_gfx_platform_mutex_unlock(&a->lock);
     OPTICS_GFX_OBSERVE_ACQUIRE(d, OPTICS_GFX_SCOPE_DEVICE, OPTICS_GFX_LIFETIME_CONTEXT, "vk_memory",
-                               "flux/core", (uint64_t)size, OPTICS_GFX_SITE_VK_MEMORY);
+                               "gfx/core", (uint64_t)size, OPTICS_GFX_SITE_VK_MEMORY);
     return OPTICS_GFX_OK;
 }
 
@@ -564,8 +564,8 @@ void optics_gfx_vk_deallocate(optics_gfx_device *d, optics_gfx_vk_alloc *alloc) 
          * nothing left to subtract and is rejected. */
         if (a->live_allocations == 0 || alloc->size > a->bytes_in_use) {
             if (d->log) {
-                d->log(OPTICS_GFX_LOG_ERROR, "flux", 0, "%s",
-                       "flux_vk_deallocate: rejected double-free of dedicated "
+                d->log(OPTICS_GFX_LOG_ERROR, "gfx", 0, "%s",
+                       "optics_gfx_vk_deallocate: rejected double-free of dedicated "
                        "allocation",
                        d->log_user);
             }
@@ -591,11 +591,11 @@ void optics_gfx_vk_deallocate(optics_gfx_device *d, optics_gfx_vk_alloc *alloc) 
             if (d->log) {
                 char buf[256];
                 snprintf(buf, sizeof(buf),
-                         "flux_vk_deallocate: rejected double-free or stale "
+                         "optics_gfx_vk_deallocate: rejected double-free or stale "
                          "alloc (offset=%llu size=%llu block_live=%u)",
                          (unsigned long long)alloc->offset, (unsigned long long)alloc->size,
                          b->live_allocations);
-                d->log(OPTICS_GFX_LOG_ERROR, "flux", 0, "%s", buf, d->log_user);
+                d->log(OPTICS_GFX_LOG_ERROR, "gfx", 0, "%s", buf, d->log_user);
             }
             optics_gfx_platform_mutex_unlock(&a->lock);
             return;
@@ -610,8 +610,8 @@ void optics_gfx_vk_deallocate(optics_gfx_device *d, optics_gfx_vk_alloc *alloc) 
             b->lost_bytes += alloc->size;
             a->lost_ranges_bytes += alloc->size;
             if (d->log) {
-                d->log(OPTICS_GFX_LOG_WARN, "flux", 0, "%s",
-                       "flux_vk_deallocate: free-list node alloc failed; "
+                d->log(OPTICS_GFX_LOG_WARN, "gfx", 0, "%s",
+                       "optics_gfx_vk_deallocate: free-list node alloc failed; "
                        "range lost (will be recovered at block reclaim)",
                        d->log_user);
             }
@@ -630,7 +630,7 @@ void optics_gfx_vk_deallocate(optics_gfx_device *d, optics_gfx_vk_alloc *alloc) 
      * retired zombies, one-shot staging, reclaimed blocks — lands in one
      * row. A retired-but-not-yet-destroyed object still shows as live, which
      * is the truth: the memory is still held. */
-    OPTICS_GFX_OBSERVE_RELEASE(d, OPTICS_GFX_SCOPE_DEVICE, "vk_memory", "flux/core", ledger_bytes);
+    OPTICS_GFX_OBSERVE_RELEASE(d, OPTICS_GFX_SCOPE_DEVICE, "vk_memory", "gfx/core", ledger_bytes);
 
     /* Auto-reclaim: if the block that just freed an allocation is now
      * empty, and there are other blocks of the same key, reclaim it.
@@ -700,7 +700,7 @@ void optics_gfx_vk_allocator_note_external(optics_gfx_device *d, VkDeviceSize by
     a->live_allocations++;
     optics_gfx_platform_mutex_unlock(&a->lock);
     OPTICS_GFX_OBSERVE_ACQUIRE(d, OPTICS_GFX_SCOPE_DEVICE, OPTICS_GFX_LIFETIME_CONTEXT,
-                               "vk_memory_external", "flux/core", (uint64_t)bytes,
+                               "vk_memory_external", "gfx/core", (uint64_t)bytes,
                                OPTICS_GFX_SITE_VK_MEMORY);
 }
 
@@ -709,8 +709,9 @@ void optics_gfx_vk_allocator_unnote_external(optics_gfx_device *d, VkDeviceSize 
     optics_gfx_platform_mutex_lock(&a->lock);
     if (a->live_allocations == 0 || bytes > a->bytes_in_use) {
         if (d->log) {
-            d->log(OPTICS_GFX_LOG_ERROR, "flux", 0, "%s",
-                   "flux_vk_allocator_unnote_external: rejected (would underflow)", d->log_user);
+            d->log(OPTICS_GFX_LOG_ERROR, "gfx", 0, "%s",
+                   "optics_gfx_vk_allocator_unnote_external: rejected (would underflow)",
+                   d->log_user);
         }
         optics_gfx_platform_mutex_unlock(&a->lock);
         return;
@@ -719,7 +720,7 @@ void optics_gfx_vk_allocator_unnote_external(optics_gfx_device *d, VkDeviceSize 
     a->bytes_reserved -= bytes;
     a->live_allocations--;
     optics_gfx_platform_mutex_unlock(&a->lock);
-    OPTICS_GFX_OBSERVE_RELEASE(d, OPTICS_GFX_SCOPE_DEVICE, "vk_memory_external", "flux/core",
+    OPTICS_GFX_OBSERVE_RELEASE(d, OPTICS_GFX_SCOPE_DEVICE, "vk_memory_external", "gfx/core",
                                (uint64_t)bytes);
 }
 

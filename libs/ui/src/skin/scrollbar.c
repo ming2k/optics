@@ -3,7 +3,7 @@
  *
  * Layout must not emit: scroll_clamp_node (layout/solve.c) only clamps
  * offsets and shifts content. This file is the drawlist-finalize walk that
- * draws scrollbars — it runs from lens_end after the whole tree (placed
+ * draws scrollbars — it runs from optics_ui_end after the whole tree (placed
  * subtrees included, ADR-0060) has been measured, arranged, and placed, so
  * every rect it reads is final for the frame. The geometry math is the
  * pre-skin code moved verbatim; the walk also stores pending thumb geometry
@@ -15,9 +15,9 @@
  * Reads solved geometry only: the container's final_rect and its arranged
  * flow children. Nodes that are is_scroll but self-manage scrolling with
  * their own state type (the table's virtualized grid, ADR-0042) have no
- * lens_scroll_state — they draw their own chrome, so this pass leaves
+ * optics_ui_scroll_state — they draw their own chrome, so this pass leaves
  * them alone. */
-static void lensi_skin_scrollbar(optics_ui *ui, optics_ui_node *n) {
+static void optics_ui__skin_scrollbar(optics_ui *ui, optics_ui_node *n) {
     /* Content extent is the union of the FLOW child rects, seeded from the
      * first flow child — ABS children are placed outside the flow
      * (ADR-0060) and never count toward scrollable content (same rule as
@@ -82,21 +82,21 @@ static void lensi_skin_scrollbar(optics_ui *ui, optics_ui_node *n) {
         /* track: drawn only when its colour is non-transparent, so a
          * consumer can opt out of the range hint entirely. */
         if (t->color_scrollbar_track & 0xff000000u) {
-            lensi_drawlist_push(ui, n,
-                                (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_RECT,
-                                                     .rel = {sb_x, 0.0f, sb_w, viewport_h},
-                                                     .color = t->color_scrollbar_track,
-                                                     .radius = radius});
+            optics_ui__drawlist_push(ui, n,
+                                     (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_RECT,
+                                                          .rel = {sb_x, 0.0f, sb_w, viewport_h},
+                                                          .color = t->color_scrollbar_track,
+                                                          .radius = radius});
         }
         /* thumb: rest / hover / drag colour picked by interaction state */
         optics_gfx_color thumb_color = dragging   ? t->color_scrollbar_thumb_active
                                        : hovering ? t->color_scrollbar_thumb_hover
                                                   : t->color_scrollbar_thumb;
-        lensi_drawlist_push(ui, n,
-                            (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_RECT,
-                                                 .rel = {sb_x, sb_y, sb_w, thumb_h},
-                                                 .color = thumb_color,
-                                                 .radius = radius});
+        optics_ui__drawlist_push(ui, n,
+                                 (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_RECT,
+                                                      .rel = {sb_x, sb_y, sb_w, thumb_h},
+                                                      .color = thumb_color,
+                                                      .radius = radius});
     }
 
     /* Store pending thumb geometry for snapshot capture (the clamped
@@ -111,12 +111,12 @@ static void scrollbar_emit_node(optics_ui *ui, optics_ui_node *n) {
     if (!n)
         return;
     if (n->is_scroll)
-        lensi_skin_scrollbar(ui, n);
+        optics_ui__skin_scrollbar(ui, n);
     for (optics_ui_node *c = n->first_child; c; c = c->next_sibling)
         scrollbar_emit_node(ui, c);
 }
 
-void lensi_scrollbars_emit(optics_ui *ui) {
+void optics_ui__scrollbars_emit(optics_ui *ui) {
     /* One tree (ADR-0060): the walk reaches placed subtrees — a dropdown's
      * option list — through their parent chain; no separate pass needed. */
     scrollbar_emit_node(ui, ui->root);

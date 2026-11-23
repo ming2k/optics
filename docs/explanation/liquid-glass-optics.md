@@ -1,6 +1,6 @@
 # Liquid Glass Optical Architecture & Physical Rendering Paradigm
 
-This document formalises the optical foundation, shader mathematics, contrast-preservation architecture, and automated verification methodology of **Prism Liquid Glass** (`<optics/material/liquid_glass.h>`, `liquid_glass.comp.slang`). It details how Optics achieves physical dielectric glass realism for desktop and spatial user interfaces without ray tracing, adhering to [ADR-0100](../adr/0100-liquid-glass-dual-rim-and-screen-space-environmental-optics.md).
+This document formalises the optical foundation, shader mathematics, contrast-preservation architecture, and automated verification methodology of **material Liquid Glass** (`<optics/material/liquid_glass.h>`, `liquid_glass.comp.slang`). It details how Optics achieves physical dielectric glass realism for desktop and spatial user interfaces without ray tracing, adhering to [ADR-0100](../adr/0100-liquid-glass-dual-rim-and-screen-space-environmental-optics.md).
 
 ---
 
@@ -40,7 +40,7 @@ $$\mathbf{p}_{\text{sample}} = \mathbf{p} - \mathbf{n} \cdot \Delta_{\text{refra
 where $d$ is the signed distance to the silhouette boundary.
 
 ### 1.3 Chromatic Dispersion (Prismatic Split)
-Because glass exhibits chromatic dispersion (Cauchy's equation: $n(\lambda) = A + B/\lambda^2$), blue light bends more sharply than red light. Prism models this by separating the red, green, and blue sampling coordinates along the outward surface gradient:
+Because glass exhibits chromatic dispersion (Cauchy's equation: $n(\lambda) = A + B/\lambda^2$), blue light bends more sharply than red light. material models this by separating the red, green, and blue sampling coordinates along the outward surface gradient:
 $$\mathbf{p}_r = \mathbf{p} - \mathbf{n} \cdot (\Delta + \delta_c), \quad \mathbf{p}_g = \mathbf{p} - \mathbf{n} \cdot \Delta, \quad \mathbf{p}_b = \mathbf{p} - \mathbf{n} \cdot (\Delta - \delta_c)$$
 This confines prismatic color fringing strictly to the curved rim band where light bends, keeping the flat interior 100% legible and distortion-free.
 
@@ -75,7 +75,7 @@ $$\text{spec\_tint} = \text{mix}\left(\text{vec3}(1.0), \max(\text{frost}, 0.12)
 
 ## 3. Contrast Preservation & Boundary Defense
 
-A fundamental challenge in spatial glass design is preventing translucent elements from vanishing when placed over similarly-colored or uniform white backdrops. Prism enforces a **four-layer defense hierarchy**:
+A fundamental challenge in spatial glass design is preventing translucent elements from vanishing when placed over similarly-colored or uniform white backdrops. material enforces a **four-layer defense hierarchy**:
 
 | Layer | Mechanism | Physical Purpose |
 | :--- | :--- | :--- |
@@ -93,7 +93,7 @@ Real-time shader algorithms cannot be verified reliably by manual inspection alo
 ```text
 ┌─────────────────────────┐     ┌─────────────────────────┐     ┌─────────────────────────┐
 │ 1. Headless GPU Device  │ ──> │ 2. Deterministic Scene  │ ──> │ 3. Sub-Pixel DMA Buffer │
-│    flux_device_create   │     │    Fixed seed & extent  │     │    flux_surface_read_px │
+│    optics_gfx_device_create   │     │    Fixed seed & extent  │     │    optics_gfx_surface_read_pixels │
 └─────────────────────────┘     └─────────────────────────┘     └─────────────────────────┘
                                                                              │
                                 ┌─────────────────────────┐                  ▼
@@ -103,13 +103,13 @@ Real-time shader algorithms cannot be verified reliably by manual inspection alo
                                 └─────────────────────────┘     └─────────────────────────┘
 ```
 
-1. **Headless Vulkan Surface Pipeline:** Tests run on headless GPU surfaces (`flux_device_desc.headless = true`), isolating rendering from window managers, Wayland compositors, and HiDPI DPI-scaling variations.
-2. **Sub-Pixel DMA Readback:** Frame output is retrieved directly from VRAM via `flux_surface_read_pixels` for mathematical channel assertions.
+1. **Headless Vulkan Surface Pipeline:** Tests run on headless GPU surfaces (`optics_gfx_device_desc.headless = true`), isolating rendering from window managers, Wayland compositors, and HiDPI DPI-scaling variations.
+2. **Sub-Pixel DMA Readback:** Frame output is retrieved directly from VRAM via `optics_gfx_surface_read_pixels` for mathematical channel assertions.
 3. **Statistical Outlier & Maximum Delta Budgeting:** Acknowledging minor driver floating-point rounding variations across GPU hardware (Intel ANV, AMD RADV, Nvidia proprietary), golden comparisons enforce a strict two-tier budget:
    - `max_delta <= 12` per channel for allowable rounding variance;
    - `outliers <= total * 0.08%` for boundary rasterization antialiasing tolerances;
    - Structural regressions immediately trigger test failures.
-4. **Automated Golden Reference Update:** Reference images (`tests/material/golden/liquid_glass_default.pam`) are committed to version control and updated via explicit `PRISM_GOLDEN_UPDATE=1` invocation upon intentional shader upgrades.
+4. **Automated Golden Reference Update:** Reference images (`tests/material/golden/liquid_glass_default.pam`) are committed to version control and updated via explicit `OPTICS_MATERIAL_GOLDEN_UPDATE=1` invocation upon intentional shader upgrades.
 5. **Compiler Header Isolation:** To prevent stale shader object cache hits (e.g. GCC 16 C23 `#embed` failing to emit depfile entries), shader bytecode is embedded via explicit Ninja-tracked header targets (`liquid_glass_spv.h`), ensuring every shader modification rebuilds dependent libraries deterministically.
 
 ---
@@ -118,5 +118,5 @@ Real-time shader algorithms cannot be verified reliably by manual inspection alo
 
 - [ADR-0046: Liquid Glass physical optics model](../adr/0046-liquid-glass-convex-lens-model.md)
 - [ADR-0063: Liquid Glass material library](../adr/0063-liquid-glass-material-library.md)
-- [ADR-0096: Prism Mica foundation material](../adr/0096-prism-mica-foundation-material.md)
+- [ADR-0096: material Mica foundation material](../adr/0096-prism-mica-foundation-material.md)
 - [ADR-0100: Liquid Glass dual-rim TIR and screen-space environmental optics](../adr/0100-liquid-glass-dual-rim-and-screen-space-environmental-optics.md)

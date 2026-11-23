@@ -2,7 +2,7 @@
  * sdf_parity.comp.slang — differential harness for the SDF derivative (ADR-0148) in Slang.
  *
  * Evaluates `optics_gfx_sdf.slang` on the GPU and writes its distance and normal into a storage
- * buffer, so test_sdf_parity can compare them against <flux/sdf.h> on the CPU.
+ * buffer, so test_sdf_parity can compare them against <optics/gfx/sdf.h> on the CPU.
  */
 
 #include "optics_gfx_sdf.slang"

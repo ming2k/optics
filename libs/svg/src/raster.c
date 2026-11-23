@@ -2,10 +2,10 @@
  *
  * This is the path a caller takes when it needs pixels rather than draw
  * commands: a DRM/KMS hardware-cursor dumb buffer, a coverage mask, a headless
- * snapshot in CI. It uses flux's device-less CPU canvas, so it needs no Vulkan
+ * snapshot in CI. It uses gfx's device-less CPU canvas, so it needs no Vulkan
  * device, no surface, and no window, and it is safe off the UI thread.
  *
- * The coverage readback is flux's 1x continuous analytic coverage alpha plane
+ * The coverage readback is gfx's 1x continuous analytic coverage alpha plane
  * (matching the alpha channel of RGBA8 readback). */
 
 #include "internal.h"

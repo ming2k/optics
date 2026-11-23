@@ -1,13 +1,13 @@
 /*
- * flux/vulkan.h — raw Vulkan handle accessors and the dynamic-rendering
+ * gfx/vulkan.h — raw Vulkan handle accessors and the dynamic-rendering
  * pass descriptor.
  *
  * Include this at the seam where you need to drop down to raw Vulkan:
  * recording your own command-buffer commands, integrating with
- * extensions flux doesn't wrap, or interoperating with another
+ * extensions gfx doesn't wrap, or interoperating with another
  * library that wants a VkDevice.
  *
- * Including this header pulls in <vulkan/vulkan.h>; <flux/core.h>
+ * Including this header pulls in <vulkan/vulkan.h>; <optics/gfx/core.h>
  * does not.
  */
 
@@ -41,7 +41,7 @@ OPTICS_GFX_API uint32_t optics_gfx_device_vk_transfer_family(const optics_gfx_de
  * feature. A POINT_LIST shader may write gl_PointSize > 1 only when
  * this returns true; otherwise consumers must clamp it to 1. */
 OPTICS_GFX_API bool optics_gfx_device_supports_large_points(const optics_gfx_device *d);
-/* The returned cache is shared by Flux's canvas/scene/compute/core pipeline
+/* The returned cache is shared by gfx's canvas/scene/compute/core pipeline
  * creation. Vulkan requires external synchronisation for every cache access.
  * Callers that pass this handle to Vulkan must hold this lock for the complete
  * Vulkan call; always pair lock/unlock on the same thread. */
@@ -59,15 +59,15 @@ OPTICS_GFX_API VkImageView optics_gfx_frame_vk_image_view(const optics_gfx_frame
 
 OPTICS_GFX_API VkImage optics_gfx_image_vk_image(const optics_gfx_image *im);
 OPTICS_GFX_API VkImageView optics_gfx_image_vk_image_view(const optics_gfx_image *im);
-/* flux_image_bindless_handle is declared in the bindless section below
- * because it returns flux_bindless_handle, which is typedef'd there. */
+/* optics_gfx_image_bindless_handle is declared in the bindless section below
+ * because it returns optics_gfx_bindless_handle, which is typedef'd there. */
 
-/* Render-target image view: hand this to flux_pass_attachment.view /
- * flux_pass_depth_attachment.view. NULL → VK_NULL_HANDLE. */
+/* Render-target image view: hand this to optics_gfx_pass_attachment.view /
+ * optics_gfx_pass_depth_attachment.view. NULL → VK_NULL_HANDLE. */
 OPTICS_GFX_API VkImageView optics_gfx_target_vk_view(const optics_gfx_target *t);
 OPTICS_GFX_API VkImage optics_gfx_target_vk_image(const optics_gfx_target *t);
 
-/* The transient ring buffer underlying flux_frame_alloc_transient. */
+/* The transient ring buffer underlying optics_gfx_frame_alloc_transient. */
 OPTICS_GFX_API VkBuffer optics_gfx_frame_vk_transient_buffer(const optics_gfx_frame *f);
 
 /* ================================================================== */
@@ -116,40 +116,40 @@ optics_gfx_device_default_sampler_handle(optics_gfx_device *d);
 /* ================================================================== */
 /*  One-shot submission (public)                                      */
 /* ================================================================== */
-/* flux owns the queues, the transient command pools, and the submit/wait
+/* gfx owns the queues, the transient command pools, and the submit/wait
  * plumbing — but before these existed, every headless use of the effect
  * runtime had to either run inside a frame or hand-roll raw Vulkan for
  * exactly the sequence the library already implements internally
  * (effect.h asked callers to "supply a one-shot command buffer" and to
  * have already completed a vkQueueWaitIdle, while exposing no way to do
- * either through flux).
+ * either through gfx).
  *
  * The two-step form covers multi-pass recording (record several operators,
  * submit once, wait once):
  *
- *   flux_oneshot_begin(device, &cmd);          // begin recording
- *     flux_effect_blur_record(...)             // record effects/compute
- *     flux_compute_pipeline_record(...)        //   into cmd
- *   flux_oneshot_submit_and_end(device, cmd);  // submit + wait + recycle
+ *   optics_gfx_oneshot_begin(device, &cmd);          // begin recording
+ *     optics_gfx_compute_dispatch(...)               // record compute work
+ *     ...                                            //   into cmd
+ *   optics_gfx_oneshot_submit_and_end(device, cmd);  // submit + wait + recycle
  *
- * flux_oneshot_run() is the single-recording convenience that wraps the
+ * optics_gfx_oneshot_run() is the single-recording convenience that wraps the
  * same three steps around a caller callback. All three serialize on the
  * device's queue lock exactly like internal submissions, so they are safe
  * to interleave with frame rendering on the same thread; they are NOT
- * thread-safe against concurrent flux use of the same device (the normal
+ * thread-safe against concurrent gfx use of the same device (the normal
  * per-device serialization rule).
  *
  * After submit-and-end returns, everything recorded into `cmd` has
  * completed on the GPU; the command buffer and its pool are recycled by
  * the library. Never submit a cmd buffer obtained here through any other
- * path, and never use it after flux_oneshot_submit_and_end. */
+ * path, and never use it after optics_gfx_oneshot_submit_and_end. */
 
 typedef void (*optics_gfx_oneshot_record_fn)(VkCommandBuffer cmd, void *userdata);
 
 /* Begin a one-shot recording. The returned command buffer is already in
  * VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT begin state, on a transient
- * pool owned by the library. Fails with FLUX_ERROR_INVALID_ARGUMENT on
- * null args, FLUX_ERROR_BACKEND_FAILURE if the pool/buffer cannot be
+ * pool owned by the library. Fails with OPTICS_GFX_ERROR_INVALID_ARGUMENT on
+ * null args, OPTICS_GFX_ERROR_BACKEND_FAILURE if the pool/buffer cannot be
  * allocated. */
 OPTICS_GFX_NODISCARD OPTICS_GFX_API optics_gfx_result
 optics_gfx_oneshot_begin(optics_gfx_device *d, VkCommandBuffer *out_cmd);
@@ -157,7 +157,7 @@ optics_gfx_oneshot_begin(optics_gfx_device *d, VkCommandBuffer *out_cmd);
 /* Submit `cmd` on the device's graphics queue and WAIT for completion
  * (fence with a finite timeout, queue-idle fallback), then recycle the
  * buffer. On return, nothing recorded into `cmd` is pending. Preserves
- * a VK_TIMEOUT as FLUX_ERROR_TIMEOUT for the caller. */
+ * a VK_TIMEOUT as OPTICS_GFX_ERROR_TIMEOUT for the caller. */
 OPTICS_GFX_NODISCARD OPTICS_GFX_API optics_gfx_result
 optics_gfx_oneshot_submit_and_end(optics_gfx_device *d, VkCommandBuffer cmd);
 
@@ -167,14 +167,14 @@ OPTICS_GFX_NODISCARD OPTICS_GFX_API optics_gfx_result
 optics_gfx_oneshot_run(optics_gfx_device *d, optics_gfx_oneshot_record_fn record, void *userdata);
 
 /* The sampled bindless handle the image was registered into at
- * create time. FLUX_BINDLESS_INVALID if the image was created
+ * create time. OPTICS_GFX_BINDLESS_INVALID if the image was created
  * without bindless registration (currently always set). */
 OPTICS_GFX_API optics_gfx_bindless_handle
 optics_gfx_image_bindless_handle(const optics_gfx_image *im);
 
 /* The storage bindless handle of the image, valid only for images created
- * with flux_image_create (FLUX_IMAGE_USAGE_COMPUTE_WRITE) (FLUX_BINDLESS_INVALID otherwise).
- * Pass it to a compute shader that writes the image via a storage binding. */
+ * with optics_gfx_image_create (OPTICS_GFX_IMAGE_USAGE_COMPUTE_WRITE) (OPTICS_GFX_BINDLESS_INVALID
+ * otherwise). Pass it to a compute shader that writes the image via a storage binding. */
 OPTICS_GFX_API optics_gfx_bindless_handle
 optics_gfx_image_bindless_storage_handle(const optics_gfx_image *im);
 
@@ -227,7 +227,7 @@ typedef struct optics_gfx_vertex_binding {
 } optics_gfx_vertex_binding;
 
 typedef struct optics_gfx_graphics_pipeline_desc {
-    optics_gfx_struct_type type; /* FLUX_TYPE_GRAPHICS_PIPELINE_DESC */
+    optics_gfx_struct_type type; /* OPTICS_GFX_TYPE_GRAPHICS_PIPELINE_DESC */
     const void *next;
 
     /* Shaders. Both required. */
@@ -250,7 +250,7 @@ typedef struct optics_gfx_graphics_pipeline_desc {
     optics_gfx_depth_test depth;
 
     /* Render-target formats. Must match the pass attachments at draw
-     * time. Use FLUX_FORMAT_UNDEFINED for `depth_format` when there
+     * time. Use OPTICS_GFX_FORMAT_UNDEFINED for `depth_format` when there
      * is no depth attachment. */
     optics_gfx_format color_format;
     optics_gfx_format depth_format;
@@ -295,7 +295,7 @@ optics_gfx_graphics_pipeline_bind(optics_gfx_frame *f,
 /* ================================================================== */
 
 /* Refcounted, device-owned sampler. Auto-registered in the bindless
- * heap on create — read the handle via flux_sampler_bindless_handle
+ * heap on create — read the handle via optics_gfx_sampler_bindless_handle
  * to reference the sampler from any shader. */
 typedef struct optics_gfx_sampler optics_gfx_sampler;
 
@@ -312,7 +312,7 @@ typedef enum optics_gfx_address_mode : uint32_t {
 } optics_gfx_address_mode;
 
 typedef struct optics_gfx_sampler_desc {
-    optics_gfx_struct_type type; /* FLUX_TYPE_SAMPLER_DESC */
+    optics_gfx_struct_type type; /* OPTICS_GFX_TYPE_SAMPLER_DESC */
     const void *next;
     optics_gfx_filter min_filter;
     optics_gfx_filter mag_filter;
@@ -359,14 +359,14 @@ typedef struct optics_gfx_pass_attachment {
     VkFormat format;
     optics_gfx_load_op load_op;
     optics_gfx_store_op store_op;
-    optics_gfx_vec4 clear_color; /* used iff load_op == FLUX_LOAD_CLEAR */
+    optics_gfx_vec4 clear_color; /* used iff load_op == OPTICS_GFX_LOAD_CLEAR */
     /* When true (and `view` is a multisample image), the pass resolves `view`
      * into the frame's swapchain image at end of rendering — for MSAA canvas
      * output. The multisample colour is not stored. */
     bool resolve_to_surface;
     /* When non-NULL, the pass resolves the multisample `view` into this image
      * view instead of the swapchain — used by canvas target capture
-     * (ADR-0017), which resolves into a caller-owned flux_image. Takes
+     * (ADR-0017), which resolves into a caller-owned optics_gfx_image. Takes
      * precedence over resolve_to_surface. */
     VkImageView resolve_view;
 } optics_gfx_pass_attachment;
@@ -381,7 +381,7 @@ typedef struct optics_gfx_pass_depth_attachment {
 } optics_gfx_pass_depth_attachment;
 
 typedef struct optics_gfx_pass_desc {
-    optics_gfx_struct_type type; /* FLUX_TYPE_PASS_DESC */
+    optics_gfx_struct_type type; /* OPTICS_GFX_TYPE_PASS_DESC */
     const void *next;
     uint32_t color_attachment_count;
     const optics_gfx_pass_attachment *color_attachments;
@@ -405,7 +405,7 @@ typedef struct optics_gfx_pass_desc {
     int32_t render_offset_x;
     int32_t render_offset_y;
     /* Optional debug label for this pass (ADR-0133). Only consumed when
-     * FLUX_OBSERVE_PASS_LABELS is requested; nullptr falls back to "pass".
+     * OPTICS_GFX_OBSERVE_PASS_LABELS is requested; nullptr falls back to "pass".
      * Must be a literal or outlive the recording call, since it lands in a
      * command buffer that is submitted after this returns. */
     const char *label;
@@ -503,7 +503,7 @@ optics_gfx_frame_pipeline_barrier(optics_gfx_frame *f,
 
 /* This API takes a VkCommandBuffer, so it lives here rather than in core.h: a
  * backend-agnostic caller must never see it. Libraries that own compute work
- * and already depend on <flux/vulkan.h> — prism is the one that does — use it to
+ * and already depend on <optics/gfx/vulkan.h> — material is the one that does — use it to
  * put their dispatches under the frame's plan, so work nothing samples is
  * pruned instead of recorded. */
 
@@ -512,7 +512,7 @@ optics_gfx_frame_pipeline_barrier(optics_gfx_frame *f,
  * indices or Vulkan handles. */
 typedef struct optics_gfx_deferred_token optics_gfx_deferred_token;
 
-/* Inputs and outputs one registered pass may declare. A Prism material reads a
+/* Inputs and outputs one registered pass may declare. A material reads a
  * capture plus a blur and writes one slab; two outputs leaves room without
  * inviting a variadic API. */
 #define OPTICS_GFX_DEFERRED_MAX_INPUTS 8u
@@ -524,13 +524,13 @@ typedef struct optics_gfx_deferred_token optics_gfx_deferred_token;
 typedef void (*optics_gfx_deferred_record_fn)(void *params, VkCommandBuffer cmd);
 
 typedef struct optics_gfx_deferred_pass_desc {
-    optics_gfx_struct_type type; /* FLUX_TYPE_DEFERRED_PASS_DESC */
+    optics_gfx_struct_type type; /* OPTICS_GFX_TYPE_DEFERRED_PASS_DESC */
     const void *next;            /* must be nullptr */
 
     optics_gfx_deferred_record_fn record;
-    /* Copied into the frame's plan arena by flux before registration returns, so
-     * this may point at the caller's stack. flux owns the copy; a material never
-     * sees the arena, which is what keeps `flux_frame` opaque. */
+    /* Copied into the frame's plan arena by gfx before registration returns, so
+     * this may point at the caller's stack. gfx owns the copy; a material never
+     * sees the arena, which is what keeps `optics_gfx_frame` opaque. */
     const void *params;
     size_t params_size;
     const char *label; /* optional debug label for the frame's pass scope */
@@ -554,21 +554,21 @@ typedef struct optics_gfx_deferred_pass_desc {
 /* Register a pass at the current pass boundary.
  *
  * It is recorded only if something requires one of its outputs: a
- * flux_frame_materialize_image call on an output, a downstream pass naming this
- * token as an input, or an explicit flux_frame_require_pass. A pass nothing
+ * optics_gfx_frame_materialize_image call on an output, a downstream pass naming this
+ * token as an input, or an explicit optics_gfx_frame_require_pass. A pass nothing
  * requires is pruned at submit and its dispatches never reach the GPU.
  *
  * `out_token` may be nullptr when the caller has no downstream pass to link.
  * A returned token stays valid until the frame is presented.
  *
  * Errors:
- *   FLUX_ERROR_INVALID_ARGUMENT — null frame/desc, wrong `type`, non-null
- *     `next`, no record callback, counts above FLUX_DEFERRED_MAX_*, no output,
+ *   OPTICS_GFX_ERROR_INVALID_ARGUMENT — null frame/desc, wrong `type`, non-null
+ *     `next`, no record callback, counts above OPTICS_GFX_DEFERRED_MAX_*, no output,
  *     or a null output image.
- *   FLUX_ERROR_INVALID_STATE    — frame not recording, or a canvas pass is
+ *   OPTICS_GFX_ERROR_INVALID_STATE    — frame not recording, or a canvas pass is
  *     active (compute cannot be recorded inside a render pass).
- *   FLUX_ERROR_OUT_OF_MEMORY    — the plan arena cannot hold `params_size`.
- *   FLUX_ERROR_OUT_OF_RANGE     — the frame's plan is full. */
+ *   OPTICS_GFX_ERROR_OUT_OF_MEMORY    — the plan arena cannot hold `params_size`.
+ *   OPTICS_GFX_ERROR_OUT_OF_RANGE     — the frame's plan is full. */
 OPTICS_GFX_NODISCARD OPTICS_GFX_API optics_gfx_result
 optics_gfx_frame_register_pass(optics_gfx_frame *f, const optics_gfx_deferred_pass_desc *desc,
                                optics_gfx_deferred_token **out_token);
@@ -578,15 +578,15 @@ optics_gfx_frame_register_pass(optics_gfx_frame *f, const optics_gfx_deferred_pa
  * in a canvas pass. Idempotent.
  *
  * Errors:
- *   FLUX_ERROR_INVALID_ARGUMENT — null frame/token, or the token does not
+ *   OPTICS_GFX_ERROR_INVALID_ARGUMENT — null frame/token, or the token does not
  *     belong to this frame's plan.
- *   FLUX_ERROR_INVALID_STATE    — frame not recording. */
+ *   OPTICS_GFX_ERROR_INVALID_STATE    — frame not recording. */
 OPTICS_GFX_NODISCARD OPTICS_GFX_API optics_gfx_result
 optics_gfx_frame_require_pass(optics_gfx_frame *f, optics_gfx_deferred_token *token);
 
 /* Fail if any of `count` images is a deferred pass output that has not executed.
  *
- * A recording path that bypasses the plan — a raw `flux_effect_*` primitive, a
+ * A recording path that bypasses the plan — a raw `optics_gfx_effect_*` primitive, a
  * custom compute pass that records straight into the command buffer — has no way
  * to know that an image it is about to sample belongs to a pass nobody required.
  * Reading it would silently consume last frame's pixels under this frame's
@@ -596,8 +596,8 @@ optics_gfx_frame_require_pass(optics_gfx_frame *f, optics_gfx_deferred_token *to
  * cannot read a pending image even though it does not participate in pruning.
  *
  * Errors:
- *   FLUX_ERROR_INVALID_ARGUMENT — null frame, or null `images` with count > 0.
- *   FLUX_ERROR_INVALID_STATE    — an image is a pending deferred output, or the
+ *   OPTICS_GFX_ERROR_INVALID_ARGUMENT — null frame, or null `images` with count > 0.
+ *   OPTICS_GFX_ERROR_INVALID_STATE    — an image is a pending deferred output, or the
  *     frame is not recording. */
 typedef struct optics_gfx_frame_reject_pending_inputs_opts {
     const optics_gfx_image *const *images;
@@ -611,4 +611,4 @@ OPTICS_GFX_NODISCARD OPTICS_GFX_API optics_gfx_result optics_gfx_frame_reject_pe
 }
 #endif
 
-#endif /* FLUX_VULKAN_H */
+#endif /* OPTICS_GFX_VULKAN_H */

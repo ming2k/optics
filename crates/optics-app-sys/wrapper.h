@@ -1,5 +1,5 @@
 /*
- * Bindgen translation unit for the aperture bindings: the application shell
- * that runs lens in an iris window.
+ * Bindgen translation unit for the app bindings: the application shell
+ * that runs ui in a native window.
  */
 #include <optics/app.h>

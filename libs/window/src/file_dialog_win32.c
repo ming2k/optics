@@ -1,14 +1,14 @@
 /* file_dialog_win32.c — file picker via the Windows common item dialogs.
  *
- * IFileOpenDialog / IFileSaveDialog (Vista+) driven through the C COM
+ * IFileOpenDialog / IFileSaveDialog (scene+) driven through the C COM
  * vtables (->lpVtbl->), matching the blocking contract of file_dialog.h:
  * Show() runs the modal loop and returns when the user confirms or cancels.
  * Results are converted to file:// URIs (UTF-16 -> UTF-8, backslashes to
  * forward slashes, percent-encoding) — the same shape the portal backend
  * returns on Linux.
  *
- * The dialogs are owned by the active iris window when one exists
- * (iris_win32__dialog_owner, provided by app_win32.c) so they stay modal to
+ * The dialogs are owned by the active window when one exists
+ * (optics_window_win32__dialog_owner, provided by app_win32.c) so they stay modal to
  * the app; without a running app they are top-level.
  *
  * NOT YET VERIFIED ON A REAL WINDOWS MACHINE (zig compile-check only). The
@@ -275,7 +275,7 @@ static WCHAR *shell_item_path(IShellItem *item) {
  * multi-selection out_paths holds a NUL-separated list and *out_bytes_used
  * (optional) the total bytes written EXCLUDING the trailing list
  * terminator — one accounting rule across all three backends
- * (file_dialog.h). Buffer-too-small is a visible IRIS_PICK_TRUNCATED via
+ * (file_dialog.h). Buffer-too-small is a visible OPTICS_WINDOW_PICK_TRUNCATED via
  * *out_truncated: the walk stops, the partial list is NOT reported as a
  * success, and *out_bytes_used reports the full requirement so far so
  * the caller can size the retry. */
@@ -389,7 +389,7 @@ OPTICS_WINDOW_API int optics_window_pick_file(const optics_window_file_dialog_op
     if (!opts)
         return OPTICS_WINDOW_PICK_UNAVAILABLE;
     /* Contract (file_dialog.h): a single-file picker never widens into a
-     * multi-select. multiple_selection belongs to iris_pick_files. */
+     * multi-select. multiple_selection belongs to optics_window_pick_files. */
     optics_window_file_dialog_opts o = *opts;
     o.multiple_selection = false;
     return pick_open(&o, false, false, opts->out_path, opts->out_cap, nullptr, nullptr) == 1

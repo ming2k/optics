@@ -3,8 +3,8 @@ id: ADR-0124
 title: "Decoupled dual-thread UI and presentation engine"
 status: accepted
 date: 2026-10-28
+scope: libs/window, libs/gfx, architecture
 superseded_by: null
-scope: libs/iris, libs/flux, architecture
 negative_knowledge: true
 ---
 

@@ -1,13 +1,13 @@
-//! Safe Rust bindings to **lens** — an immediate-mode UI façade over a
-//! retained-mode core, drawing through flux's Vulkan canvas.
+//! Safe Rust bindings to **ui** — an immediate-mode UI façade over a
+//! retained-mode core, drawing through gfx's Vulkan canvas.
 //!
 //! Three ways in, lowest to highest level:
 //!
 //! 1. **Headless** ([`Ui::headless`]) — logic/layout/interaction with no GPU.
-//! 2. **Embedded** ([`Ui::with_device`] + [`Snapshot::submit`]) — you own a flux
-//!    device and canvas; lens draws the UI into your frame. This is the
-//!    seam for putting UI inside an existing flux/Vulkan app.
-//! 3. **Windowed** — use the `lens-shell-wayland` crate, which owns the window,
+//! 2. **Embedded** ([`Ui::with_device`] + [`Snapshot::submit`]) — you own a gfx
+//!    device and canvas; ui draws the UI into your frame. This is the
+//!    seam for putting UI inside an existing gfx/Vulkan app.
+//! 3. **Windowed** — use the `ui-shell-wayland` crate, which owns the window,
 //!    device, and event loop and just hands you a [`Frame`] each frame.
 //!
 //! ```no_run
@@ -27,17 +27,17 @@ use std::ffi::CString;
 use std::os::raw::c_char;
 use std::ptr;
 
-/// Raw-bindings escape hatch (see the `flux` crate's note). Kept `pub`
+/// Raw-bindings escape hatch (see the `gfx` crate's note). Kept `pub`
 /// deliberately as the one documented unsafe escape hatch.
-/// Raw-bindings escape hatch (see the `flux` crate's note). Kept `pub`
+/// Raw-bindings escape hatch (see the `gfx` crate's note). Kept `pub`
 /// deliberately as the one documented unsafe escape hatch.
 pub use optics_ui_sys as sys;
 
-/// The caret blink period lens applies when a context does not override it
+/// The caret blink period ui applies when a context does not override it
 /// (Optics ADR-0151): one full on/off cycle, so a 530 ms half-cycle — the
 /// cadence X11, Win32, AppKit and GTK converged on.
 ///
-/// Mirrors `LENSI_CARET_BLINK_PERIOD_S` in lens's internal header. It is exposed
+/// Mirrors `OPTICS_UI_CARET_BLINK_PERIOD_S` in ui's internal header. It is exposed
 /// because "restore the default blink" has no entry point: [`Ui::set_caret_blink`]
 /// spells "no blink" as `period <= 0`, so a host that disabled the blink for an
 /// accessibility preference must name a period to bring it back. Without this
@@ -125,21 +125,21 @@ pub struct Ui {
 }
 
 impl Ui {
-    /// Create a headless context (no flux device): immediate-mode logic,
+    /// Create a headless context (no gfx device): immediate-mode logic,
     /// layout and snapshot publication run without a GPU. Activate a snapshot
     /// explicitly to use its geometry for headless interaction.
     pub fn headless() -> Result<Ui, Error> {
         Self::create(ptr::null_mut())
     }
 
-    /// Wrap a live `lens*` you do not own as a borrowed (non-owning) view.
+    /// Wrap a live `ui*` you do not own as a borrowed (non-owning) view.
     /// The returned `Ui` does **not** destroy the context on drop — the
-    /// owner (e.g. iris, for its app context) stays in charge. Use this
-    /// when a host hands you a live lens context (inside a start/setup
+    /// owner (e.g. window, for its app context) stays in charge. Use this
+    /// when a host hands you a live ui context (inside a start/setup
     /// callback) and you want the safe surface without taking ownership.
     ///
     /// # Safety
-    /// `raw` must be a live `lens*` that remains valid for as long as the
+    /// `raw` must be a live `ui*` that remains valid for as long as the
     /// returned `Ui` (or any `&Ui` derived from it) is used, and must not
     /// be used through any other mutable view simultaneously.
     pub unsafe fn borrow_raw(raw: *mut sys::optics_ui) -> Ui {
@@ -149,13 +149,13 @@ impl Ui {
         }
     }
 
-    /// Create a context bound to an existing flux device. The device is
-    /// retained for the lifetime of the `Ui`. Use this to embed lens into
-    /// an app that already manages its own flux/Vulkan setup; pair with
+    /// Create a context bound to an existing gfx device. The device is
+    /// retained for the lifetime of the `Ui`. Use this to embed ui into
+    /// an app that already manages its own gfx/Vulkan setup; pair with
     /// [`Snapshot::submit`] inside your canvas envelope.
     ///
     /// # Safety
-    /// `device` must be a live `optics_gfx_device` obtained from the flux API and
+    /// `device` must be a live `optics_gfx_device` obtained from the gfx API and
     /// must remain valid until this `Ui` is dropped.
     pub unsafe fn with_device(device: *mut sys::optics_gfx_device) -> Result<Ui, Error> {
         Self::create(device)
@@ -192,13 +192,13 @@ impl Ui {
 
     /// Whether one parent received the same retained widget id twice in the
     /// last frame. Repeated data rows should use an explicit widget id or an
-    /// id scope; otherwise Lens can only retain one of the duplicate nodes.
+    /// id scope; otherwise ui can only retain one of the duplicate nodes.
     pub fn has_duplicate_ids(&self) -> bool {
         // SAFETY: self.raw is live; the call only reads frame diagnostics.
         unsafe { sys::optics_ui_has_duplicate_ids(self.raw as *const sys::optics_ui) }
     }
 
-    /// Deliver a drag-and-drop payload into the Lens UI at the given position.
+    /// Deliver a drag-and-drop payload into the UI at the given position.
     pub fn deliver_drop(&mut self, payload: &str, pos: (f32, f32)) {
         let c = cstr(payload);
         let pt = sys::optics_gfx_point { x: pos.0, y: pos.1 };
@@ -444,7 +444,7 @@ impl Ui {
     /// Accessibility reduced-motion switch. While enabled, every eased value
     /// resolves to its target within one frame — no fades or slides — and
     /// [`Ui::anim_pending`] stays false. The host owns the policy (user
-    /// preference); lens executes it. Default false.
+    /// preference); ui executes it. Default false.
     pub fn set_reduced_motion(&mut self, reduced: bool) {
         // SAFETY: raw is a live context.
         unsafe { sys::optics_ui_set_reduced_motion(self.raw, reduced) };
@@ -472,7 +472,7 @@ impl Ui {
     /// Current caret blink phase: `true` while the caret is in the visible half
     /// of its blink cycle (Optics ADR-0151).
     ///
-    /// Lens owns the blink clock because only lens can make it a *damage*
+    /// ui owns the blink clock because only ui can make it a *damage*
     /// signal. The clock advances once per build by `Input::dt_seconds`, so a
     /// host paced from the display pulse gets a display-sampled blink for free,
     /// and a host that skipped frames resumes on the phase it would have
@@ -489,11 +489,11 @@ impl Ui {
     /// Override the caret blink period in seconds (Optics ADR-0151).
     ///
     /// `period <= 0` (or a non-finite value) *disables* the blink: the caret
-    /// stays solid and lens reports no caret damage at all, which is how
+    /// stays solid and ui reports no caret damage at all, which is how
     /// reduced motion is expressed. Use [`DEFAULT_CARET_BLINK_PERIOD_S`] to
     /// restore the library default, since there is no separate "reset" call.
     ///
-    /// Accessibility preference is host policy, so the host decides; lens
+    /// Accessibility preference is host policy, so the host decides; ui
     /// executes.
     pub fn set_caret_blink(&mut self, period_seconds: f32) {
         // SAFETY: raw is live; the value is a plain float.
@@ -550,7 +550,7 @@ impl Ui {
         unsafe { sys::optics_ui_request_paste(self.raw) };
     }
 
-    /// Deliver clipboard text into lens; the focused text widget consumes it
+    /// Deliver clipboard text into ui; the focused text widget consumes it
     /// on the next frame's build.
     pub fn paste(&mut self, text: &str) {
         let opts = sys::optics_ui_paste_opts {
@@ -565,7 +565,7 @@ impl Ui {
 impl Drop for Ui {
     fn drop(&mut self) {
         if self.borrowed {
-            return; // the owner (e.g. iris) destroys the context
+            return; // the owner (e.g. window) destroys the context
         }
         // SAFETY: raw was created by optics_ui_create and not yet destroyed.
         unsafe { sys::optics_ui_release(self.raw) };
@@ -589,8 +589,8 @@ pub struct Frame<'frame> {
 }
 
 impl<'frame> Frame<'frame> {
-    /// Wrap a raw `lens` that the caller has already `optics_ui_begin`'d. Used by
-    /// `lens-shell-wayland`, whose host owns the begin/end envelope.
+    /// Wrap a raw `ui` that the caller has already `optics_ui_begin`'d. Used by
+    /// `ui-shell-wayland`, whose host owns the begin/end envelope.
     ///
     /// # Safety
     /// `ui` must be a live context currently inside a `optics_ui_begin` /
@@ -700,7 +700,7 @@ impl<'frame> Frame<'frame> {
     }
 
     /// Shape `text` with the active theme font and return its logical extent.
-    /// This is the same measurement seam used by Lens widgets during their
+    /// This is the same measurement seam used by ui widgets during their
     /// intrinsic-size pass.
     pub fn measure_text(&self, text: &str, size: f32) -> TextMetrics {
         let text = cstr(text);
@@ -728,7 +728,7 @@ impl<'frame> Frame<'frame> {
     }
 
     /// Ask the host for clipboard text. The payload is delivered into
-    /// lens's paste queue (same frame or a later one, platform-dependent);
+    /// ui's paste queue (same frame or a later one, platform-dependent);
     /// drain it with [`Frame::take_paste`].
     pub fn request_paste(&mut self) {
         // SAFETY: ui is live inside a frame.
@@ -736,11 +736,11 @@ impl<'frame> Frame<'frame> {
     }
 
     /// Drain a pending paste payload (one-shot). For app-owned editing
-    /// surfaces that render text outside lens widgets; lens text widgets
+    /// surfaces that render text outside ui widgets; ui text widgets
     /// consume their own paste internally, so only call this while the
     /// app's own surface is the paste target.
     pub fn take_paste(&mut self) -> Option<String> {
-        // The C staging buffer caps payloads at 1 MiB (LENSI_PASTE_MAX).
+        // The C staging buffer caps payloads at 1 MiB (OPTICS_UI_PASTE_MAX).
         let mut buf = vec![0u8; 1024 * 1024];
         let opts = sys::optics_ui_take_paste_opts {
             dst: buf.as_mut_ptr() as *mut c_char,
@@ -855,7 +855,7 @@ impl<'frame> Frame<'frame> {
 
     /// Center `body` on both axes inside a `width` × `height` box.
     ///
-    /// Lens containers align only on the cross axis ([`LayoutOpts::cross`]);
+    /// ui containers align only on the cross axis ([`LayoutOpts::cross`]);
     /// the main axis always packs from the start, so a bare label inside a
     /// fixed-size column sits at the top and a bare label inside a fixed-size
     /// row sits at the left. `centered` supplies the missing half of the
@@ -1028,7 +1028,7 @@ impl<'frame> Frame<'frame> {
     ///
     /// # Safety
     ///
-    /// Same contract as [`Ui::image`]: `image` must be a live `optics_gfx_image`
+    /// Same contract as [`Self::image`]: `image` must be a live `optics_gfx_image`
     /// owned by this `Ui`'s device, alive and unmodified for the whole call.
     pub unsafe fn image_tinted(
         &mut self,
@@ -1675,7 +1675,7 @@ impl<'frame> Frame<'frame> {
 
 /// A fixed-capacity, NUL-terminated UTF-8 edit buffer for [`Frame::textfield`].
 ///
-/// lens edits the buffer in place (C string semantics), so Rust's `String`
+/// ui edits the buffer in place (C string semantics), so Rust's `String`
 /// can't back it directly. `TextBuf` owns a `Vec<u8>` of fixed capacity and
 /// hands the C side a stable pointer.
 pub struct TextBuf {
@@ -1704,7 +1704,7 @@ impl TextBuf {
 
     /// Replace the buffer contents with `text`, preserving the capacity.
     /// Truncated to `capacity - 1` bytes (room for the NUL terminator). Use to
-    /// reset a persistent buffer the host owns alongside a textfield — lens
+    /// reset a persistent buffer the host owns alongside a textfield — ui
     /// keeps its cursor clamped to the new length on the next frame. Follow
     /// with [`Frame::textfield_set_caret`] when the caret should land
     /// somewhere specific instead (e.g. the end of a Tab completion).
@@ -1733,12 +1733,12 @@ impl TextBuf {
     }
 }
 
-/// A lens operation failed.
+/// A ui operation failed.
 ///
-/// Carries the *flux diagnostic*, not just the result code. The code alone
+/// Carries the *gfx diagnostic*, not just the result code. The code alone
 /// (`OPTICS_GFX_ERROR_INVALID_ARGUMENT`) cannot distinguish a degenerate rect from an
 /// out-of-bounds one from a double-begun pass, and every one of those needs a
-/// different fix. Flux records which entry point failed, at which source line,
+/// different fix. gfx records which entry point failed, at which source line,
 /// with a human-readable message, and discards it unless the caller reads it at
 /// the failure site — so the read has to happen here, in the constructor, and
 /// the detail has to travel with the error.
@@ -1749,30 +1749,30 @@ impl TextBuf {
 #[derive(Debug)]
 pub enum Error {
     /// `optics_ui_create` returned a non-OK `optics_gfx_result`.
-    Create(FluxDiagnostic),
+    Create(GfxDiagnostic),
     /// Snapshot publication or execution returned a non-OK `optics_gfx_result`.
-    Render(FluxDiagnostic),
+    Render(GfxDiagnostic),
 }
 
-/// The flux diagnostic behind a failed lens call.
+/// The gfx diagnostic behind a failed ui call.
 ///
 /// `optics_ui_sys` binds the enum from its own build of the C headers, so its
 /// `optics_gfx_result` is a nominally distinct type from `optics_gfx::sys`'s even though both
 /// mirror the same C enum. Bridging on the discriminant would need a
 /// `TryFrom<i32>` that bindgen does not emit, and would be a conversion whose
-/// only purpose is to satisfy the type checker. Carrying the code plus flux's
+/// only purpose is to satisfy the type checker. Carrying the code plus gfx's
 /// own rendered diagnostic instead keeps the information and skips the dance: the
 /// message is what a human needs, and it comes from the same thread-local slot
 /// either way.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FluxDiagnostic {
-    /// The `optics_gfx_result` discriminant, as flux reported it.
+pub struct GfxDiagnostic {
+    /// The `optics_gfx_result` discriminant, as gfx reported it.
     pub code: i32,
-    /// `"{FLUX_ERROR_...}"` — the enum's own name, so logs stay greppable.
+    /// `"{OPTICS_GFX_ERROR_...}"` — the enum's own name, so logs stay greppable.
     pub code_name: String,
-    /// Flux entry point that failed, e.g. `"flux_canvas_begin_pass"`.
+    /// gfx entry point that failed, e.g. `"optics_gfx_canvas_begin"`.
     pub function: Option<String>,
-    /// Source file inside flux, and the line in it.
+    /// Source file inside gfx, and the line in it.
     pub file: Option<String>,
     pub line: i32,
     /// Human-readable detail: which argument, which bound, which state.
@@ -1781,7 +1781,7 @@ pub struct FluxDiagnostic {
     pub backend_code: i32,
 }
 
-impl FluxDiagnostic {
+impl GfxDiagnostic {
     /// Build a diagnostic from a raw result, for tests and for any binding that
     /// needs to render a failure it captured itself.
     ///
@@ -1794,12 +1794,12 @@ impl FluxDiagnostic {
     }
 
     fn read(rc: sys::optics_gfx_result) -> Self {
-        /* Read the thread-local slot *here*, at the failure site: flux overwrites
+        /* Read the thread-local slot *here*, at the failure site: gfx overwrites
          * it on the next failing call, so a later read would describe a different
          * error — or none. `last()` returns `None` when the slot is empty or
          * holds an unrelated code, which is the "no detail recorded" case. */
         match optics_gfx::ErrorInfo::last() {
-            Some(info) => FluxDiagnostic {
+            Some(info) => GfxDiagnostic {
                 code: rc as i32,
                 code_name: format!("{rc:?}"),
                 function: info.function,
@@ -1808,7 +1808,7 @@ impl FluxDiagnostic {
                 message: info.message,
                 backend_code: info.backend_code,
             },
-            None => FluxDiagnostic {
+            None => GfxDiagnostic {
                 code: rc as i32,
                 code_name: format!("{rc:?}"),
                 function: None,
@@ -1821,7 +1821,7 @@ impl FluxDiagnostic {
     }
 }
 
-impl std::fmt::Display for FluxDiagnostic {
+impl std::fmt::Display for GfxDiagnostic {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.code_name)?;
         if let Some(function) = &self.function {
@@ -1838,24 +1838,21 @@ impl std::fmt::Display for FluxDiagnostic {
 }
 
 impl Error {
-    /// Build from a flux result, reading the thread-local diagnostic while it
+    /// Build from a gfx result, reading the thread-local diagnostic while it
     /// still describes *this* call.
     ///
     /// `optics_gfx::ErrorInfo::last_if` declines a stale diagnostic whose code belongs
-    /// to a different call, so a missing detail means "flux did not record one
+    /// to a different call, so a missing detail means "gfx did not record one
     /// for this code" rather than "the detail was lost on the way here".
-    pub(crate) fn from_result(
-        ctor: fn(FluxDiagnostic) -> Self,
-        rc: sys::optics_gfx_result,
-    ) -> Self {
-        ctor(FluxDiagnostic::read(rc))
+    pub(crate) fn from_result(ctor: fn(GfxDiagnostic) -> Self, rc: sys::optics_gfx_result) -> Self {
+        ctor(GfxDiagnostic::read(rc))
     }
 }
 
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Error::Create(info) => write!(f, "lens_create failed: {info}"),
+            Error::Create(info) => write!(f, "optics_ui_create failed: {info}"),
             Error::Render(info) => write!(f, "snapshot operation failed: {info}"),
         }
     }
@@ -1863,16 +1860,16 @@ impl std::fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
-/// Register an SVG string as a runtime lens icon (see `optics_ui_icon_register_svg`).
+/// Register an SVG string as a runtime ui icon (see `optics_ui_icon_register_svg`).
 ///
 /// The returned id continues where the built-in [`Icon`] enum ends
 /// (`>= OPTICS_UI_ICON_COUNT`). Registration is process-global, never reclaimed,
-/// and — like the rest of lens — not thread-safe: call from the UI thread.
+/// and — like the rest of ui — not thread-safe: call from the UI thread.
 /// The SVG's own paint colours are ignored; the glyph draws in the theme
 /// colour, stroke-only icons in the 2/24 weight of the built-in set.
 pub fn register_svg_icon(svg: &str) -> Option<sys::optics_ui_icon_id> {
     let svg = cstr(svg);
-    // SAFETY: svg outlives the call; lens keeps no pointer into it.
+    // SAFETY: svg outlives the call; ui keeps no pointer into it.
     let id = unsafe { sys::optics_ui_icon_register_svg(svg.as_ptr()) };
     // OPTICS_UI_ICON_INVALID is (optics_ui_icon_id)-1; the newtype binding makes it
     // plain data (u32::MAX), so this comparison is sound.
@@ -1899,7 +1896,7 @@ pub fn default_skin(kind: WidgetKind) -> SkinFn {
 /// position/velocity) here; the library never integrates anything.
 ///
 /// # Safety
-/// `node` must be a live lens node obtained inside the current frame (e.g.
+/// `node` must be a live ui node obtained inside the current frame (e.g.
 /// the node passed to a skin callback); the returned pointer is valid until
 /// the node is reclaimed by the store GC.
 pub unsafe fn skin_scratch(ui: *mut sys::optics_ui, node: *mut sys::optics_ui_node) -> *mut f32 {
@@ -1958,7 +1955,7 @@ pub unsafe fn skin_border(
 ///
 /// # Safety
 /// `ui` and `node` must be the values the skin was called with, during
-/// that call; lens copies the text into its frame arena.
+/// that call; ui copies the text into its frame arena.
 pub unsafe fn skin_text(
     ui: *mut sys::optics_ui,
     node: *mut sys::optics_ui_node,
@@ -2035,7 +2032,7 @@ pub unsafe fn skin_clip_pop(ui: *mut sys::optics_ui, node: *mut sys::optics_ui_n
     unsafe { sys::optics_ui_skin_clip_pop(ui, node) };
 }
 
-/// The lens version string reported by the linked C library.
+/// The ui version string reported by the linked C library.
 pub fn version() -> &'static str {
     // SAFETY: optics_ui_version_string returns a static NUL-terminated string.
     let p = unsafe { sys::optics_ui_version_string() };
@@ -2045,7 +2042,7 @@ pub fn version() -> &'static str {
 }
 
 /// The linked library's packed version number — identical layout to
-/// flux's (`major << 16 | minor << 8 | patch`).
+/// gfx's (`major << 16 | minor << 8 | patch`).
 pub fn version_number() -> u32 {
     unsafe { sys::optics_ui_version_number() }
 }

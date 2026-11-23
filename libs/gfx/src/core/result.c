@@ -3,38 +3,38 @@
 #include <stdio.h>
 #include <string.h>
 
-/* thread_local is a C23 keyword; no <threads.h> needed (MinGW/MSVC lack it). */
+/* thread_local is a C23 keyword. */
 
 const char *optics_gfx_result_string(optics_gfx_result r) {
     switch (r) {
     case OPTICS_GFX_OK:
-        return "FLUX_OK";
+        return "OPTICS_GFX_OK";
     case OPTICS_GFX_ERROR_INVALID_ARGUMENT:
-        return "FLUX_ERROR_INVALID_ARGUMENT";
+        return "OPTICS_GFX_ERROR_INVALID_ARGUMENT";
     case OPTICS_GFX_ERROR_OUT_OF_MEMORY:
-        return "FLUX_ERROR_OUT_OF_MEMORY";
+        return "OPTICS_GFX_ERROR_OUT_OF_MEMORY";
     case OPTICS_GFX_ERROR_OUT_OF_RANGE:
-        return "FLUX_ERROR_OUT_OF_RANGE";
+        return "OPTICS_GFX_ERROR_OUT_OF_RANGE";
     case OPTICS_GFX_ERROR_INVALID_STATE:
-        return "FLUX_ERROR_INVALID_STATE";
+        return "OPTICS_GFX_ERROR_INVALID_STATE";
     case OPTICS_GFX_ERROR_UNSUPPORTED:
-        return "FLUX_ERROR_UNSUPPORTED";
+        return "OPTICS_GFX_ERROR_UNSUPPORTED";
     case OPTICS_GFX_ERROR_BACKEND_FAILURE:
-        return "FLUX_ERROR_BACKEND_FAILURE";
+        return "OPTICS_GFX_ERROR_BACKEND_FAILURE";
     case OPTICS_GFX_ERROR_DEVICE_LOST:
-        return "FLUX_ERROR_DEVICE_LOST";
+        return "OPTICS_GFX_ERROR_DEVICE_LOST";
     case OPTICS_GFX_ERROR_SURFACE_LOST:
-        return "FLUX_ERROR_SURFACE_LOST";
+        return "OPTICS_GFX_ERROR_SURFACE_LOST";
     case OPTICS_GFX_ERROR_TIMEOUT:
-        return "FLUX_ERROR_TIMEOUT";
+        return "OPTICS_GFX_ERROR_TIMEOUT";
     case OPTICS_GFX_ERROR_BUSY:
-        return "FLUX_ERROR_BUSY";
+        return "OPTICS_GFX_ERROR_BUSY";
     }
-    return "FLUX_ERROR_UNKNOWN";
+    return "OPTICS_GFX_ERROR_UNKNOWN";
 }
 
 static thread_local optics_gfx_error_info g_last_error;
-/* Backing store for formatted messages (FLUX_FAILF). The error slot borrows
+/* Backing store for formatted messages (OPTICS_GFX_FAILF). The error slot borrows
  * this buffer, so its contents stay valid exactly as the public contract
  * states: until the next non-OK return on this thread. */
 static thread_local char g_error_message[512];
@@ -75,8 +75,8 @@ void optics_gfx_set_last_errorf(optics_gfx_result code, const char *function, co
 }
 
 /* Public seam for a consumer library's own validation failures (see core.h).
- * Delegates to the same slot so a caller's `flux_get_last_error` cannot tell
- * flux-native and consumer-detected failures apart — which is the point: the
+ * Delegates to the same slot so a caller's `optics_gfx_get_last_error` cannot tell
+ * gfx-native and consumer-detected failures apart — which is the point: the
  * binding reads one contract either way. */
 void optics_gfx_set_diagnostic(const optics_gfx_error_info *info) {
     if (!info)

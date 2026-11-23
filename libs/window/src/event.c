@@ -1,6 +1,6 @@
 /* event.c — the shared pre-fold event seam (ADR-0107).
  *
- * State is main-thread-only by construction: iris_app_run blocks the
+ * State is main-thread-only by construction: optics_window_run blocks the
  * calling thread and owns the only seam. See event_internal.h for the
  * contract and the pipeline the backends follow.
  */

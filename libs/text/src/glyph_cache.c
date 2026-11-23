@@ -135,8 +135,8 @@ static uint32_t round_pow2(uint32_t v, uint32_t lo, uint32_t hi) {
 }
 
 /* Every allocation in this file goes through the caller's allocator when there
- * is a device, so a host's custom flux_allocator sees glyph's memory and the
- * ledger attributes it to glyph/core rather than to flux (ADR-0135). A
+ * is a device, so a host's custom optics_gfx_allocator sees glyph's memory and the
+ * ledger attributes it to text/core rather than to gfx (ADR-0135). A
  * device-less cache (measure-only context) has neither, and libc is correct. */
 static void *gc_alloc(optics_gfx_device *d, size_t bytes) {
     if (!d)
@@ -146,7 +146,7 @@ static void *gc_alloc(optics_gfx_device *d, size_t bytes) {
                                 &(optics_gfx_device_alloc_opts){
                                     .type = OPTICS_GFX_TYPE_DEVICE_ALLOC_OPTS,
                                     .bytes = bytes,
-                                    .owner = "glyph/core",
+                                    .owner = "text/core",
                                     .kind = "cache",
                                     .scope = OPTICS_GFX_SCOPE_CONTEXT,
                                 },
@@ -165,7 +165,7 @@ static void gc_free(optics_gfx_device *d, void *p) {
     optics_gfx_device_free(d, &(optics_gfx_device_free_opts){
                                   .type = OPTICS_GFX_TYPE_DEVICE_FREE_OPTS,
                                   .ptr = p,
-                                  .owner = "glyph/core",
+                                  .owner = "text/core",
                                   .kind = "cache",
                                   .scope = OPTICS_GFX_SCOPE_CONTEXT,
                               });

@@ -4,7 +4,7 @@
  * Consumes flattened contours and produces an analytic coverage plane: for each
  * pixel, the exact area of the region the fill rule selects. This is the
  * algorithm a coverage backend is built on, and it is deliberately NOT the
- * acceptance harness's method — `tests/flux/coverage_harness.c` clips the
+ * acceptance harness's method — `tests/gfx/coverage_harness.c` clips the
  * polygon to each pixel and sums signed areas, which is easy to trust and far
  * too slow to use. Overlapping the two would make every gate circular; they are
  * kept independent and compared instead (`test_coverage_raster`).

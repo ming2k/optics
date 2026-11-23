@@ -3,6 +3,9 @@ id: ADR-0033
 title: "Lens text seam — draw and shape through flux-text, no in-tree font engine"
 status: accepted
 date: 2026-07-21
+scope: ui (L2 toolkit)
+superseded_by: null
+negative_knowledge: true
 ---
 
 # ADR-0033: Lens text seam — draw and shape through flux-text, no in-tree font engine

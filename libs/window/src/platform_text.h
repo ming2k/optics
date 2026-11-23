@@ -1,7 +1,7 @@
 /* platform_text.h — shared UTF-8 helpers for the platform backends.
  *
  * Every backend funnels native text (IME commits, preedits, clipboard,
- * drops) into the same fixed-size iris_input buffers. Truncating those at a
+ * drops) into the same fixed-size optics_window_input buffers. Truncating those at a
  * raw byte count can split a multi-byte sequence and produce invalid UTF-8,
  * which downstream consumers (D-Bus string marshalling, text shapers) are
  * entitled to reject. These helpers keep every truncation on a code-point
@@ -9,7 +9,7 @@
  * local utf8_floor_boundary was the reference behaviour).
  *
  * Pure and dependency-free; compiles on every platform so the logic is
- * unit-testable headlessly (tests/iris/test_platform_text.c).
+ * unit-testable headlessly (tests/window/test_platform_text.c).
  */
 #ifndef OPTICS_WINDOW_PLATFORM_TEXT_H
 #define OPTICS_WINDOW_PLATFORM_TEXT_H
@@ -45,13 +45,13 @@ bool optics_window_text_memento_update(char **saved, size_t *saved_len, uint32_t
 void optics_window_text_memento_clear(char **saved, size_t *saved_len, uint32_t *saved_cursor);
 
 /* Is `cp` a code point the backends must deliver as COMMITTED TEXT
- * (iris_input.text_utf8)? False for control characters: the C0 range
+ * (optics_window_input.text_utf8)? False for control characters: the C0 range
  * (Return \r, Tab \t, Backspace \b, …) AND the DEL character 0x7f.
  *
  * DEL is the subtle one: xkb maps the Delete keysym (0xffff) and Win32
  * maps Ctrl+Backspace's WM_CHAR to exactly U+007F, so without the second
  * half of the test every Delete press would ALSO deliver "\x7f" as text —
- * the key event already carries the intent (IRIS_KEY_DELETE), and the
+ * the key event already carries the intent (OPTICS_WINDOW_KEY_DELETE), and the
  * invisible byte would corrupt editor buffers. Cocoa's characters filter
  * has always excluded it ("Control characters (Return "\r", Tab "\t",
  * DEL 0x7f) are not text"); this predicate pins the same rule for all
@@ -62,4 +62,4 @@ void optics_window_text_memento_clear(char **saved, size_t *saved_len, uint32_t 
  * (platform_internal.h) requires them to agree on what is text. */
 bool optics_window_cp_is_text(uint32_t cp);
 
-#endif /* IRIS_PLATFORM_TEXT_H */
+#endif /* OPTICS_WINDOW_PLATFORM_TEXT_H */

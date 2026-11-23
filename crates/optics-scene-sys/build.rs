@@ -33,7 +33,7 @@ fn main() {
         )
         .layout_tests(true)
         .generate()
-        .expect("bindgen failed to generate vista bindings");
+        .expect("bindgen failed to generate scene bindings");
 
     write_bindings(&bindings);
 }

@@ -3,7 +3,7 @@
 # optics_test: assertion accounting only. No Vulkan headers, no library
 # dependencies, so every test layer can link it.
 #
-# flux_test: Vulkan device fixtures shared by flux/prism/vista tests. It is
+# optics_gfx_test: Vulkan device fixtures shared by gfx/material/scene tests. It is
 # separate on purpose: a CPU-only test must not inherit a Vulkan link line just
 # to reach an assertion macro.
 

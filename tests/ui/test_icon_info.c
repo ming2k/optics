@@ -1,16 +1,16 @@
 /*
- * test_icon_info.c — lens_icon_info() public read access to the icon table.
+ * test_icon_info.c — optics_ui_icon_info() public read access to the icon table.
  *
  * Contract under test (icon.h):
  *   - built-in ids resolve to non-NULL descriptors whose cmd count > 0;
- *   - LENS_ICON_INVALID (and any negative id) resolves to NULL;
- *   - runtime SVG ids (>= LENS_ICON_COUNT) resolve through the registry;
+ *   - OPTICS_UI_ICON_INVALID (and any negative id) resolves to NULL;
+ *   - runtime SVG ids (>= OPTICS_UI_ICON_COUNT) resolve through the registry;
  *   - the mode out-param is optional and, when given, receives the
  *     built-in table's render mode (0 fill / 1 stroke).
  */
 
-#include "lens_test.h"
 #include "optics_test.h"
+#include "ui_test.h"
 #include <optics/ui.h>
 #include <optics/ui/icon.h>
 #include <string.h>

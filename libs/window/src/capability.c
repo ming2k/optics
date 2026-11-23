@@ -1,7 +1,7 @@
-/* capability.c — static feature discovery (see iris/capability.h).
+/* capability.c — static feature discovery (see window/capability.h).
  *
  * One translation unit, no backend headers: the backend answers are
- * compile-time constants chosen by the IRIS_BACKEND_* defines that meson
+ * compile-time constants chosen by the OPTICS_WINDOW_BACKEND_* defines that meson
  * sets per target (ADR-0044). Keeping every capability answer in this
  * single table is the point — a capability that is not wired here is
  * reported as unsupported everywhere, consistently, instead of being
@@ -39,20 +39,20 @@ const char *optics_window_backend_name(void) {
  * and Cocoa reports integer backingScaleFactor (ADR-0067). */
 
 static const int irisi_caps_wayland[] = {
-    1, /* IRIS_CAP_WINDOW_CONTROL  */
-    1, /* IRIS_CAP_THEME_WATCH     */
-    1, /* IRIS_CAP_A11Y            */
-    1, /* IRIS_CAP_FILE_DIALOG     */
-    1, /* IRIS_CAP_CLIPBOARD       */
-    1, /* IRIS_CAP_PRIMARY_SELECTION */
-    1, /* IRIS_CAP_TABLET          */
-    1, /* IRIS_CAP_DROP_TARGET     */
-    0, /* IRIS_CAP_DECORATIONS — runtime: requires the compositor's
+    1, /* OPTICS_WINDOW_CAP_WINDOW_CONTROL  */
+    1, /* OPTICS_WINDOW_CAP_THEME_WATCH     */
+    1, /* OPTICS_WINDOW_CAP_A11Y            */
+    1, /* OPTICS_WINDOW_CAP_FILE_DIALOG     */
+    1, /* OPTICS_WINDOW_CAP_CLIPBOARD       */
+    1, /* OPTICS_WINDOW_CAP_PRIMARY_SELECTION */
+    1, /* OPTICS_WINDOW_CAP_TABLET          */
+    1, /* OPTICS_WINDOW_CAP_DROP_TARGET     */
+    0, /* OPTICS_WINDOW_CAP_DECORATIONS — runtime: requires the compositor's
         * xdg-decoration protocol; the static answer is "not guaranteed".
         * A runtime-refined variant can flip this when the globals land. */
-    0, /* IRIS_CAP_FRACTIONAL_SCALE */
-    1, /* IRIS_CAP_DRAG_SOURCE     */
-    1, /* IRIS_CAP_ACTIVATION_TOKEN */
+    0, /* OPTICS_WINDOW_CAP_FRACTIONAL_SCALE */
+    1, /* OPTICS_WINDOW_CAP_DRAG_SOURCE     */
+    1, /* OPTICS_WINDOW_CAP_ACTIVATION_TOKEN */
 };
 
 #if defined(OPTICS_WINDOW_BACKEND_WIN32)
@@ -94,7 +94,7 @@ static const int irisi_caps_cocoa[] = {
 /* Compile-time guard: every table must answer every capability. A new
  * enum value that is not wired into all three tables fails the build
  * here rather than reading out of bounds at runtime. (The no-backend
- * fallback answers 0 inline in iris_supports below.) */
+ * fallback answers 0 inline in optics_window_supports below.) */
 #if defined(OPTICS_WINDOW_BACKEND_WIN32)
 _Static_assert(sizeof(irisi_caps_win32) == sizeof(irisi_caps_wayland), "capability table drift");
 #endif

@@ -3,7 +3,7 @@ id: ADR-0145
 title: "Wayland listener slots are a pinned, mechanically verified contract"
 status: accepted
 date: 2026-11-04
-scope: [iris, tools]
+scope: [window, tools]
 superseded_by: null
 negative_knowledge: true
 ---

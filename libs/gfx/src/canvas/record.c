@@ -204,7 +204,7 @@ void canvas_record_retain_sampler(optics_gfx_canvas *c, optics_gfx_sampler *samp
 /*  pointer, never copied, so a recorded segment's baked UVs are only  */
 /*  faithful while the producer has not rearranged the buffer's        */
 /*  texels. Producers tag runs with a content generation               */
-/*  (flux_glyph_run_host_atlas_desc); the canvas remembers the newest  */
+/*  (optics_gfx_glyph_run_host_atlas_desc); the canvas remembers the newest  */
 /*  generation seen per buffer and replay refuses older segments.      */
 /* ------------------------------------------------------------------ */
 
@@ -249,16 +249,17 @@ void canvas_emit(optics_gfx_canvas *c, canvas_pipe_id id, const optics_gfx_canva
 bool optics_gfx_canvas_cache_begin(optics_gfx_canvas *c) {
     if (!c || !c->recording) {
         OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_STATE,
-                        "flux_canvas_cache_begin outside begin/end frame");
+                        "optics_gfx_canvas_cache_begin outside begin/end frame");
         return false;
     }
     if (c->record_depth >= OPTICS_GFX_CANVAS_RECORD_DEPTH_CAP) {
-        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_OUT_OF_RANGE, "flux_canvas_cache_begin nesting too deep");
+        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_OUT_OF_RANGE,
+                        "optics_gfx_canvas_cache_begin nesting too deep");
         return false;
     }
     optics_gfx_canvas_record_slot *s = slot_alloc(c);
     if (!s) {
-        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_OUT_OF_MEMORY, "flux_canvas_cache_begin: no slot");
+        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_OUT_OF_MEMORY, "optics_gfx_canvas_cache_begin: no slot");
         return false;
     }
     s->owner = c;
@@ -277,7 +278,7 @@ optics_gfx_canvas_cache_entry optics_gfx_canvas_cache_end(optics_gfx_canvas *c) 
     optics_gfx_canvas_cache_entry null_rec = OPTICS_GFX_CANVAS_CACHE_ENTRY_INIT;
     if (!c || c->record_depth == 0) {
         OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_STATE,
-                        "flux_canvas_cache_end without begin_record");
+                        "optics_gfx_canvas_cache_end without begin_record");
         return null_rec;
     }
     optics_gfx_canvas_record_slot *s = c->record_stack[--c->record_depth];
@@ -331,7 +332,7 @@ bool optics_gfx_canvas_cache_replay(optics_gfx_canvas *c, optics_gfx_canvas_cach
         return false;
     /* Host-atlas check: a glyph batch's baked UVs only stay faithful while
      * the producer has not rearranged the buffer since the segment was
-     * captured (flux_glyph_run_host_atlas_desc). Refuse up front so a stale
+     * captured (optics_gfx_glyph_run_host_atlas_desc). Refuse up front so a stale
      * segment draws nothing rather than mis-sampling moved texels. */
     for (uint32_t i = 0; i < s->op_count; ++i) {
         const optics_gfx_record_op *op = &s->ops[i];

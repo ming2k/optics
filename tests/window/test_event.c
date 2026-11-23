@@ -5,8 +5,8 @@
  * helper is hidden-visibility, so event.c is compiled directly (as
  * test_a11y_util does for a11y_util.c).
  *
- * Also pins the public wiring: iris_app_opts.on_event exists and accepts
- * an iris_event_fn, and the iris/event.h vocabulary compiles under C23.
+ * Also pins the public wiring: optics_window_opts.on_event exists and accepts
+ * an optics_window_event_fn, and the window/event.h vocabulary compiles under C23.
  */
 
 #include <optics/window/event.h>
@@ -115,7 +115,7 @@ int main(void) {
     optics_window_opts cfg = {.on_event = seam_cb};
     OT_EXPECT(cfg.on_event == seam_cb);
 
-    /* ---- Vocabulary sanity (lens values reused, not redefined) ---- */
+    /* ---- Vocabulary sanity (ui values reused, not redefined) ---- */
     optics_window_event k = {
         .type = OPTICS_WINDOW_EVENT_KEY,
         .keyboard = {.key = OPTICS_WINDOW_KEY_F5, .pressed = true, .mods = OPTICS_WINDOW_MOD_CTRL}};

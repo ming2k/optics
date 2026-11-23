@@ -1,7 +1,7 @@
 /* test_audit_fixes.c — regression coverage for the audit round. */
 
-#include "lens_test.h"
 #include "optics_test.h"
+#include "ui_test.h"
 #include <optics/ui.h>
 #include <string.h>
 
@@ -299,7 +299,7 @@ static void test_empty_label_current_id_matches(void) {
     optics_ui_begin(ui, &IN0);
     optics_ui_button(ui, &(optics_ui_button_opts){.label = ""});
     optics_ui_test_end(ui);
-    /* lens_current_id with an empty label must resolve the node the build
+    /* optics_ui_current_id with an empty label must resolve the node the build
      * produced (the sentinel hash), not the raw scope id. */
     OT_EXPECT(optics_ui_find(ui, optics_ui_current_id(ui, "")) != nullptr);
 

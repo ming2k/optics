@@ -3,6 +3,9 @@ id: ADR-0007
 title: "Hand-rolled Vulkan slab allocator (no VMA)"
 status: accepted
 date: 2026-05-19
+scope: unrecorded
+superseded_by: null
+negative_knowledge: false
 ---
 
 # ADR-0007: Hand-rolled Vulkan slab allocator (no VMA)

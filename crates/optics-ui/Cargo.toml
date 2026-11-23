@@ -1,6 +1,6 @@
 [package]
 name = "optics-ui"
-description = "Safe idiomatic Rust bindings to lens, the Optics immediate-mode UI toolkit"
+description = "Safe idiomatic Rust bindings to ui, the Optics immediate-mode UI toolkit"
 publish = false
 links = "optics_ui_rs"
 version.workspace = true
@@ -15,3 +15,9 @@ optics-gfx = { workspace = true }
 
 [build-dependencies]
 optics-build = { workspace = true }
+
+[features]
+# Force a static link of the Optics archives; the default links the shared
+# objects (docs/how-to/choose-a-static-or-shared-link.md). OPTICS_STATIC /
+# OPTICS_DYNAMIC in the environment override it.
+static = ["optics-ui-sys/static", "optics-gfx/static"]

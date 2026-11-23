@@ -3,7 +3,7 @@
  *
  * The pools previously capped at a fixed entry count, which at 3072x1920 with
  * RGBA16F transients (45 MiB each) admitted 1.4 GiB of resident image memory.
- * This test drives real allocations through `flux_effect_blur` at a size large
+ * This test drives real allocations through `optics_gfx_effect_blur` at a size large
  * enough that the byte budget — not the entry count — is the binding
  * constraint, and asserts the pool stays inside the documented ceiling.
  *

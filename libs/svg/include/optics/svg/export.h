@@ -1,8 +1,8 @@
 /*
- * reticle/export.h — single source of truth for symbol visibility.
+ * svg/export.h — single source of truth for symbol visibility.
  *
- * Every public reticle header includes this instead of restating the macro
- * (the lens/transit export.h convention; a drifted export macro is a Windows
+ * Every public svg header includes this instead of restating the macro
+ * (the ui/motion export.h convention; a drifted export macro is a Windows
  * link error).
  */
 #ifndef OPTICS_SVG_EXPORT_H
@@ -20,4 +20,4 @@
 #define OPTICS_SVG_API
 #endif
 
-#endif /* RETICLE_EXPORT_H */
+#endif /* OPTICS_SVG_EXPORT_H */

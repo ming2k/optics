@@ -1,4 +1,4 @@
-//! Smoke tests for the `iris` binding that do not require a Wayland session.
+//! Smoke tests for the `window` binding that do not require a Wayland session.
 //!
 //! These exercise the API surface that is reachable without a window:
 //! version string, color-scheme query (which degrades

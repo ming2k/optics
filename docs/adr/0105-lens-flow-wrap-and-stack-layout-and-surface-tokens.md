@@ -3,7 +3,7 @@ id: ADR-0105
 title: "Lens Flow Wrap and Stack In-Tree Layout Subsystems and Semantic Surface Tokens"
 status: accepted
 date: 2026-09-27
-scope: libs/lens, bindings/lens-rs
+scope: libs/ui, bindings/lens-rs
 superseded_by: null
 negative_knowledge: true
 ---

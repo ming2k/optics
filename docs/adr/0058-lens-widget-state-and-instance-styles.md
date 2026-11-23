@@ -3,6 +3,9 @@ id: ADR-0058
 title: "Lens widget state bitflags and per-instance styles"
 status: accepted
 date: 2026-08-10
+scope: ui (L2 toolkit)
+superseded_by: null
+negative_knowledge: true
 ---
 
 # ADR-0058: Lens widget state bitflags and per-instance styles

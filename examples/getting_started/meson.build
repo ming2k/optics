@@ -29,25 +29,18 @@ if opt_svg
 endif
 
 # Compute shader starter (Slang -> SPIR-V)
-gs_spv2h_py = import('python').find_installation('python3')
-gs_spv2h = files('../../tools/build/spv2h.py')
 gs_slangc = find_program('slangc', required : true)
 gs_slang_flags = ['-target', 'spirv', '-profile', 'spirv_1_6', '-Wno-41012']
-gs_embed_args = cc.get_supported_arguments('--embed-dir=' + meson.current_build_dir())
+gs_embed_args = ['--embed-dir=' + meson.current_build_dir()]
 
 fill_spv = custom_target('gs_fill.comp.spv',
   input   : 'shaders/fill.slang',
   output  : 'fill.comp.spv',
   command : [gs_slangc, gs_slang_flags, '-entry', 'main', '-stage', 'compute', '@INPUT@', '-o', '@OUTPUT@'],
 )
-fill_spv_h = custom_target('gs_fill_comp_spv.h',
-  input   : fill_spv,
-  output  : 'fill_comp_spv.h',
-  command : [gs_spv2h_py, gs_spv2h, '@INPUT@', '@OUTPUT@', 'fill_spv'],
-)
 
 executable('compute_pass',
-  ['compute_pass.c', fill_spv_h, fill_spv],
+  ['compute_pass.c', fill_spv],
   c_args       : gs_embed_args,
   dependencies : [gfx_dep, vulkan_dep],
   install      : false,

@@ -17,10 +17,10 @@
 
 #include "optics_test.h"
 
-/* Create /tmp/iris-test-XXXXXX/gsettings that exits 1; return the dir path.
+/* Create /tmp/window-test-XXXXXX/gsettings that exits 1; return the dir path.
  * Caller must clean up (rmdir) the directory. Returns 0 on success. */
 static int make_failing_gsettings(char *out_dir, size_t cap) {
-    snprintf(out_dir, cap, "/tmp/iris-test-XXXXXX");
+    snprintf(out_dir, cap, "/tmp/window-test-XXXXXX");
     if (!mkdtemp(out_dir))
         return -1;
     char path[1024];
@@ -44,7 +44,7 @@ static void with_env(const char *gtk_theme, optics_window_color_scheme *out) {
 }
 
 /* Watch callback for the lifecycle checks below: with no running
- * iris_app_run loop, deliveries are dropped before reaching it, so any
+ * optics_window_run loop, deliveries are dropped before reaching it, so any
  * call here is a bug. */
 static int watch_calls;
 static void on_scheme_changed(optics_window_color_scheme scheme, void *user) {
@@ -84,7 +84,7 @@ int main(void) {
     with_env(nullptr, &s);
     OT_EXPECT(s == OPTICS_WINDOW_COLOR_SCHEME_PREFER_DARK);
 
-    /* 5. iris_system_prefers_dark is consistent: PREFER_DARK and
+    /* 5. optics_window_system_prefers_dark is consistent: PREFER_DARK and
      *    NO_PREFERENCE both count as "dark" (the library's safe default). */
     OT_EXPECT(optics_window_system_prefers_dark() == true);
 

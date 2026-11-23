@@ -1,8 +1,8 @@
 /* fuzz_glb_parse.c — feed arbitrary bytes through the deviceless GLB
- * parse seam (vista_parse_glb, ADR-0016).
+ * parse seam (optics_scene_parse_glb, ADR-0016).
  *
  * The harness allocates a parsed scene and releases it with
- * vista_scene_data_free, so the parser's allocation/free discipline
+ * optics_scene_data_free, so the parser's allocation/free discipline
  * is exercised on BOTH success and error paths (ASan verifies: any
  * retained buffer on an error path is a leak; any double-free is a
  * crash). The parser must also:

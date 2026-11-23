@@ -3,6 +3,9 @@ id: ADR-0065
 title: "Per-group material overrides and backdrop statistics"
 status: accepted
 date: 2026-08-12
+scope: unrecorded
+superseded_by: null
+negative_knowledge: true
 ---
 
 # ADR-0065: Per-group material overrides and backdrop statistics

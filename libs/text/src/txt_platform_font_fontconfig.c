@@ -155,7 +155,7 @@ txtp_font_list *txt_platform_font_query_family(const char *family_name, float we
             continue;
 
         txtp_font_match *m = &list->matches[list->count];
-        m->path = txtp_strdup((const char *)file);
+        m->path = strdup((const char *)file);
 
         /* Fontconfig's face index carries the chosen weight: for variable
          * fonts the requested named instance lives in the high bits (Regular
@@ -181,7 +181,7 @@ txtp_font_list *txt_platform_font_query_family(const char *family_name, float we
             if (fp) {
                 fclose(fp);
                 txtp_font_match *m = &list->matches[list->count++];
-                m->path = txtp_strdup(hardcoded[i]);
+                m->path = strdup(hardcoded[i]);
                 m->index = 0;
             }
         }
@@ -252,7 +252,7 @@ bool txt_platform_font_query_codepoint(const char *family_name, float weight, bo
     FcCharSet *cs = nullptr;
     FcPatternGetCharSet(p, FC_CHARSET, 0, &cs);
 
-    out->path = txtp_strdup((const char *)file);
+    out->path = strdup((const char *)file);
     out->index = idx;
     out->charset = cs ? txtp_charset_from_fc(cs) : nullptr;
     FcFontSetDestroy(fs);

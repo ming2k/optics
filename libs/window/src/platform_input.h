@@ -1,24 +1,24 @@
 /* platform_input.h — platform-neutral pointer button mapping.
  *
- * lens's input contract is indexed by IRIS_BUTTON_LEFT / IRIS_BUTTON_RIGHT /
- * IRIS_BUTTON_MIDDLE (see lens/lens.h). Each backend receives native button
+ * ui's input contract is indexed by OPTICS_WINDOW_BUTTON_LEFT / OPTICS_WINDOW_BUTTON_RIGHT /
+ * OPTICS_WINDOW_BUTTON_MIDDLE (see ui/ui.h). Each backend receives native button
  * codes — Linux evdev BTN_* (linux/input-event-codes.h), Win32
  * WM_xBUTTONDOWN / WM_xBUTTONUP messages, Cocoa NSEvent buttonNumber — and
  * must map them onto that contract. This header is the shared mapping
  * layer so no backend ever includes another platform's headers:
  *
- *   1. Translate the native code to iris_pointer_button (per-backend switch;
+ *   1. Translate the native code to optics_window_pointer_button (per-backend switch;
  *      the only place linux/input-event-codes.h, windows.h button codes,
  *      or NSEvent constants may appear).
- *   2. Convert with iris_pointer_button_index() to the lens index.
+ *   2. Convert with optics_window_pointer_button_index() to the ui index.
  *
  * Unknown/native-only buttons (X1/X2, buttonNumber ≥ 3, …) translate to
- * IRIS_POINTER_BUTTON_UNKNOWN and map to -1; backends must ignore those
+ * OPTICS_WINDOW_POINTER_BUTTON_UNKNOWN and map to -1; backends must ignore those
  * events, as app_wayland.c does today.
  *
  * It is also the shared home for the scroll-channel classification
  * (below): pure, dependency-free, unit-testable headlessly
- * (tests/iris/test_platform_input.c).
+ * (tests/window/test_platform_input.c).
  */
 #ifndef OPTICS_WINDOW_PLATFORM_INPUT_H
 #define OPTICS_WINDOW_PLATFORM_INPUT_H
@@ -33,7 +33,7 @@ typedef enum optics_window_pointer_button : int32_t {
     OPTICS_WINDOW_POINTER_BUTTON_MIDDLE,
 } optics_window_pointer_button;
 
-/* iris_input mouse index for `button`, or -1 when the button has no lens
+/* optics_window_input mouse index for `button`, or -1 when the button has no ui
  * slot (caller must drop the event). */
 static inline int optics_window_pointer_button_index(optics_window_pointer_button button) {
     switch (button) {
@@ -54,13 +54,13 @@ static inline int optics_window_pointer_button_index(optics_window_pointer_butto
 /* ------------------------------------------------------------------ */
 
 /* A wheel notch, expressed on the continuous (scroll_pixels_*) channel,
- * matching the lens-side consumer convention (slider.c divides
+ * matching the ui-side consumer convention (slider.c divides
  * scroll_pixels_y by 40; win32 routes sub-notch deltas at 40 px/notch).
  * Consumers that fold both channels into one distance can multiply wheel
  * steps by this constant. */
 #define OPTICS_WINDOW_SCROLL_PIXELS_PER_NOTCH 40.0
 
-/* Which iris_input channel a scroll delta belongs on (ADR-0036): wheel
+/* Which optics_window_input channel a scroll delta belongs on (ADR-0036): wheel
  * steps (scroll_x/y — discrete notches, widgets scale them by their line
  * factor) or continuous pixels (scroll_pixels_x/y — touchpad finger
  * motion, widgets consume unscaled). */
@@ -90,8 +90,8 @@ static inline bool optics_window_scroll_source_is_continuous(uint32_t source) {
 /* Direction contract for BOTH channels (ADR-0036 established the two
  * channels; this documents the sign they share): positive = the user's
  * gesture pushes content up (wheel rolled away from the palm / finger
- * moved up); negative = content moves up under a down gesture. Lens
- * consumers pin the same convention (tests/lens/test_scroll.c,
+ * moved up); negative = content moves up under a down gesture. ui
+ * consumers pin the same convention (tests/ui/test_scroll.c,
  * test_slider.c): negative scroll_y scrolls the viewport DOWN the
  * document.
  *
@@ -104,16 +104,16 @@ static inline bool optics_window_scroll_source_is_continuous(uint32_t source) {
  *
  * `axis` is 0 for vertical, 1 for horizontal (the WL_POINTER_AXIS_*
  * values; passed numerically so the header stays wayland-free). */
-/* Map one platform scroll delta to the lens convention (the sign contract
- * above). Used by backends whose platform sign differs from lens's
- * (Wayland inverts); backends whose deltas already match the lens
+/* Map one platform scroll delta to the ui convention (the sign contract
+ * above). Used by backends whose platform sign differs from ui's
+ * (Wayland inverts); backends whose deltas already match the ui
  * convention (Win32 vertical, Cocoa) pass their delta straight to
- * iris_scroll_accum_delta. */
+ * optics_window_scroll_accum_delta. */
 static inline double optics_window_scroll_delta(double platform_delta) {
     return -platform_delta;
 }
 
-/* Apply an already-lens-space scroll delta to the accumulator channels
+/* Apply an already-ui-space scroll delta to the accumulator channels
  * (axis 0 = vertical, 1 = horizontal). */
 static inline void optics_window_scroll_accum_delta(double *steps_y, double *pixels_y,
                                                     double *steps_x, double *pixels_x,
@@ -139,4 +139,4 @@ static inline void optics_window_scroll_accum(double *steps_y, double *pixels_y,
                                      optics_window_scroll_delta(delta), continuous);
 }
 
-#endif /* IRIS_PLATFORM_INPUT_H */
+#endif /* OPTICS_WINDOW_PLATFORM_INPUT_H */

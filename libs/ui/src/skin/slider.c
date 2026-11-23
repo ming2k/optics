@@ -4,14 +4,14 @@
  * interaction affordance and is never hidden in service of a "visually
  * quiet" look (the pre-0061 fade+scale reveal was flavor). Hover/drag
  * feedback is colour-only, matching every other widget. The slider tokens
- * (track/knob geometry and colours, error colour) have no lens_style slot
+ * (track/knob geometry and colours, error colour) have no optics_ui_style slot
  * yet, so the skin reads them from the theme; the common tokens come from
  * the resolved style. Track geometry uses last frame's arranged rect (the
  * documented one-frame latency, ADR-0029). */
 
 #include "../internal.h"
 
-void lensi_skin_slider(optics_ui *ui, optics_ui_node *n, const optics_ui_widget_record *rec) {
+void optics_ui__skin_slider(optics_ui *ui, optics_ui_node *n, const optics_ui_widget_record *rec) {
     const optics_ui_style_resolved *rs = &rec->style;
     const optics_ui_theme *t = &ui->theme; /* slider tokens (no style slots yet) */
     bool disabled = (rec->state & OPTICS_UI_STATE_DISABLED) != 0;
@@ -35,11 +35,11 @@ void lensi_skin_slider(optics_ui *ui, optics_ui_node *n, const optics_ui_widget_
 
     /* Knob affordance is always present (ADR-0061); hover and drag only
      * shift its colour toward the accent — no scale, no alpha reveal.
-     * lensi_approach on hover_t/active_t marks animation pending, so
+     * optics_ui__approach on hover_t/active_t marks animation pending, so
      * input-driven hosts keep rendering until the colour settles. */
     float emphasis = fmaxf(rec->hover_t * 0.35f, rec->active_t * 0.6f);
     optics_gfx_color knob_color =
-        disabled || error ? knob_target : lensi_lerp_color(knob_target, rs->accent, emphasis);
+        disabled || error ? knob_target : optics_ui__lerp_color(knob_target, rs->accent, emphasis);
 
     if (!rec->content.vertical) {
         float track_x0 = rs->padding + knob_extent * 0.5f;
@@ -48,32 +48,33 @@ void lensi_skin_slider(optics_ui *ui, optics_ui_node *n, const optics_ui_widget_
             track_w = 1.0f;
 
         /* track */
-        lensi_drawlist_push(ui, n,
-                            (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_RECT,
-                                                 .rel = {track_x0, h * 0.5f - track_radius, track_w,
-                                                         track_thickness},
-                                                 .color = track_color,
-                                                 .radius = track_radius});
+        optics_ui__drawlist_push(ui, n,
+                                 (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_RECT,
+                                                      .rel = {track_x0, h * 0.5f - track_radius,
+                                                              track_w, track_thickness},
+                                                      .color = track_color,
+                                                      .radius = track_radius});
 
         /* Filled portion ends at the exact value. The knob is an interaction
          * affordance, not part of the value geometry, so it must not move
          * or lengthen the fill. */
         float fill_w = frac * track_w;
         if (fill_w > 0.001f)
-            lensi_drawlist_push(ui, n,
-                                (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_RECT,
-                                                     .rel = {track_x0, h * 0.5f - track_radius,
-                                                             fill_w, track_thickness},
-                                                     .color = fill_color,
-                                                     .radius = track_radius});
+            optics_ui__drawlist_push(ui, n,
+                                     (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_RECT,
+                                                          .rel = {track_x0, h * 0.5f - track_radius,
+                                                                  fill_w, track_thickness},
+                                                          .color = fill_color,
+                                                          .radius = track_radius});
 
         float knob_x = track_x0 + frac * track_w - knob_extent * 0.5f;
         float knob_y = h * 0.5f - knob_extent * 0.5f;
-        lensi_drawlist_push(ui, n,
-                            (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_RECT,
-                                                 .rel = {knob_x, knob_y, knob_extent, knob_extent},
-                                                 .color = knob_color,
-                                                 .radius = knob_extent * 0.5f});
+        optics_ui__drawlist_push(
+            ui, n,
+            (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_RECT,
+                                 .rel = {knob_x, knob_y, knob_extent, knob_extent},
+                                 .color = knob_color,
+                                 .radius = knob_extent * 0.5f});
         return;
     }
 
@@ -83,25 +84,26 @@ void lensi_skin_slider(optics_ui *ui, optics_ui_node *n, const optics_ui_widget_
         track_h = 1.0f;
     float track_x = w * 0.5f - track_thickness * 0.5f;
 
-    lensi_drawlist_push(ui, n,
-                        (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_RECT,
-                                             .rel = {track_x, track_y0, track_thickness, track_h},
-                                             .color = track_color,
-                                             .radius = track_thickness * 0.5f});
+    optics_ui__drawlist_push(
+        ui, n,
+        (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_RECT,
+                             .rel = {track_x, track_y0, track_thickness, track_h},
+                             .color = track_color,
+                             .radius = track_thickness * 0.5f});
     float fill_h = frac * track_h;
     if (fill_h > 0.001f)
-        lensi_drawlist_push(ui, n,
-                            (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_RECT,
-                                                 .rel = {track_x, track_y0 + track_h - fill_h,
-                                                         track_thickness, fill_h},
-                                                 .color = fill_color,
-                                                 .radius = track_thickness * 0.5f});
+        optics_ui__drawlist_push(ui, n,
+                                 (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_RECT,
+                                                      .rel = {track_x, track_y0 + track_h - fill_h,
+                                                              track_thickness, fill_h},
+                                                      .color = fill_color,
+                                                      .radius = track_thickness * 0.5f});
 
     float knob_x = w * 0.5f - knob_extent * 0.5f;
     float knob_y = track_y0 + (1.0f - frac) * track_h - knob_extent * 0.5f;
-    lensi_drawlist_push(ui, n,
-                        (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_RECT,
-                                             .rel = {knob_x, knob_y, knob_extent, knob_extent},
-                                             .color = knob_color,
-                                             .radius = knob_extent * 0.5f});
+    optics_ui__drawlist_push(ui, n,
+                             (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_RECT,
+                                                  .rel = {knob_x, knob_y, knob_extent, knob_extent},
+                                                  .color = knob_color,
+                                                  .radius = knob_extent * 0.5f});
 }

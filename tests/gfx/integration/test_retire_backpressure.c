@@ -1,6 +1,6 @@
 /*
- * flux retire-FIFO backpressure: the zombie queue has a hard entry
- * bound (FLUX_RETIRE_MAX_PENDING). Releasing resources while NO frames
+ * gfx retire-FIFO backpressure: the zombie queue has a hard entry
+ * bound (OPTICS_GFX_RETIRE_MAX_PENDING). Releasing resources while NO frames
  * are submitted freezes the retire watermark, so the FIFO would grow
  * without bound and pin the GPU memory of every parked resource — the
  * exact shape of a host that tears down and rebuilds pools while
@@ -21,7 +21,7 @@
 
 #define IMG_W 8u
 #define IMG_H 8u
-/* Far past FLUX_RETIRE_MAX_PENDING (4096): enough that a missing
+/* Far past OPTICS_GFX_RETIRE_MAX_PENDING (4096): enough that a missing
  * backpressure path would leave thousands of zombies parked with
  * their memory pinned, while a working one stays flat after each
  * forced drain. */

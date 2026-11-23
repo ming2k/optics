@@ -4,7 +4,7 @@
  * consistent with the requested sigma.
  *
  * Also covers: input validation, sigma=0 acts as a copy,
- * flux_effect_reset is harmless when called twice.
+ * optics_gfx_effect_reset is harmless when called twice.
  */
 #include "gfx_test.h"
 #include "optics_test.h"
@@ -502,7 +502,7 @@ int main(void) {
         OT_EXPECT(optics_gfx_effect_promote(transient, &owned) == OPTICS_GFX_OK);
         OT_EXPECT(owned != nullptr);
         /* The promoted image must have a fresh sampled bindless handle
-         * (regular flux_image lifecycle), distinct from the transient. */
+         * (regular optics_gfx_image lifecycle), distinct from the transient. */
         OT_EXPECT(optics_gfx_image_bindless_handle(owned) != OPTICS_GFX_BINDLESS_INVALID);
         OT_EXPECT(optics_gfx_image_bindless_handle(owned) !=
                   optics_gfx_image_bindless_handle(transient));
@@ -575,7 +575,7 @@ int main(void) {
         OT_EXPECT(edge_right > 32 && edge_right < 224);
         OT_EXPECT(edge_right > edge_left);
 
-        /* Owned image survives flux_effect_reset (which only releases
+        /* Owned image survives optics_gfx_effect_reset (which only releases
          * transients). After reset, we can still sample it. */
         optics_gfx_effect_reset(d);
         OT_EXPECT(optics_gfx_image_vk_image(owned) != VK_NULL_HANDLE);

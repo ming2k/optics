@@ -6,12 +6,12 @@
  * and is pinned by a differential test". Before this test the device side had
  * no such pin: `test_sdf` compared the host implementation against a *hand
  * transcribed* reference of the shader expression, which cannot detect a change
- * to `flux_sdf.slang` at all. The pin was described in prose and enforced by
+ * to `optics_gfx_sdf.slang` at all. The pin was described in prose and enforced by
  * nothing.
  *
- * This test dispatches the real `flux_sdf.slang` — the same header the shipped
+ * This test dispatches the real `optics_gfx_sdf.slang` — the same header the shipped
  * materials include — and compares its distance and normal against
- * `<flux/sdf.h>` sample by sample. Drift in either direction fails here:
+ * `<optics/gfx/sdf.h>` sample by sample. Drift in either direction fails here:
  *
  *   - edit the Slang field or edge rule  -> GPU moves, host does not
  *   - edit the host field or gradient    -> host moves, GPU does not
@@ -34,19 +34,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-#if defined(__has_embed) && !defined(OPTICS_GFX_SHADER_NO_EMBED)
-#if __has_embed("sdf_parity.comp.spv")
-#define TEST_SHADERS_EMBED 1
-#endif
-#endif
-
-#ifdef TEST_SHADERS_EMBED
 alignas(uint32_t) static const unsigned char parity_spv[] = {
 #embed "sdf_parity.comp.spv"
 };
-#else
-#include "sdf_parity_comp_spv.h"
-#endif
 
 #define SAMPLE_COUNT 4096u
 #define WORKGROUP 64u
@@ -307,7 +297,7 @@ int main(void) {
                 optics_gfx_point p = lattice_point(i, cs->half_x, cs->half_y, &extent);
 
                 /* The continuum gradient is DISCONTINUOUS across the interior
-                 * medial axis by definition — `flux_sdf_squircle_gradient` is the
+                 * medial axis by definition — `optics_gfx_sdf_squircle_gradient` is the
                  * hard pick of the dominant edge, and the header says it flips by
                  * 90 degrees across zero width. On a square that axis is the exact
                  * diagonal, and the two sides can land on opposite sides of the

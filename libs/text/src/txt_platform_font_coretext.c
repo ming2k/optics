@@ -106,7 +106,7 @@ void txtp_font_list_free(txtp_font_list *list) {
 /* ------------------------------------------------------------------ */
 
 /* Generic names arrive from face.c; map them to families that ship with
- * every macOS release. A custom family name (FLUX_TEXT_FONT) is used
+ * every macOS release. A custom family name (OPTICS_TEXT_FONT) is used
  * verbatim. */
 static const char *map_generic_family(const char *family_name) {
     if (strcmp(family_name, "serif") == 0)
@@ -188,7 +188,7 @@ static char *path_from_descriptor(CTFontDescriptorRef desc) {
     CFRelease(url);
     if (!ok)
         return nullptr;
-    return txtp_strdup((const char *)buf);
+    return strdup((const char *)buf);
 }
 
 /* Fill a match from an instantiated font. See the file-header caveat for

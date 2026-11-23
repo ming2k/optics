@@ -13,11 +13,11 @@
  *   - can fail the Nth allocation, so OOM paths are driven deterministically.
  *
  * What is asserted:
- *   1. `flux_device_alloc` returns memory this allocator produced (pointer is
+ *   1. `optics_gfx_device_alloc` returns memory this allocator produced (pointer is
  *      inside one of our blocks) and zeroes it.
- *   2. prism's filter creation spends bytes *through this allocator*, and
+ *   2. material's filter creation spends bytes *through this allocator*, and
  *      releasing it returns exactly those bytes.
- *   3. lens's store allocation does the same.
+ *   3. ui's store allocation does the same.
  *   4. At teardown, live bytes are zero — per owner, not just in total.
  *
  * A library that bypasses the funnel shows up as "0 bytes seen for owner=X",
@@ -69,7 +69,7 @@ static void *hostile_alloc(size_t bytes, void *user) {
         return nullptr;
     if (g_block_count >= MAX_BLOCKS)
         return nullptr;
-    /* Deliberately NOT zeroed: the contract says flux_device_alloc zeroes it,
+    /* Deliberately NOT zeroed: the contract says optics_gfx_device_alloc zeroes it,
      * so a caller relying on that must be caught if it is not done. */
     block_hdr *h = malloc(sizeof(*h) + bytes);
     if (!h)
@@ -152,7 +152,7 @@ static void lane_funnel_contract(optics_gfx_device *d) {
             all_zero = false;
     OT_EXPECT(all_zero);
 
-    /* The ledger must show the row under the caller's owner, not flux's. */
+    /* The ledger must show the row under the caller's owner, not gfx's. */
     optics_gfx_observe_counters c = {};
     OT_EXPECT(optics_gfx_observe_read_counters(
                   d, &(optics_gfx_observe_read_counters_opts){.scope = OPTICS_GFX_SCOPE_DEVICE,
@@ -230,10 +230,10 @@ static void lane_funnel_oom(optics_gfx_device *d) {
 
 /* --- 2/3. libraries must route through it ----------------------------- */
 
-static void lane_prism_uses_funnel(optics_gfx_device *d) {
+static void lane_material_uses_funnel(optics_gfx_device *d) {
     optics_material_mica_filter *warm = nullptr;
     if (optics_material_mica_filter_create(d, &warm) != OPTICS_GFX_OK) {
-        fprintf(stderr, "info: prism_mica_filter unavailable; lane skipped\n");
+        fprintf(stderr, "info: optics_material_mica_filter unavailable; lane skipped\n");
         return;
     }
     optics_material_mica_filter_release(warm);
@@ -244,7 +244,7 @@ static void lane_prism_uses_funnel(optics_gfx_device *d) {
     optics_material_mica_filter *f = nullptr;
     OT_EXPECT(optics_material_mica_filter_create(d, &f) == OPTICS_GFX_OK);
     size_t after_create = g_live_bytes;
-    /* A filter is a struct plus its frame slots; any growth here is prism's
+    /* A filter is a struct plus its frame slots; any growth here is material's
      * memory arriving through the caller's allocator. */
     OT_EXPECT(after_create > before);
 
@@ -253,15 +253,15 @@ static void lane_prism_uses_funnel(optics_gfx_device *d) {
     OT_EXPECT(g_frees > frees_before);
 }
 
-static void lane_lens_uses_funnel(optics_gfx_device *d) {
+static void lane_ui_uses_funnel(optics_gfx_device *d) {
     optics_ui_desc ld = {.size = sizeof(ld), .device = d};
     optics_ui *ui = nullptr;
     if (optics_ui_create(&ld, &ui) != OPTICS_GFX_OK) {
-        fprintf(stderr, "info: lens unavailable; lane skipped\n");
+        fprintf(stderr, "info: ui unavailable; lane skipped\n");
         return;
     }
     size_t before = g_live_bytes;
-    /* A frame build allocates from the lens funnel. */
+    /* A frame build allocates from the ui funnel. */
     optics_ui_begin(ui, nullptr);
     optics_ui_end(ui);
     size_t during = g_live_bytes;
@@ -410,8 +410,8 @@ int main(void) {
     lane_funnel_contract(d);
     lane_funnel_rejects_unattributed(d);
     lane_funnel_oom(d);
-    lane_prism_uses_funnel(d);
-    lane_lens_uses_funnel(d);
+    lane_material_uses_funnel(d);
+    lane_ui_uses_funnel(d);
     lane_image_snapshot_oom(d);
     lane_image_lut_oom(d);
     lane_sampler_buffer_oom(d);

@@ -2,7 +2,7 @@
  * Memory budget query test (VK_EXT_memory_budget).
  *
  * The device now enables VK_EXT_memory_budget whenever the driver
- * advertises it, so flux_device_memory_budget must report per-heap
+ * advertises it, so optics_gfx_device_memory_budget must report per-heap
  * usage/budget on supporting drivers and degrade cleanly elsewhere.
  * Runs on any ICD; skips gracefully when no Vulkan device exists.
  */

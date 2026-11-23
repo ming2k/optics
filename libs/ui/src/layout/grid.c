@@ -238,7 +238,7 @@ static void grid_compute_row_heights(const optics_ui_node *n, uint32_t total_row
 /*  Public solver entries                                             */
 /* ================================================================== */
 
-optics_gfx_point lensi_grid_measure(optics_ui_node *n) {
+optics_gfx_point optics_ui__grid_measure(optics_ui_node *n) {
     uint32_t cols = n->grid_columns > 0 ? n->grid_columns : 1;
     uint32_t total_rows = grid_place_children(n);
     if (total_rows == 0) {
@@ -296,7 +296,7 @@ optics_gfx_point lensi_grid_measure(optics_ui_node *n) {
     return (optics_gfx_point){sum_w, sum_h};
 }
 
-void lensi_grid_arrange(optics_ui_node *n, optics_gfx_rect inner) {
+void optics_ui__grid_arrange(optics_ui_node *n, optics_gfx_rect inner) {
     uint32_t cols = n->grid_columns > 0 ? n->grid_columns : 1;
     uint32_t total_rows = 0;
     for (optics_ui_node *c = n->first_child; c; c = c->next_sibling) {
@@ -309,7 +309,7 @@ void lensi_grid_arrange(optics_ui_node *n, optics_gfx_rect inner) {
     if (cols == 0 || total_rows == 0) {
         for (optics_ui_node *c = n->first_child; c; c = c->next_sibling)
             if (c->place == OPTICS_UI_PLACE_ABS)
-                lensi_arrange_node(c, lensi_resolve_abs_rect(n->ui, c));
+                optics_ui__arrange_node(c, optics_ui__resolve_abs_rect(n->ui, c));
         return;
     }
 
@@ -349,23 +349,23 @@ void lensi_grid_arrange(optics_ui_node *n, optics_gfx_rect inner) {
             cell_h += (float)(r_span - 1) * n->grid_row_gap;
 
         float target_w = (c->fixed_w > 0.0f || c->fit) ? c->measured.x : cell_w;
-        target_w = lensi_constrain_extent(target_w, c->min_w, c->max_w);
+        target_w = optics_ui__constrain_extent(target_w, c->min_w, c->max_w);
         if (target_w > cell_w && c->min_w <= cell_w)
             target_w = cell_w;
 
         float target_h = (c->fixed_h > 0.0f || c->fit) ? c->measured.y : cell_h;
-        target_h = lensi_constrain_extent(target_h, c->min_h, c->max_h);
+        target_h = optics_ui__constrain_extent(target_h, c->min_h, c->max_h);
         if (target_h > cell_h && c->min_h <= cell_h)
             target_h = cell_h;
 
-        float off_x = lensi_align_offset(n->align, cell_w - target_w);
-        float off_y = lensi_align_offset(n->cross, cell_h - target_h);
+        float off_x = optics_ui__align_offset(n->align, cell_w - target_w);
+        float off_y = optics_ui__align_offset(n->cross, cell_h - target_h);
 
-        lensi_arrange_node(c,
-                           (optics_gfx_rect){cell_x + off_x, cell_y + off_y, target_w, target_h});
+        optics_ui__arrange_node(
+            c, (optics_gfx_rect){cell_x + off_x, cell_y + off_y, target_w, target_h});
     }
 
     for (optics_ui_node *c = n->first_child; c; c = c->next_sibling)
         if (c->place == OPTICS_UI_PLACE_ABS)
-            lensi_arrange_node(c, lensi_resolve_abs_rect(n->ui, c));
+            optics_ui__arrange_node(c, optics_ui__resolve_abs_rect(n->ui, c));
 }

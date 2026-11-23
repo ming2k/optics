@@ -1,16 +1,16 @@
 /*
- * flux/compute.h — compute pipelines and dispatch.
+ * gfx/compute.h — compute pipelines and dispatch.
  *
  * Pipelines bind the device-wide bindless descriptor set at set=0
  * automatically; per-dispatch state rides
  * push constants or a buffer slice referenced by 64-bit device
  * address.
  *
- * Dispatch takes a raw VkCommandBuffer rather than a flux_frame:
+ * Dispatch takes a raw VkCommandBuffer rather than a optics_gfx_frame:
  * compute is useful both inside the frame loop (recorded into the
  * frame's command buffer) and outside it (one-shot transfers,
  * headless workloads). Pull the frame's command buffer via
- * flux_frame_vk_command_buffer() when calling from a frame.
+ * optics_gfx_frame_vk_command_buffer() when calling from a frame.
  */
 
 #ifndef OPTICS_GFX_COMPUTE_H
@@ -26,7 +26,7 @@ extern "C" {
 typedef struct optics_gfx_compute_pipeline optics_gfx_compute_pipeline;
 
 typedef struct optics_gfx_compute_pipeline_desc {
-    optics_gfx_struct_type type; /* FLUX_TYPE_COMPUTE_PIPELINE_DESC */
+    optics_gfx_struct_type type; /* OPTICS_GFX_TYPE_COMPUTE_PIPELINE_DESC */
     const void *next;
     const uint32_t *spirv; /* SPIR-V code (uint32 words) */
     size_t spirv_word_count;
@@ -72,4 +72,4 @@ OPTICS_GFX_API void optics_gfx_compute_dispatch(const optics_gfx_compute_dispatc
 }
 #endif
 
-#endif /* FLUX_COMPUTE_H */
+#endif /* OPTICS_GFX_COMPUTE_H */

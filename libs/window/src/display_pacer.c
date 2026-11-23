@@ -81,15 +81,15 @@ optics_window_pace_decision optics_window_pacer_tick(optics_window_pacer *p,
 
     /* Is the display actively driving frames? The caret tick is deliberately
      * excluded — a blinking caret does not justify a display-locked cadence.
-     * A blink flip arrives as `chrome_damaged` (lens reports the transition),
+     * A blink flip arrives as `chrome_damaged` (ui reports the transition),
      * which is why nothing here mentions the caret. */
     bool cadence_active = grace || animating || in->host_skip_render || in->surface_needs_paint ||
                           in->chrome_damaged || in->ui_animating;
 
     /* Is a frame pending at all? Three terms keep the low idle tick alive:
-     *   - `has_host_content`: such a host's content is opaque to lens, so
+     *   - `has_host_content`: such a host's content is opaque to ui, so
      *     running cfg->build is how it observes its own state changes;
-     *   - `caret_ticking`: lens advances the blink clock by the frame delta,
+     *   - `caret_ticking`: ui advances the blink clock by the frame delta,
      *     so a live clock needs ticks to reach its next phase. The tick does
      *     not paint; the flip that lands on one arrives as chrome damage.
      * Only a host with neither can reach full quiescence. */

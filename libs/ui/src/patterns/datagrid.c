@@ -53,7 +53,7 @@ optics_ui_datagrid_action optics_ui_datagrid(optics_ui *ui, const optics_ui_data
 
     /* Column resize drag state */
     optics_ui_id drag_id = optics_ui_current_id(ui, "datagrid_drag");
-    optics_ui_node *drag_node = lensi_store_touch(ui, drag_id);
+    optics_ui_node *drag_node = optics_ui__store_touch(ui, drag_id);
     datagrid_drag *drag =
         drag_node ? (datagrid_drag *)optics_ui_node_state(drag_node, sizeof(datagrid_drag))
                   : nullptr;

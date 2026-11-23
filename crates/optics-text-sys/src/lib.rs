@@ -1,4 +1,4 @@
-//! Raw FFI bindings to `libglyph`.
+//! Raw FFI bindings to `liboptics_text`.
 #![allow(non_upper_case_globals)]
 #![allow(non_camel_case_types)]
 #![allow(non_snake_case)]

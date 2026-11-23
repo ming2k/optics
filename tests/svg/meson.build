@@ -1,41 +1,41 @@
-# tests/reticle — the reticle vector compiler's behavioural contract. CPU-only: no Vulkan
-# device, no window, no font; everything here runs on flux's software canvas.
+# tests/svg — the svg vector compiler's behavioural contract. CPU-only: no Vulkan
+# device, no window, no font; everything here runs on gfx's software canvas.
 
-test_reticle_parse = executable('test_reticle_parse', 'test_reticle_parse.c',
+test_svg_parse = executable('test_svg_parse', 'test_svg_parse.c',
   dependencies        : [svg_dep, gfx_dep, m_dep, optics_test_dep],
   include_directories : [svg_inc, gfx_inc],
 )
-test('svg_parse', test_reticle_parse, suite : 'unit')
+test('svg_parse', test_svg_parse, suite : 'unit')
 
-test_reticle_geometry = executable('test_reticle_geometry', 'test_reticle_geometry.c',
+test_svg_geometry = executable('test_svg_geometry', 'test_svg_geometry.c',
   dependencies        : [svg_dep, gfx_dep, m_dep, optics_test_dep],
   include_directories : [svg_inc, gfx_inc],
 )
-test('svg_geometry', test_reticle_geometry, suite : 'unit')
+test('svg_geometry', test_svg_geometry, suite : 'unit')
 
-test_reticle_paint = executable('test_reticle_paint', 'test_reticle_paint.c',
+test_svg_paint = executable('test_svg_paint', 'test_svg_paint.c',
   dependencies        : [svg_dep, gfx_dep, m_dep, optics_test_dep],
   include_directories : [svg_inc, gfx_inc],
 )
-test('svg_paint', test_reticle_paint, suite : 'unit')
+test('svg_paint', test_svg_paint, suite : 'unit')
 
-test_reticle_draw = executable('test_reticle_draw', 'test_reticle_draw.c',
+test_svg_draw = executable('test_svg_draw', 'test_svg_draw.c',
   dependencies        : [svg_dep, gfx_dep, m_dep, optics_test_dep],
   include_directories : [svg_inc, gfx_inc],
 )
-test('svg_draw', test_reticle_draw, suite : 'integration')
+test('svg_draw', test_svg_draw, suite : 'integration')
 
-test_reticle_limits = executable('test_reticle_limits', 'test_reticle_limits.c',
+test_svg_limits = executable('test_svg_limits', 'test_svg_limits.c',
   dependencies        : [svg_dep, gfx_dep, m_dep, optics_test_dep],
   include_directories : [svg_inc, gfx_inc],
 )
-test('svg_limits', test_reticle_limits, suite : 'unit')
+test('svg_limits', test_svg_limits, suite : 'unit')
 
-test_reticle_leak = executable('test_reticle_leak', 'test_reticle_leak.c',
+test_svg_leak = executable('test_svg_leak', 'test_svg_leak.c',
   dependencies        : [svg_dep, gfx_dep, m_dep, optics_test_dep],
   include_directories : [svg_inc, gfx_inc],
 )
-test('svg_leak', test_reticle_leak, suite : 'unit')
+test('svg_leak', test_svg_leak, suite : 'unit')
 
 if get_option('fuzz')
   subdir('fuzz')

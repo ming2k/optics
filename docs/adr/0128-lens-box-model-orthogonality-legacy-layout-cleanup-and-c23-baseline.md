@@ -3,6 +3,9 @@ id: ADR-0128
 title: "Lens box model orthogonality, legacy layout cleanup, and C23 baseline"
 status: accepted
 date: 2026-08-26
+scope: ui (C core UI library), ui-rs (Rust binding layer)
+superseded_by: null
+negative_knowledge: false
 ---
 
 # ADR-0128: Lens box model orthogonality, legacy layout cleanup, and C23 baseline

@@ -3,6 +3,9 @@ id: ADR-0078
 title: "Ghost replay — the render surface for leave animations"
 status: accepted
 date: 2026-08-23
+scope: ui (L2 toolkit)
+superseded_by: null
+negative_knowledge: true
 ---
 
 # ADR-0078: Ghost replay — the render surface for leave animations

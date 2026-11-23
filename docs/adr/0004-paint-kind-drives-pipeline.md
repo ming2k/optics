@@ -3,6 +3,9 @@ id: ADR-0004
 title: "Paint kind drives pipeline selection"
 status: accepted
 date: 2026-01-01
+scope: unrecorded
+superseded_by: null
+negative_knowledge: true
 ---
 
 # ADR-0004: Paint kind drives pipeline selection

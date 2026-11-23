@@ -18,7 +18,7 @@ Optics enforces deterministic, headless testing across the C and Rust codebases 
 | Verification Channel | Primary Scope | Execution Mode | Governing Document |
 | :--- | :--- | :--- | :--- |
 | **Mechanical Unit / Integration** | Math, layout algorithms, CPU tessellation, memory budgets, leak tracking | Automated (`meson test`) | [Testing](testing.md) |
-| **Tolerance Goldens** | Raster stability, Lavapipe visual regression gates | Automated (`test_prism_golden`) | [Testing](testing.md#golden-references) |
+| **Tolerance Goldens** | Raster stability, Lavapipe visual regression gates | Automated (`test_material_golden`) | [Testing](testing.md#golden-references) |
 | **Interactive Examples** | Materials, 2D/3D pipelines, font shaping, window shells, drag-and-drop | Manual human inspection | This document |
 | **Pre-Release Smoke Matrix** | Clean build, compositor matrix, window lifecycle, OS packaging | Manual release gate | This document & [Release](release.md) |
 
@@ -28,7 +28,7 @@ Optics enforces deterministic, headless testing across the C and Rust codebases 
 
 ### 2.1 Build Configuration
 
-Manual verification requires compiling the interactive example targets across `flux`, `prism`, `iris`, `lens`, `vista`, and `glyph`:
+Manual verification requires compiling the interactive example targets across `gfx`, `material`, `window`, `ui`, `scene`, and `text`:
 
 ```bash
 # Clean setup with examples, tests, and debugging symbols enabled
@@ -56,7 +56,7 @@ $env:VK_LAYER_KHR_VALIDATION = "1"
 
 ## 3. Visual Effects and Material Inspection
 
-The primary visual test bed is the modern material showcase (`examples/showcase/material_gallery`), consolidating `libs/prism`, `libs/flux`, and `libs/lens`.
+The primary visual test bed is the modern material showcase (`examples/showcase/material_gallery`), consolidating `libs/material`, `libs/gfx`, and `libs/ui`.
 
 ### 3.1 Execution and Controls
 
@@ -152,7 +152,7 @@ Run the core rendering pipelines to verify path tessellation, font shaping, comp
 
 ## 5. UI Widgets, Window Shell, and Interaction Protocols
 
-Verify desktop user interface controls, input handling, window lifecycle, and system capabilities hosted within `libs/iris` and `libs/lens`.
+Verify desktop user interface controls, input handling, window lifecycle, and system capabilities hosted within `libs/window` and `libs/ui`.
 
 ### 5.1 Retained UI Controls (`examples/showcase/widget_gallery`)
 
@@ -216,11 +216,11 @@ Verify retained text editing (`ADR-0036`, `ADR-0057`, `ADR-0064`):
    - Hover over the right drop target: target borders highlight in active hover state.
    - Release mouse: payload drops successfully and status label updates with payload size.
 2. **External Drag-Out**:
-   - Drag from the Iris drag source and release into an external text editor or terminal window.
+   - Drag from the window drag source and release into an external text editor or terminal window.
    - Payload string must paste into the destination application.
 3. **External Drop-In**:
-   - Select text or a file in your file manager / browser, drag it over the Iris window target, and drop.
-   - Iris drop target receives payload data without dropping packets or crashing.
+   - Select text or a file in your file manager / browser, drag it over the window target, and drop.
+   - window drop target receives payload data without dropping packets or crashing.
 
 ---
 

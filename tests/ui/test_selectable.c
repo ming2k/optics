@@ -1,7 +1,7 @@
 /* test_selectable.c — selectable row click + selected-state semantics. */
 
-#include "lens_test.h"
 #include "optics_test.h"
+#include "ui_test.h"
 #include <optics/gfx/canvas_cpu.h>
 #include <optics/ui.h>
 

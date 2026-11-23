@@ -1,7 +1,7 @@
 /* test_button.c — button click detection. */
 
-#include "lens_test.h"
 #include "optics_test.h"
+#include "ui_test.h"
 #include <optics/gfx/canvas_cpu.h>
 #include <optics/ui.h>
 
@@ -253,8 +253,8 @@ static void test_button_mouse_secondary(void) {
     optics_ui_button(ui, &(optics_ui_button_opts){.label = "sw"});
     optics_ui_test_end(ui);
 
-    /* Right-press then right-release inside: lens_button(mouse_button=RIGHT)
-     * reports it; lens_button (left) does not. */
+    /* Right-press then right-release inside: optics_ui_button(mouse_button=RIGHT)
+     * reports it; optics_ui_button (left) does not. */
     optics_ui_input in = IN0;
     in.cursor = (optics_gfx_point){20, 20};
     in.mouse_down[OPTICS_UI_MOUSE_RIGHT] = true;

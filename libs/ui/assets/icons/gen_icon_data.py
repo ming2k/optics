@@ -10,7 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent.parent
 FEATHER_DIR = ROOT / "assets" / "icons" / "feather"
 MATERIAL_ROUNDED_DIR = ROOT / "assets" / "icons" / "material-rounded"
-ICON_H = ROOT / "include" / "lens" / "icon.h"
+ICON_H = ROOT / "include" / "ui" / "icon.h"
 ICON_DATA_C = ROOT / "src" / "icon_data.c"
 
 ICON_RENDER_STROKE = 0
@@ -504,28 +504,28 @@ def fmt_float(f):
 
 def generate_icon_h(icons):
     lines = []
-    lines.append("#ifndef LENS_ICON_H")
-    lines.append("#define LENS_ICON_H")
+    lines.append("#ifndef OPTICS_UI_ICON_H")
+    lines.append("#define OPTICS_UI_ICON_H")
     lines.append("")
     lines.append("#include <stdint.h>")
     lines.append("")
-    lines.append("typedef enum lens_icon_id {")
+    lines.append("typedef enum optics_ui_icon_id {")
     for i, (name, _, _) in enumerate(icons):
         lines.append(f"\tLENS_ICON_{name} = {i},")
     lines.append("\tLENS_ICON_COUNT,")
-    lines.append("} lens_icon_id;")
+    lines.append("} optics_ui_icon_id;")
     lines.append("")
-    lines.append("typedef struct lens_icon_cmd {")
+    lines.append("typedef struct optics_ui_icon_cmd {")
     lines.append("\tuint8_t type;")
     lines.append("\tfloat params[6];")
-    lines.append("} lens_icon_cmd;")
+    lines.append("} optics_ui_icon_cmd;")
     lines.append("")
-    lines.append("typedef struct lens_icon_desc {")
-    lines.append("\tconst lens_icon_cmd *cmds;")
+    lines.append("typedef struct optics_ui_icon_desc {")
+    lines.append("\tconst optics_ui_icon_cmd *cmds;")
     lines.append("\tuint32_t count;")
-    lines.append("} lens_icon_desc;")
+    lines.append("} optics_ui_icon_desc;")
     lines.append("")
-    lines.append("extern const lens_icon_desc lens_icon_table[LENS_ICON_COUNT];")
+    lines.append("extern const optics_ui_icon_desc optics_ui_icon_table[OPTICS_UI_ICON_COUNT];")
     lines.append("")
     lines.append("#endif")
     return "\n".join(lines) + "\n"
@@ -538,7 +538,7 @@ def generate_icon_data_c(icons):
 
     for name, cmds, _ in icons:
         aname = icon_array_name(name.lower().replace("_", "-"))
-        lines.append(f"static const lens_icon_cmd lens_icon_{aname}_cmds[] = {{")
+        lines.append(f"static const optics_ui_icon_cmd optics_ui_icon_{aname}_cmds[] = {{")
         for cmd in cmds:
             type_id = cmd[0]
             params = cmd[1:]
@@ -547,18 +547,18 @@ def generate_icon_data_c(icons):
         lines.append("};")
         lines.append("")
 
-    lines.append("const lens_icon_desc lens_icon_table[LENS_ICON_COUNT] = {")
+    lines.append("const optics_ui_icon_desc optics_ui_icon_table[OPTICS_UI_ICON_COUNT] = {")
     for name, cmds, _ in icons:
         aname = icon_array_name(name.lower().replace("_", "-"))
         count = len(cmds)
-        lines.append(f"\t[LENS_ICON_{name}] = {{ lens_icon_{aname}_cmds, {count} }},")
+        lines.append(f"\t[OPTICS_UI_ICON_{name}] = {{ optics_ui_icon_{aname}_cmds, {count} }},")
     lines.append("};")
     lines.append("")
 
-    lines.append("const uint8_t lens_icon_render_modes[LENS_ICON_COUNT] = {")
+    lines.append("const uint8_t optics_ui_icon_render_modes[OPTICS_UI_ICON_COUNT] = {")
     for name, _, render_mode in icons:
         if render_mode != ICON_RENDER_STROKE:
-            lines.append(f"\t[LENS_ICON_{name}] = {render_mode},")
+            lines.append(f"\t[OPTICS_UI_ICON_{name}] = {render_mode},")
     lines.append("};")
     return "\n".join(lines) + "\n"
 

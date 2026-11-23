@@ -1,6 +1,6 @@
 /* uri.c — file:// URI → local path conversion for the file-dialog results.
  *
- * iris_pick_file / iris_pick_save_path return host URIs ("file:///a%20b/c").
+ * optics_window_pick_file / optics_window_pick_save_path return host URIs ("file:///a%20b/c").
  * Hosts need filesystem paths; making every one hand-roll percent-decoding
  * (with its own take on '+' vs %20, over-long sequences, and the authority
  * component) is exactly the kind of per-consumer drift a toolkit API

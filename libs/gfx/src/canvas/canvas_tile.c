@@ -3,7 +3,7 @@
  *
  * Implements GPU segment upload, Y-clipped tile binning, exact per-pixel-row
  * right-to-left backdrop prefix scan, and a tiled CPU reference matching
- * flux_vector_eval.slang bit-for-bit in math.
+ * optics_gfx_vector_eval.slang bit-for-bit in math.
  */
 
 #include "canvas_tile.h"
@@ -470,7 +470,7 @@ optics_gfx_result canvas_tile_rasterize(const optics_gfx_tile_segment *segs, uin
     int32_t *row_bd = calloc((size_t)num_tiles * OPTICS_GFX_TILE_SIZE, sizeof(int32_t));
     uint32_t max_indices =
         canvas_tile_estimate_max_indices(local_segs, seg_count, 0u, 0u, tx_cnt, ty_cnt);
-    uint32_t *indices = malloc(((size_t)max_indices + 1u) * sizeof(uint32_t));
+    uint32_t *indices = calloc((size_t)max_indices + 1u, sizeof(uint32_t));
     if (!tiles || !row_bd || !indices) {
         free(local_segs);
         free(tiles);

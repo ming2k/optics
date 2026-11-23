@@ -18,6 +18,8 @@
 #include <optics/gfx/vulkan.h>
 
 #include <math.h>
+#include <stdckdint.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* The recording frame stack for this thread (ADR-0089 1B-2B). Uploads are
@@ -26,7 +28,7 @@
  * stack follows the actual recording context instead: the frame a synchronous
  * upload belongs to, if any. Work from a worker thread that is not recording a
  * frame has no plan to join; the upload stays on the frame-independent path,
- * and flux_surface_begin_frame has already flushed any open batch before a
+ * and optics_gfx_surface_begin_frame has already flushed any open batch before a
  * frame can sample it. */
 #define OPTICS_GFX_CURRENT_FRAME_MAX 8u
 static thread_local optics_gfx_frame *g_current_frames[OPTICS_GFX_CURRENT_FRAME_MAX];
@@ -457,9 +459,8 @@ static bool foreign_images_grow(optics_gfx_surface *s, optics_gfx_per_frame *pf)
     size_t bytes = 0;
     size_t wait_bytes = 0;
     if (new_capacity < old_capacity ||
-        !optics_gfx_platform_mul_size((size_t)new_capacity, sizeof(*pf->foreign_images), &bytes) ||
-        !optics_gfx_platform_mul_size((size_t)new_capacity + 1u, sizeof(*pf->foreign_waits),
-                                      &wait_bytes)) {
+        ckd_mul(&bytes, (size_t)new_capacity, sizeof(*pf->foreign_images)) ||
+        ckd_mul(&wait_bytes, (size_t)new_capacity + 1u, sizeof(*pf->foreign_waits))) {
         OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_OUT_OF_RANGE, "too many foreign images in one frame");
         return false;
     }
@@ -745,7 +746,7 @@ optics_gfx_result optics_gfx_surface_begin_frame(optics_gfx_surface *s,
 
     if (s->frame_active) {
         OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_STATE,
-                        "flux_surface_begin_frame called while a frame is already in flight");
+                        "optics_gfx_surface_begin_frame called while a frame is already in flight");
         return OPTICS_GFX_ERROR_INVALID_STATE;
     }
     if (s->needs_recreate)
@@ -830,7 +831,7 @@ optics_gfx_result optics_gfx_surface_begin_frame(optics_gfx_surface *s,
     vr = vkAcquireNextImageKHR(vkd, s->swapchain, timeout, pf->image_acquired, VK_NULL_HANDLE,
                                &image_index);
     if (vr == VK_ERROR_OUT_OF_DATE_KHR) {
-        return OPTICS_GFX_ERROR_SURFACE_LOST; /* caller should call flux_surface_resize */
+        return OPTICS_GFX_ERROR_SURFACE_LOST; /* caller should call optics_gfx_surface_resize */
     }
     if (vr == VK_TIMEOUT || vr == VK_NOT_READY) {
         /* No swapchain image became available within the caller's timeout.
@@ -956,7 +957,7 @@ acquired:
     }
 
     /* Surface-owned frame slot. Stable pointer for the caller's
-     * lifetime of this frame; cleared by flux_frame_present. Safe
+     * lifetime of this frame; cleared by optics_gfx_frame_present. Safe
      * for a single thread driving multiple surfaces (the old
      * thread_local design clobbered other surfaces' slots). */
     s->frame_slot = (struct optics_gfx_frame){
@@ -1167,11 +1168,11 @@ void optics_gfx_frame_begin_pass(optics_gfx_frame *f, const optics_gfx_pass_desc
         ri.pStencilAttachment = &stencil;
     }
 
-    /* Pass-scope debug label (ADR-0133). flux_frame_begin_pass/end_pass is the
+    /* Pass-scope debug label (ADR-0133). optics_gfx_frame_begin_pass/end_pass is the
      * one seam every backend routes through — Vulkan canvas, tile-compute
      * coverage, scene — so labelling here covers all of them, and the CPU
      * backend simply never reaches this function. Off unless
-     * FLUX_OBSERVE_PASS_LABELS is requested and attribution is compiled in. */
+     * OPTICS_GFX_OBSERVE_PASS_LABELS is requested and attribution is compiled in. */
     optics_gfx_vk_cmd_begin_label(s->device, pf->cmd, desc && desc->label ? desc->label : "pass");
     vkCmdBeginRendering(pf->cmd, &ri);
     f->pass_active = true;
@@ -1501,7 +1502,7 @@ optics_gfx_result optics_gfx_frame_submit(optics_gfx_frame *f) {
 optics_gfx_result optics_gfx_frame_present(optics_gfx_frame *f) {
     if (!f || !f->surface || f->state != OPTICS_GFX_FRAME_STATE_SUBMITTED)
         return OPTICS_GFX_ERROR_INVALID_STATE;
-    OPTICS_GFX_PROFILE_ZONE(z_present, "flux.frame_present");
+    OPTICS_GFX_PROFILE_ZONE(z_present, "gfx.frame_present");
     optics_gfx_surface *s = f->surface;
 
     if (s->offscreen) {
@@ -1524,7 +1525,7 @@ optics_gfx_result optics_gfx_frame_present(optics_gfx_frame *f) {
      * dispatches Wayland events inside vkQueuePresentKHR; running it on
      * the same thread as the window event loop (e.g. glfwPollEvents)
      * keeps the wl_display single-threaded. The per-image render_finished
-     * semaphore signalled by flux_frame_submit gates the present on
+     * semaphore signalled by optics_gfx_frame_submit gates the present on
      * rendering completion. queue_lock serialises vs concurrent submits
      * on the same queue. */
     VkPresentInfoKHR pi = {
@@ -1535,7 +1536,7 @@ optics_gfx_result optics_gfx_frame_present(optics_gfx_frame *f) {
         .pSwapchains = &s->swapchain,
         .pImageIndices = &s->current_image,
     };
-    OPTICS_GFX_PROFILE_ZONE(z_vk_present, "flux.vkQueuePresent");
+    OPTICS_GFX_PROFILE_ZONE(z_vk_present, "gfx.vkQueuePresent");
     optics_gfx_platform_mutex_lock(&s->device->queue_lock);
     VkResult vr = vkQueuePresentKHR(s->device->graphics_queue, &pi);
     optics_gfx_platform_mutex_unlock(&s->device->queue_lock);
@@ -1545,7 +1546,7 @@ optics_gfx_result optics_gfx_frame_present(optics_gfx_frame *f) {
     s->frame_active = false;
     f->state = OPTICS_GFX_FRAME_STATE_PRESENTED;
     (void)optics_gfx_observe_frame_drain_check(s->device);
-    OPTICS_GFX_PROFILE_FRAME("flux.present");
+    OPTICS_GFX_PROFILE_FRAME("gfx.present");
     OPTICS_GFX_PROFILE_ZONE_END(z_present);
 
     if (vr == VK_ERROR_OUT_OF_DATE_KHR || vr == VK_SUBOPTIMAL_KHR)

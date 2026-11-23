@@ -3,7 +3,7 @@ id: ADR-0127
 title: "Decoupled Host Canvas Recording and Hardware-Locked Presentation Pacing"
 status: accepted
 date: 2026-11-01
-scope: libs/iris, libs/flux, libs/lens, architecture
+scope: libs/window, libs/gfx, libs/ui, architecture
 superseded_by: null
 negative_knowledge: true
 ---

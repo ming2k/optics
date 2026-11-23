@@ -61,7 +61,7 @@ id: ADR-NNNN
 title: "[Title of Decision]"
 status: accepted # [draft | accepted | superseded | rejected]
 date: YYYY-MM-DD
-scope: [libraries or subsystems affected, e.g. flux, lens, iris]
+scope: [libraries or subsystems affected, e.g. gfx, ui, window]
 superseded_by: null # e.g., ADR-0016 (mandatory when status is superseded)
 negative_knowledge: true
 ---

@@ -3,6 +3,9 @@ id: ADR-0032
 title: "Lens theme token system — sized struct with ABI guard"
 status: accepted
 date: 2026-07-21
+scope: ui (L2 toolkit)
+superseded_by: null
+negative_knowledge: true
 ---
 
 # ADR-0032: Lens theme token system — sized struct with ABI guard

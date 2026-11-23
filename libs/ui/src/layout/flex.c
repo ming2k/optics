@@ -103,7 +103,7 @@ static float flex_adjustment(const optics_ui_node *n, optics_ui_axis axis, float
 /*  Wrap (Flow) and Stack Layout Strategies (ADR-0105)                */
 /* ================================================================== */
 
-static void lensi_wrap_arrange(optics_ui_node *n, optics_gfx_rect inner) {
+static void optics_ui__wrap_arrange(optics_ui_node *n, optics_gfx_rect inner) {
     float avail_w = inner.w;
     float row_gap = n->row_gap > 0.0f ? n->row_gap : n->gap;
 
@@ -134,9 +134,9 @@ static void lensi_wrap_arrange(optics_ui_node *n, optics_gfx_rect inner) {
             if (c->place == OPTICS_UI_PLACE_ABS)
                 continue;
             float cw = (c->fixed_w > 0.0f) ? c->fixed_w : c->measured.x;
-            cw = lensi_constrain_extent(cw, c->min_w, c->max_w);
+            cw = optics_ui__constrain_extent(cw, c->min_w, c->max_w);
             float ch = (c->fixed_h > 0.0f) ? c->fixed_h : c->measured.y;
-            ch = lensi_constrain_extent(ch, c->min_h, c->max_h);
+            ch = optics_ui__constrain_extent(ch, c->min_h, c->max_h);
 
             float next_w = (line_count > 0) ? (line_w + n->gap + cw) : cw;
             if (line_count > 0 && avail_w > 0.0f && next_w > avail_w) {
@@ -152,14 +152,14 @@ static void lensi_wrap_arrange(optics_ui_node *n, optics_gfx_rect inner) {
         }
 
         float free_x = fmaxf(0.0f, avail_w - line_w);
-        float line_x = inner.x + lensi_align_offset(n->align, free_x);
+        float line_x = inner.x + optics_ui__align_offset(n->align, free_x);
 
         for (optics_ui_node *c = line_start;; c = c->next_sibling) {
             if (c->place != OPTICS_UI_PLACE_ABS) {
                 float cw = (c->fixed_w > 0.0f) ? c->fixed_w : c->measured.x;
-                cw = lensi_constrain_extent(cw, c->min_w, c->max_w);
+                cw = optics_ui__constrain_extent(cw, c->min_w, c->max_w);
                 float ch = (c->fixed_h > 0.0f) ? c->fixed_h : c->measured.y;
-                ch = lensi_constrain_extent(ch, c->min_h, c->max_h);
+                ch = optics_ui__constrain_extent(ch, c->min_h, c->max_h);
 
                 float cy = cur_y;
                 if (n->cross == OPTICS_UI_CENTER) {
@@ -170,7 +170,7 @@ static void lensi_wrap_arrange(optics_ui_node *n, optics_gfx_rect inner) {
                     ch = line_h;
                 }
 
-                lensi_arrange_node(c, (optics_gfx_rect){line_x, cy, cw, ch});
+                optics_ui__arrange_node(c, (optics_gfx_rect){line_x, cy, cw, ch});
                 line_x += cw + n->gap;
             }
 
@@ -191,11 +191,11 @@ static void lensi_wrap_arrange(optics_ui_node *n, optics_gfx_rect inner) {
     for (optics_ui_node *c = n->first_child; c; c = c->next_sibling) {
         if (c->place != OPTICS_UI_PLACE_ABS)
             continue;
-        lensi_arrange_node(c, lensi_resolve_abs_rect(n->ui, c));
+        optics_ui__arrange_node(c, optics_ui__resolve_abs_rect(n->ui, c));
     }
 }
 
-optics_gfx_point lensi_stack_measure(optics_ui_node *n) {
+optics_gfx_point optics_ui__stack_measure(optics_ui_node *n) {
     float max_w = 0.0f;
     float max_h = 0.0f;
     for (optics_ui_node *c = n->first_child; c; c = c->next_sibling) {
@@ -209,7 +209,7 @@ optics_gfx_point lensi_stack_measure(optics_ui_node *n) {
     return (optics_gfx_point){max_w + 2.0f * n->pad, max_h + 2.0f * n->pad};
 }
 
-void lensi_stack_arrange(optics_ui_node *n, optics_gfx_rect inner) {
+void optics_ui__stack_arrange(optics_ui_node *n, optics_gfx_rect inner) {
     for (optics_ui_node *c = n->first_child; c; c = c->next_sibling) {
         if (c->place == OPTICS_UI_PLACE_ABS)
             continue;
@@ -221,22 +221,22 @@ void lensi_stack_arrange(optics_ui_node *n, optics_gfx_rect inner) {
         if (n->cross == OPTICS_UI_STRETCH && c->fixed_h <= 0.0f && !c->fit)
             ch = inner.h;
 
-        cw = lensi_constrain_extent(cw, c->min_w, c->max_w);
-        ch = lensi_constrain_extent(ch, c->min_h, c->max_h);
+        cw = optics_ui__constrain_extent(cw, c->min_w, c->max_w);
+        ch = optics_ui__constrain_extent(ch, c->min_h, c->max_h);
 
         optics_ui_align h_align = (c->align != 0) ? c->align : n->align;
         optics_ui_align v_align = (c->cross != 0) ? c->cross : n->cross;
 
-        float cx = inner.x + lensi_align_offset(h_align, inner.w - cw);
-        float cy = inner.y + lensi_align_offset(v_align, inner.h - ch);
+        float cx = inner.x + optics_ui__align_offset(h_align, inner.w - cw);
+        float cy = inner.y + optics_ui__align_offset(v_align, inner.h - ch);
 
-        lensi_arrange_node(c, (optics_gfx_rect){cx, cy, cw, ch});
+        optics_ui__arrange_node(c, (optics_gfx_rect){cx, cy, cw, ch});
     }
 
     for (optics_ui_node *c = n->first_child; c; c = c->next_sibling) {
         if (c->place != OPTICS_UI_PLACE_ABS)
             continue;
-        lensi_arrange_node(c, lensi_resolve_abs_rect(n->ui, c));
+        optics_ui__arrange_node(c, optics_ui__resolve_abs_rect(n->ui, c));
     }
 }
 
@@ -244,7 +244,7 @@ void lensi_stack_arrange(optics_ui_node *n, optics_gfx_rect inner) {
 /*  Public 1D Flex Strategy Entries                                   */
 /* ================================================================== */
 
-optics_gfx_point lensi_flex_measure(optics_ui_node *n) {
+optics_gfx_point optics_ui__flex_measure(optics_ui_node *n) {
     if (n->wrap && n->axis == OPTICS_UI_ROW && n->fixed_w > 0.0f) {
         float avail = n->fixed_w - 2.0f * n->pad;
         float row_gap = n->row_gap > 0.0f ? n->row_gap : n->gap;
@@ -254,9 +254,9 @@ optics_gfx_point lensi_flex_measure(optics_ui_node *n) {
             if (c->place == OPTICS_UI_PLACE_ABS)
                 continue;
             float cw = (c->fixed_w > 0.0f) ? c->fixed_w : c->measured.x;
-            cw = lensi_constrain_extent(cw, c->min_w, c->max_w);
+            cw = optics_ui__constrain_extent(cw, c->min_w, c->max_w);
             float ch = (c->fixed_h > 0.0f) ? c->fixed_h : c->measured.y;
-            ch = lensi_constrain_extent(ch, c->min_h, c->max_h);
+            ch = optics_ui__constrain_extent(ch, c->min_h, c->max_h);
 
             float next_w = (cnt > 0) ? (line_w + n->gap + cw) : cw;
             if (cnt > 0 && avail > 0.0f && next_w > avail) {
@@ -301,9 +301,9 @@ optics_gfx_point lensi_flex_measure(optics_ui_node *n) {
                                       : (optics_gfx_point){cross, main};
 }
 
-void lensi_flex_arrange(optics_ui_node *n, optics_gfx_rect inner) {
+void optics_ui__flex_arrange(optics_ui_node *n, optics_gfx_rect inner) {
     if (n->wrap && n->axis == OPTICS_UI_ROW) {
-        lensi_wrap_arrange(n, inner);
+        optics_ui__wrap_arrange(n, inner);
         return;
     }
 
@@ -346,7 +346,7 @@ void lensi_flex_arrange(optics_ui_node *n, optics_gfx_rect inner) {
     float remaining = fmaxf(0, free - used_adjustment);
     float gap = n->gap + (n->space_between && cnt > 1 ? remaining / (cnt - 1) : 0);
     float cursor = ((ax == OPTICS_UI_ROW) ? inner.x : inner.y) +
-                   (n->space_between ? 0 : lensi_align_offset(n->align, remaining));
+                   (n->space_between ? 0 : optics_ui__align_offset(n->align, remaining));
     for (optics_ui_node *c = n->first_child; c; c = c->next_sibling) {
         if (c->place == OPTICS_UI_PLACE_ABS)
             continue;
@@ -361,17 +361,18 @@ void lensi_flex_arrange(optics_ui_node *n, optics_gfx_rect inner) {
                           (ax == OPTICS_UI_ROW ? c->fixed_h : c->fixed_w) <= 0)
                              ? inner_cross
                              : pt_cross(c->measured, ax);
-        cross_sz = lensi_constrain_extent(cross_sz, node_min_cross(c, ax), node_max_cross(c, ax));
+        cross_sz =
+            optics_ui__constrain_extent(cross_sz, node_min_cross(c, ax), node_max_cross(c, ax));
         if (cross_sz > inner_cross && node_min_cross(c, ax) <= inner_cross)
             cross_sz = inner_cross;
 
-        float cross_off = lensi_align_offset(n->cross, inner_cross - cross_sz);
+        float cross_off = optics_ui__align_offset(n->cross, inner_cross - cross_sz);
         float cross_pos = ((ax == OPTICS_UI_ROW) ? inner.y : inner.x) + cross_off;
 
         optics_gfx_rect cr = (ax == OPTICS_UI_ROW)
                                  ? (optics_gfx_rect){cursor, cross_pos, main_sz, cross_sz}
                                  : (optics_gfx_rect){cross_pos, cursor, cross_sz, main_sz};
-        lensi_arrange_node(c, cr);
+        optics_ui__arrange_node(c, cr);
         cursor += main_sz + gap;
     }
 
@@ -379,6 +380,6 @@ void lensi_flex_arrange(optics_ui_node *n, optics_gfx_rect inner) {
     for (optics_ui_node *c = n->first_child; c; c = c->next_sibling) {
         if (c->place != OPTICS_UI_PLACE_ABS)
             continue;
-        lensi_arrange_node(c, lensi_resolve_abs_rect(n->ui, c));
+        optics_ui__arrange_node(c, optics_ui__resolve_abs_rect(n->ui, c));
     }
 }

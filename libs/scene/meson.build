@@ -1,7 +1,7 @@
-# vista — glTF 2.0 3D scene hierarchy and asset runtime over libflux (ADR-0016, ADR-0106).
+# scene — glTF 2.0 3D scene hierarchy and asset runtime over liboptics_gfx (ADR-0016, ADR-0106).
 #
-# A separate shared library that links libflux and feeds the
-# flux_scene_draw_mesh primitive. It carries its own pkg-config file so
+# A separate shared library that links liboptics_gfx and feeds the
+# optics_gfx_scene_draw_mesh primitive. It carries its own pkg-config file so
 # consumers link it independently of the rendering engine.
 
 scene_inc = include_directories('include')
@@ -36,7 +36,7 @@ pkg.generate(
   libraries    : scene_lib,
   name         : 'optics-scene',
   filebase     : 'optics-scene',
-  description  : 'glTF 2.0 3D scene hierarchy and asset runtime over flux',
+  description  : 'glTF 2.0 3D scene hierarchy and asset runtime over gfx',
   version      : meson.project_version(),
   requires     : ['optics-gfx >= ' + meson.project_version()],
 )

@@ -3,7 +3,7 @@ id: ADR-0107
 title: "Iris pre-lens event seam — ordered iris_event interception before snapshot folding"
 status: accepted
 date: 2026-10-06
-scope: libs/iris, bindings/iris-rs, tests/iris, tools/gen_symbols.py, docs
+scope: libs/window, bindings/iris-rs, tests/window, tools/gen_symbols.py, docs
 superseded_by: null
 negative_knowledge: true
 ---

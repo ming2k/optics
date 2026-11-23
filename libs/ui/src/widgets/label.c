@@ -117,7 +117,7 @@ static void push_line_slice(optics_ui *ui, optics_ui_text_line **lines, int *cou
         int nc = *cap ? *cap * 2 : 8;
         optics_ui_text_line *na = optics_gfx_arena_alloc(&ui->arena, (size_t)nc * sizeof *na);
         if (!na) {
-            lensi_set_overflow(ui);
+            optics_ui__set_overflow(ui);
             return;
         }
         if (*lines)
@@ -127,7 +127,7 @@ static void push_line_slice(optics_ui *ui, optics_ui_text_line **lines, int *cou
     }
     char *line = optics_gfx_arena_alloc(&ui->arena, len + 1);
     if (!line) {
-        lensi_set_overflow(ui);
+        optics_ui__set_overflow(ui);
         return;
     }
     memcpy(line, text, len);
@@ -141,32 +141,32 @@ optics_ui_response optics_ui_label(optics_ui *ui, const optics_ui_label_opts *op
     if (!opts)
         opts = &default_opts;
 
-    lensi_apply_box(ui, opts->box);
-    optics_ui_style eff = lensi_style_effective(ui);
+    optics_ui__apply_box(ui, opts->box);
+    optics_ui_style eff = optics_ui__style_effective(ui);
     const char *text = opts->text ? opts->text : "";
 
     float size = opts->size;
     if (size <= 0.0f)
-        size = lensi_style_font_size(ui, &eff, &ui->theme);
+        size = optics_ui__style_font_size(ui, &eff, &ui->theme);
     else
-        size = lensi_font_px(ui, size);
+        size = optics_ui__font_px(ui, size);
 
     float padding = (eff.fields & OPTICS_UI_STYLE_PADDING) ? eff.padding : 0.0f;
-    optics_ui_style_resolved rs = lensi_style_resolve(ui, &eff, &ui->theme, 0);
+    optics_ui_style_resolved rs = optics_ui__style_resolve(ui, &eff, &ui->theme, 0);
     if (!(eff.fields & OPTICS_UI_STYLE_PADDING))
         rs.padding = 0.0f;
 
-    optics_ui_id id =
-        opts->box.id ? lensi_gen_widget_id(ui, opts->box.id) : lensi_gen_widget_id(ui, text);
-    optics_ui_node *n = lensi_store_touch(ui, id);
+    optics_ui_id id = opts->box.id ? optics_ui__gen_widget_id(ui, opts->box.id)
+                                   : optics_ui__gen_widget_id(ui, text);
+    optics_ui_node *n = optics_ui__store_touch(ui, id);
     if (!n)
         return (optics_ui_response){};
 
-    lensi_link_child(ui, n);
-    lensi_node_box(ui, n, &opts->box);
+    optics_ui__link_child(ui, n);
+    optics_ui__node_box(ui, n, &opts->box);
     n->is_container = false;
 
-    optics_ui_text_metrics intrinsic = lensi_text_measure_label(ui, text, size, opts->weight);
+    optics_ui_text_metrics intrinsic = optics_ui__text_measure_label(ui, text, size, opts->weight);
     float max_w = opts->box.max_width;
     bool wrap = opts->wrap || max_w > 0.0f;
 
@@ -222,27 +222,27 @@ optics_ui_response optics_ui_label(optics_ui *ui, const optics_ui_label_opts *op
     }
     n->measured = (optics_gfx_point){w, h};
 
-    lensi_node_semantics(ui, n, OPTICS_UI_ROLE_LABEL, text, nullptr, 0);
+    optics_ui__node_semantics(ui, n, OPTICS_UI_ROLE_LABEL, text, nullptr, 0);
 
-    lensi_skin_emit(ui, n,
-                    &(optics_ui_widget_record){
-                        .kind = OPTICS_UI_WIDGET_LABEL,
-                        .state = 0,
-                        .bounds = {0, 0, w, h},
-                        .last_bounds = n->prev_rect,
-                        .style = rs,
-                        .style_fields = eff.fields,
-                        .content =
-                            {
-                                .label = text,
-                                .text = intrinsic,
-                                .text_size = size,
-                                .text_weight = opts->weight,
-                                .align = opts->align,
-                                .lines = lines,
-                                .line_count = line_count,
-                            },
-                    });
+    optics_ui__skin_emit(ui, n,
+                         &(optics_ui_widget_record){
+                             .kind = OPTICS_UI_WIDGET_LABEL,
+                             .state = 0,
+                             .bounds = {0, 0, w, h},
+                             .last_bounds = n->prev_rect,
+                             .style = rs,
+                             .style_fields = eff.fields,
+                             .content =
+                                 {
+                                     .label = text,
+                                     .text = intrinsic,
+                                     .text_size = size,
+                                     .text_weight = opts->weight,
+                                     .align = opts->align,
+                                     .lines = lines,
+                                     .line_count = line_count,
+                                 },
+                         });
 
     optics_ui_response r = (optics_ui_response){.id = id, .rect = n->prev_rect};
     ui->last_response = r;

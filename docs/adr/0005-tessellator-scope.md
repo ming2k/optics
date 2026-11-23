@@ -3,7 +3,9 @@ id: ADR-0005
 title: "Ear-clipping tessellator with stencil-then-cover deferred"
 status: superseded
 date: 2026-01-01
-superseded_by: "ADR-0011"
+scope: unrecorded
+superseded_by: ADR-0011
+negative_knowledge: true
 ---
 
 # ADR-0005: Ear-clipping tessellator with stencil-then-cover deferred

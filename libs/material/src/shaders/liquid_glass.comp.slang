@@ -39,9 +39,9 @@ struct GlassBody {
     uint shape_count;
     uint has_focus;
     uint reserved;
-    /* Pad to PRISM_BODY_STRIDE (256 bytes). */
+    /* Pad to OPTICS_MATERIAL_BODY_STRIDE (256 bytes). */
     uint pad0[2]; /* payload 136 -> 144: 16-align */
-    float4 pad1[7]; /* 112 more -> 256 = PRISM_BODY_STRIDE */
+    float4 pad1[7]; /* 112 more -> 256 = OPTICS_MATERIAL_BODY_STRIDE */
 };
 
 struct LiquidGlassPush {

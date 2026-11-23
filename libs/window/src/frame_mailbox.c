@@ -134,9 +134,9 @@ void optics_window_mailbox_publish(optics_window_frame_mailbox *mb,
     if (!mb || pkt != &mb->pool[mb->back])
         return;
 
-    OPTICS_GFX_PROFILE_ZONE(z, "iris.mailbox_publish");
+    OPTICS_GFX_PROFILE_ZONE(z, "window.mailbox_publish");
     pkt->sequence = atomic_fetch_add_explicit(&mb->sequence, 1, memory_order_relaxed) + 1;
-    OPTICS_GFX_PROFILE_PLOT_INT("iris.mailbox_seq", (int64_t)pkt->sequence);
+    OPTICS_GFX_PROFILE_PLOT_INT("window.mailbox_seq", (int64_t)pkt->sequence);
     optics_window__ui_snapshot_retain(mb->ui, pkt->snapshot);
     if (pkt->host_list)
         optics_gfx_display_list_retain(pkt->host_list);
@@ -157,7 +157,7 @@ optics_window_frame_packet *optics_window_mailbox_claim(optics_window_frame_mail
      * one than the load saw, which is exactly what a claim should return. */
     if (!(atomic_load_explicit(&mb->middle, memory_order_acquire) & OPTICS_WINDOW_MAILBOX_FRESH))
         return nullptr;
-    OPTICS_GFX_PROFILE_ZONE(z, "iris.mailbox_claim");
+    OPTICS_GFX_PROFILE_ZONE(z, "window.mailbox_claim");
     const uint32_t old = atomic_exchange_explicit(&mb->middle, mb->front, memory_order_acq_rel);
     mb->front = old & OPTICS_WINDOW_MAILBOX_INDEX;
     OPTICS_GFX_PROFILE_ZONE_END(z);

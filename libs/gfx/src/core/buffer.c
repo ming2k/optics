@@ -3,11 +3,11 @@
  *
  * GPU_LOCAL: backed by DEVICE_LOCAL memory; not host-mappable. If
  * initial_data is set, the data is uploaded via a one-shot staging
- * buffer + transient command buffer (reuses flux_vk_upload_to_buffer).
+ * buffer + transient command buffer (reuses optics_gfx_vk_upload_to_buffer).
  *
  * HOST_VISIBLE: backed by HOST_VISIBLE|HOST_COHERENT memory and
  * persistently mapped. The mapped pointer is returned by
- * flux_buffer_mapped(); writes are immediately visible to the GPU
+ * optics_gfx_buffer_mapped(); writes are immediately visible to the GPU
  * on a coherent buffer.
  */
 #include "internal.h"
@@ -53,7 +53,8 @@ optics_gfx_result optics_gfx_buffer_create(optics_gfx_device *d, const optics_gf
     if (!d || !desc || !out)
         return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
     if (desc->type != OPTICS_GFX_TYPE_BUFFER_DESC) {
-        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT, "desc->type != FLUX_TYPE_BUFFER_DESC");
+        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT,
+                        "desc->type != OPTICS_GFX_TYPE_BUFFER_DESC");
         return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
     }
     if (desc->size == 0) {
@@ -83,7 +84,7 @@ optics_gfx_result optics_gfx_buffer_create(optics_gfx_device *d, const optics_gf
         goto fail;
 
     optics_gfx_vk_set_name_from_ledger(d, VK_OBJECT_TYPE_BUFFER, (uint64_t)b->buffer,
-                                       OPTICS_GFX_SCOPE_DEVICE, "vk_buffer", "flux/core");
+                                       OPTICS_GFX_SCOPE_DEVICE, "vk_buffer", "gfx/core");
 
     if (desc->location == OPTICS_GFX_BUFFER_HOST_VISIBLE) {
         b->mapped = b->alloc.mapped;
@@ -112,7 +113,7 @@ optics_gfx_result optics_gfx_buffer_create(optics_gfx_device *d, const optics_gf
 
     *out = b;
     OPTICS_GFX_OBSERVE_ACQUIRE(d, OPTICS_GFX_SCOPE_DEVICE, OPTICS_GFX_LIFETIME_CONTEXT, "vk_buffer",
-                               "flux/core", 0, OPTICS_GFX_SITE_VK_BUFFER);
+                               "gfx/core", 0, OPTICS_GFX_SITE_VK_BUFFER);
     return OPTICS_GFX_OK;
 
 fail:
@@ -145,7 +146,7 @@ void optics_gfx_buffer_release(optics_gfx_buffer *b) {
      * destroyed once the queue provably passed every batch that could
      * reference them. */
     optics_gfx_device_retire_buffer(d, b->buffer, &b->alloc);
-    OPTICS_GFX_OBSERVE_RELEASE(d, OPTICS_GFX_SCOPE_DEVICE, "vk_buffer", "flux/core", 0);
+    OPTICS_GFX_OBSERVE_RELEASE(d, OPTICS_GFX_SCOPE_DEVICE, "vk_buffer", "gfx/core", 0);
     optics_gfx_internal_free(d, b);
     optics_gfx_device_release(d);
 }

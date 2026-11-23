@@ -1,10 +1,10 @@
-# libflux — the rendering foundation: Vulkan 1.3 RHI, 2D canvas (GPU and CPU
+# liboptics_gfx — the rendering foundation: Vulkan 1.3 RHI, 2D canvas (GPU and CPU
 # backends), 3D draw core, compute pipelines, image effects, the analytic curve
 # kernel and distance fields.
 #
-# flux is one library with one ABI. There are no per-module build switches:
-# every installed libflux exports the same symbols and ships the same headers,
-# so "which flux is this?" is answered by the version alone.
+# gfx is one library with one ABI. There are no per-module build switches:
+# every installed liboptics_gfx exports the same symbols and ships the same headers,
+# so "which gfx is this?" is answered by the version alone.
 
 vulkan_dep  = dependency('vulkan',  version : '>=1.3', required : true)
 threads_dep = dependency('threads')
@@ -13,7 +13,7 @@ gfx_inc = [include_directories('include'), include_directories('.')]
 
 # dma-buf (fd-based external memory import/export + sync_file fences) is
 # Linux-only. Elsewhere src/core/dmabuf_stub.c answers every public entry point
-# with FLUX_ERROR_UNSUPPORTED, so call sites need no #ifdef (ADR-0052).
+# with OPTICS_GFX_ERROR_UNSUPPORTED, so call sites need no #ifdef (ADR-0052).
 have_dmabuf = host_machine.system() == 'linux'
 
 gfx_sources = files(
@@ -45,7 +45,6 @@ gfx_sources = files(
   'src/math/arena.c',
   'src/curve/curve.c',
   'src/sdf/sdf.c',
-  'src/vault/tess_earcut.c',
   'src/canvas/image.c',
   'src/canvas/canvas.c',
   'src/canvas/canvas_dispatch.c',
@@ -86,7 +85,7 @@ endif
 
 # C23 #embed bakes each compiled .spv into the binary (renderer.c, effect.c,
 # scene.c). --embed-dir points the compiler at the build directory.
-gfx_c_args += cc.get_supported_arguments('--embed-dir=' + meson.current_build_dir())
+gfx_c_args += '--embed-dir=' + meson.current_build_dir()
 
 # ---------------------------------------------------------------------------
 # Shaders (Slang -> SPIR-V, ADR-0156). One table, one rule.
@@ -101,7 +100,7 @@ gfx_shader_inc = [
   '-I' + meson.current_source_dir() / 'include/optics/gfx/shaders',
 ]
 # Shared snippets: editing any of them rebuilds every shader.
-flux_shader_deps = files(
+optics_gfx_shader_deps = files(
   'src/canvas/shaders/canvas_color.slang',
   'src/canvas/shaders/canvas_image_common.slang',
   'src/canvas/shaders/canvas_tile_common.slang',
@@ -109,10 +108,10 @@ flux_shader_deps = files(
   'include/optics/gfx/shaders/optics_gfx_sdf.slang',
   'include/optics/gfx/shaders/optics_gfx_vector_eval.slang',
 )
-flux_stage = {'vert' : 'vertex', 'frag' : 'fragment', 'comp' : 'compute'}
+optics_gfx_stage = {'vert' : 'vertex', 'frag' : 'fragment', 'comp' : 'compute'}
 
 # [directory, source stem, stage, output stem, extra slangc args]
-flux_shaders = [
+optics_gfx_shaders = [
   ['canvas', 'canvas_solid',       'vert', 'canvas_solid',           []],
   ['canvas', 'canvas_solid',       'frag', 'canvas_solid',           []],
   ['canvas', 'canvas_gradient',    'frag', 'canvas_gradient',        []],
@@ -144,28 +143,28 @@ flux_shaders = [
   ['effect', 'effect_shadow',      'comp', 'effect_shadow_16f',   ['-DEFFECT_STORAGE_RGBA16F']],
 ]
 
-flux_spv = {}
-flux_extra_inputs = []
-foreach s : flux_shaders
+optics_gfx_spv = {}
+optics_gfx_extra_inputs = []
+foreach s : optics_gfx_shaders
   out = '@0@.@1@.spv'.format(s[3], s[2])
   spv = custom_target(out,
     input        : 'src/@0@/shaders/@1@.@2@.slang'.format(s[0], s[1], s[2]),
-    depend_files : flux_shader_deps,
+    depend_files : optics_gfx_shader_deps,
     output       : out,
-    command      : [slangc, slangc_flags, '-entry', 'main', '-stage', flux_stage[s[2]],
+    command      : [slangc, slangc_flags, '-entry', 'main', '-stage', optics_gfx_stage[s[2]],
                     s[4], gfx_shader_inc, '@INPUT@', '-o', '@OUTPUT@'],
   )
-  flux_spv += {out : spv}
-  flux_extra_inputs += spv
+  optics_gfx_spv += {out : spv}
+  optics_gfx_extra_inputs += spv
 endforeach
 # Consumed by the tile-raster integration tests.
-canvas_tile_raster_comp_spv = flux_spv['canvas_tile_raster.comp.spv']
+canvas_tile_raster_comp_spv = optics_gfx_spv['canvas_tile_raster.comp.spv']
 
 # SONAME policy: `optics_soname` is derived once in the top-level meson.build
 # (full version pre-1.0, major.minor after); `version` is always X.Y.Z.
 gfx_lib = library('optics_gfx',
   gfx_sources,
-  flux_extra_inputs,
+  optics_gfx_extra_inputs,
   include_directories   : gfx_inc,
   c_args                : gfx_c_args,
   dependencies          : [vulkan_dep, threads_dep, m_dep, tracy_dep],
@@ -195,11 +194,10 @@ install_headers(
 )
 
 # The analytic distance field is defined once for Slang consumers too
-# (ADR-0118, ADR-0156); prism's materials include it rather than keeping copies.
+# (ADR-0118, ADR-0156); material's materials include it rather than keeping copies.
 install_headers('include/optics/gfx/shaders/optics_gfx_sdf.slang',
                 'include/optics/gfx/shaders/optics_gfx_vector_eval.slang',
                 subdir : 'optics/gfx/shaders')
-install_headers('include/optics/gfx/vault/tess_earcut.h', subdir : 'optics/gfx/vault')
 
 gfx_dep = declare_dependency(
   link_with             : gfx_lib,

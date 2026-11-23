@@ -2,8 +2,8 @@
  * test_rfc0094_contracts.c — Validation suite for RFC-0094 / ADR-0087:
  * - Dual-lifecycle contracts (_retain/_release, _init/_deinit/_reset)
  * - Target-driven canvas begin/end polymorphism
- * - FLUX_INIT safe initialization macro
- * - Zero-cost inline canvas helpers (<flux/canvas_helpers.h>)
+ * - OPTICS_GFX_INIT safe initialization macro
+ * - Zero-cost inline canvas helpers (<optics/gfx/canvas_helpers.h>)
  * - Font atlas explicit synchronization query
  */
 
@@ -14,7 +14,7 @@
 #include <optics/gfx/math.h>
 #include <optics/text.h>
 
-static void test_flux_init_macro(void) {
+static void test_gfx_init_macro(void) {
     /* Lowercase struct form */
     optics_gfx_buffer_desc b1 =
         OPTICS_GFX_INIT(buffer_desc, .size = 1024, .usage = OPTICS_GFX_BUFFER_USAGE_VERTEX,
@@ -26,7 +26,7 @@ static void test_flux_init_macro(void) {
 
     /* Uppercase descriptor form */
     optics_gfx_target_desc t1 =
-        OPTICS_GFX_INIT(TARGET_DESC, .width = 800, .height = 600, .usage = OPTICS_GFX_TARGET_COLOR,
+        OPTICS_GFX_INIT(target_desc, .width = 800, .height = 600, .usage = OPTICS_GFX_TARGET_COLOR,
                         .format = OPTICS_GFX_FORMAT_RGBA8_UNORM);
     OT_EXPECT(t1.type == OPTICS_GFX_TYPE_TARGET_DESC);
     OT_EXPECT(t1.next == nullptr);
@@ -34,7 +34,7 @@ static void test_flux_init_macro(void) {
     OT_EXPECT(t1.height == 600);
 
     /* CPU target desc */
-    optics_gfx_cpu_target_desc ct1 = OPTICS_GFX_INIT(CPU_TARGET_DESC, .width = 64, .height = 64,
+    optics_gfx_cpu_target_desc ct1 = OPTICS_GFX_INIT(cpu_target_desc, .width = 64, .height = 64,
                                                      .format = OPTICS_GFX_FORMAT_RGBA8_UNORM);
     OT_EXPECT(ct1.type == OPTICS_GFX_TYPE_CPU_TARGET_DESC);
     OT_EXPECT(ct1.next == nullptr);
@@ -71,7 +71,7 @@ static void test_arena_lifecycle(void) {
 
 static void test_cpu_target_and_canvas_polymorphism(void) {
     /* 1. Create CPU Target */
-    optics_gfx_cpu_target_desc t_desc = OPTICS_GFX_INIT(CPU_TARGET_DESC, .width = 64, .height = 64,
+    optics_gfx_cpu_target_desc t_desc = OPTICS_GFX_INIT(cpu_target_desc, .width = 64, .height = 64,
                                                         .format = OPTICS_GFX_FORMAT_RGBA8_UNORM);
     optics_gfx_target *target = nullptr;
     optics_gfx_result r = optics_gfx_target_create_cpu(&t_desc, &target);
@@ -87,7 +87,7 @@ static void test_cpu_target_and_canvas_polymorphism(void) {
 
     /* 2. Create CPU Canvas */
     optics_gfx_canvas_desc c_desc =
-        OPTICS_GFX_INIT(CANVAS_DESC, .backend = OPTICS_GFX_CANVAS_BACKEND_CPU, .width = 64,
+        OPTICS_GFX_INIT(canvas_desc, .backend = OPTICS_GFX_CANVAS_BACKEND_CPU, .width = 64,
                         .height = 64, .scale = 1.0f);
     optics_gfx_canvas *canvas = nullptr;
     r = optics_gfx_canvas_create(&c_desc, &canvas);
@@ -108,7 +108,7 @@ static void test_cpu_target_and_canvas_polymorphism(void) {
                     .attachment = {.kind = OPTICS_GFX_CANVAS_ATTACHMENT_TARGET, .target = target}});
     OT_EXPECT(r == OPTICS_GFX_OK);
 
-    /* 4. Use inline canvas helpers from <flux/canvas_helpers.h> */
+    /* 4. Use inline canvas helpers from <optics/gfx/canvas_helpers.h> */
     optics_gfx_rect rect = {4.0f, 4.0f, 24.0f, 24.0f};
     optics_gfx_color rect_color = optics_gfx_color_rgba_premul(255, 0, 0, 255);
     optics_gfx_canvas_fill_rect_color(canvas, rect, rect_color);
@@ -202,15 +202,15 @@ static void test_adr0088_clean_break(void) {
 
     optics_gfx_encoder_destroy(enc);
 
-    /* 4. Play back into CPU canvas via flux_canvas_submit_display_list */
+    /* 4. Play back into CPU canvas via optics_gfx_canvas_submit_display_list */
     optics_gfx_cpu_target_desc t_desc = OPTICS_GFX_INIT(
-        CPU_TARGET_DESC, .width = 128, .height = 128, .format = OPTICS_GFX_FORMAT_RGBA8_UNORM);
+        cpu_target_desc, .width = 128, .height = 128, .format = OPTICS_GFX_FORMAT_RGBA8_UNORM);
     optics_gfx_target *target = nullptr;
     OT_EXPECT(optics_gfx_target_create_cpu(&t_desc, &target) == OPTICS_GFX_OK);
 
     /* Draws only into explicit targets; its own framebuffer is unused. */
     optics_gfx_canvas_desc c_desc = OPTICS_GFX_INIT(
-        CANVAS_DESC, .backend = OPTICS_GFX_CANVAS_BACKEND_CPU, .width = 1, .height = 1);
+        canvas_desc, .backend = OPTICS_GFX_CANVAS_BACKEND_CPU, .width = 1, .height = 1);
     optics_gfx_canvas *c = nullptr;
     OT_EXPECT(optics_gfx_canvas_create(&c_desc, &c) == OPTICS_GFX_OK);
 
@@ -268,14 +268,14 @@ static void test_adr0090_display_list_immutable_capture(void) {
     optics_gfx_arena_deinit(&caller_arena);
 
     /* Play back display list into CPU canvas — the embedded path segments must survive! */
-    optics_gfx_cpu_target_desc t_desc = OPTICS_GFX_INIT(CPU_TARGET_DESC, .width = 64, .height = 64,
+    optics_gfx_cpu_target_desc t_desc = OPTICS_GFX_INIT(cpu_target_desc, .width = 64, .height = 64,
                                                         .format = OPTICS_GFX_FORMAT_RGBA8_UNORM);
     optics_gfx_target *target = nullptr;
     OT_EXPECT(optics_gfx_target_create_cpu(&t_desc, &target) == OPTICS_GFX_OK);
 
     /* Draws only into explicit targets; its own framebuffer is unused. */
     optics_gfx_canvas_desc c_desc = OPTICS_GFX_INIT(
-        CANVAS_DESC, .backend = OPTICS_GFX_CANVAS_BACKEND_CPU, .width = 1, .height = 1);
+        canvas_desc, .backend = OPTICS_GFX_CANVAS_BACKEND_CPU, .width = 1, .height = 1);
     optics_gfx_canvas *c = nullptr;
     OT_EXPECT(optics_gfx_canvas_create(&c_desc, &c) == OPTICS_GFX_OK);
 
@@ -304,14 +304,14 @@ static void test_adr0090_display_list_immutable_capture(void) {
 }
 
 static void test_adr0091_save_layer_opacity_group(void) {
-    optics_gfx_cpu_target_desc t_desc = OPTICS_GFX_INIT(CPU_TARGET_DESC, .width = 64, .height = 64,
+    optics_gfx_cpu_target_desc t_desc = OPTICS_GFX_INIT(cpu_target_desc, .width = 64, .height = 64,
                                                         .format = OPTICS_GFX_FORMAT_RGBA8_UNORM);
     optics_gfx_target *target = nullptr;
     OT_EXPECT(optics_gfx_target_create_cpu(&t_desc, &target) == OPTICS_GFX_OK);
 
     /* Draws only into explicit targets; its own framebuffer is unused. */
     optics_gfx_canvas_desc c_desc = OPTICS_GFX_INIT(
-        CANVAS_DESC, .backend = OPTICS_GFX_CANVAS_BACKEND_CPU, .width = 1, .height = 1);
+        canvas_desc, .backend = OPTICS_GFX_CANVAS_BACKEND_CPU, .width = 1, .height = 1);
     optics_gfx_canvas *c = nullptr;
     OT_EXPECT(optics_gfx_canvas_create(&c_desc, &c) == OPTICS_GFX_OK);
 
@@ -357,7 +357,7 @@ static void test_adr0091_save_layer_opacity_group(void) {
 }
 
 static void test_adr0091_squircle_distinct_geometry(void) {
-    optics_gfx_cpu_target_desc t_desc = OPTICS_GFX_INIT(CPU_TARGET_DESC, .width = 64, .height = 64,
+    optics_gfx_cpu_target_desc t_desc = OPTICS_GFX_INIT(cpu_target_desc, .width = 64, .height = 64,
                                                         .format = OPTICS_GFX_FORMAT_RGBA8_UNORM);
     optics_gfx_target *t_sq = nullptr;
     OT_EXPECT(optics_gfx_target_create_cpu(&t_desc, &t_sq) == OPTICS_GFX_OK);
@@ -367,7 +367,7 @@ static void test_adr0091_squircle_distinct_geometry(void) {
 
     /* Draws only into explicit targets; its own framebuffer is unused. */
     optics_gfx_canvas_desc c_desc = OPTICS_GFX_INIT(
-        CANVAS_DESC, .backend = OPTICS_GFX_CANVAS_BACKEND_CPU, .width = 1, .height = 1);
+        canvas_desc, .backend = OPTICS_GFX_CANVAS_BACKEND_CPU, .width = 1, .height = 1);
     optics_gfx_canvas *c = nullptr;
     OT_EXPECT(optics_gfx_canvas_create(&c_desc, &c) == OPTICS_GFX_OK);
 
@@ -437,13 +437,13 @@ static void test_adr0092_text_atlas_epoch_tracking(void) {
 }
 
 static void test_adr0093_target_exclusive_borrow_and_readback(void) {
-    optics_gfx_cpu_target_desc t_desc = OPTICS_GFX_INIT(CPU_TARGET_DESC, .width = 32, .height = 32,
+    optics_gfx_cpu_target_desc t_desc = OPTICS_GFX_INIT(cpu_target_desc, .width = 32, .height = 32,
                                                         .format = OPTICS_GFX_FORMAT_RGBA8_UNORM);
     optics_gfx_target *target = nullptr;
     OT_EXPECT(optics_gfx_target_create_cpu(&t_desc, &target) == OPTICS_GFX_OK);
 
     optics_gfx_canvas_desc c_desc = OPTICS_GFX_INIT(
-        CANVAS_DESC, .backend = OPTICS_GFX_CANVAS_BACKEND_CPU, .width = 32, .height = 32);
+        canvas_desc, .backend = OPTICS_GFX_CANVAS_BACKEND_CPU, .width = 32, .height = 32);
     optics_gfx_canvas *c1 = nullptr;
     OT_EXPECT(optics_gfx_canvas_create(&c_desc, &c1) == OPTICS_GFX_OK);
     optics_gfx_canvas *c2 = nullptr;
@@ -500,7 +500,7 @@ static void test_adr0093_target_exclusive_borrow_and_readback(void) {
 }
 
 int main(void) {
-    test_flux_init_macro();
+    test_gfx_init_macro();
     test_arena_lifecycle();
     test_cpu_target_and_canvas_polymorphism();
     test_text_lifecycle_and_atlas_sync();

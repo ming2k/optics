@@ -1,13 +1,13 @@
-/* app.c — iris_app_run dispatcher.
+/* app.c — optics_window_run dispatcher.
  *
- * Exactly one platform backend is compiled into libiris, selected at meson
- * configure time (ADR-0044): IRIS_BACKEND_WAYLAND, IRIS_BACKEND_WIN32, or
- * IRIS_BACKEND_COCOA. iris_app_run forwards to that backend; the public
+ * Exactly one platform backend is compiled into liboptics_window, selected at meson
+ * configure time (ADR-0044): OPTICS_WINDOW_BACKEND_WAYLAND, OPTICS_WINDOW_BACKEND_WIN32, or
+ * OPTICS_WINDOW_BACKEND_COCOA. optics_window_run forwards to that backend; the public
  * headers never change per platform.
  *
- * If IRIS_BUILD_NO_BACKEND is defined at compile time, iris_app_run
+ * If OPTICS_WINDOW_BUILD_NO_BACKEND is defined at compile time, optics_window_run
  * returns a non-zero code immediately. This lets platform-less CI builds
- * link against libiris for header / bindgen purposes.
+ * link against liboptics_window for header / bindgen purposes.
  */
 
 #include <optics/window/loop.h>
@@ -67,7 +67,7 @@ OPTICS_WINDOW_API int optics_window_post_to_main_thread(optics_window_main_threa
     /* The backend wakeup seam (platform_wakeup.h) IS the delivery
      * mechanism: each backend registers a thread-safe kick that makes its
      * event-loop wait return, and drains the shared FIFO on the loop
-     * thread. See iris/app.h for the public contract. */
+     * thread. See window/app.h for the public contract. */
     return optics_window_platform_wakeup_post(fn, user);
 #else
     (void)fn;
@@ -77,7 +77,7 @@ OPTICS_WINDOW_API int optics_window_post_to_main_thread(optics_window_main_threa
 }
 
 OPTICS_WINDOW_API int optics_window_run(const optics_window_opts *cfg) {
-    /* Both callbacks are optional: a pure-lens app leaves paint NULL, a
+    /* Both callbacks are optional: a pure-ui app leaves paint NULL, a
      * pure-canvas demo leaves build NULL. Rejecting an empty config here
      * would force every minimal example to register a no-op closure. */
     if (!cfg) {
@@ -98,7 +98,7 @@ OPTICS_WINDOW_API int optics_window_run(const optics_window_opts *cfg) {
     optics_window__event_seam_clear();
     return rc;
 #else
-    return 2; /* IRIS_BUILD_NO_BACKEND */
+    return 2; /* OPTICS_WINDOW_BUILD_NO_BACKEND */
 #endif
 }
 

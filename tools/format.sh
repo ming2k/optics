@@ -19,7 +19,7 @@ fi
 # file was deleted (a clean-break refactor must not make the formatter fail).
 SOURCES=$(
     git ls-files --cached --others --exclude-standard \
-        'libs/*.c' 'libs/*.h' 'examples/*.c' 'tests/*.c' 'tests/*.h' |
+        'libs/*.c' 'libs/*.h' 'examples/*.c' 'tests/*.c' 'tests/*.h' 'tools/*.c' |
     while IFS= read -r file; do
         if [ -f "$file" ]; then
             printf '%s\n' "$file"

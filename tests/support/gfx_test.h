@@ -1,5 +1,5 @@
 /*
- * flux_test.h — Vulkan device fixtures shared by flux, prism and vista tests.
+ * gfx_test.h — Vulkan device fixtures shared by gfx, material and scene tests.
  *
  * This header carries *fixtures only*, no assertions. Every test binary uses
  * the one assertion harness from <optics_test.h>; a device fixture is not a
@@ -22,7 +22,7 @@
  * first probe. */
 bool optics_gfx_test_have_vulkan(void);
 
-/* Headless device, validation off. Caller releases with flux_device_release. */
+/* Headless device, validation off. Caller releases with optics_gfx_device_release. */
 optics_gfx_device *optics_gfx_test_make_headless_device(void);
 optics_gfx_device *optics_gfx_test_make_headless_device_in_flight(uint32_t frames_in_flight);
 
@@ -41,4 +41,4 @@ optics_gfx_device *optics_gfx_test_make_validation_dmabuf_device(optics_gfx_log_
 uint32_t optics_gfx_test_find_memory_type(optics_gfx_device *device, uint32_t filter,
                                           VkMemoryPropertyFlags want);
 
-#endif /* FLUX_TEST_H */
+#endif /* OPTICS_GFX_TEST_H */

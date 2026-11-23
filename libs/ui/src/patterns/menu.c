@@ -50,7 +50,7 @@ int32_t optics_ui_popup_menu(optics_ui *ui, const optics_ui_menu_opts *opts) {
         return -1;
 
     optics_ui_id state_id = optics_ui_current_id(ui, "menu_kb_state");
-    optics_ui_node *state_node = lensi_store_touch(ui, state_id);
+    optics_ui_node *state_node = optics_ui__store_touch(ui, state_id);
     popup_menu_state *state =
         state_node ? (popup_menu_state *)optics_ui_node_state(state_node, sizeof(popup_menu_state))
                    : nullptr;

@@ -1,17 +1,17 @@
 /*
- * glyph/glyph.h — text shaping, layout, and glyph-run rendering (ADR-0016, ADR-0106).
+ * optics/text.h — text shaping, layout, and glyph-run rendering (ADR-0016, ADR-0106).
  *
- * Sibling library of libflux: shapes UTF-8 plus style (size, weight, colour)
+ * Sibling library of liboptics_gfx: shapes UTF-8 plus style (size, weight, colour)
  * into positioned glyph quads against a device-uploaded coverage atlas, then
- * batches them through flux_canvas_draw_glyph_run.
+ * batches them through optics_gfx_canvas_draw_glyph_run.
  */
 
 #ifndef OPTICS_TEXT_H
 #define OPTICS_TEXT_H
 
-#include <optics/gfx/canvas.h> /* flux_canvas, flux_color */
-#include <optics/gfx/core.h>   /* flux_device, flux_result */
-#include <optics/gfx/math.h>   /* flux_arena */
+#include <optics/gfx/canvas.h> /* optics_gfx_canvas, optics_gfx_color */
+#include <optics/gfx/core.h>   /* optics_gfx_device, optics_gfx_result */
+#include <optics/gfx/math.h>   /* optics_gfx_arena */
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -39,9 +39,9 @@ extern "C" {
 
 #define OPTICS_TEXT_VERSION_MAJOR 0
 #define OPTICS_TEXT_VERSION_MINOR 0
-#define OPTICS_TEXT_VERSION_PATCH 82
+#define OPTICS_TEXT_VERSION_PATCH 83
 
-/* Packed integer version, monotonic — identical layout to FLUX_VERSION_NUMBER. */
+/* Packed integer version, monotonic — identical layout to OPTICS_GFX_VERSION_NUMBER. */
 #define OPTICS_TEXT_VERSION_NUMBER                                                                 \
     (((uint32_t)OPTICS_TEXT_VERSION_MAJOR << 16) | ((uint32_t)OPTICS_TEXT_VERSION_MINOR << 8) |    \
      (uint32_t)OPTICS_TEXT_VERSION_PATCH)
@@ -237,4 +237,4 @@ OPTICS_TEXT_API size_t optics_text_visual_move(optics_text_ctx *t,
 }
 #endif
 
-#endif /* GLYPH_H */
+#endif /* OPTICS_TEXT_H */

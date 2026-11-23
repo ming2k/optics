@@ -1,11 +1,11 @@
 # Caret/selection mapping: every assertion crosses the itemiser + shaper +
 # font stack, so this is an integration lane. A host with no shaping backend
 # skips explicitly.
-test_glyph_caret = executable('test_glyph_caret',
-  'test_glyph_caret.c',
+test_text_caret = executable('test_text_caret',
+  'test_text_caret.c',
   dependencies : [text_test_dep],
 )
-test('glyph_caret', test_glyph_caret, suite : 'integration')
+test('text_caret', test_text_caret, suite : 'integration')
 
 # Long-session text soak: drives the glyph cache past its live ceiling and
 # replays resident working sets, asserting the diagnostic counters (evictions,

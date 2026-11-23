@@ -3,7 +3,9 @@ id: ADR-0113
 title: "Convex fast-path tessellation and winding-robust convexity test"
 status: superseded
 date: 2026-10-17
-superseded_by: "ADR-0115"
+scope: libs/gfx/src/canvas/geometry_tess.c, the ear_clip_contour
+superseded_by: ADR-0115
+negative_knowledge: true
 ---
 
 # ADR-0113: Convex fast-path tessellation and winding-robust convexity test

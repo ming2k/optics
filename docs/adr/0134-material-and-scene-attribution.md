@@ -3,7 +3,7 @@ id: ADR-0134
 title: "Material and scene ownership is attributed to its own library, not to flux"
 status: accepted
 date: 2026-11-02
-scope: [prism, vista, flux, tools]
+scope: [material, scene, gfx, tools]
 superseded_by: null
 negative_knowledge: true
 ---

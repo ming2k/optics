@@ -1,17 +1,17 @@
 /*
- * flux/math.h — value-type math primitives.
+ * gfx/math.h — value-type math primitives.
  *
- * No Vulkan dependency. No allocations except via flux_arena.
+ * No Vulkan dependency. No allocations except via optics_gfx_arena.
  *
  * Naming honesty:
- *   flux_mat3x2  2D affine transform (rows × cols).
- *   flux_mat4    general 4×4 (projections, view, model).
- *   flux_quat    unit quaternion.
+ *   optics_gfx_mat3x2  2D affine transform (rows × cols).
+ *   optics_gfx_mat4    general 4×4 (projections, view, model).
+ *   optics_gfx_quat    unit quaternion.
  * No type punning between dimensions.
  *
- * flux_color is a packed 32-bit value: bits 31..24 = A, 23..16 = R,
+ * optics_gfx_color is a packed 32-bit value: bits 31..24 = A, 23..16 = R,
  * 15..8 = G, 7..0 = B (premultiplied). The value is portable across
- * endianness — flux_color_unpack is the only sanctioned decoder; do
+ * endianness — optics_gfx_color_unpack is the only sanctioned decoder; do
  * not memcpy the bytes into a GPU buffer expecting a particular
  * component layout.
  */
@@ -71,7 +71,7 @@ OPTICS_GFX_API optics_gfx_vec4 optics_gfx_vec4_normalize(optics_gfx_vec4 v);
 typedef struct optics_gfx_point {
     float x, y;
 } optics_gfx_point;
-/* flux_rect is a core value type (flux/core.h): damage is a frame-native
+/* optics_gfx_rect is a core value type (gfx/core.h): damage is a frame-native
  * concept and every layer that names a dirty region needs the same struct. */
 
 /* The smallest rectangle covering both `a` and `b`. An empty operand
@@ -82,7 +82,7 @@ typedef struct optics_gfx_point {
  * rectangle (Win32 `DwmFlush`-style regions, most Vulkan `renderArea`s). A
  * producer that can describe a set must never union before the consumer has had
  * the chance to use the set — the union of a top strip and a bottom dock is the
- * whole output. Use `lens_damage_rects` for the set, and this only at the point
+ * whole output. Use `optics_ui_damage_rects` for the set, and this only at the point
  * where a single-rect API forces the collapse. */
 static inline optics_gfx_rect optics_gfx_rect_union(optics_gfx_rect a, optics_gfx_rect b) {
     if (a.w <= 0.0f || a.h <= 0.0f)
@@ -150,7 +150,7 @@ OPTICS_GFX_API optics_gfx_mat4 optics_gfx_mat4_look_at(optics_gfx_vec3 eye, opti
                                                        optics_gfx_vec3 up);
 
 /* ================================================================== */
-/*  3×3 matrix (color-space transforms; column-major like flux_mat4)  */
+/*  3×3 matrix (color-space transforms; column-major like optics_gfx_mat4)  */
 /* ================================================================== */
 
 typedef struct optics_gfx_mat3 {
@@ -193,15 +193,15 @@ OPTICS_GFX_API optics_gfx_color optics_gfx_color_from_linear(optics_gfx_vec4 lin
 /*  Color-space math (ADR-0069)                                       */
 /* ================================================================== */
 
-/* Validation and equality for flux_color_space values. Custom spaces are
+/* Validation and equality for optics_gfx_color_space values. Custom spaces are
  * valid only with sane chromaticities (xy in (0,1), non-degenerate
- * triangle, non-zero white); FLUX_TRANSFER_GAMMA requires gamma > 0. */
+ * triangle, non-zero white); OPTICS_GFX_TRANSFER_GAMMA requires gamma > 0. */
 OPTICS_GFX_API bool optics_gfx_color_space_is_valid(optics_gfx_color_space cs);
 OPTICS_GFX_API bool optics_gfx_color_space_equal(optics_gfx_color_space a,
                                                  optics_gfx_color_space b);
 
 /* Scalar transfer functions between linear light and the encoded
- * domain. `gamma` is read only for FLUX_TRANSFER_GAMMA. PQ linear is in
+ * domain. `gamma` is read only for OPTICS_GFX_TRANSFER_GAMMA. PQ linear is in
  * units of 10000 cd/m²; HLG is nominal 0..1 scene light. Encode clamps
  * to the representable range; decode mirrors it. */
 OPTICS_GFX_API float optics_gfx_transfer_encode(optics_gfx_transfer_func tf, float gamma,
@@ -250,4 +250,4 @@ static inline uint32_t optics_gfx_bucket_extent(uint32_t extent, uint32_t step) 
 }
 #endif
 
-#endif /* FLUX_MATH_H */
+#endif /* OPTICS_GFX_MATH_H */

@@ -1,4 +1,4 @@
-/* context.c — lens lifecycle and the per-frame envelope (ADR-0024/0009). */
+/* context.c — ui lifecycle and the per-frame envelope (ADR-0024/0009). */
 
 #include "../internal.h"
 #include "../render/icon_mask.h"
@@ -32,15 +32,15 @@ const char *optics_ui_version_string(void) {
         OPTICS_UI_VERSION_MINOR) "." OPTICS_UI_STRINGIFY(OPTICS_UI_VERSION_PATCH);
 }
 
-/* The one lens allocation funnel (ADR-0129, ADR-0135).
+/* The one ui allocation funnel (ADR-0129, ADR-0135).
  *
- * The ledger row is now written by flux_device_alloc itself, with lens's own
+ * The ledger row is now written by optics_gfx_device_alloc itself, with ui's own
  * (owner, kind) pair — previously this function counted by hand *and* called
  * the device allocator, so attribution lived in two places. The device-less
- * fallback keeps plain malloc: a lens context created without a device (CPU-only
+ * fallback keeps plain malloc: a ui context created without a device (CPU-only
  * layout, unit tests) has no ledger to write to, and that is a legitimate state,
  * not a violation. */
-void *lensi_alloc(optics_ui *ui, size_t bytes) {
+void *optics_ui__alloc(optics_ui *ui, size_t bytes) {
     if (!ui->device)
         return malloc(bytes); // RAW_ALLOC_OK(no-device)
     void *p = nullptr;
@@ -48,7 +48,7 @@ void *lensi_alloc(optics_ui *ui, size_t bytes) {
                                 &(optics_gfx_device_alloc_opts){
                                     .type = OPTICS_GFX_TYPE_DEVICE_ALLOC_OPTS,
                                     .bytes = bytes,
-                                    .owner = "lens/core",
+                                    .owner = "ui/core",
                                     .kind = "host",
                                     .scope = OPTICS_GFX_SCOPE_CONTEXT,
                                 },
@@ -57,12 +57,12 @@ void *lensi_alloc(optics_ui *ui, size_t bytes) {
     return p;
 }
 
-/* Device-scoped allocation pair for owners that outlive their lens context
+/* Device-scoped allocation pair for owners that outlive their ui context
  * (currently: scene snapshots, whose last release can come from a host after
- * lens_release). Same attribution as lensi_alloc, but keyed on the device the
+ * optics_ui_release). Same attribution as optics_ui__alloc, but keyed on the device the
  * memory belongs to rather than on a context that may be gone. */
-void *lensi_alloc_by_device(optics_gfx_device *d, size_t bytes) {
-    /* Zeroed on both paths: flux_device_alloc guarantees it, and the device-less
+void *optics_ui__alloc_by_device(optics_gfx_device *d, size_t bytes) {
+    /* Zeroed on both paths: optics_gfx_device_alloc guarantees it, and the device-less
      * fallback must match, because callers rely on the zeroing (a snapshot
      * struct's display_list/node_count start life as zero). Returning unzeroed
      * malloc here was a real bug — it turned a zeroed struct into garbage. */
@@ -73,7 +73,7 @@ void *lensi_alloc_by_device(optics_gfx_device *d, size_t bytes) {
                                 &(optics_gfx_device_alloc_opts){
                                     .type = OPTICS_GFX_TYPE_DEVICE_ALLOC_OPTS,
                                     .bytes = bytes,
-                                    .owner = "lens/core",
+                                    .owner = "ui/core",
                                     .kind = "snapshot",
                                     .scope = OPTICS_GFX_SCOPE_CONTEXT,
                                 },
@@ -82,7 +82,7 @@ void *lensi_alloc_by_device(optics_gfx_device *d, size_t bytes) {
     return p;
 }
 
-void lensi_free_by_device(optics_gfx_device *d, void *ptr) {
+void optics_ui__free_by_device(optics_gfx_device *d, void *ptr) {
     if (!ptr)
         return;
     if (!d) {
@@ -92,13 +92,13 @@ void lensi_free_by_device(optics_gfx_device *d, void *ptr) {
     optics_gfx_device_free(d, &(optics_gfx_device_free_opts){
                                   .type = OPTICS_GFX_TYPE_DEVICE_FREE_OPTS,
                                   .ptr = ptr,
-                                  .owner = "lens/core",
+                                  .owner = "ui/core",
                                   .kind = "snapshot",
                                   .scope = OPTICS_GFX_SCOPE_CONTEXT,
                               });
 }
 
-void lensi_free(optics_ui *ui, void *ptr) {
+void optics_ui__free(optics_ui *ui, void *ptr) {
     if (!ptr)
         return;
     if (!ui->device) {
@@ -108,24 +108,24 @@ void lensi_free(optics_ui *ui, void *ptr) {
     optics_gfx_device_free(ui->device, &(optics_gfx_device_free_opts){
                                            .type = OPTICS_GFX_TYPE_DEVICE_FREE_OPTS,
                                            .ptr = ptr,
-                                           .owner = "lens/core",
+                                           .owner = "ui/core",
                                            .kind = "host",
                                            .scope = OPTICS_GFX_SCOPE_CONTEXT,
                                        });
 }
 
-static void lensi_theme_normalize(optics_ui_theme *t);
+static void optics_ui__theme_normalize(optics_ui_theme *t);
 
 /* Size-aware theme copy (ADR-0032 decision 1 — previously documented but
  * not implemented, which made it an over-read on input and an over-write
- * on output for callers built against different lens_theme layouts).
- * Semantics match the implemented lens_input guard in lens_begin():
+ * on output for callers built against different optics_ui_theme layouts).
+ * Semantics match the implemented optics_ui_input guard in optics_ui_begin():
  *   size == 0        -> legacy caller: trust the full struct (pre-guard ABI)
  *   0 < size < lib   -> copy only the caller's prefix, default the rest
  *   size > lib size  -> copy only the library's prefix (caller is newer)
- * In every case the stored theme ends with size = sizeof(lens_theme) as
+ * In every case the stored theme ends with size = sizeof(optics_ui_theme) as
  * the library now sees it. */
-static optics_ui_theme lensi_theme_copy_in(const optics_ui_theme *src) {
+static optics_ui_theme optics_ui__theme_copy_in(const optics_ui_theme *src) {
     optics_ui_theme t = optics_ui_theme_default();
     if (!src)
         return t;
@@ -138,11 +138,11 @@ static optics_ui_theme lensi_theme_copy_in(const optics_ui_theme *src) {
     return t;
 }
 
-/* Size-aware lens_desc read (mirrors the lens_input guard in lens_begin):
+/* Size-aware optics_ui_desc read (mirrors the optics_ui_input guard in optics_ui_begin):
  * read only min(caller, library) bytes so a caller compiled against a
- * different lens_desc layout — older or newer — cannot make the library
+ * different optics_ui_desc layout — older or newer — cannot make the library
  * read past its own struct. Returns a fully library-local copy. */
-static optics_ui_desc lensi_desc_copy_in(const optics_ui_desc *desc) {
+static optics_ui_desc optics_ui__desc_copy_in(const optics_ui_desc *desc) {
     optics_ui_desc d;
     memset(&d, 0, sizeof d);
     if (!desc)
@@ -166,13 +166,13 @@ optics_gfx_result optics_ui_create(const optics_ui_desc *desc, optics_ui **out) 
         return OPTICS_GFX_ERROR_OUT_OF_MEMORY;
 
     /* Read the caller's descriptor through the size guard: a caller built
-     * against a different lens_desc layout never makes the library read
+     * against a different optics_ui_desc layout never makes the library read
      * past its own struct. All field reads below come from this local
      * copy, never from `desc` directly. (The parameter re-point is what
      * the dead-store check flags; the parameter itself is never read
      * again after this line — drop the re-point and read the copy `d`
      * directly.) */
-    const optics_ui_desc d = lensi_desc_copy_in(desc);
+    const optics_ui_desc d = optics_ui__desc_copy_in(desc);
 
     static atomic_uint_fast64_t next_identity = 1;
     ui->identity = atomic_fetch_add_explicit(&next_identity, 1, memory_order_relaxed);
@@ -182,8 +182,8 @@ optics_gfx_result optics_ui_create(const optics_ui_desc *desc, optics_ui **out) 
         (void)dev;
     }
 
-    ui->theme = d.theme.size ? lensi_theme_copy_in(&d.theme) : optics_ui_theme_default();
-    lensi_theme_normalize(&ui->theme);
+    ui->theme = d.theme.size ? optics_ui__theme_copy_in(&d.theme) : optics_ui_theme_default();
+    optics_ui__theme_normalize(&ui->theme);
     ui->scale = (d.scale > 0.0f) ? d.scale : 1.0f;
     ui->text_scale = (d.text_scale > 0.0f && isfinite(d.text_scale)) ? d.text_scale : 1.0f;
     ui->opacity = 1.0f;
@@ -194,28 +194,28 @@ optics_gfx_result optics_ui_create(const optics_ui_desc *desc, optics_ui **out) 
     /* Caret blink clock defaults (ADR-0151). 530 ms is the platform
      * convention every toolkit converged on; the clock starts visible so the
      * first frame after focus shows a caret rather than a gap. The clock is
-     * inactive until a *widget* claims the caret (`lensi_set_caret_rect`): a
+     * inactive until a *widget* claims the caret (`optics_ui__set_caret_rect`): a
      * host-owned caret has its own clock in the app, and driving it from here
-     * as well would make lens report flips the app's painter never made. */
+     * as well would make ui report flips the app's painter never made. */
     ui->caret_blink_enabled = true;
-    ui->caret_lens_owned = false;
+    ui->caret_ui_owned = false;
     ui->caret_blink_period_s =
-        d.caret_blink_period_s > 0.0f ? d.caret_blink_period_s : LENSI_CARET_BLINK_PERIOD_S;
+        d.caret_blink_period_s > 0.0f ? d.caret_blink_period_s : OPTICS_UI_CARET_BLINK_PERIOD_S;
     ui->caret_phase_s = 0.0f;
     ui->caret_visible = true;
     ui->caret_presented_visible = true;
 
-    size_t arena_bytes = d.arena_bytes ? d.arena_bytes : LENSI_DEFAULT_ARENA_BYTES;
+    size_t arena_bytes = d.arena_bytes ? d.arena_bytes : OPTICS_UI_DEFAULT_ARENA_BYTES;
     optics_gfx_result r = optics_gfx_arena_init(&ui->arena, arena_bytes, nullptr);
     if (r != OPTICS_GFX_OK)
         goto fail_arena;
 
-    uint32_t cap = d.store_capacity ? d.store_capacity : LENSI_DEFAULT_STORE_CAP;
-    r = lensi_store_init(ui, cap);
+    uint32_t cap = d.store_capacity ? d.store_capacity : OPTICS_UI_DEFAULT_STORE_CAP;
+    r = optics_ui__store_init(ui, cap);
     if (r != OPTICS_GFX_OK)
         goto fail_store;
 
-    /* Shared text engine (glyph). Always usable: it degrades to
+    /* Shared text engine (text). Always usable: it degrades to
      * monospace metrics internally when no shaping backend or font is
      * available, so widgets never branch on backend presence. Only fails
      * on allocation, which is non-fatal here (text simply stays blank). */
@@ -225,7 +225,7 @@ optics_gfx_result optics_ui_create(const optics_ui_desc *desc, optics_ui **out) 
 
     /* Icon coverage-mask cache (ADR-0112). Allocation failure is non-fatal:
      * the pool stays at cap 0 and icons draw through the live vector path. */
-    lensi_icon_mask_pool_init(ui);
+    optics_ui__icon_mask_pool_init(ui);
 
     *out = ui;
     return OPTICS_GFX_OK;
@@ -243,14 +243,14 @@ void optics_ui_release(optics_ui *ui) {
     if (!ui)
         return;
     optics_ui_snapshot_release(ui->presented_snapshot);
-    lensi_icon_mask_pool_destroy(ui);
-    lensi_ghost_destroy(ui);
+    optics_ui__icon_mask_pool_destroy(ui);
+    optics_ui__ghost_destroy(ui);
     optics_text_release(ui->text); /* null-safe */
-    lensi_store_destroy(ui);
+    optics_ui__store_destroy(ui);
     optics_gfx_arena_deinit(&ui->arena);
     /* Context scope drain point (ADR-0129). Emitted while the device is
      * still alive so the report can name rows; the device is released
-     * afterwards. A non-zero row here is a lens-owned leak, which is
+     * afterwards. A non-zero row here is a ui-owned leak, which is
      * exactly what had no attribution at all before this point. */
     if (ui->device) {
         optics_gfx_observe_report_emit(ui->device, OPTICS_GFX_SCOPE_CONTEXT);
@@ -259,7 +259,7 @@ void optics_ui_release(optics_ui *ui) {
     free(ui); // RAW_ALLOC_OK(no-device)
 }
 
-static void lensi_theme_normalize(optics_ui_theme *t) {
+static void optics_ui__theme_normalize(optics_ui_theme *t) {
     if (t->font_size_title <= 0.0f)
         t->font_size_title = t->font_size * (24.0f / 14.0f);
     if (t->font_size_h1 <= 0.0f)
@@ -324,8 +324,8 @@ optics_ui_text_family optics_ui_get_text_family(const optics_ui *ui) {
 void optics_ui_set_theme(optics_ui *ui, optics_ui_theme theme) {
     if (!ui)
         return;
-    ui->theme = theme.size ? lensi_theme_copy_in(&theme) : optics_ui_theme_default();
-    lensi_theme_normalize(&ui->theme);
+    ui->theme = theme.size ? optics_ui__theme_copy_in(&theme) : optics_ui_theme_default();
+    optics_ui__theme_normalize(&ui->theme);
 }
 
 optics_ui_theme optics_ui_get_theme(const optics_ui *ui) {
@@ -333,7 +333,7 @@ optics_ui_theme optics_ui_get_theme(const optics_ui *ui) {
      * library cannot know it), so the guard works the other way: the
      * caller copies the prefix it knows and must consult .size. The
      * returned struct always carries the library's current
-     * sizeof(lens_theme) so a mismatch is detectable rather than silent. */
+     * sizeof(optics_ui_theme) so a mismatch is detectable rather than silent. */
     optics_ui_theme t = ui ? ui->theme : optics_ui_theme_default();
     t.size = sizeof(optics_ui_theme);
     return t;
@@ -358,26 +358,26 @@ void optics_ui_set_ghost(optics_ui *ui, const optics_ui_set_ghost_opts *opts) {
         alpha = 0.0f;
     else if (alpha > 1.0f)
         alpha = 1.0f;
-    lensi_ghost_pin(ui, opts->subtree_root, alpha);
+    optics_ui__ghost_pin(ui, opts->subtree_root, alpha);
 }
 
 float optics_ui_opacity(const optics_ui *ui) {
     return ui ? ui->opacity : 1.0f;
 }
 
-/* Scoped frame clip — see lens.h. The stack restores the enclosing clip; a
+/* Scoped frame clip — see ui.h. The stack restores the enclosing clip; a
  * push beyond the fixed depth is counted so its matching end stays balanced
  * instead of popping an outer scope. */
 void optics_ui_clip_begin(optics_ui *ui, const optics_ui_clip_opts *opts) {
     if (!ui || !opts)
         return;
-    if (ui->clip_depth >= LENSI_CLIP_STACK_MAX) {
+    if (ui->clip_depth >= OPTICS_UI_CLIP_STACK_MAX) {
         ui->clip_overflow++;
-        lensi_set_overflow(ui);
+        optics_ui__set_overflow(ui);
         return;
     }
     ui->clip_stack[ui->clip_depth++] = ui->clip;
-    ui->clip = lensi_rect_intersect(ui->clip, opts->rect);
+    ui->clip = optics_ui__rect_intersect(ui->clip, opts->rect);
 }
 
 void optics_ui_clip_end(optics_ui *ui) {
@@ -398,7 +398,7 @@ void optics_ui_set_scale(optics_ui *ui, float scale) {
     }
 }
 
-/* Accessibility text scale — see lens.h for the contract. Applied at the
+/* Accessibility text scale — see ui.h for the contract. Applied at the
  * resolved-style funnel (style.c) and the explicit-size entry points, so
  * measure/paint/caret stay in agreement with no further invalidation
  * plumbing: font sizes already ride the draw-command hash (drawlist.c),
@@ -444,7 +444,7 @@ bool optics_ui_anim_pending(const optics_ui *ui) {
  * `dt_seconds` is the host's frame delta, which is the compositor's pulse
  * interval on a paced frame and the idle tick on a skipped one; that is
  * exactly the cadence a blink should be sampled at. */
-static void lensi_caret_advance_blink(optics_ui *ui) {
+static void optics_ui__caret_advance_blink(optics_ui *ui) {
     if (!ui->caret_blink_enabled || !(ui->caret_blink_period_s > 0.0f))
         return;
     float dt = ui->input.dt_seconds;
@@ -461,13 +461,13 @@ static void lensi_caret_advance_blink(optics_ui *ui) {
 }
 
 /* True when the caret's current phase differs from the phase actually on
- * screen. This is the *only* caret term `lens_frame_needs_repaint` may
+ * screen. This is the *only* caret term `optics_ui_frame_needs_repaint` may
  * consult: a caret that exists but has not flipped is not damage.
  *
  * A host-owned caret is excluded outright (ADR-0151): the app paints it with
- * its own clock, so lens has no authority to declare its phase changed. */
-static bool lensi_caret_phase_changed(const optics_ui *ui) {
-    if (!ui->caret_lens_owned)
+ * its own clock, so ui has no authority to declare its phase changed. */
+static bool optics_ui__caret_phase_changed(const optics_ui *ui) {
+    if (!ui->caret_ui_owned)
         return false;
     if (ui->caret_rect.w <= 0.0f || ui->caret_rect.h <= 0.0f)
         return false;
@@ -475,14 +475,14 @@ static bool lensi_caret_phase_changed(const optics_ui *ui) {
 }
 
 bool optics_ui_caret_flip_pending(const optics_ui *ui) {
-    return ui ? lensi_caret_phase_changed(ui) : false;
+    return ui ? optics_ui__caret_phase_changed(ui) : false;
 }
 
 bool optics_ui_caret_clock_live(const optics_ui *ui) {
     if (!ui)
         return false;
-    /* Only a widget-owned caret has a lens clock to advance (ADR-0151). */
-    if (!ui->caret_lens_owned)
+    /* Only a widget-owned caret has a ui clock to advance (ADR-0151). */
+    if (!ui->caret_ui_owned)
         return false;
     /* An IME composition holds the caret solid, so no clock is needed. */
     if (ui->input.preedit_utf8[0] != '\0')
@@ -492,15 +492,15 @@ bool optics_ui_caret_clock_live(const optics_ui *ui) {
     return ui->caret_rect.w > 0.0f && ui->caret_rect.h > 0.0f;
 }
 
-/* Read-only repaint query for damage-driven hosts (valid between lens_end
- * and the next lens_begin). True when anything the last snapshot publication would
+/* Read-only repaint query for damage-driven hosts (valid between optics_ui_end
+ * and the next optics_ui_begin). True when anything the last snapshot publication would
  * have produced differs from what is already on screen. */
 bool optics_ui_frame_needs_repaint(const optics_ui *ui) {
     if (!ui)
         return false;
 
     /* Base tree damage: lifecycle, geometry, hover/active eases and
-     * draw-list hash changes, rolled up bottom-up by lensi_mark_dirty. */
+     * draw-list hash changes, rolled up bottom-up by optics_ui__mark_dirty. */
     if (ui->root &&
         (ui->root->subtree_changed || ui->root->visual_revision != ui->root->presented_revision))
         return true;
@@ -531,11 +531,11 @@ bool optics_ui_frame_needs_repaint(const optics_ui *ui) {
 
     /* Ghosts are time-driven by contract (ADR-0078 decision 6): a fade
      * host re-pins alpha every frame and the countdown ticks every
-     * lens_end, so while any ghost exists the next frame differs from the
+     * optics_ui_end, so while any ghost exists the next frame differs from the
      * last painted one even when no other damage source is live. Without
      * this term a ghost-only fade stalls the moment the base tree is
      * clean — the leaving surface freezes mid-fade. */
-    if (lensi_ghost_active(ui))
+    if (optics_ui__ghost_active(ui))
         return true;
 
     /* The caret's *flip*, not its existence (ADR-0151). The old term was
@@ -545,7 +545,7 @@ bool optics_ui_frame_needs_repaint(const optics_ui *ui) {
      * it did paint re-painted an identical caret because no phase existed to
      * advance. A blink is a 2-state clock sampled at the display cadence; only
      * the transition between the two states changes pixels. */
-    if (lensi_caret_phase_changed(ui))
+    if (optics_ui__caret_phase_changed(ui))
         return true;
 
     return false;
@@ -588,11 +588,11 @@ static optics_gfx_rect rect_intersect_bounds(optics_gfx_rect a, optics_gfx_rect 
  * descendants are visited separately. */
 /* Where one command paints, in absolute coordinates, resolved against `box`. */
 static optics_gfx_rect paint_of_cmd(optics_gfx_rect box, const optics_ui_draw_cmd *c) {
-    return lensi_cmd_paint_extent(box, c);
+    return optics_ui__cmd_paint_extent(box, c);
 }
 
 static optics_gfx_rect node_paint_bounds(const optics_ui_node *n) {
-    return lensi_node_paint_bounds(n);
+    return optics_ui__node_paint_bounds(n);
 }
 
 /* The same paint, resolved against `box` instead of the node's current
@@ -614,12 +614,12 @@ static optics_gfx_rect node_paint_bounds_at(const optics_ui_node *n, optics_gfx_
 
 /* ---- regional damage ------------------------------------------------------
  *
- * lens_damage_rects reports the frame's damage as a bounded rectangle list. The
+ * optics_ui_damage_rects reports the frame's damage as a bounded rectangle list. The
  * walk is deliberately not a bounding-box accumulator: a host that repaints
  * regionally (and a compositor hands the list straight to its per-plane damage
  * hint) must never see a HUD chip and a Dock spring merged into one nearly
  * full-output box. A host whose presentation API takes one rectangle collapses
- * the list with `flux_rect_union` at that boundary — never before.
+ * the list with `optics_gfx_rect_union` at that boundary — never before.
  *
  * Two rules carry the localization:
  *
@@ -766,7 +766,7 @@ static void damage_walk(const optics_ui *ui, const optics_ui_node *n, bool owned
              * excludes still show the last presented frame, unioned with the new
              * one so a widening clip repaints what it reveals. */
             damage_push(acc, ui, n->prev_clip);
-            damage_push(acc, ui, lensi_node_child_clip(n));
+            damage_push(acc, ui, optics_ui__node_child_clip(n));
         }
     }
     for (const optics_ui_node *c = n->first_child; c; c = c->next_sibling)
@@ -775,7 +775,7 @@ static void damage_walk(const optics_ui *ui, const optics_ui_node *n, bool owned
 
 /* Nodes that left the child lists still own pixels on screen.
  *
- * `lensi_store_reap` keeps a node in the store for LENSI_LEAVE_GRACE_FRAMES and
+ * `optics_ui__store_reap` keeps a node in the store for OPTICS_UI_LEAVE_GRACE_FRAMES and
  * only then frees it, but it detaches the node from its parent's sibling list
  * immediately. `damage_walk` traverses `first_child`/`next_sibling`, so it can
  * never reach such a node — while the geometry the last activated snapshot
@@ -787,11 +787,11 @@ static void damage_walk(const optics_ui *ui, const optics_ui_node *n, bool owned
  * Only PERSISTENT geometry is read here, never `n->cmds`:
  *
  *   - `render_rect` is a value copied out of the snapshot at activation
- *     (`lens_snapshot_activate`), so it is valid on any later frame.
+ *     (`optics_ui_snapshot_activate`), so it is valid on any later frame.
  *   - `n->cmds` and the strings they point at live in the per-frame arena
- *     (`lens_begin` calls `flux_arena_reset`, which only rewinds the cursor and
+ *     (`optics_ui_begin` calls `optics_gfx_arena_reset`, which only rewinds the cursor and
  *     recycles immediately). A LEAVING node is never touched, so
- *     `lensi_node_reset_frame` never clears its `cmds` — the pointer survives
+ *     `optics_ui__node_reset_frame` never clears its `cmds` — the pointer survives
  *     while the memory behind it is handed to *this* frame's nodes. Deriving
  *     paint bounds from it reads whatever was allocated there this frame:
  *     measured, one unrelated label appearing elsewhere moved a departed row's
@@ -807,7 +807,7 @@ static void damage_walk(const optics_ui *ui, const optics_ui_node *n, bool owned
  * array the frame already touches. */
 static void damage_walk_leaving(const optics_ui *ui, damage_accum *acc) {
     const optics_ui_store *s = &ui->store;
-    for (uint32_t i = s->live_head; i != LENSI_STORE_LINK_NONE; i = s->slots[i].next_live) {
+    for (uint32_t i = s->live_head; i != OPTICS_UI_STORE_LINK_NONE; i = s->slots[i].next_live) {
         const optics_ui_node *n = s->slots[i].node;
         if (!n || n->phase != OPTICS_UI_NODE_LEAVING)
             continue;
@@ -823,7 +823,7 @@ static void damage_walk_leaving(const optics_ui *ui, damage_accum *acc) {
 }
 
 /* Damage for one ghost subtree. A ghost node carries its own box, opacity and
- * command list, but no `lens_node` — so its paint extent is resolved command by
+ * command list, but no `optics_ui_node` — so its paint extent is resolved command by
  * command through the same predictor the live walk uses, which is what keeps the
  * fading outline/halo fringe from being left behind. */
 static void damage_push_ghost(damage_accum *acc, const optics_ui *ui,
@@ -832,7 +832,7 @@ static void damage_push_ghost(damage_accum *acc, const optics_ui *ui,
         return;
     optics_gfx_rect hit = (optics_gfx_rect){0, 0, 0, 0};
     for (uint32_t i = 0; i < g->cmd_count; i++) {
-        const optics_gfx_rect paint = lensi_cmd_paint_extent(g->final_rect, &g->cmds[i].cmd);
+        const optics_gfx_rect paint = optics_ui__cmd_paint_extent(g->final_rect, &g->cmds[i].cmd);
         hit = rect_union_bounds(hit, paint);
     }
     /* No commands of its own (a departing container): the children paint, and the
@@ -863,7 +863,7 @@ static uint32_t damage_resolve(const optics_ui *ui, const optics_ui_damage_opts 
      * (ADR-0151). Its *existence* is not a pixel change — pushing the rect
      * unconditionally meant a focused field dirtied its caret box every
      * frame, which is the same defect the repaint query carried. */
-    if (lensi_caret_phase_changed(ui))
+    if (optics_ui__caret_phase_changed(ui))
         damage_push(&acc, ui, ui->caret_rect);
     /* The tooltip is painted outside the draw list, below the anchor rather than
      * at it (replay.c: the box is `{anchor.x, anchor.y + anchor.h + 4, ...}`).
@@ -871,7 +871,7 @@ static uint32_t damage_resolve(const optics_ui *ui, const optics_ui_damage_opts 
      * of a disappearing one undamaged, so the painted extent is derived from the
      * same measurements replay uses. */
     if (ui->tooltip.active || ui->prev_tooltip_active) {
-        /* `painted` was measured at `lensi_tooltip` time, while the context was
+        /* `painted` was measured at `optics_ui__tooltip` time, while the context was
          * mutable — a damage walk cannot re-shape text. It survives the reset to
          * `active = false`, so when a tooltip disappears the last painted box is
          * exactly the band that has to be erased. The anchor is reported as well:
@@ -930,7 +930,7 @@ static uint32_t damage_resolve(const optics_ui *ui, const optics_ui_damage_opts 
      * that excluded them would under-cover, and under-covering leaves stale
      * pixels on screen. The caller sees one full-viewport rect it can repaint.
      * Callers that need the true regions raise the bound, which is a compile-time
-     * contract (`LENS_DAMAGE_RECTS_CAPACITY`). */
+     * contract (`OPTICS_UI_DAMAGE_RECTS_CAPACITY`). */
     if (acc.overflowed) {
         if (capacity == 0)
             return count;
@@ -962,8 +962,8 @@ bool optics_ui_reduced_motion(const optics_ui *ui) {
 void optics_ui_push_style(optics_ui *ui, optics_ui_style style) {
     if (!ui)
         return;
-    if (ui->style_top >= LENSI_STYLE_STACK_MAX) {
-        lensi_set_overflow(ui);
+    if (ui->style_top >= OPTICS_UI_STYLE_STACK_MAX) {
+        optics_ui__set_overflow(ui);
         return;
     }
     ui->style_stack[ui->style_top++] = style;
@@ -979,24 +979,24 @@ void optics_ui_pop_style(optics_ui *ui) {
 /* ------------------------------------------------------------------ */
 
 void optics_ui_begin(optics_ui *ui, const optics_ui_input *input) {
-    OPTICS_GFX_PROFILE_FRAME_START("lens.frame");
-    OPTICS_GFX_PROFILE_ZONE(z_begin, "lens.begin");
+    OPTICS_GFX_PROFILE_FRAME_START("ui.frame");
+    OPTICS_GFX_PROFILE_ZONE(z_begin, "ui.begin");
     /* The UI frame is the ledger's frame-lifetime unit (ADR-0129 decision 4).
-     * lens_begin opens it and lens_end closes it, and the balance is enforced
-     * at the frame boundary by flux_observe_frame_drain_check, which flux's
-     * frame present/abandon paths already call. A lens frame that opens
+     * optics_ui_begin opens it and optics_ui_end closes it, and the balance is enforced
+     * at the frame boundary by optics_gfx_observe_frame_drain_check, which gfx's
+     * frame present/abandon paths already call. A ui frame that opens
      * without closing is the exact regression class that per-frame
      * enforcement exists to catch within one frame instead of at exit. */
     if (ui->device)
         OPTICS_GFX_OBSERVE_ACQUIRE(ui->device, OPTICS_GFX_SCOPE_CONTEXT, OPTICS_GFX_LIFETIME_FRAME,
-                                   "frame", "lens/core", 0, OPTICS_GFX_SITE_NONE);
+                                   "frame", "ui/core", 0, OPTICS_GFX_SITE_NONE);
     ui->building = true;
     ui->frame++;
     ui->overflow = false;
     ui->duplicate_ids = false;
     ui->anim_pending = false; /* set true by any eased value still in transit */
     optics_gfx_arena_reset(&ui->arena);
-    lensi_ghost_begin_frame(ui); /* ghosts survive the reset; clear refresh marks */
+    optics_ui__ghost_begin_frame(ui); /* ghosts survive the reset; clear refresh marks */
 
     /* Size-aware copy (ADR-0036): zero = legacy/trust full struct; >0
      * clamps to min(caller, lib) so apps compiled against older or newer
@@ -1018,15 +1018,15 @@ void optics_ui_begin(optics_ui *ui, const optics_ui_input *input) {
     ui->caret_rect = (optics_gfx_rect){0, 0, 0, 0}; /* refreshed by text widget */
     ui->text_context = (optics_ui_text_context){};  /* refreshed alongside it */
     /* Ownership is per-frame, like the rect it describes: whichever producer
-     * claims the caret *this* frame decides whether lens owns its blink
+     * claims the caret *this* frame decides whether ui owns its blink
      * (ADR-0151). A stale `true` would let a widget-owned caret keep claiming
      * a clock after the host took the caret back. */
-    ui->caret_lens_owned = false;
+    ui->caret_ui_owned = false;
     /* Advance the blink clock here, before any widget runs, so the phase is
      * identical for the skin draw, the repaint query and the damage walk
      * (ADR-0151). Doing it at widget-build time would let a frame that
      * builds two text widgets observe two different phases. */
-    lensi_caret_advance_blink(ui);
+    optics_ui__caret_advance_blink(ui);
     if (!ui->input.mouse_down[0] || ui->input.mouse_released[0]) {
         ui->dnd_source.active = false;
     }
@@ -1049,10 +1049,10 @@ void optics_ui_begin(optics_ui *ui, const optics_ui_input *input) {
     ui->next_placeholder = nullptr;
     ui->next_style = optics_ui_style_init();
     ui->style_top = 0;  /* style scopes are frame-scoped (ADR-0061): a
-                         * forgotten lens_pop_style cannot leak across frames */
-    ui->opacity = 1.0f; /* likewise: a forgotten lens_set_opacity restore
+                         * forgotten optics_ui_pop_style cannot leak across frames */
+    ui->opacity = 1.0f; /* likewise: a forgotten optics_ui_set_opacity restore
                          * cannot dim the next frame */
-    ui->clip_depth = 0; /* frame-scoped: a forgotten lens_clip_end cannot
+    ui->clip_depth = 0; /* frame-scoped: a forgotten optics_ui_clip_end cannot
                          * leak a clip into the next frame */
     ui->clip_overflow = 0;
     ui->clip = (ui->input.display_size.x > 0.0f && ui->input.display_size.y > 0.0f)
@@ -1066,7 +1066,7 @@ void optics_ui_begin(optics_ui *ui, const optics_ui_input *input) {
     ui->last_response = (optics_ui_response){};
     ui->last_node = nullptr;
     /* Band buckets are arena-backed; they reset with the arena and are
-     * rebuilt by lensi_place_bucket at lens_end. The per-band caps are
+     * rebuilt by optics_ui__place_bucket at optics_ui_end. The per-band caps are
      * retained across the reset for the same reason as cmd_cap: the
      * rebuild allocates at last frame's high-water size in one step
      * instead of re-walking the doubling chain. */
@@ -1088,10 +1088,10 @@ void optics_ui_begin(optics_ui *ui, const optics_ui_input *input) {
 #endif
 
     /* implicit root: a column container covering the display (ADR-0028) */
-    optics_ui_id root_id = lensi_hash("##root", 6, 0);
+    optics_ui_id root_id = optics_ui__hash("##root", 6, 0);
     ui->id_stack[ui->id_top++] = root_id;
 
-    optics_ui_node *root = lensi_store_touch(ui, root_id);
+    optics_ui_node *root = optics_ui__store_touch(ui, root_id);
     ui->root = root;
     if (root) {
         root->is_container = true;
@@ -1105,22 +1105,22 @@ void optics_ui_begin(optics_ui *ui, const optics_ui_input *input) {
 }
 
 void optics_ui_end(optics_ui *ui) {
-    OPTICS_GFX_PROFILE_ZONE(z_end, "lens.end");
+    OPTICS_GFX_PROFILE_ZONE(z_end, "ui.end");
     /* close any containers the caller left open */
     while (ui->cont_top > 1)
-        lensi_open_container_pop(ui);
+        optics_ui__open_container_pop(ui);
 
-    /* Close the frame-lifetime row opened by lens_begin (ADR-0129 decision 4).
+    /* Close the frame-lifetime row opened by optics_ui_begin (ADR-0129 decision 4).
      * Balanced here; an early return or a throw between begin and end leaves
      * it open, which is precisely what the frame-boundary check reports. */
     if (ui->device)
-        OPTICS_GFX_OBSERVE_RELEASE(ui->device, OPTICS_GFX_SCOPE_CONTEXT, "frame", "lens/core", 0);
+        OPTICS_GFX_OBSERVE_RELEASE(ui->device, OPTICS_GFX_SCOPE_CONTEXT, "frame", "ui/core", 0);
 
-    lensi_store_reap(ui);    /* phase transitions + GC (ADR-0027) */
-    lensi_layout_solve(ui);  /* two-pass measure/arrange, ABS-aware (ADR-0028/0060) */
-    lensi_place_bucket(ui);  /* bucket ABS nodes into z bands (ADR-0060)  */
-    lensi_place_dismiss(ui); /* click-outside + Escape, post-build        */
-    lensi_focus_tab(ui);     /* Tab / Shift+Tab focus traversal     */
+    optics_ui__store_reap(ui);    /* phase transitions + GC (ADR-0027) */
+    optics_ui__layout_solve(ui);  /* two-pass measure/arrange, ABS-aware (ADR-0028/0060) */
+    optics_ui__place_bucket(ui);  /* bucket ABS nodes into z bands (ADR-0060)  */
+    optics_ui__place_dismiss(ui); /* click-outside + Escape, post-build        */
+    optics_ui__focus_tab(ui);     /* Tab / Shift+Tab focus traversal     */
 
     /* Click outside any focusable widget clears focus. */
     if (ui->input.mouse_pressed[OPTICS_UI_MOUSE_LEFT] && !ui->click_hit_focusable) {
@@ -1131,11 +1131,11 @@ void optics_ui_end(optics_ui *ui) {
     /* Scrollbar chrome is emitted here — after the whole tree (base +
      * placed subtrees) is solved and placed, before damage tracking —
      * because layout itself must not author draw commands (ADR-0059). */
-    lensi_scrollbars_emit(ui);
+    optics_ui__scrollbars_emit(ui);
 
-    lensi_mark_dirty(ui);      /* compute subtree_changed for culling */
-    lensi_ghost_capture(ui);   /* freeze leaving subtrees (ADR-0078) */
-    lensi_ghost_end_frame(ui); /* expire unrefreshed ghosts */
+    optics_ui__mark_dirty(ui);      /* compute subtree_changed for culling */
+    optics_ui__ghost_capture(ui);   /* freeze leaving subtrees (ADR-0078) */
+    optics_ui__ghost_end_frame(ui); /* expire unrefreshed ghosts */
 
     /* An AT activation that no widget consumed this frame (the node
      * vanished, is not focusable, or is disabled) is dropped: requests
@@ -1153,7 +1153,7 @@ void optics_ui_end(optics_ui *ui) {
     ui->generation++;
     ui->building = false;
     OPTICS_GFX_PROFILE_ZONE_END(z_end);
-    OPTICS_GFX_PROFILE_FRAME_END("lens.frame");
+    OPTICS_GFX_PROFILE_FRAME_END("ui.frame");
 }
 
 void optics_ui_set_focus(optics_ui *ui, optics_ui_id id) {
@@ -1166,10 +1166,10 @@ void optics_ui_set_focus(optics_ui *ui, optics_ui_id id) {
 }
 
 void optics_ui_a11y_activate(optics_ui *ui, optics_ui_id id) {
-    /* Record only; the next build's lensi_interact consumes it (ADR-0062).
+    /* Record only; the next build's optics_ui__interact consumes it (ADR-0062).
      * A second call before the frame replaces the first — AT-SPI actions
      * are synchronous/sequential, so one pending slot is enough. */
-    optics_ui_node *n = ui ? lensi_store_find(ui, id) : nullptr;
+    optics_ui_node *n = ui ? optics_ui__store_find(ui, id) : nullptr;
     if (n && n->has_prev && n->phase != OPTICS_UI_NODE_LEAVING)
         ui->a11y_activate_id = id;
 }
@@ -1194,7 +1194,7 @@ optics_ui_node *optics_ui_root(optics_ui *ui) {
     return ui ? ui->root : nullptr;
 }
 optics_ui_node *optics_ui_find(optics_ui *ui, optics_ui_id id) {
-    return ui ? lensi_store_find(ui, id) : nullptr;
+    return ui ? optics_ui__store_find(ui, id) : nullptr;
 }
 
 uint64_t optics_ui_generation(const optics_ui *ui) {

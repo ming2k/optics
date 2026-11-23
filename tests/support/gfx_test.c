@@ -1,5 +1,5 @@
 /*
- * flux_test.c — Vulkan device fixtures for the shared test support library.
+ * gfx_test.c — Vulkan device fixtures for the shared test support library.
  *
  * The fixture layer is deliberately separate from <optics_test.h>: a runtime
  * test's assertion accounting must not depend on Vulkan headers, and a Vulkan
@@ -17,10 +17,10 @@
 
 /* LeakSanitizer: Mesa ICDs leak a handful of driver-internal blocks at
  * vkDestroyDevice (for example ANV's companion RCS command buffer). Those
- * blocks are allocated and owned entirely inside the driver; flux cannot free
- * them. Suppress by ICD module so the suites stay signal-bearing: a flux-side
- * leak still reports because every flux object also owns a host block
- * allocated in libflux.so, which no entry below matches. */
+ * blocks are allocated and owned entirely inside the driver; gfx cannot free
+ * them. Suppress by ICD module so the suites stay signal-bearing: a gfx-side
+ * leak still reports because every gfx object also owns a host block
+ * allocated in liboptics_gfx.so, which no entry below matches. */
 const char *__lsan_default_suppressions(void) {
     return "leak:libvulkan_intel\n"
            "leak:libvulkan_lvp\n"

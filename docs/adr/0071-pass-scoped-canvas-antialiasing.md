@@ -3,7 +3,9 @@ id: ADR-0071
 title: "Pass-scoped canvas antialiasing policy"
 status: superseded
 date: 2026-08-20
-superseded_by: "ADR-0116"
+scope: unrecorded
+superseded_by: ADR-0116
+negative_knowledge: false
 ---
 
 # ADR-0071: Pass-scoped canvas antialiasing policy

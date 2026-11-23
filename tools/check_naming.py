@@ -183,32 +183,175 @@ def check_tree(root: Path) -> list[str]:
                     f"crates/{entry.name}: non-canonical crate name (ADR-0170)"
                 )
 
-    # 6. Live documentation drift check (excludes immutable historical ADRs and dated reviews)
-    live_doc_drift_re = re.compile(
-        r"<(?:flux|glyph|reticle|prism|vista|transit|iris|lens|aperture)/"
-        r"|examples/(?:flux|glyph|reticle|prism|vista|transit|iris|lens|aperture|scenarios)/"
-        r"|libs/(?:flux|glyph|reticle|prism|vista|transit|iris|lens|aperture)/"
-        r"|crates/optics-(?:flux|glyph|reticle|prism|vista|transit|iris|lens|aperture)\b"
-        r"|-D(?:glyph|reticle|prism|vista|transit)="
-        r"|\b(?:aperture_app_run|iris_app_run|iris_window_|optics_app_app_|optics_window_window_|optics_window_app_|optics_scene_scene_)"
-    )
-    historical_docs = {"docs/dev/architecture-review-2026-09-14.md"}
-    for d in ("docs/tutorials", "docs/how-to", "docs/reference", "docs/explanation", "docs/dev"):
-        doc_dir = root / d
-        if not doc_dir.is_dir():
-            continue
-        for md in sorted(doc_dir.rglob("*.md")):
-            rel = md.relative_to(root).as_posix()
-            if rel in historical_docs:
-                continue
-            text = md.read_text(encoding="utf-8", errors="replace")
-            m = live_doc_drift_re.search(text)
-            if m:
-                line = text.count("\n", 0, m.start()) + 1
-                errors.append(
-                    f"{rel}:{line}: stale legacy reference '{m.group(0)}' in live doc (ADR-0170/0171/0172)"
-                )
+    live = live_files(root)
+    errors += check_legacy_codenames(root, live)
+    errors += check_dangling_references(root, live)
+    errors += check_dangling_paths(root, live)
+    return errors
 
+
+# ----------------------------------------------------------------------------
+# 6-8. Live-tree content (ADR-0170, ADR-0173)
+#
+# The rename is only finished when the codenames are gone from what people read
+# and what the program prints, not just from directory names and API macros.
+# "Live" is every source, build, tool and test file plus the current docs; ADRs
+# and the CHANGELOG are history and keep the names they were written with.
+# ----------------------------------------------------------------------------
+
+LIVE_TREES = ("libs", "include", "tests", "examples", "crates", "tools", ".github")
+LIVE_DOC_DIRS = ("docs/tutorials", "docs/how-to", "docs/reference", "docs/explanation",
+                 "docs/dev")
+LIVE_TOP_FILES = ("meson.build", "meson_options.txt", "README.md", "AGENTS.md", "docs/index.md")
+LIVE_EXTS = frozenset({".c", ".h", ".m", ".rs", ".slang", ".py", ".build", ".txt", ".toml", ".sh",
+                       ".md", ".yml", ".supp"})
+# Guardrails and their regression tests hold codenames, stale names and fake
+# paths as fixture data; the content rules do not apply to them.
+GUARDRAIL_FILE_RE = re.compile(r"^(?:tools/check_[a-z_]+\.py|tests/optics/test_[a-z_]+_guardrail\.py)$")
+
+
+def is_guardrail_file(rel: str) -> bool:
+    return GUARDRAIL_FILE_RE.match(rel) is not None
+# Dated, deliberately frozen records inside docs/dev.
+HISTORICAL_DOCS = frozenset({"docs/dev/architecture-review-2026-09-14.md"})
+SKIP_DIRS = frozenset({"target", "build", ".git", "subprojects"})
+
+C_LIKE = frozenset({".c", ".h", ".m", ".rs", ".slang"})
+CODE_EXTS = C_LIKE
+
+
+def live_files(root: Path) -> list[Path]:
+    out: list[Path] = []
+    for d in LIVE_TREES + LIVE_DOC_DIRS:
+        base = root / d
+        if not base.is_dir():
+            continue
+        for p in sorted(base.rglob("*")):
+            if not p.is_file() or p.suffix not in LIVE_EXTS:
+                continue
+            if SKIP_DIRS.intersection(p.relative_to(root).parts):
+                continue
+            out.append(p)
+    for f in LIVE_TOP_FILES:
+        if (root / f).is_file():
+            out.append(root / f)
+    return [p for p in out if p.relative_to(root).as_posix() not in HISTORICAL_DOCS]
+
+
+def read(p: Path) -> str:
+    return p.read_text(encoding="utf-8", errors="replace")
+
+
+def line_of(text: str, pos: int) -> int:
+    return text.count("\n", 0, pos) + 1
+
+
+# Spans that legitimately contain a codename: ADR file names (links to history)
+# and the Feather "aperture" icon.
+PROTECTED_RE = re.compile(
+    r"\b\d{4}-[a-z0-9]+(?:-[a-z0-9]+)*(?:\.md)?\b"
+    r"|\b\w*icon_aperture\w*\b|\b\w*ICON_APERTURE\w*\b|\"aperture\"|aperture\.svg"
+)
+
+# flux, iris, aperture, reticle, vista and prism have no meaning in this tree
+# other than the old module names, in any position: a word, a path segment, a
+# string, or one `_`-separated part of an identifier.
+UNAMBIGUOUS_CODENAME_RE = re.compile(
+    r"(?<![A-Za-z0-9])(flux|iris|aperture|reticle|vista|prism)(?![A-Za-z0-9])", re.IGNORECASE
+)
+# ...and as the leading word of a CamelCase type or class name (FluxDiagnostic,
+# IrisView). Glyph is excluded: GlyphRun is a glyph run.
+CAMEL_CODENAME_RE = re.compile(r"(?<![A-Za-z0-9])(?:Flux|Iris|Aperture|Reticle|Vista|Prism|Lens|Transit)(?=[A-Z])")
+# lens, glyph and transit are also ordinary words ("the glass lens", "a glyph
+# run", "still in transit"), so only their codename forms are flagged: the old
+# symbol prefixes, include paths, library and crate names, owner strings, and
+# the module name in code quotes.
+AMBIGUOUS_CODENAME_RE = re.compile(
+    r"(?<![A-Za-z0-9_])(?:lensi?_|LENSI?_|transit_|TRANSIT_|GLYPH_[A-Z])"
+    r"|<(?:lens|glyph|transit)/"
+    r"|\b(?:libs|tests|examples)/(?:lens|glyph|transit)\b"
+    r"|\blib(?:lens|glyph|transit)\b"
+    r"|\boptics-(?:lens|glyph|transit)\b"
+    r"|\"(?:lens|glyph|transit)[/.]"
+    r"|`(?:lens|glyph|transit)`"
+)
+
+
+def check_legacy_codenames(root: Path, files: list[Path]) -> list[str]:
+    errors: list[str] = []
+    for p in files:
+        rel = p.relative_to(root).as_posix()
+        if is_guardrail_file(rel):
+            continue
+        text = PROTECTED_RE.sub(lambda m: " " * len(m.group(0)), read(p))
+        for rx in (UNAMBIGUOUS_CODENAME_RE, AMBIGUOUS_CODENAME_RE, CAMEL_CODENAME_RE):
+            for m in rx.finditer(text):
+                errors.append(
+                    f"{rel}:{line_of(text, m.start())}: legacy codename '{m.group(0)}'"
+                    " (ADR-0170; use the semantic module name)"
+                )
+    return errors
+
+
+# An `optics_*` / `OPTICS_*` name mentioned in a comment or a doc must exist in
+# code. This is what keeps prose from describing functions that were renamed or
+# deleted. Names assembled at run time are listed explicitly.
+OPTICS_NAME_RE = re.compile(r"\b(?:optics|OPTICS)_[A-Za-z0-9]+_[A-Za-z0-9_]*[A-Za-z0-9]\b")
+RUNTIME_NAMES_RE = re.compile(r"^OPTICS_[A-Z]+_SOURCE_DIR$")  # optics-build: format!("{}_SOURCE_DIR")
+C_COMMENT_RE = re.compile(r"/\*.*?\*/|//[^\n]*", re.DOTALL)
+HASH_COMMENT_RE = re.compile(r"#[^\n]*")
+
+
+def check_dangling_references(root: Path, files: list[Path]) -> list[str]:
+    defined: set[str] = set()
+    mentions: list[tuple[str, str, int]] = []
+    for p in files:
+        text = read(p)
+        if p.suffix in CODE_EXTS:
+            defined.update(OPTICS_NAME_RE.findall(C_COMMENT_RE.sub(" ", text)))
+            for c in C_COMMENT_RE.finditer(text):
+                for m in OPTICS_NAME_RE.finditer(c.group(0)):
+                    mentions.append((p.relative_to(root).as_posix(), m.group(0),
+                                     line_of(text, c.start() + m.start())))
+        elif p.name == "meson.build":
+            # `-DNAME=1` defines a macro; split the flag so NAME is a whole word.
+            code = HASH_COMMENT_RE.sub(" ", text).replace("-D", "-D ")
+            defined.update(OPTICS_NAME_RE.findall(code))
+        elif p.suffix == ".md":
+            for m in OPTICS_NAME_RE.finditer(text):
+                mentions.append((p.relative_to(root).as_posix(), m.group(0),
+                                 line_of(text, m.start())))
+    return [
+        f"{rel}:{line}: '{name}' is not defined anywhere in the tree (stale or misspelled API name)"
+        for rel, name, line in mentions
+        if name not in defined and not RUNTIME_NAMES_RE.match(name)
+    ]
+
+
+# A repository path mentioned in a comment, doc or build file must exist,
+# relative to the repository root or to the file that names it.
+REPO_PATH_RE = re.compile(
+    r"(?<![\w./-])((?:libs|tests|examples|tools|crates|docs|include)/[A-Za-z0-9_./-]+"
+    r"\.(?:c|h|m|rs|slang|py|build|md|toml|sh|txt|xml|supp|yml))\b"
+)
+# Paths a tool names precisely so that they must NOT exist.
+FORBIDDEN_PATHS = frozenset({"crates/Cargo.toml"})
+
+
+def check_dangling_paths(root: Path, files: list[Path]) -> list[str]:
+    errors: list[str] = []
+    for p in files:
+        rel = p.relative_to(root).as_posix()
+        if is_guardrail_file(rel):
+            continue
+        text = read(p)
+        for m in REPO_PATH_RE.finditer(text):
+            ref = m.group(1)
+            if ref in FORBIDDEN_PATHS:
+                continue
+            if (root / ref).exists() or (p.parent / ref).exists():
+                continue
+            errors.append(f"{rel}:{line_of(text, m.start())}: path '{ref}' does not exist")
     return errors
 
 

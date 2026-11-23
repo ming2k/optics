@@ -20,7 +20,7 @@ A descriptor is for configuration. Operands are parameters.
 4. **Creation and widget calls always take a descriptor**, even when they are
    small today: they are where configuration accumulates.
 5. **Positional is correct for operands.** Scalar setters and getters
-   (`flux_canvas_rotate(c, radians)`, `lens_set_scale(ui, scale)`), lifecycle
+   (`optics_gfx_canvas_rotate(c, radians)`, `optics_ui_set_scale(ui, scale)`), lifecycle
    primitives (`retain` / `release`), and value kernels — pure math and
    geometry in `<optics/gfx/math.h>`, `<optics/gfx/curve.h>`, `<optics/gfx/sdf.h>` and the path
    verbs — keep their arguments positional at any count. Wrapping six control
@@ -30,13 +30,13 @@ Callers pass descriptors as C23 compound literals; a zeroed field means "the
 default":
 
 ```c
-lens_button(ui, &(lens_button_opts){
+optics_ui_button(ui, &(optics_ui_button_opts){
     .label = "Save",
-    .variant = LENS_BUTTON_PRIMARY,
+    .variant = OPTICS_UI_BUTTON_PRIMARY,
 });
 ```
 
-Fallible entry points return `flux_result` (the stack-wide status type) or a
+Fallible entry points return `optics_gfx_result` (the stack-wide status type) or a
 typed response; queries may return a value directly. Bare `int` error codes
 and unchecked out-parameters are prohibited in new API.
 

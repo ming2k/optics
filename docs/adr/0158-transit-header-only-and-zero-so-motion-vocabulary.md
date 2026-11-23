@@ -3,7 +3,7 @@ id: ADR-0158
 title: "Transit is a header-only vocabulary — zero shared object, pure inline math, and FFI elimination"
 status: accepted
 date: 2026-11-12
-scope: libs/transit, bindings/transit-rs, examples/transit, tests/transit
+scope: libs/motion, bindings/transit-rs, examples/motion, tests/motion
 superseded_by: null
 negative_knowledge: true
 ---

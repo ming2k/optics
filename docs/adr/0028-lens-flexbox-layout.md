@@ -3,6 +3,9 @@ id: ADR-0028
 title: "Lens two-phase flexbox layout (measure / arrange)"
 status: accepted
 date: 2026-07-21
+scope: ui (L2 toolkit)
+superseded_by: null
+negative_knowledge: true
 ---
 
 # ADR-0028: Lens two-phase flexbox layout (measure / arrange)

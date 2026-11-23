@@ -71,30 +71,30 @@ optics_ui_response optics_ui_slider(optics_ui *ui, const optics_ui_slider_opts *
     if (!opts)
         opts = &default_opts;
 
-    lensi_apply_box(ui, opts->box);
+    optics_ui__apply_box(ui, opts->box);
     const optics_ui_theme *t = &ui->theme;
     bool disabled = ui->next_disabled;
-    for (optics_ui_node *parent = lensi_open_container(ui); parent; parent = parent->parent)
+    for (optics_ui_node *parent = optics_ui__open_container(ui); parent; parent = parent->parent)
         disabled = disabled || parent->box_disabled;
     bool error = ui->next_error;
     ui->next_disabled = false;
     ui->next_error = false;
 
-    optics_ui_style eff = lensi_style_effective(ui);
-    float padding = lensi_style_padding(&eff, t);
+    optics_ui_style eff = optics_ui__style_effective(ui);
+    float padding = optics_ui__style_padding(&eff, t);
     const char *label = opts->label ? opts->label : "";
-    optics_ui_id id =
-        opts->box.id ? lensi_gen_widget_id(ui, opts->box.id) : lensi_gen_widget_id(ui, label);
-    optics_ui_node *n = lensi_store_touch(ui, id);
+    optics_ui_id id = opts->box.id ? optics_ui__gen_widget_id(ui, opts->box.id)
+                                   : optics_ui__gen_widget_id(ui, label);
+    optics_ui_node *n = optics_ui__store_touch(ui, id);
     if (!n)
         return (optics_ui_response){};
 
-    lensi_link_child(ui, n);
-    lensi_node_box(ui, n, &opts->box);
+    optics_ui__link_child(ui, n);
+    optics_ui__node_box(ui, n, &opts->box);
     n->is_container = false;
 
     bool is_vert = (opts->axis == OPTICS_UI_COLUMN);
-    float font_size = lensi_style_font_size(ui, &eff, t);
+    float font_size = optics_ui__style_font_size(ui, &eff, t);
     float w, h;
     if (is_vert) {
         w = (n->fixed_w > 0) ? n->fixed_w : (font_size + 2.0f * padding);
@@ -105,11 +105,11 @@ optics_ui_response optics_ui_slider(optics_ui *ui, const optics_ui_slider_opts *
     }
     n->measured = (optics_gfx_point){w, h};
 
-    optics_ui_response r = lensi_interact(ui, n, true, disabled);
+    optics_ui_response r = optics_ui__interact(ui, n, true, disabled);
 
     float dt = ui->input.dt_seconds;
     bool reveal_knob = !disabled && (r.hovered || r.focused || r.pressed);
-    n->hover_t = lensi_approach(ui, n->hover_t, reveal_knob ? 1.0f : 0.0f, dt, 12.0f);
+    n->hover_t = optics_ui__approach(ui, n->hover_t, reveal_knob ? 1.0f : 0.0f, dt, 12.0f);
 
     float min = opts->min;
     float max = opts->max > min ? opts->max : min + 1.0f;
@@ -150,27 +150,27 @@ optics_ui_response optics_ui_slider(optics_ui *ui, const optics_ui_slider_opts *
     snprintf(val_str, sizeof(val_str), opts->format ? opts->format : "%.2f", (double)cur);
     uint32_t sem_flags =
         (r.focused ? OPTICS_UI_A11Y_FOCUSED : 0) | (disabled ? OPTICS_UI_A11Y_DISABLED : 0);
-    lensi_node_semantics(ui, n, OPTICS_UI_ROLE_SLIDER, label, val_str, sem_flags);
+    optics_ui__node_semantics(ui, n, OPTICS_UI_ROLE_SLIDER, label, val_str, sem_flags);
 
-    optics_ui_style_resolved rs = lensi_style_resolve(ui, &eff, t, r.state);
-    lensi_skin_emit(ui, n,
-                    &(optics_ui_widget_record){
-                        .kind = OPTICS_UI_WIDGET_SLIDER,
-                        .state = r.state,
-                        .bounds = {0, 0, w, h},
-                        .last_bounds = n->prev_rect,
-                        .style = rs,
-                        .style_fields = eff.fields,
-                        .hover_t = n->hover_t,
-                        .active_t = n->active_t,
-                        .content =
-                            {
-                                .label = label,
-                                .ratio = ratio,
-                                .vertical = is_vert,
-                                .error = error,
-                            },
-                    });
+    optics_ui_style_resolved rs = optics_ui__style_resolve(ui, &eff, t, r.state);
+    optics_ui__skin_emit(ui, n,
+                         &(optics_ui_widget_record){
+                             .kind = OPTICS_UI_WIDGET_SLIDER,
+                             .state = r.state,
+                             .bounds = {0, 0, w, h},
+                             .last_bounds = n->prev_rect,
+                             .style = rs,
+                             .style_fields = eff.fields,
+                             .hover_t = n->hover_t,
+                             .active_t = n->active_t,
+                             .content =
+                                 {
+                                     .label = label,
+                                     .ratio = ratio,
+                                     .vertical = is_vert,
+                                     .error = error,
+                                 },
+                         });
 
     ui->last_response = r;
     return r;

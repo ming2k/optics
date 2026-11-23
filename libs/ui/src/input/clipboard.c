@@ -1,23 +1,23 @@
 /* clipboard.c — host clipboard interface, caret rect, paste queue.
  *
- * The host (the application's platform layer) supplies lens_clipboard at
- * lens_create. lens never links a clipboard or IME library itself —
+ * The host (the application's platform layer) supplies optics_ui_clipboard at
+ * optics_ui_create. ui never links a clipboard or IME library itself —
  * same separation as windowing (ADR-0029) and text (ADR-0033/0011).
  *
- * Paste is asynchronous: a widget (or app) calls lens_request_paste,
- * the host fulfils it later by calling lens_paste, and the next frame's
- * focused text widget drains it via lensi_take_paste. (ADR-0036) */
+ * Paste is asynchronous: a widget (or app) calls optics_ui_request_paste,
+ * the host fulfils it later by calling optics_ui_paste, and the next frame's
+ * focused text widget drains it via optics_ui__take_paste. (ADR-0036) */
 
 #include "../internal.h"
 
 /* ---- caret rect (set by the focused text widget; read by the host) ---- */
 
-void lensi_set_caret_rect(optics_ui *ui, optics_gfx_rect r) {
+void optics_ui__set_caret_rect(optics_ui *ui, optics_gfx_rect r) {
     if (!ui)
         return;
     ui->caret_rect = r;
-    /* A text widget owns its caret, so lens owns the blink (ADR-0151). */
-    ui->caret_lens_owned = r.w > 0.0f && r.h > 0.0f;
+    /* A text widget owns its caret, so ui owns the blink (ADR-0151). */
+    ui->caret_ui_owned = r.w > 0.0f && r.h > 0.0f;
 }
 
 optics_gfx_rect optics_ui_caret_rect(const optics_ui *ui) {
@@ -52,8 +52,8 @@ void optics_ui_set_caret_blink(optics_ui *ui, float period_seconds) {
     ui->caret_phase_s = fmodf(ui->caret_phase_s, period_seconds);
 }
 
-void lensi_set_text_context(optics_ui *ui, const char *utf8, uint32_t len, uint32_t cursor,
-                            bool multiline) {
+void optics_ui__set_text_context(optics_ui *ui, const char *utf8, uint32_t len, uint32_t cursor,
+                                 bool multiline) {
     if (!ui)
         return;
     ui->text_context = (optics_ui_text_context){
@@ -79,7 +79,7 @@ void optics_ui_request_paste(optics_ui *ui) {
     /* Bind the request to the currently focused widget: when the payload
      * arrives (asynchronously, from the host), only that widget may drain
      * it — focus drift between request and fulfilment must not deliver the
-     * text elsewhere. 0 = unbound (a host pushing lens_paste without a
+     * text elsewhere. 0 = unbound (a host pushing optics_ui_paste without a
      * request keeps the legacy "whoever is focused drains it" path). */
     ui->paste_target = ui->focused_id;
     if (ui->clipboard.request_text)
@@ -95,15 +95,15 @@ void optics_ui_paste(optics_ui *ui, const optics_ui_paste_opts *opts) {
         ui->paste_len = 0;
         return;
     }
-    if (len > LENSI_PASTE_MAX - 1)
-        len = LENSI_PASTE_MAX - 1;
+    if (len > OPTICS_UI_PASTE_MAX - 1)
+        len = OPTICS_UI_PASTE_MAX - 1;
     memcpy(ui->paste_buf, utf8, len);
     ui->paste_buf[len] = '\0';
     ui->paste_len = (uint32_t)len;
     ui->paste_frame = ui->frame; /* delivery window: this frame and the next */
 }
 
-const char *lensi_take_paste(optics_ui *ui, uint32_t *out_len) {
+const char *optics_ui__take_paste(optics_ui *ui, uint32_t *out_len) {
     if (out_len)
         *out_len = 0;
     if (!ui || !ui->paste_len)
@@ -130,7 +130,7 @@ uint32_t optics_ui_take_paste(optics_ui *ui, const optics_ui_take_paste_opts *op
     const char *src;
     if (!opts || !opts->dst || !opts->cap)
         return 0;
-    src = lensi_take_paste(ui, &len);
+    src = optics_ui__take_paste(ui, &len);
     if (!src)
         return 0;
     if (len > opts->cap - 1)
@@ -143,10 +143,10 @@ uint32_t optics_ui_take_paste(optics_ui *ui, const optics_ui_take_paste_opts *op
 void optics_ui_set_caret_rect(optics_ui *ui, optics_gfx_rect r) {
     if (!ui)
         return;
-    /* Host-owned caret: the app paints it and owns its clock. Lens records the
+    /* Host-owned caret: the app paints it and owns its clock. ui records the
      * geometry only, because the platform layer still needs it for the IME
      * candidate window — and explicitly does *not* claim ownership, so this
      * caret contributes no damage and no clock (ADR-0151). */
     ui->caret_rect = r;
-    ui->caret_lens_owned = false;
+    ui->caret_ui_owned = false;
 }

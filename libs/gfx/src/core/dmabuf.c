@@ -1,5 +1,5 @@
 /*
- * flux/dmabuf.c - import a Linux dma-buf as a sampled flux_image.
+ * gfx/dmabuf.c - import a Linux dma-buf as a sampled optics_gfx_image.
  *
  * Uses VK_EXT_image_drm_format_modifier to create a VkImage whose memory
  * layout matches the producer's DRM modifier, VK_KHR_external_memory_fd to
@@ -7,16 +7,16 @@
  * An optional Linux sync_file acquire fence can be imported as an external
  * semaphore and waited by the foreign-queue acquire. The image is then
  * registered in the bindless heap, so the canvas samples it like any other
- * flux_image.
+ * optics_gfx_image.
  *
  * Scope: single-plane formats with an explicit DRM modifier. Synchronisation
  * with the producer remains a caller contract in this revision.
  *
  * This is a core-level facility: device.c / surface.c / frame.c call the
- * acquire-semaphore pool helpers and flux_dmabuf_supported unconditionally
+ * acquire-semaphore pool helpers and optics_gfx_dmabuf_supported unconditionally
  * (ADR-0052: no #ifdef at call sites), so meson compiles this file (or its
  * non-Linux stub) regardless of the canvas module gate. The one entry point
- * that genuinely needs canvas internals, flux_canvas_wait_dmabuf_acquire,
+ * that genuinely needs canvas internals, optics_gfx_canvas_wait_dmabuf_acquire,
  * lives in src/canvas/dmabuf_acquire.c.
  */
 
@@ -153,7 +153,7 @@ static bool external_image_importable(optics_gfx_device *d, VkFormat format, uin
 static optics_gfx_result dmabuf_enum_sampleable_importable_modifiers(optics_gfx_device *d,
                                                                      VkFormat vfmt, uint64_t *out,
                                                                      uint32_t *inout_count) {
-    /* The caller's contract (flux_dmabuf_format_modifiers) guarantees
+    /* The caller's contract (optics_gfx_dmabuf_format_modifiers) guarantees
      * out != NULL whenever *inout_count != 0; assert it here so the
      * analyzer can prove the write below, and a future caller passing
      * a NULL out with a nonzero capacity fails loudly at the boundary
@@ -371,10 +371,10 @@ static optics_gfx_result import_sync_fd_semaphore(optics_gfx_device *d, int acqu
     return OPTICS_GFX_OK;
 }
 
-/* Cross-TU body for the canvas-level flux_canvas_wait_dmabuf_acquire
+/* Cross-TU body for the canvas-level optics_gfx_canvas_wait_dmabuf_acquire
  * (src/canvas/dmabuf_acquire.c): import `acquire_sync_fd` as a temporary
  * SYNC_FD payload on a pooled semaphore. The stub twin reports
- * FLUX_ERROR_UNSUPPORTED so the canvas file stays platform-neutral. */
+ * OPTICS_GFX_ERROR_UNSUPPORTED so the canvas file stays platform-neutral. */
 optics_gfx_result optics_gfx_dmabuf_import_acquire_semaphore(optics_gfx_device *d,
                                                              int acquire_sync_fd,
                                                              VkSemaphore *out) {
@@ -509,7 +509,7 @@ optics_gfx_result optics_gfx_image_import_dmabuf(optics_gfx_device *d,
     *out = nullptr;
     if (desc->type != OPTICS_GFX_TYPE_DMABUF_IMAGE_DESC) {
         OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT,
-                        "desc->type != FLUX_TYPE_DMABUF_IMAGE_DESC");
+                        "desc->type != OPTICS_GFX_TYPE_DMABUF_IMAGE_DESC");
         return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
     }
     if (desc->width == 0 || desc->height == 0) {

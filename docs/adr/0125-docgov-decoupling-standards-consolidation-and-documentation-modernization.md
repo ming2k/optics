@@ -3,8 +3,8 @@ id: ADR-0125
 title: "DocGov Decoupling, Standards Consolidation, and Documentation Modernization"
 status: accepted
 date: 2026-10-30
-superseded_by: null
 scope: docs, dev/standards, agent/directives, tools
+superseded_by: null
 negative_knowledge: true
 ---
 

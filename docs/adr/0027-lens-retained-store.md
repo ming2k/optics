@@ -3,6 +3,9 @@ id: ADR-0027
 title: "Lens retained store — open-addressing id→node map with ENTERING/STABLE/LEAVING GC"
 status: accepted
 date: 2026-07-21
+scope: ui (L2 toolkit)
+superseded_by: null
+negative_knowledge: true
 ---
 
 # ADR-0027: Lens retained store — open-addressing id→node map with ENTERING/STABLE/LEAVING GC

@@ -1,5 +1,5 @@
 /*
- * flux/profile.h — execution profiler telemetry facade (ADR-0138).
+ * gfx/profile.h — execution profiler telemetry facade (ADR-0138).
  *
  * Provides a zero-overhead, pure C23 profiling and telemetry facade for
  * real-time frame timeline tracking, multi-thread execution boundaries,
@@ -87,7 +87,7 @@ typedef const void *optics_gfx_profile_zone;
 /*  Public API (Single Opts Descriptor Paradigm, ADR-0082)            */
 /* ================================================================== */
 
-/* Options descriptor for flux_profile_query. */
+/* Options descriptor for optics_gfx_profile_query. */
 typedef struct optics_gfx_profile_opts {
     const char *app_info; /* Optional application metadata broadcast */
 } optics_gfx_profile_opts;
@@ -106,4 +106,4 @@ optics_gfx_profile_query(const optics_gfx_profile_opts *opts);
 }
 #endif
 
-#endif /* FLUX_PROFILE_H */
+#endif /* OPTICS_GFX_PROFILE_H */

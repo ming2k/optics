@@ -3,6 +3,9 @@ id: ADR-0036
 title: "Lens input / clipboard / IME — host-supplied, size-guarded ABI"
 status: accepted
 date: 2026-07-21
+scope: ui (L2 toolkit)
+superseded_by: null
+negative_knowledge: true
 ---
 
 # ADR-0036: Lens input / clipboard / IME — host-supplied, size-guarded ABI

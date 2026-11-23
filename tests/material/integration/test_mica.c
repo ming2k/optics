@@ -1,10 +1,11 @@
 /*
- * test_mica.c — integration test for prism mica foundation material (ADR-0096).
+ * test_mica.c — integration test for material mica foundation material (ADR-0096).
  *
  * Verifies:
  *   - Lifecycle: creation, retention, refcounting, and safe destruction.
  *   - Geometry & Masking: analytic rounded-rectangle SDF masks the mica layer.
- *   - Base vs. Alt: PRISM_MICA_ALT produces deeper tint/contrast than PRISM_MICA_BASE.
+ *   - Base vs. Alt: OPTICS_MATERIAL_MICA_ALT produces deeper tint/contrast than
+ * OPTICS_MATERIAL_MICA_BASE.
  *   - Inactive Fallback: fallback_weight = 1.0f blends output into fallback_color.
  *   - Screen anchoring: screen_width / screen_height coordinates execute reliably.
  *   - Frame slot cycling: multi-frame persistent output clearing works without residue.

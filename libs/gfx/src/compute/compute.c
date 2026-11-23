@@ -17,7 +17,7 @@
 struct optics_gfx_compute_pipeline {
     atomic_uint ref_count;
     optics_gfx_device *device; /* retained unless device_weak */
-    bool device_weak;          /* see flux_compute_pipeline_make_device_weak */
+    bool device_weak;          /* see optics_gfx_compute_pipeline_make_device_weak */
 
     VkPipelineLayout layout;
     VkPipeline pipeline;
@@ -31,7 +31,7 @@ optics_gfx_result optics_gfx_compute_pipeline_create(optics_gfx_device *d,
         return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
     if (desc->type != OPTICS_GFX_TYPE_COMPUTE_PIPELINE_DESC) {
         OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT,
-                        "desc->type != FLUX_TYPE_COMPUTE_PIPELINE_DESC");
+                        "desc->type != OPTICS_GFX_TYPE_COMPUTE_PIPELINE_DESC");
         return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
     }
     if (!desc->spirv || desc->spirv_word_count == 0) {
@@ -193,7 +193,7 @@ void optics_gfx_compute_dispatch(const optics_gfx_compute_dispatch_opts *opts) {
              * declared, masking a mismatched build silently. Skip the
              * dispatch entirely and surface the error. */
             OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT,
-                            "flux_compute_dispatch push_bytes exceeds pipeline range");
+                            "optics_gfx_compute_dispatch push_bytes exceeds pipeline range");
             return;
         }
         vkCmdPushConstants(cmd, pipeline->layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, push_bytes,

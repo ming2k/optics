@@ -1,6 +1,6 @@
 [package]
 name = "optics-text-sys"
-description = "Raw FFI bindings to glyph (libglyph), generated from <glyph/glyph.h>"
+description = "Raw FFI bindings to glyph (liboptics_text), generated from <optics/text.h>"
 publish = false
 links = "optics_text"
 version.workspace = true
@@ -14,3 +14,9 @@ optics-gfx-sys = { workspace = true }
 
 [build-dependencies]
 optics-build = { workspace = true }
+
+[features]
+# Force a static link of the Optics archives; the default links the shared
+# objects (docs/how-to/choose-a-static-or-shared-link.md). OPTICS_STATIC /
+# OPTICS_DYNAMIC in the environment override it.
+static = ["optics-gfx-sys/static"]

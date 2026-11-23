@@ -2,9 +2,9 @@
 
 #include "../internal.h"
 
-/* LENS_KEY_TAB and LENS_MOD_SHIFT are defined in <lens/lens.h>. */
+/* OPTICS_UI_KEY_TAB and OPTICS_UI_MOD_SHIFT are defined in <optics/ui.h>. */
 
-void lensi_focus_tab(optics_ui *ui) {
+void optics_ui__focus_tab(optics_ui *ui) {
     if (ui->tab_count == 0)
         return;
 
@@ -52,7 +52,7 @@ void lensi_focus_tab(optics_ui *ui) {
     }
     ui->focused_id = ui->tab_order[next];
     /* Tab traversal is keyboard navigation: the newly focused widget shows
-     * a focus ring (LENS_STATE_FOCUS_VISIBLE, ADR-0058) until a pointer
-     * press or a programmatic lens_set_focus revokes the modality. */
+     * a focus ring (OPTICS_UI_STATE_FOCUS_VISIBLE, ADR-0058) until a pointer
+     * press or a programmatic optics_ui_set_focus revokes the modality. */
     ui->focus_visible = true;
 }

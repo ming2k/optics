@@ -35,12 +35,12 @@
  * must not depend on the growth trigger (which always fires at
  * saturation and would otherwise starve the sweep — see put()).
  *
- * Only compiled when GLYPH_HAVE_FTHB is defined; consumers include
+ * Only compiled when OPTICS_TEXT_HAVE_FTHB is defined; consumers include
  * it via text_internal.h.
  */
 
-#ifndef OPTICS_GFX_GLYPH_CACHE_H
-#define OPTICS_GFX_GLYPH_CACHE_H
+#ifndef OPTICS_TEXT_GLYPH_CACHE_H
+#define OPTICS_TEXT_GLYPH_CACHE_H
 
 #include <optics/gfx/core.h>
 #include <stdbool.h>
@@ -160,4 +160,4 @@ void glyph_cache_get_stats(const glyph_cache *c, glyph_cache_stats *out);
 typedef bool (*glyph_cache_visit_fn)(glyph_entry *e, void *ctx);
 void glyph_cache_visit(glyph_cache *c, glyph_cache_visit_fn visit, void *ctx);
 
-#endif /* FLUX_GLYPH_CACHE_H */
+#endif /* OPTICS_TEXT_GLYPH_CACHE_H */

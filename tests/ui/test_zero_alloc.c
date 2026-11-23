@@ -1,8 +1,8 @@
 /* test_zero_alloc.c — the frame walk never touches the heap.
  *
  * Invariant (docs/dev/standards/architecture.md §3.3): a steady-state frame —
- * the same widgets as the frame before, whatever the input — runs lens_begin
- * through lens_end on the per-frame arena alone and never calls libc malloc /
+ * the same widgets as the frame before, whatever the input — runs optics_ui_begin
+ * through optics_ui_end on the per-frame arena alone and never calls libc malloc /
  * calloc / realloc / free. A comment cannot hold that line; this test does,
  * by interposing the allocator for the whole process and counting every call
  * made while a frame is open.

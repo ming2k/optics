@@ -1,5 +1,5 @@
 /*
- * Deviceless GLB parse stage (vista_parse_glb, ADR-0016): the parse
+ * Deviceless GLB parse stage (optics_scene_parse_glb, ADR-0016): the parse
  * and the GPU build are separate seams, so every parser behaviour is
  * testable without a Vulkan device.
  *
@@ -14,11 +14,11 @@
  *   - hostile inputs (bad magic, total length beyond the buffer,
  *     total=0 unsigned-underflow crash found by fuzz_glb_parse,
  *     accessor count bombs, OOB buffer views, node cycles) all fail
- *     with FLUX_ERROR_INVALID_ARGUMENT, never by crashing;
+ *     with OPTICS_GFX_ERROR_INVALID_ARGUMENT, never by crashing;
  *   - the out handle is NULL on every failure path (the documented
  *     contract callers rely on to skip the free).
  *
- * Build-stage behaviour (flux_mesh upload) is covered by the GPU
+ * Build-stage behaviour (optics_gfx_mesh upload) is covered by the GPU
  * integration suites; this file is deliberately device-free.
  */
 #include "optics_test.h"

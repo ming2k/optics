@@ -3,7 +3,7 @@ id: ADR-0168
 title: "Exported dma-buf images carry a lease, not a caller-discipline lifetime"
 status: accepted
 date: 2026-11-18
-scope: flux/core, flux/bindings
+scope: gfx/core, gfx/bindings
 superseded_by: null
 negative_knowledge: true
 ---

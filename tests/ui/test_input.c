@@ -1,7 +1,7 @@
 /* test_input.c — scripted input sequences → expected responses (ADR-0006). */
 
-#include "lens_test.h"
 #include "optics_test.h"
+#include "ui_test.h"
 #include <optics/ui.h>
 
 static void test_hover_press_click(void) {

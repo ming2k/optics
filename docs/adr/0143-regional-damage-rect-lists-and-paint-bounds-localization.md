@@ -3,8 +3,8 @@ id: ADR-0143
 title: "Regional frame damage as a rect list, and paint-bounds localization"
 status: accepted
 date: 2026-11-03
+scope: [ui, bindings, architecture]
 superseded_by: null
-scope: [lens, bindings, architecture]
 negative_knowledge: true
 ---
 

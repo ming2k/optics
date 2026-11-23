@@ -1,7 +1,7 @@
 /* test_checkbox.c — checkbox toggle detection. */
 
-#include "lens_test.h"
 #include "optics_test.h"
+#include "ui_test.h"
 #include <optics/ui.h>
 
 static const optics_ui_input IN0 = {.display_size = {400, 200}, .dt_seconds = 0.016f};

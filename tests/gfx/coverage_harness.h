@@ -3,7 +3,7 @@
  *
  * This is the ground truth every coverage backend is measured against, and it
  * is deliberately NOT a backend: it lives in the test tree, it is slow, and it
- * shares no algorithm with any rasterizer in libflux. A backend that validated
+ * shares no algorithm with any rasterizer in liboptics_gfx. A backend that validated
  * itself against its own helper would prove nothing (ADR-0112's postmortem,
  * applied to tests).
  *
@@ -14,7 +14,7 @@
  *                             signed areas. One arithmetic identity pins it:
  *                             the coverage sum must equal the geometry's signed
  *                             area, exactly.
- *   cov_harness_supersample() n x n winding samples (flux_curve_cover_coverage).
+ *   cov_harness_supersample() n x n winding samples (optics_gfx_curve_cover_coverage).
  *                             Trivially correct, converges as O(1/n); used to
  *                             confirm the area reference on shapes where the two
  *                             must agree.
@@ -72,7 +72,7 @@ typedef struct cov_report {
 double cov_harness_signed_area(optics_gfx_curve_cover cover);
 
 /* Exact algebraic-area coverage of `cover` over a w x h pixel grid whose pixel
- * (i, j) spans [ox+i, ox+i+1) x [oy+j, oy+j+1). Returns FLUX_OK, or an explicit
+ * (i, j) spans [ox+i, ox+i+1) x [oy+j, oy+j+1). Returns OPTICS_GFX_OK, or an explicit
  * error if the flattened contours exceed the harness's fixed capacity (fail
  * closed rather than truncating a reference).
  *
@@ -82,7 +82,7 @@ OPTICS_GFX_NODISCARD optics_gfx_result cov_harness_area(optics_gfx_curve_cover c
                                                         cov_plane *out);
 
 /* Supersampled coverage of `cover` under `rule`, same grid, n x n samples per
- * pixel (n clamped by flux_curve_cover_coverage to [1,64]). */
+ * pixel (n clamped by optics_gfx_curve_cover_coverage to [1,64]). */
 OPTICS_GFX_NODISCARD optics_gfx_result cov_harness_supersample(optics_gfx_curve_cover cover,
                                                                optics_gfx_curve_fill rule, float ox,
                                                                float oy, uint32_t w, uint32_t h,

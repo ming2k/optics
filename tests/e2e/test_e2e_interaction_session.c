@@ -1,8 +1,8 @@
 /*
  * e2e_interaction_session — a real host loop without a window.
  *
- * One synthetic session drives the public API the way iris does: per-frame
- * input, a build callback, lens_end, snapshot publication, activation, and a
+ * One synthetic session drives the public API the way window does: per-frame
+ * input, a build callback, optics_ui_end, snapshot publication, activation, and a
  * CPU replay. It spans pointer interaction, focus/keyboard input, text, an
  * accessibility walk, and pixel output.
  *
@@ -11,8 +11,8 @@
  * session even if every individual widget still passes its own test.
  */
 
-#include "lens_test.h"
 #include "optics_test.h"
+#include "ui_test.h"
 
 #include <optics/gfx/canvas.h>
 #include <optics/gfx/canvas_cpu.h>

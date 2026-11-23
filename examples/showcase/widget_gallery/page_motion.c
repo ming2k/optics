@@ -17,8 +17,9 @@ void wg_page_motion(optics_ui *ui, const ds_palette *p, wg_app *app) {
         .stiffness = app->stiffness,
         .damping = app->damping,
     };
-    const bool settled = optics_motion_spring_advance(&app->spring, app->target, params,
-                                                      optics_ui_dt(ui), app->reduced_motion);
+    optics_motion_spring_advance(&app->spring, app->target, params, optics_ui_dt(ui),
+                                 app->reduced_motion);
+    const bool settled = optics_motion_spring_settled(&app->spring, app->target, 1e-3f, 1e-3f);
     if (!settled) {
         optics_app_request_frame();
     }

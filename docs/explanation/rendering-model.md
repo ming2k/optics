@@ -1,6 +1,6 @@
 # Value-Semantic Rendering (VSR) Architecture
 
-This document formalises the rendering architecture of Flux. It defines **Value-Semantic Rendering (VSR)**—the paradigm that replaces the traditional, decades-old dichotomy between "Immediate Mode" and "Retained Mode"—and details its physical data flow, caching model, and alignment with modern GPU hardware.
+This document formalises the rendering architecture of gfx. It defines **Value-Semantic Rendering (VSR)**—the paradigm that replaces the traditional, decades-old dichotomy between "Immediate Mode" and "Retained Mode"—and details its physical data flow, caching model, and alignment with modern GPU hardware.
 
 ---
 
@@ -27,19 +27,19 @@ This dichotomy rests on a fundamental **category error**: it conflates the **API
 * **Traditional Retained Mode** assumed that in order to cache rendered content, the engine *must* own and maintain a mutable, stateful graph of persistent objects (`Node`, `Element`, `Widget`).
 * **Traditional Immediate Mode** assumed that in order to keep the API stateless, procedural, and simple, the engine *must* discard everything every frame and recompute all geometry from scratch.
 
-Flux rejects both assumptions.
+gfx rejects both assumptions.
 
 ---
 
 ## 2. Defining Value-Semantic Rendering (VSR)
 
-Flux introduces and implements **Value-Semantic Rendering (VSR)**:
+gfx introduces and implements **Value-Semantic Rendering (VSR)**:
 
 > **Value-Semantic Rendering (VSR)** is an architectural paradigm where drawing operations are expressed via a **stateless, procedural API**, while their execution payloads are captured into **immutable, relocatable, value-semantic command streams**.
 
 In VSR:
 1. **There are no "living" engine objects**: The graphics core maintains no stateful widget trees, parent-child links, layout graphs, or mutation listeners.
-2. **Commands are immutable values**: A recorded drawing sequence is not an object graph; it is a frozen, contiguous byte slice (`flux_display_list`) with atomic reference counting. Like a string or an integer, it is pure data.
+2. **Commands are immutable values**: A recorded drawing sequence is not an object graph; it is a frozen, contiguous byte slice (`optics_gfx_display_list`) with atomic reference counting. Like a string or an integer, it is pure data.
 3. **Threading is inherently safe**: Because display lists are immutable, worker threads can record them concurrently and pass them across thread boundaries with zero synchronization locks.
 4. **Caching is decoupled from application state**: Caching does not require scene-graph invalidation algorithms. The engine provides lightweight, value-keyed geometry caches and submission caches.
 
@@ -47,22 +47,22 @@ In VSR:
 
 ## 3. The Orthogonal Primitive Foundation (`Geometry × Brush`)
 
-A core pillar of VSR is the complete decoupling of **spatial shape** from **optical material**. In Flux, every 2D draw operation converges onto a single orthogonal entry point:
+A core pillar of VSR is the complete decoupling of **spatial shape** from **optical material**. In gfx, every 2D draw operation converges onto a single orthogonal entry point:
 
 ```c
-FLUX_API void flux_canvas_draw_geometry(flux_canvas *c,
-                                        const flux_geometry *geom,
-                                        const flux_brush *brush);
+OPTICS_GFX_API void optics_gfx_canvas_draw_geometry(optics_gfx_canvas *c,
+                                        const optics_gfx_geometry *geom,
+                                        const optics_gfx_brush *brush);
 ```
 
 ### Separation of Concerns
 
-* **`flux_geometry` (Spatial Boundary & Topology)**:
+* **`optics_gfx_geometry` (Spatial Boundary & Topology)**:
   * Shape Kind: `Rect`, `RRect`, `Squircle` (G2 superellipse), `Circle`, `Line`, `Path`.
   * Stroke Style: `width` (0 = fill, > 0 = stroke), `cap` (butt, round, square), `join` (miter, round, bevel), and `miter_limit`.
   * *Purity*: Geometry knows nothing about colors, textures, or shaders. It only dictates CPU tessellation or GPU distance fields.
 
-* **`flux_brush` (Optics & Material)**:
+* **`optics_gfx_brush` (Optics & Material)**:
   * Material Kind: `Solid` color, `LinearGradient`, `RadialGradient`, `ImagePattern`.
   * Optical Attributes: `blend` mode (`SRC_OVER`, `SRC`, `PLUS`, `MULTIPLY`) and `opacity` ($0.0 \sim 1.0$).
   * *Purity*: Brush knows nothing about bounding boxes or line caps. It is packaged directly into GPU push constants.
@@ -73,12 +73,12 @@ To provide immediate-mode convenience without dynamic symbol table bloat, `<opti
 
 ```c
 // High-level call:
-flux_canvas_fill_rect_color(canvas, rect, 0xFF00FF00u);
+optics_gfx_canvas_fill_rect_color(canvas, rect, 0xFF00FF00u);
 
 // Expands at compile-time with zero runtime overhead into:
-flux_canvas_draw_geometry(canvas,
-    &(flux_geometry){ .kind = FLUX_GEOM_RECT, .rect.rect = rect },
-    &(flux_brush){ .kind = FLUX_BRUSH_SOLID, .solid.color = 0xFF00FF00u, .opacity = 1.0f }
+optics_gfx_canvas_draw_geometry(canvas,
+    &(optics_gfx_geometry){ .kind = OPTICS_GFX_GEOM_RECT, .rect.rect = rect },
+    &(optics_gfx_brush){ .kind = OPTICS_GFX_BRUSH_SOLID, .solid.color = 0xFF00FF00u, .opacity = 1.0f }
 );
 ```
 
@@ -91,25 +91,25 @@ VSR operates across three distinct, physically decoupled phases:
 ```text
   Phase 1: Recording (CPU)            Phase 2: Freezing (Value)          Phase 3: Execution (GPU)
 ┌───────────────────────────┐       ┌───────────────────────────┐      ┌───────────────────────────┐
-│ flux_encoder              │       │ flux_display_list         │      │ flux_canvas               │
+│ optics_gfx_encoder              │       │ optics_gfx_display_list         │      │ optics_gfx_canvas               │
 │ • Linear Byte Buffer      │ ───►  │ • Immutable Byte Slice    │ ──►  │ • Tessellation Cache hit  │
 │ • Zero GPU interaction    │       │ • Atomic refcount         │      │ • Push Constants BDA      │
 │ • Retains image resources │       │ • Relocatable & threadsafe│      │ • Vulkan 1.3 vkCmdDraw    │
 └───────────────────────────┘       └───────────────────────────┘      └───────────────────────────┘
 ```
 
-### Phase 1: Recording (`flux_encoder`)
-* When an application records drawing operations, `flux_encoder` does **not** call graphics drivers and does **not** perform expensive polygon triangulation.
-* It writes packed binary command headers (`flux_cmd_header`), geometries, and brushes into a contiguous, cache-local byte stream.
-* External GPU dependencies (such as `flux_image`) are retained via atomic reference counts so recorded bindless handles never dangle.
+### Phase 1: Recording (`optics_gfx_encoder`)
+* When an application records drawing operations, `optics_gfx_encoder` does **not** call graphics drivers and does **not** perform expensive polygon triangulation.
+* It writes packed binary command headers (`optics_gfx_cmd_header`), geometries, and brushes into a contiguous, cache-local byte stream.
+* External GPU dependencies (such as `optics_gfx_image`) are retained via atomic reference counts so recorded bindless handles never dangle.
 
-### Phase 2: Freezing (`flux_display_list`)
-* Calling `flux_encoder_finish` seals the recording into an immutable `flux_display_list`.
+### Phase 2: Freezing (`optics_gfx_display_list`)
+* Calling `optics_gfx_encoder_finish` seals the recording into an immutable `optics_gfx_display_list`.
 * The list owns its memory budget. It has no pointer dependencies into transient recorder storage.
-* It can be cached indefinitely by userland UI frameworks (e.g., `lens`), shared across thread boundaries, or submitted repeatedly.
+* It can be cached indefinitely by userland UI frameworks (e.g., `ui`), shared across thread boundaries, or submitted repeatedly.
 
-### Phase 3: Replay & Tiered Acceleration (`flux_canvas`)
-When submitted via `flux_canvas_submit_display_list(c, list)`, the engine executes the stream through three converged 1x analytic routes:
+### Phase 3: Replay & Tiered Acceleration (`optics_gfx_canvas`)
+When submitted via `optics_gfx_canvas_submit_display_list(c, list)`, the engine executes the stream through three converged 1x analytic routes:
 
 1. **Analytic SDF Fast-Path**: For rounded rectangles, circles, and squircles under similarity transforms, CPU vertex generation is bypassed. `CANVAS_PIPE_SDF` evaluates exact shape-space signed distance fields per fragment.
 2. **Batched Axis-Aligned Integers**: Integer axis-aligned solid/gradient rectangles batch into `submit_triangles` (`CANVAS_PIPE_SOLID` / `CANVAS_PIPE_GRADIENT`), and unclipped integer axis-aligned images keep `CANVAS_PIPE_IMAGE`.
@@ -119,28 +119,28 @@ When submitted via `flux_canvas_submit_display_list(c, list)`, the engine execut
 
 ## 5. Architectural Separation: Display Lists vs. Submission Caches
 
-Per [ADR-0095](../adr/0095-flux-public-contract-convergence.md), Flux strictly separates content description from hardware optimization:
+Per [ADR-0095](../adr/0095-flux-public-contract-convergence.md), gfx strictly separates content description from hardware optimization:
 
-| Capability | `flux_display_list` | `flux_canvas_cache_*` |
+| Capability | `optics_gfx_display_list` | `optics_gfx_canvas_cache_*` |
 | :--- | :--- | :--- |
 | **Role** | Portable, immutable content description | Low-level, disposable hardware submission cache |
 | **Coordinate Space** | Logical / device-independent units | Physical framebuffer pixels |
 | **State Coupling** | Decoupled; valid under any transform or scissor | Anchored to exact transform, target extent, and scissor |
-| **Scope** | Cross-frame, cross-canvas, cross-thread | Local to one `flux_canvas` instance |
+| **Scope** | Cross-frame, cross-canvas, cross-thread | Local to one `optics_gfx_canvas` instance |
 | **Lifecycle** | Explicit refcount (`_retain` / `_release`) | Canvas-owned LRU byte budget with auto-eviction |
 
 ---
 
 ## 6. Vulkan 1.3 Hardware Alignment & Low-Latency Mechanics
 
-VSR maps directly to modern explicit graphics APIs (Vulkan 1.3, Metal 3, DirectX 12). Traditional APIs forced continuous driver state changes; Flux aligns with hardware pipelines:
+VSR maps directly to modern explicit graphics APIs (Vulkan 1.3, Metal 3, DirectX 12). Traditional APIs forced continuous driver state changes; gfx aligns with hardware pipelines:
 
 ### 1. Deterministic Hot-Path (Zero Heap Allocations)
-* Dynamic per-frame scratch memory uses per-frame ring buffers (`flux_frame_alloc_transient`). Allocation is a single atomic pointer bump ($< 1\text{ ns}$).
+* Dynamic per-frame scratch memory uses per-frame ring buffers (`optics_gfx_frame_alloc_transient`). Allocation is a single atomic pointer bump ($< 1\text{ ns}$).
 * Temporary contour and link arrays (`scratch_pts`, `scratch_verts`) are pre-allocated per canvas. Draw operations never trigger `malloc` or `free`.
 
 ### 2. Minimum-Latency Presentation (`VK_PRESENT_MODE_MAILBOX_KHR`)
-* In `libs/gfx/src/core/surface.c`, Flux prioritises Vulkan's Mailbox presentation mode.
+* In `libs/gfx/src/core/surface.c`, gfx prioritises Vulkan's Mailbox presentation mode.
 * Unlike FIFO double/triple buffering, Mailbox does not queue frames; it continuously updates the backbuffer with the newest frame completed before the vertical blanking interval.
 * Input-to-photon latency is reduced by $16 \sim 33\text{ ms}$ compared to traditional queues.
 
@@ -153,7 +153,7 @@ VSR maps directly to modern explicit graphics APIs (Vulkan 1.3, Metal 3, DirectX
 
 ## 7. Industry Convergence: The Universal Modern Pattern
 
-Flux's Value-Semantic Rendering is not an isolated experiment. It is the C23 native embodiment of the architecture to which all world-class graphics engines have converged:
+gfx's Value-Semantic Rendering is not an isolated experiment. It is the C23 native embodiment of the architecture to which all world-class graphics engines have converged:
 
 * **Google Chromium (`cc::PaintRecord`)**: WebKit originally painted directly; modern Blink paints procedurally into immutable display item lists (`cc::PaintRecord`), rasterized asynchronously by worker pools.
 * **Google Flutter (`Impeller::Picture`)**: Flutter replaced Skia's runtime state machine with Impeller, where widgets record into immutable `Picture` command streams executed on Vulkan/Metal entity pipelines.

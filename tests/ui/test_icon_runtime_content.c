@@ -1,10 +1,10 @@
 /* test_icon_runtime_content.c — content of the streams produced by
- * lens_icon_register_svg. CPU-only.
+ * optics_ui_icon_register_svg. CPU-only.
  *
  * Widget-level coverage lives in test_icon_runtime.c; this binary compiles
  * icon_runtime.c (+ icon_data.c) directly — the same pattern as
- * test_drawlist_hash — because the registry accessors (lensi_icon_desc and
- * friends) are hidden symbols that do not link from liblens.so. The point
+ * test_drawlist_hash — because the registry accessors (optics_ui__icon_desc and
+ * friends) are hidden symbols that do not link from liboptics_ui.so. The point
  * is to assert WHAT got registered, not just that an id came back:
  *
  *  - every shape survives flattening (a circle + line icon keeps two
@@ -18,8 +18,8 @@
  */
 
 #include "../../libs/ui/src/internal.h"
-#include "lens_test.h"
 #include "optics_test.h"
+#include "ui_test.h"
 #include <optics/ui.h>
 
 /* Feather-style: circle + line, stroke only, in a 24x24 viewBox. */
@@ -46,7 +46,7 @@ int main(void) {
     optics_ui_icon_id fill = optics_ui_icon_register_svg(SVG_FILL);
     OT_EXPECT((int)fill == (int)stroke + 1);
 
-    const optics_ui_icon_desc *desc = lensi_icon_desc((int32_t)stroke);
+    const optics_ui_icon_desc *desc = optics_ui__icon_desc((int32_t)stroke);
     OT_EXPECT(desc != nullptr);
 
     /* Both shapes survive: exactly two MOVE verbs (circle subpath + line
@@ -108,12 +108,12 @@ int main(void) {
     OT_EXPECT(min_y > 2.9f && max_y < 21.1f);
 
     /* Render mode follows the shapes' paint. */
-    OT_EXPECT(lensi_icon_mode((int32_t)stroke) == LENSI_ICON_RENDER_STROKE);
-    OT_EXPECT(lensi_icon_mode((int32_t)fill) == LENSI_ICON_RENDER_FILL);
+    OT_EXPECT(optics_ui__icon_mode((int32_t)stroke) == OPTICS_UI_ICON_RENDER_STROKE);
+    OT_EXPECT(optics_ui__icon_mode((int32_t)fill) == OPTICS_UI_ICON_RENDER_FILL);
 
     /* A 48-wide viewBox scales down into the 24 box (r=18 -> 9). */
     optics_ui_icon_id wide = optics_ui_icon_register_svg(SVG_WIDE_VIEWBOX);
-    const optics_ui_icon_desc *wd = lensi_icon_desc((int32_t)wide);
+    const optics_ui_icon_desc *wd = optics_ui__icon_desc((int32_t)wide);
     OT_EXPECT(wd != nullptr && wd->count > 0);
     OT_EXPECT(wd->cmds[0].type == 0);
     OT_EXPECT(wd->cmds[0].params[0] > 20.9f && wd->cmds[0].params[0] < 21.1f);

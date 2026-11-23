@@ -19,7 +19,7 @@
  * size_t) since strings > 4 GiB are rejected at the door, halving the
  * per-byte working set. */
 
-#include "glyph_internal.h"
+#include "text_internal.h"
 
 #include <limits.h>
 #include <stdint.h>

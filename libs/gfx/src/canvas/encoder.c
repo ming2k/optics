@@ -39,7 +39,7 @@ typedef struct optics_gfx_cmd_draw_geom {
      * immutable snapshots replace them. Serialization IDs key on these. */
     const void *image_key;
     const void *sampler_key;
-    /* Trailing flux_path_segment[], addressed relative to this command. */
+    /* Trailing optics_gfx_path_segment[], addressed relative to this command. */
 } optics_gfx_cmd_draw_geom;
 
 typedef struct optics_gfx_cmd_glyph_run {
@@ -49,7 +49,7 @@ typedef struct optics_gfx_cmd_glyph_run {
     size_t host_cov_bytes;
     const void *atlas_key;
     const void *sampler_key;
-    /* Trailing flux_glyph_quad[], then coverage bytes. */
+    /* Trailing optics_gfx_glyph_quad[], then coverage bytes. */
 } optics_gfx_cmd_glyph_run;
 
 typedef struct {
@@ -232,7 +232,7 @@ optics_gfx_result optics_gfx_encoder_create(const optics_gfx_encoder_desc *desc,
 /* An encoder is a frame-lifetime recorder: it is created, records one
  * frame's commands, and is destroyed before the frame ends. It is the one
  * resource in the stack whose lifetime genuinely coincides with a frame, so it
- * is the FLUX_LIFETIME_FRAME kind that `flux_observe_frame_drain_check`
+ * is the OPTICS_GFX_LIFETIME_FRAME kind that `optics_gfx_observe_frame_drain_check`
  * enforces at the frame boundary (ADR-0129 decision 4).
  *
  * Device-free by design: an encoder may exist before any device (CPU canvas,
@@ -241,7 +241,7 @@ optics_gfx_result optics_gfx_encoder_create(const optics_gfx_encoder_desc *desc,
  * a nullptr device and lands in the process ledger, whose drain point is
  * process exit — which would be the wrong drain point for a per-frame object.
  * Instead the encoder takes the device from its own canvas-bound creation path
- * when there is one; the flux_canvas_reserve path below passes it explicitly. */
+ * when there is one. */
 
 void optics_gfx_encoder_destroy(optics_gfx_encoder *enc) {
     if (!enc)
@@ -259,23 +259,23 @@ static void encoder_draw_geometry_impl(optics_gfx_encoder *enc, const optics_gfx
     optics_gfx_brush b = brush ? *brush : optics_gfx_brush_solid(0xff000000u);
     if (!geom) {
         OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT,
-                        "flux_encoder_draw_geometry: geom is NULL");
+                        "optics_gfx_encoder_draw_geometry: geom is NULL");
         optics_gfx_encoder_fail(enc, OPTICS_GFX_ERROR_INVALID_ARGUMENT);
         return;
     }
     if (!canvas_valid_geometry(geom)) {
         switch (geom->kind) {
         case OPTICS_GFX_GEOM_RECT:
-            OPTICS_GFX_FAILF(
-                OPTICS_GFX_ERROR_INVALID_ARGUMENT,
-                "flux_encoder_draw_geometry: non-finite or negative rect [%.2f, %.2f, %.2f, %.2f]",
-                (double)geom->rect.rect.x, (double)geom->rect.rect.y, (double)geom->rect.rect.w,
-                (double)geom->rect.rect.h);
+            OPTICS_GFX_FAILF(OPTICS_GFX_ERROR_INVALID_ARGUMENT,
+                             "optics_gfx_encoder_draw_geometry: non-finite or negative rect [%.2f, "
+                             "%.2f, %.2f, %.2f]",
+                             (double)geom->rect.rect.x, (double)geom->rect.rect.y,
+                             (double)geom->rect.rect.w, (double)geom->rect.rect.h);
             break;
         case OPTICS_GFX_GEOM_RRECT:
             OPTICS_GFX_FAILF(
                 OPTICS_GFX_ERROR_INVALID_ARGUMENT,
-                "flux_encoder_draw_geometry: non-finite/negative rrect [%.2f, %.2f, %.2f, "
+                "optics_gfx_encoder_draw_geometry: non-finite/negative rrect [%.2f, %.2f, %.2f, "
                 "%.2f], radius=%.2f",
                 (double)geom->rrect.rect.x, (double)geom->rrect.rect.y, (double)geom->rrect.rect.w,
                 (double)geom->rrect.rect.h, (double)geom->rrect.radius);
@@ -283,7 +283,7 @@ static void encoder_draw_geometry_impl(optics_gfx_encoder *enc, const optics_gfx
         case OPTICS_GFX_GEOM_SQUIRCLE:
             OPTICS_GFX_FAILF(
                 OPTICS_GFX_ERROR_INVALID_ARGUMENT,
-                "flux_encoder_draw_geometry: invalid squircle [%.2f, %.2f, %.2f, %.2f], "
+                "optics_gfx_encoder_draw_geometry: invalid squircle [%.2f, %.2f, %.2f, %.2f], "
                 "r=%.2f, c=%.2f",
                 (double)geom->squircle.rect.x, (double)geom->squircle.rect.y,
                 (double)geom->squircle.rect.w, (double)geom->squircle.rect.h,
@@ -292,20 +292,20 @@ static void encoder_draw_geometry_impl(optics_gfx_encoder *enc, const optics_gfx
         case OPTICS_GFX_GEOM_CIRCLE:
             OPTICS_GFX_FAILF(
                 OPTICS_GFX_ERROR_INVALID_ARGUMENT,
-                "flux_encoder_draw_geometry: invalid circle center=[%.2f, %.2f], r=%.2f",
+                "optics_gfx_encoder_draw_geometry: invalid circle center=[%.2f, %.2f], r=%.2f",
                 (double)geom->circle.cx, (double)geom->circle.cy, (double)geom->circle.radius);
             break;
         case OPTICS_GFX_GEOM_LINE:
             OPTICS_GFX_FAILF(
                 OPTICS_GFX_ERROR_INVALID_ARGUMENT,
-                "flux_encoder_draw_geometry: non-finite line [%.2f, %.2f] -> [%.2f, %.2f]",
+                "optics_gfx_encoder_draw_geometry: non-finite line [%.2f, %.2f] -> [%.2f, %.2f]",
                 (double)geom->line.x0, (double)geom->line.y0, (double)geom->line.x1,
                 (double)geom->line.y1);
             break;
         default:
             OPTICS_GFX_FAILF(
                 OPTICS_GFX_ERROR_INVALID_ARGUMENT,
-                "flux_encoder_draw_geometry: invalid geometry kind %d or stroke width %.2f",
+                "optics_gfx_encoder_draw_geometry: invalid geometry kind %d or stroke width %.2f",
                 (int)geom->kind, (double)geom->stroke.width);
             break;
         }
@@ -315,7 +315,7 @@ static void encoder_draw_geometry_impl(optics_gfx_encoder *enc, const optics_gfx
     if (!(has_image_slot ? canvas_valid_brush_slot(&b) : canvas_valid_brush(&b))) {
         OPTICS_GFX_FAILF(
             OPTICS_GFX_ERROR_INVALID_ARGUMENT,
-            "flux_encoder_draw_geometry: invalid brush opacity=%.3f (must be in [0, 1]) or "
+            "optics_gfx_encoder_draw_geometry: invalid brush opacity=%.3f (must be in [0, 1]) or "
             "blend=%d",
             (double)b.opacity, (int)b.blend);
         optics_gfx_encoder_fail(enc, OPTICS_GFX_ERROR_INVALID_ARGUMENT);
@@ -502,10 +502,10 @@ void optics_gfx_encoder_restore(optics_gfx_encoder *enc) {
 
 void optics_gfx_encoder_clip_rect(optics_gfx_encoder *enc, optics_gfx_rect r) {
     if (!canvas_finite_rect(r)) {
-        OPTICS_GFX_FAILF(
-            OPTICS_GFX_ERROR_INVALID_ARGUMENT,
-            "flux_encoder_clip_rect: non-finite or negative clip rect [%.2f, %.2f, %.2f, %.2f]",
-            (double)r.x, (double)r.y, (double)r.w, (double)r.h);
+        OPTICS_GFX_FAILF(OPTICS_GFX_ERROR_INVALID_ARGUMENT,
+                         "optics_gfx_encoder_clip_rect: non-finite or negative clip rect [%.2f, "
+                         "%.2f, %.2f, %.2f]",
+                         (double)r.x, (double)r.y, (double)r.w, (double)r.h);
         optics_gfx_encoder_fail(enc, OPTICS_GFX_ERROR_INVALID_ARGUMENT);
         return;
     }
@@ -527,7 +527,7 @@ void optics_gfx_encoder_save_layer(optics_gfx_encoder *enc,
     if (!isfinite(opacity) || opacity < 0 || opacity > 1 ||
         (bounds && !canvas_finite_rect(*bounds))) {
         OPTICS_GFX_FAILF(OPTICS_GFX_ERROR_INVALID_ARGUMENT,
-                         "flux_encoder_save_layer: invalid opacity=%.3f or bounds",
+                         "optics_gfx_encoder_save_layer: invalid opacity=%.3f or bounds",
                          (double)opacity);
         optics_gfx_encoder_fail(enc, OPTICS_GFX_ERROR_INVALID_ARGUMENT);
         return;
@@ -548,9 +548,10 @@ void optics_gfx_encoder_save_layer(optics_gfx_encoder *enc,
 
 static void encoder_vec2(optics_gfx_encoder *enc, optics_gfx_cmd_kind kind, float x, float y) {
     if (!isfinite(x) || !isfinite(y)) {
-        OPTICS_GFX_FAILF(OPTICS_GFX_ERROR_INVALID_ARGUMENT,
-                         "flux_encoder transform (kind=%d): non-finite delta/scale [%.2f, %.2f]",
-                         (int)kind, (double)x, (double)y);
+        OPTICS_GFX_FAILF(
+            OPTICS_GFX_ERROR_INVALID_ARGUMENT,
+            "optics_gfx_encoder transform (kind=%d): non-finite delta/scale [%.2f, %.2f]",
+            (int)kind, (double)x, (double)y);
         optics_gfx_encoder_fail(enc, OPTICS_GFX_ERROR_INVALID_ARGUMENT);
         return;
     }

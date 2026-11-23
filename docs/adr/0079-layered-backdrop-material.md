@@ -3,6 +3,9 @@ id: ADR-0079
 title: "Layered backdrop material — frost beneath glass in one dispatch"
 status: accepted
 date: 2026-08-25
+scope: libs/material (new material prism_backdrop_layer_filter, shader backdrop_frost.comp, shared glass dispatcher glass_dispatch.h)
+superseded_by: null
+negative_knowledge: true
 ---
 
 # ADR-0079: Layered backdrop material — frost beneath glass in one dispatch

@@ -1,27 +1,27 @@
 /*
- * iris/host.h — the UI-host seam: how a UI layer plugs into the iris frame loop.
+ * window/host.h — the UI-host seam: how a UI layer plugs into the window frame loop.
  *
- * iris owns the window, the event pump, the flux device/surface/canvas and the
- * frame cadence. It does not know what draws the UI. A UI layer (lens through
- * `aperture`, or anything else) implements `iris_ui_host` and hands it to
- * iris_app_run via `iris_app_opts.ui`; iris calls it at fixed points of the
+ * window owns the window, the event pump, the gfx device/surface/canvas and the
+ * frame cadence. It does not know what draws the UI. A UI layer (ui through
+ * `app`, or anything else) implements `optics_window_ui_host` and hands it to
+ * optics_window_run via `optics_window_opts.ui`; window calls it at fixed points of the
  * frame and never includes a UI header.
  *
- * Per frame, on the iris_app_run thread:
+ * Per frame, on the optics_window_run thread:
  *
- *     native events → iris_event → on_event → fold → iris_input
+ *     native events → optics_window_event → on_event → fold → optics_window_input
  *       → ui.frame(in, &report)          build + layout + interaction
  *       → pacer decides paint / skip / quiesce from `report`
  *       → ui.snapshot_create             immutable visuals for this build
  *       → ui.snapshot_submit(canvas)     may run on the presentation thread
  *       → ui.snapshot_activate           the frame reached the display
  *
- * Threading: every callback runs on the iris_app_run thread except
+ * Threading: every callback runs on the optics_window_run thread except
  * `snapshot_submit`, `snapshot_retain` and `snapshot_release`, which may run on
  * the presentation thread (ADR-0124) and must only touch the snapshot.
  *
  * Every function pointer is optional; a null entry is a no-op with a neutral
- * result. `iris_app_opts.ui == nullptr` is a window with host canvas content
+ * result. `optics_window_opts.ui == nullptr` is a window with host canvas content
  * only.
  */
 #ifndef OPTICS_WINDOW_HOST_H
@@ -54,7 +54,7 @@ extern "C" {
 #define OPTICS_WINDOW_PREEDIT_MAX 256
 
 typedef struct optics_window_key_event {
-    int key;      /* IRIS_KEY_* or unshifted printable ASCII */
+    int key;      /* OPTICS_WINDOW_KEY_* or unshifted printable ASCII */
     bool pressed; /* down edge if true, up edge if false     */
     bool repeat;  /* synthesised auto-repeat press           */
 } optics_window_key_event;
@@ -70,7 +70,7 @@ typedef struct optics_window_input {
     float scroll_x, scroll_y;               /* wheel steps (notches)          */
     float scroll_pixels_x, scroll_pixels_y; /* continuous (touchpad) distance */
 
-    uint32_t mods;                          /* IRIS_MOD_* level state  */
+    uint32_t mods;                          /* OPTICS_WINDOW_MOD_* level state  */
     char text_utf8[OPTICS_WINDOW_TEXT_MAX]; /* committed text this frame */
     optics_window_key_event keys[OPTICS_WINDOW_INPUT_MAX_KEYS];
     uint32_t key_count;
@@ -120,7 +120,7 @@ typedef struct optics_window_ui_frame {
 
 /* Clipboard and drag source, bound to the active window. Paste is
  * asynchronous: `clipboard_request_text` is answered later through
- * `iris_ui_host.paste`, never inside the request. */
+ * `optics_window_ui_host.paste`, never inside the request. */
 typedef struct optics_window_ui_services {
     void (*clipboard_set_text)(const char *utf8, size_t len, void *user);
     void (*clipboard_request_text)(void *user);
@@ -149,7 +149,7 @@ struct optics_window_ui_host {
 
     /* Lifecycle. `start` runs once the device, surface and canvas exist and
      * before the first frame; false aborts the run. `stop` runs after the
-     * frame loop while every iris object is still alive. `destroy` runs after
+     * frame loop while every window object is still alive. `destroy` runs after
      * the device has gone idle and must release everything the UI layer owns. */
     bool (*start)(void *user, const optics_window_ui_start_info *info);
     void (*stop)(void *user);
@@ -192,4 +192,4 @@ struct optics_window_ui_host {
 }
 #endif
 
-#endif /* IRIS_HOST_H */
+#endif /* OPTICS_WINDOW_HOST_H */

@@ -1,11 +1,11 @@
-/* node.c — per-node frame reset and the lens_node_* escape hatch (ADR-0031). */
+/* node.c — per-node frame reset and the optics_ui_node_* escape hatch (ADR-0031). */
 
 #include "../internal.h"
 
 /* Clear the per-frame fields of a node when it is first touched this
  * frame. Persistent fields (id, phase, has_prev, prev_rect, state,
  * animation) are preserved (ADR-0027). */
-void lensi_node_reset_frame(optics_ui_node *n) {
+void optics_ui__node_reset_frame(optics_ui_node *n) {
     n->parent = nullptr;
     n->first_child = n->last_child = n->next_sibling = nullptr;
     n->child_count = 0;
@@ -55,7 +55,7 @@ void lensi_node_reset_frame(optics_ui_node *n) {
     n->cmd_hash = 0;
     /* The command list is arena memory: the arena is reset wholesale each
      * frame, so the pointer must drop. `cmd_cap` deliberately survives:
-     * lensi_node_push_cmd sizes the fresh allocation from it in one step
+     * optics_ui__drawlist_push sizes the fresh allocation from it in one step
      * instead of re-walking the 8->16->32 doubling chain every frame
      * (each step is an arena alloc plus a memcpy of everything emitted
      * so far). A node that emitted 32 commands last frame allocates
@@ -101,10 +101,10 @@ void *optics_ui_node_state(optics_ui_node *n, size_t bytes) {
         return n->state_bytes == bytes ? n->state : nullptr;
     }
     /* Allocate through the owning context's persistent allocator and zero-init
-     * on first touch (ADR-0027). Freed at reap or lens_release. */
-    void *mem = lensi_alloc(n->ui, bytes);
+     * on first touch (ADR-0027). Freed at reap or optics_ui_release. */
+    void *mem = optics_ui__alloc(n->ui, bytes);
     if (!mem) {
-        lensi_set_overflow(n->ui);
+        optics_ui__set_overflow(n->ui);
         return nullptr;
     }
     memset(mem, 0, bytes);

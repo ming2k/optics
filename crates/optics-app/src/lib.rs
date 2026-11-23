@@ -1,16 +1,16 @@
-//! Safe Rust bindings to **aperture** — the application shell that runs a
-//! lens UI in an iris window.
+//! Safe Rust bindings to **app** — the application shell that runs a
+//! UI in a native window.
 //!
-//! iris owns the window, GPU device and event loop; lens is the UI engine;
-//! aperture binds the two. Each frame it runs two host callbacks:
+//! window owns the window, GPU device and event loop; ui is the UI engine;
+//! app binds the two. Each frame it runs two host callbacks:
 //!
 //! 1. **build** ([`Frame`] + [`Input`]) — inside an open `optics_ui_begin/end`
-//!    pair. The host builds its chrome (immediate-mode lens widgets) and
-//!    reads the per-frame [`Input`] snapshot to drive anything lens itself
+//!    pair. The host builds its chrome (immediate-mode ui widgets) and
+//!    reads the per-frame [`Input`] snapshot to drive anything ui itself
 //!    does not own.
 //! 2. **record** ([`RecordHost`]) — on the UI thread, before the frame is
 //!    submitted. The host records canvas content into an immutable display
-//!    list; it is composited under the chrome. Use it for surfaces lens
+//!    list; it is composited under the chrome. Use it for surfaces ui
 //!    cannot describe (a document canvas, an image, a custom render path).
 //!
 //! ```no_run
@@ -23,19 +23,19 @@
 //! ).unwrap();
 //! ```
 //!
-//! Window control, cursors, dialogs and the colour-scheme query are iris's
-//! and live in the re-exported [`iris`] crate.
+//! Window control, cursors, dialogs and the colour-scheme query are window's
+//! and live in the re-exported [`window`] crate.
 
 #![deny(rust_2018_idioms)]
 
 use std::ffi::CString;
 
-/// Raw-bindings escape hatch (see the `flux` crate's note). Kept `pub`
+/// Raw-bindings escape hatch (see the `gfx` crate's note). Kept `pub`
 /// deliberately as the one documented unsafe escape hatch.
 pub use optics_app_sys as sys;
 
 /// The platform shell this crate runs on: window, cursor, dialogs, pacing.
-pub use optics_window as iris;
+pub use optics_window as window;
 
 pub use optics_ui::key;
 pub use optics_ui::mods;
@@ -57,7 +57,7 @@ pub struct RecordHost {
 impl RecordHost {
     /// Borrowed encoder command recorder for this frame.
     pub fn encoder(&mut self) -> optics_gfx::Encoder {
-        // SAFETY: iris handed us a live `optics_gfx_encoder*` for the duration of the record callback.
+        // SAFETY: window handed us a live `optics_gfx_encoder*` for the duration of the record callback.
         unsafe { optics_gfx::Encoder::borrow_raw(self.encoder) }
     }
 
@@ -67,10 +67,10 @@ impl RecordHost {
     }
 }
 
-/// A thin wrapper over the raw pointers iris hands to the optional start
-/// callback: the lens context and the flux device iris owns for this app.
-/// The callback runs once — after iris has created its device, canvas and
-/// lens context, before the first frame — which makes it the right place to
+/// A thin wrapper over the raw pointers window hands to the optional start
+/// callback: the ui context and the gfx device window owns for this app.
+/// The callback runs once — after window has created its device, canvas and
+/// ui context, before the first frame — which makes it the right place to
 /// set up device-dependent resources (text shapers, image uploads) without
 /// installing a per-frame record callback: a start hook costs nothing per
 /// frame and does not defeat the backend's idle frame-skip. The same
@@ -81,16 +81,16 @@ pub struct StartHost {
 }
 
 impl StartHost {
-    /// The live `lens*`, as the safe crate's borrowed [`Ui`] handle. Valid
-    /// for the app's lifetime; iris destroys the context at shutdown.
+    /// The live `ui*`, as the safe crate's borrowed [`Ui`] handle. Valid
+    /// for the app's lifetime; window destroys the context at shutdown.
     pub fn ui(&self) -> Ui {
-        // SAFETY: iris keeps `lens*` alive for the whole run; `Ui::borrow`
+        // SAFETY: window keeps `ui*` alive for the whole run; `Ui::borrow`
         // is the safe non-owning view over it (no destroy on drop).
-        // SAFETY: iris handed us live typed pointers for the callback's duration.
+        // SAFETY: window handed us live typed pointers for the callback's duration.
         unsafe { Ui::borrow_raw(self.ui) }
     }
 
-    /// The `optics_gfx_device*` iris owns, as a borrowed (non-owning)
+    /// The `optics_gfx_device*` window owns, as a borrowed (non-owning)
     /// `optics_gfx::Device`. Borrow it — never open a second device in the same
     /// process.
     pub fn optics_gfx_device(&self) -> optics_gfx::Device {
@@ -100,9 +100,9 @@ impl StartHost {
     }
 }
 
-/// The handle iris hands to the optional `stop` callback: the same borrows
+/// The handle window hands to the optional `stop` callback: the same borrows
 /// as [`StartHost`], live one last time after the frame loop and before
-/// iris tears down lens, flux, and the device (ADR-0045). This is where
+/// window tears down ui, gfx, and the device (ADR-0045). This is where
 /// hosts release every device-backed resource created from
 /// [`StartHost::optics_gfx_device`].
 pub type StopHost = StartHost;
@@ -121,7 +121,7 @@ pub enum RunError {
 impl std::fmt::Display for RunError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            RunError::Platform(rc) => write!(f, "aperture_app_run exited with code {rc}"),
+            RunError::Platform(rc) => write!(f, "optics_app_run exited with code {rc}"),
             RunError::BadTitle => write!(f, "window title contains an interior NUL byte"),
             RunError::BadAppId => write!(f, "application ID contains an interior NUL byte"),
         }
@@ -186,7 +186,7 @@ impl Config {
 ///
 /// Wraps `optics_app_run`. `build` runs once per frame inside an open
 /// `optics_ui_begin/end` pair, with `input` being the same [`Input`] snapshot
-/// lens is consuming this frame. `record` (if `Some`) records host canvas
+/// ui is consuming this frame. `record` (if `Some`) records host canvas
 /// content into an immutable display list before the frame is submitted, so
 /// it lands under the chrome. Blocks the calling thread until the window is
 /// closed.
@@ -209,8 +209,8 @@ impl Application {
         )
     }
 
-    /// Like [`Application::run`], plus a one-shot `start` callback that iris
-    /// invokes after its device/canvas/lens setup and before the first frame
+    /// Like [`Application::run`], plus a one-shot `start` callback that window
+    /// invokes after its device/canvas/ui setup and before the first frame
     /// (see [`StartHost`]). The callback returning `false` aborts the run.
     pub fn run_with_start<B, S>(config: Config, start: S, build: B) -> Result<(), RunError>
     where
@@ -226,10 +226,10 @@ impl Application {
         )
     }
 
-    /// The full lifecycle form (ADR-0045): `start` runs after iris's
-    /// device/canvas/lens setup and before the first frame (returning
+    /// The full lifecycle form (ADR-0045): `start` runs after window's
+    /// device/canvas/ui setup and before the first frame (returning
     /// `false` aborts the run); `stop` runs after the frame loop and before
-    /// iris destroys the device, giving hosts a deterministic point to
+    /// window destroys the device, giving hosts a deterministic point to
     /// release device-backed resources. `record` is the optional host canvas
     /// recorder. Either may be `None`.
     pub fn run_with_lifecycle<B, S, T, R>(
@@ -252,7 +252,7 @@ impl Application {
     ///
     /// The `record` closure records vector drawing into a CPU-bound
     /// [`optics_gfx::Encoder`]. The resulting immutable display list is submitted
-    /// by the same presentation pipeline as lens chrome, on every backend.
+    /// by the same presentation pipeline as ui chrome, on every backend.
     pub fn run_with_record<B, R>(
         config: Config,
         build: B,
@@ -433,16 +433,16 @@ where
     record: Option<Box<R>>,
 }
 
-/// The semantic cursor lens reports for the hovered widget, as the platform
-/// cursor iris shows for it. The backends apply this mapping themselves every
+/// The semantic cursor ui reports for the hovered widget, as the platform
+/// cursor window shows for it. The backends apply this mapping themselves every
 /// frame; it is exposed for hosts that draw their own cursor.
-pub fn cursor_for_hint(hint: CursorHint) -> iris::Cursor {
+pub fn cursor_for_hint(hint: CursorHint) -> window::Cursor {
     match hint {
-        CursorHint::Default => iris::Cursor::Default,
-        CursorHint::Pointer => iris::Cursor::Pointer,
-        CursorHint::Text => iris::Cursor::Text,
-        CursorHint::ResizeEw => iris::Cursor::ResizeEw,
-        CursorHint::ResizeNs => iris::Cursor::ResizeNs,
+        CursorHint::Default => window::Cursor::Default,
+        CursorHint::Pointer => window::Cursor::Pointer,
+        CursorHint::Text => window::Cursor::Text,
+        CursorHint::ResizeEw => window::Cursor::ResizeEw,
+        CursorHint::ResizeNs => window::Cursor::ResizeNs,
     }
 }
 
@@ -452,16 +452,22 @@ mod tests {
 
     #[test]
     fn optics_ui_cursor_hints_map_to_platform_cursor_shapes() {
-        assert_eq!(cursor_for_hint(CursorHint::Default), iris::Cursor::Default);
-        assert_eq!(cursor_for_hint(CursorHint::Pointer), iris::Cursor::Pointer);
-        assert_eq!(cursor_for_hint(CursorHint::Text), iris::Cursor::Text);
+        assert_eq!(
+            cursor_for_hint(CursorHint::Default),
+            window::Cursor::Default
+        );
+        assert_eq!(
+            cursor_for_hint(CursorHint::Pointer),
+            window::Cursor::Pointer
+        );
+        assert_eq!(cursor_for_hint(CursorHint::Text), window::Cursor::Text);
         assert_eq!(
             cursor_for_hint(CursorHint::ResizeEw),
-            iris::Cursor::ResizeEw
+            window::Cursor::ResizeEw
         );
         assert_eq!(
             cursor_for_hint(CursorHint::ResizeNs),
-            iris::Cursor::ResizeNs
+            window::Cursor::ResizeNs
         );
     }
 
@@ -500,7 +506,7 @@ mod tests {
     fn run_error_display() {
         assert_eq!(
             RunError::Platform(7).to_string(),
-            "aperture_app_run exited with code 7"
+            "optics_app_run exited with code 7"
         );
         assert_eq!(
             RunError::BadTitle.to_string(),

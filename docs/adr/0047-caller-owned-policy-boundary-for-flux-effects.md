@@ -3,7 +3,9 @@ id: ADR-0047
 title: "Caller-owned policy boundary for flux effects"
 status: superseded
 date: 2026-08-01
-superseded_by: "ADR-0063"
+scope: gfx
+superseded_by: ADR-0063
+negative_knowledge: true
 ---
 
 # ADR-0047: Caller-owned policy boundary for flux effects

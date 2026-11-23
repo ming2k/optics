@@ -1,7 +1,7 @@
 /*
  * .glb (binary glTF 2.0) container parser + glTF JSON walker.
  *
- * Resolves the supported subset (see scene-graph.h) into flux mesh resources
+ * Resolves the supported subset (see scene-graph.h) into gfx mesh resources
  * and a node tree with world matrices. The JSON is parsed by json.c into a jv
  * tree; this file only walks it. Little-endian is assumed for the binary
  * container and accessor data (the glTF spec mandates both).
@@ -495,7 +495,7 @@ static void decompose_matrix(optics_gfx_mat4 m, optics_gfx_vec3 *t, optics_gfx_q
         c0 = optics_gfx_vec3_scale(c0, -1.0f);
     }
     /* quat_from_rotation_columns consumes a row-major 3x3 matrix.  glTF and
-     * flux_mat4 store the basis vectors as columns, so transpose while
+     * optics_gfx_mat4 store the basis vectors as columns, so transpose while
      * flattening instead of accidentally interpreting the inverse rotation. */
     float r[9] = {c0.x, c1.x, c2.x, c0.y, c1.y, c2.y, c0.z, c1.z, c2.z};
     *q = quat_from_rotation_columns(r);
@@ -556,7 +556,7 @@ optics_gfx_result sg_parse_glb(const void *bytes, size_t len, sg_scene_data *dat
 
     /* Declared up front and NULL/zero-initialised so the single `fail`
      * block at the bottom can release them from any exit (the repo's
-     * standard single-exit discipline; see iris app init for the
+     * standard single-exit discipline; see window app init for the
      * large-scale version). */
     int *roots = nullptr;
     uint32_t root_n = 0;

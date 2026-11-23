@@ -1,8 +1,11 @@
 ---
 id: ADR-0042
 title: "Lens virtualized table / data grid"
-status: accepted
+status: superseded
 date: 2026-07-21
+scope: ui (L2 toolkit)
+superseded_by: ADR-0082
+negative_knowledge: true
 ---
 
 # ADR-0042: Lens virtualized table / data grid

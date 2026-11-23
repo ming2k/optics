@@ -3,6 +3,9 @@ id: ADR-0096
 title: "Prism Mica foundation material — screen-anchored wallpaper composite"
 status: accepted
 date: 2026-09-15
+scope: New material component in libs/material (<optics/material/mica.h>), compute shaders (src/shaders/mica.comp), and filter implementation (src/mica.c)
+superseded_by: null
+negative_knowledge: true
 ---
 
 # ADR-0096: Prism Mica foundation material — screen-anchored wallpaper composite

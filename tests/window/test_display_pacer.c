@@ -32,7 +32,7 @@
 #define HZ144_NS 6944444LL
 
 /* A baseline "the window is alive" input. Overlays are applied per scenario.
- * Deliberately a *lens-only* host (no cfg->record): that is the configuration
+ * Deliberately a *ui-only* host (no cfg->record): that is the configuration
  * that can reach full quiescence, so scenarios that want the low tick or the
  * pulse cadence opt in explicitly. */
 static optics_window_pace_inputs base_inputs(int64_t now) {
@@ -225,7 +225,7 @@ static void test_timer_fallback_is_display_aligned(void) {
  * Two distinct signals must not be confused (ADR-0151):
  *   - `caret_ticking` is a *level*: a blink clock is live, so the low idle
  *     tick must keep running for the clock to advance. It never paints.
- *   - `chrome_damaged` is the *edge* lens reports on the frame a flip lands:
+ *   - `chrome_damaged` is the *edge* ui reports on the frame a flip lands:
  *     that frame owes a real paint.
  * The defect this pins is the old contract, where a focused caret reported
  * itself as damage every frame and no host with a text field could quiesce. */
@@ -238,7 +238,7 @@ static void test_caret_idle_tick(void) {
     int paints = 0, ticks = 0;
     int64_t first_wait = 0;
     for (int i = 0; i < 200; i++) {
-        /* lens reports damage only on the frames where the phase flipped. */
+        /* ui reports damage only on the frames where the phase flipped. */
         bool blink_flip = (i > 0) && (i % 2 == 0);
 
         optics_window_pace_inputs in = base_inputs(t);
@@ -395,9 +395,9 @@ static void test_forced_paint_precedence(void) {
     OT_EXPECT(optics_window_pacer_tick(&p2, &st).action == OPTICS_WINDOW_PACE_PAINT);
 }
 
-/* A lens-only host (no cfg->record) paints on chrome damage and quiesces the
+/* A ui-only host (no cfg->record) paints on chrome damage and quiesces the
  * moment the chrome stops changing. */
-static void test_lens_only_host(void) {
+static void test_ui_only_host(void) {
     optics_window_pacer p;
     optics_window_pacer_init(&p);
 
@@ -532,7 +532,7 @@ int main(void) {
     test_caret_clock_never_raises_the_cadence();
     test_quiescence();
     test_forced_paint_precedence();
-    test_lens_only_host();
+    test_ui_only_host();
     test_animation_request_survives_skips();
     test_sim_clock_monotonic_under_stale_pulses();
     return OT_REPORT();

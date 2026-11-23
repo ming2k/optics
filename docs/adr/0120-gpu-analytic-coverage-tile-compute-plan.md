@@ -3,8 +3,8 @@ id: ADR-0120
 title: "GPU analytic coverage — tile-compute plan for a modern 2D rasterizer"
 status: accepted
 date: 2026-10-25
+scope: libs/gfx, bindings, CI (tests/gfx)
 superseded_by: null
-scope: libs/flux, bindings, CI (tests/flux)
 negative_knowledge: true
 ---
 

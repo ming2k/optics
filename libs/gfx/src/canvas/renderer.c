@@ -8,12 +8,12 @@
 #include <stdalign.h>
 #include <string.h>
 
-/* Static guard so any growth of flux_canvas_push fails to compile if
+/* Static guard so any growth of optics_gfx_canvas_push fails to compile if
  * it would exceed the device-wide budget. Bump
- * FLUX_DEVICE_REQUIRED_PUSH_BYTES (and re-evaluate Vulkan-minimum
+ * OPTICS_GFX_DEVICE_REQUIRED_PUSH_BYTES (and re-evaluate Vulkan-minimum
  * compatibility) when this triggers. */
 static_assert(sizeof(optics_gfx_canvas_push) <= OPTICS_GFX_DEVICE_REQUIRED_PUSH_BYTES,
-              "flux_canvas_push exceeds FLUX_DEVICE_REQUIRED_PUSH_BYTES");
+              "optics_gfx_canvas_push exceeds OPTICS_GFX_DEVICE_REQUIRED_PUSH_BYTES");
 
 /* Shader bytecode embedded via native C23 #embed. */
 alignas(uint32_t) static const unsigned char canvas_solid_vert_spv[] = {
@@ -73,9 +73,9 @@ static VkShaderModule make_module(VkDevice d, const void *bytes, size_t len) {
 /* ------------------------------------------------------------------ */
 /*  Device-cached pipeline (format, samples, and stencil contract)    */
 /*                                                                    */
-/*  flux_canvas_create previously built a fresh VkPipeline per        */
+/*  optics_gfx_canvas_create previously built a fresh VkPipeline per        */
 /*  canvas (~ms each). With multiple short-lived canvases (typical    */
-/*  for flux-ui-style UIs) that cost added up. The pipeline depends   */
+/*  for gfx-ui-style UIs) that cost added up. The pipeline depends   */
 /*  only on (color_format, samples, stencil contract), so we cache it */
 /*  and share it across canvases. Pipelines outlive any individual    */
 /*  canvas; the device's canvas_state_destroy hook frees them.        */
@@ -480,7 +480,7 @@ void push_vertex(optics_gfx_canvas_vertex *v, optics_gfx_point p, optics_gfx_mat
     v->_pad = 0;
 }
 
-/* Fill a flux_canvas_push from the active paint. For solid paints
+/* Fill a optics_gfx_canvas_push from the active paint. For solid paints
  * the gradient fields are zeroed (the solid shader ignores them).
  * For gradients, copies endpoint + stops, converting the parameters
  * into framebuffer pixel space with the current transform — the
@@ -609,43 +609,4 @@ void submit_triangles(optics_gfx_canvas *c, const canvas_paint *paint,
     if (kind == CANVAS_PAINT_LINEAR_GRADIENT || kind == CANVAS_PAINT_RADIAL_GRADIENT)
         id = CANVAS_PIPE_GRADIENT;
     submit_triangles_id(c, paint, id, verts, vertex_count);
-}
-
-/* Submit stroked geometry through the backend's analytic coverage seam.
- *
- * This is deliberately not folded into submit_triangles. Axis-aligned integer
- * rectangle fills share all draw-visible state and batch into one draw call
- * (thousands of rects per frame in a point field); a coverage draw carries its
- * own segment list and cannot batch. Integer axis-aligned rects keep the
- * batched path. */
-void submit_triangles_covered(optics_gfx_canvas *c, const canvas_paint *paint,
-                              const optics_gfx_canvas_vertex *verts, uint32_t vertex_count) {
-    if (!paint || !c->recording || vertex_count < 3)
-        return;
-    if (!c->backend || !c->backend->submit_cover_triangles) {
-        canvas_fail(c, OPTICS_GFX_ERROR_UNSUPPORTED,
-                    "analytic triangle coverage unsupported by canvas backend");
-        return;
-    }
-    optics_gfx_result r = c->backend->submit_cover_triangles(
-        c->backend, c, verts, vertex_count, paint, c->states[c->state_top].scissor);
-    if (r != OPTICS_GFX_OK)
-        canvas_fail(c, r, "analytic cover stroke submission failed");
-}
-
-/* Push a triangle into the scratch vertex array. Bounds-checked.
- * On overflow records the failure via FLUX_FAIL so consumers see a
- * non-OK flux_get_last_error after the frame; subsequent draws into
- * the same scratch silently no-op (last-error has already been set). */
-void emit_tri(optics_gfx_canvas_vertex *verts, uint32_t *count, uint32_t cap, optics_gfx_mat3x2 tx,
-              optics_gfx_color color, optics_gfx_point a, optics_gfx_point b, optics_gfx_point e) {
-    if (*count + 3 > cap) {
-        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_OUT_OF_RANGE,
-                        "canvas vertex scratch exhausted "
-                        "(FLUX_CANVAS_PATH_SCRATCH_CAP*3); triangles dropped");
-        return;
-    }
-    push_vertex(&verts[(*count)++], a, tx, color);
-    push_vertex(&verts[(*count)++], b, tx, color);
-    push_vertex(&verts[(*count)++], e, tx, color);
 }

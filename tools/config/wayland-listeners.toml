@@ -1,5 +1,5 @@
 # wayland-listeners.toml — the pinned event contract for every Wayland
-# listener table in libs/iris (INV-ARCH-WLSLOT).
+# listener table in libs/window (INV-ARCH-WLSLOT).
 #
 # Why pinned instead of read from the installed wayland-protocols at check
 # time: a verdict that depends on the host either fails where the package is

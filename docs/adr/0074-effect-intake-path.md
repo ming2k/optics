@@ -3,6 +3,9 @@ id: ADR-0074
 title: "Effect intake path — new visual operators and where choreography never enters"
 status: accepted
 date: 2026-08-22
+scope: gfx effect module, material
+superseded_by: null
+negative_knowledge: true
 ---
 
 # ADR-0074: Effect intake path — new visual operators and where choreography never enters

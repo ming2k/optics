@@ -42,8 +42,8 @@ jobs:
         # Each entry carries its binary directory and seed-corpus directory.
         # They used to be re-derived from `${{ matrix.target }}` by a `case`
         # block in every step, which duplicated the list three times and had
-        # already drifted: fuzz_lens_store builds under tests/lens/fuzz but the
-        # steps looked for it under tests/flux/fuzz, so that target failed to
+        # already drifted: fuzz_ui_store builds under tests/ui/fuzz but the
+        # steps looked for it under tests/gfx/fuzz, so that target failed to
         # exec on every run. One entry per target makes that drift impossible,
         # and adding a harness is a one-line change here.
         include:
@@ -62,12 +62,12 @@ jobs:
           - target: fuzz_display_list_deserialize
             dir: tests/gfx/fuzz
             corpus: tests/gfx/fuzz/corpus/display_list_deserialize
-          - target: fuzz_lens_store
+          - target: fuzz_ui_store
             dir: tests/ui/fuzz
-            corpus: tests/ui/fuzz/corpus/lens_store
-          - target: fuzz_reticle_parse
+            corpus: tests/ui/fuzz/corpus/ui_store
+          - target: fuzz_svg_parse
             dir: tests/svg/fuzz
-            corpus: tests/svg/fuzz/corpus/reticle_parse
+            corpus: tests/svg/fuzz/corpus/svg_parse
     steps:
       - uses: actions/checkout@v4
 
@@ -79,7 +79,7 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
-            build-essential clang lld ninja-build pkg-config libclang-rt-18-dev \
+            build-essential clang-19 lld ninja-build pkg-config libclang-rt-19-dev \
             libvulkan-dev libfreetype-dev libharfbuzz-dev libfontconfig1-dev \
             libfribidi-dev libwayland-dev wayland-protocols libxkbcommon-dev \
             libsystemd-dev
@@ -91,8 +91,8 @@ jobs:
 
       - name: Configure (libFuzzer + ASan)
         env:
-          CC: clang
-          CXX: clang++
+          CC: clang-19
+          CXX: clang++-19
         run: |
           meson setup build -Dfuzz=true -Dexamples=false -Dtests=true \
             --buildtype=debugoptimized \

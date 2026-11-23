@@ -1,5 +1,5 @@
-/* app_cocoa.m — native macOS Cocoa window + Vulkan (Metal, via flux) +
- * iris_input. Mirrors app_wayland.c section-for-section:
+/* app_cocoa.m — native macOS Cocoa window + Vulkan (Metal, via gfx) +
+ * optics_window_input. Mirrors app_wayland.c section-for-section:
  *
  *   connection → window → pointer → keyboard → IME → clipboard → frame
  *   pacing → run/teardown.
@@ -8,9 +8,9 @@
  * frame-pacing policy stays identical to the other backends (ADR-0044). The
  * view is layer-backed by a CAMetalLayer and the Vulkan surface is created
  * with VK_EXT_metal_surface (MoltenVK). Pointer and keyboard events are
- * folded into one iris_input per frame (ADR-0029).
+ * folded into one optics_window_input per frame (ADR-0029).
  *
- * Compiled with ARC (see the darwin branch in libs/iris/meson.build).
+ * Compiled with ARC (see the darwin branch in libs/window/meson.build).
  *
  * ============================================================================
  *  UNVERIFIED ASSUMPTIONS (written on Linux without an Apple SDK; each needs
@@ -25,16 +25,16 @@
  *     make nextEventMatchingMask return, so in the fully-idle state
  *     (distantFuture deadline) the frame loop would never wake to apply the
  *     posted change. The posted event both wakes the wait and gives the
- *     dispatch site a place to call iris_platform_wakeup_drain(). Semantics
+ *     dispatch site a place to call optics_window_platform_wakeup_drain(). Semantics
  *     match the header contract (kick wakes the loop; drain runs queued
  *     callbacks on the loop thread).
  *  2. NSTextInputContext.handleEvent: drives the IME synchronously: it
  *     invokes our NSTextInputClient callbacks (insertText: / setMarkedText:…)
- *     before returning. keyDown: always forwards the lens key event unless a
+ *     before returning. keyDown: always forwards the ui key event unless a
  *     composition was active (the IME owns the key stream then), and skips
  *     manual text generation only when insertText: already delivered the
- *     text for that key — so a plain letter is both a lens key event and
- *     lens text, exactly like the Wayland backend.
+ *     text for that key — so a plain letter is both a ui key event and
+ *     ui text, exactly like the Wayland backend.
  *  3. A layer-backed (wantsLayer=YES + makeBackingLayer) flipped view gets
  *     correct MoltenVK presentation orientation (AppKit marks the backing
  *     layer's contents as flipped; MoltenVK is expected to honour that). If
@@ -100,7 +100,7 @@ static const NSInteger kIrisEventSubtypeWakeup = 0x4952; /* 'IR' — wakeup seam
 static const NSInteger kIrisEventSubtypePaste = 0x4950;  /* 'IP' — clipboard   */
 
 /* ------------------------------------------------------------------ */
-/*  Accumulated input, drained into one iris_input per frame             */
+/*  Accumulated input, drained into one optics_window_input per frame             */
 /* ------------------------------------------------------------------ */
 
 typedef struct cp_accum {
@@ -112,7 +112,7 @@ typedef struct cp_accum {
     double scroll_px_x, scroll_px_y; /* precise (trackpad) points this frame */
     uint32_t mods;                   /* level state (persists)               */
     char text[256];                  /* committed text this frame; must match
-                                       iris_input.text_utf8 (static_assert below) */
+                                       optics_window_input.text_utf8 (static_assert below) */
     char preedit[OPTICS_WINDOW_PREEDIT_MAX];  /* IME preedit string (level state)     */
     uint32_t preedit_cursor;         /* caret byte offset in preedit         */
     uint32_t preedit_sel_lo;         /* selection byte range in preedit      */
@@ -121,31 +121,31 @@ typedef struct cp_accum {
     uint32_t key_count;
 } cp_accum;
 
-/* The staging buffers feed iris_input by whole-buffer memcpy in
- * drain_input; pin the sizes so a lens-side change fails at compile time
+/* The staging buffers feed optics_window_input by whole-buffer memcpy in
+ * drain_input; pin the sizes so a ui-side change fails at compile time
  * instead of over-reading the accumulator (the wayland backend carries
  * the same guards). */
 static_assert(sizeof((cp_accum *)0)->text == sizeof((optics_window_input *)0)->text_utf8,
-              "cp_accum.text must match iris_input.text_utf8");
+              "cp_accum.text must match optics_window_input.text_utf8");
 static_assert(sizeof((cp_accum *)0)->preedit == sizeof((optics_window_input *)0)->preedit_utf8,
-              "cp_accum.preedit must match iris_input.preedit_utf8");
+              "cp_accum.preedit must match optics_window_input.preedit_utf8");
 
 /* ------------------------------------------------------------------ */
 /*  Platform state                                                       */
 /* ------------------------------------------------------------------ */
 
-@class IrisView;
+@class OpticsWindowView;
 
 static int64_t cocoa_query_refresh_ns(NSWindow *window);
 
 /* One ObjC object owns all per-app state. Using an NSObject (not a C struct
  * of ObjC pointers) keeps every NS reference ARC-managed; the C POD fields
  * live in @public ivars so the code stays shaped like app_wayland.c. */
-@interface IrisPlatform : NSObject {
+@interface OpticsWindowPlatform : NSObject {
   @public
     NSWindow *window;
-    IrisView *view;
-    id win_delegate; /* IrisWindowDelegate *, kept opaque to dodge the cycle */
+    OpticsWindowView *view;
+    id win_delegate; /* OpticsWindowDelegate *, kept opaque to dodge the cycle */
 
     const optics_window_ui_host *ui; /* live UI host; null before start / after teardown */
     optics_window_ui_frame ui_frame; /* report of the most recent UI frame */
@@ -167,10 +167,10 @@ static int64_t cocoa_query_refresh_ns(NSWindow *window);
     bool a11y_prefs_watching;
     bool a11y_running;
 
-    optics_window_cursor host_cursor;      /* last explicit iris_set_cursor value    */
-    optics_window_cursor effective_cursor; /* host override, else lens widget hint   */
+    optics_window_cursor host_cursor;      /* last explicit optics_window_set_cursor value    */
+    optics_window_cursor effective_cursor; /* host override, else ui widget hint   */
 
-    NSString *pending_paste; /* clipboard text awaiting async lens_paste     */
+    NSString *pending_paste; /* clipboard text awaiting async optics_ui_paste     */
 
     /* Drag-and-drop state (ADR-0086) */
     optics_window_dnd_source drag_source;
@@ -187,45 +187,45 @@ static int64_t cocoa_query_refresh_ns(NSWindow *window);
 }
 @end
 
-@implementation IrisPlatform
+@implementation OpticsWindowPlatform
 @end
 
 /* Declared before the context-free helpers and drag/clipboard callbacks
  * that message the view; the implementation follows much later. */
-@interface IrisView : NSView <NSTextInputClient, NSDraggingDestination, NSDraggingSource> {
+@interface OpticsWindowView : NSView <NSTextInputClient, NSDraggingDestination, NSDraggingSource> {
   @public
-    /* Owned by iris_app_run_cocoa for the whole view lifetime; the view is
+    /* Owned by optics_window_run_cocoa for the whole view lifetime; the view is
      * torn down first, so a weak back-pointer is safe. */
-    __unsafe_unretained IrisPlatform *_platform;
+    __unsafe_unretained OpticsWindowPlatform *_platform;
     NSString *_marked_text;         /* live IME composition, nil when none          */
     NSRange _selected_in_marked;    /* caret/selection inside _marked_text     */
     bool _ime_delivered_this_event; /* insertText/setMarkedText fired during
                                      * the current keyDown: dispatch         */
 }
-- (instancetype)initWithFrame:(NSRect)frame platform:(IrisPlatform *)pl;
+- (instancetype)initWithFrame:(NSRect)frame platform:(OpticsWindowPlatform *)pl;
 - (void)irisUpdateMetalLayer;
 @end
 
-/* iris_set_cursor is a public, context-free API; it reaches the active
+/* optics_window_set_cursor is a public, context-free API; it reaches the active
  * app's platform through this single static pointer. Set at the top of
- * iris_app_run_cocoa, cleared at exit. Documented as thread-affine:
- * callers must drive it from the same thread that runs iris_app_run. */
-static IrisPlatform *g_active_pl = nil;
+ * optics_window_run_cocoa, cleared at exit. Documented as thread-affine:
+ * callers must drive it from the same thread that runs optics_window_run. */
+static OpticsWindowPlatform *g_active_pl = nil;
 
 void optics_window_request_animation_frame_cocoa(void) {
-    IrisPlatform *pl = g_active_pl;
+    OpticsWindowPlatform *pl = g_active_pl;
     if (pl)
         pl->animation_frame_requested = true;
 }
 
 void optics_window_record_mark_static_cocoa(void) {
-    IrisPlatform *pl = g_active_pl;
+    OpticsWindowPlatform *pl = g_active_pl;
     if (pl)
         pl->record_static = true;
 }
 
 void optics_window_request_frame_skip_render_cocoa(void) {
-    IrisPlatform *pl = g_active_pl;
+    OpticsWindowPlatform *pl = g_active_pl;
     if (pl)
         pl->frame_skip_render = true;
 }
@@ -234,7 +234,7 @@ void optics_window_request_frame_skip_render_cocoa(void) {
 /*  Cursor (NSCursor)                                                  */
 /* ------------------------------------------------------------------ */
 
-/* Map the public cursor enum to the AppKit stock cursor. IRIS_CURSOR_BUSY
+/* Map the public cursor enum to the AppKit stock cursor. OPTICS_WINDOW_CURSOR_BUSY
  * has no public AppKit equivalent (the spinning beach ball is not
  * settable); fall back to the arrow, as documented here. */
 static NSCursor *cursor_for(optics_window_cursor c) {
@@ -262,17 +262,17 @@ static NSCursor *cursor_for(optics_window_cursor c) {
 /* Apply the effective cursor immediately. AppKit only honours -[NSCursor set]
  * while the pointer is over one of our windows during event processing; we
  * call this from the cursorUpdate:/mouseEntered: tracking events, from
- * iris_set_cursor, and from the per-frame hint follow-up, so the effective
+ * optics_window_set_cursor, and from the per-frame hint follow-up, so the effective
  * change lands on the next pointer event at the latest. */
-static void cursor_apply(IrisPlatform *pl) {
+static void cursor_apply(OpticsWindowPlatform *pl) {
     [cursor_for(pl->effective_cursor) set];
 }
 
-/* Effective cursor: an explicit host iris_set_cursor wins; while it is
- * DEFAULT, follow the semantic hint of the lens widget under the pointer
+/* Effective cursor: an explicit host optics_window_set_cursor wins; while it is
+ * DEFAULT, follow the semantic hint of the ui widget under the pointer
  * (I-beam over text fields, hand over clickable elements, …). Same policy
  * as the Win32 backend. Returns true when the effective cursor changed. */
-static bool cursor_follow_hint(IrisPlatform *pl) {
+static bool cursor_follow_hint(OpticsWindowPlatform *pl) {
     optics_window_cursor eff = pl->host_cursor;
     if (eff == OPTICS_WINDOW_CURSOR_DEFAULT && pl->ui)
         eff = pl->ui_frame.cursor;
@@ -282,9 +282,9 @@ static bool cursor_follow_hint(IrisPlatform *pl) {
     return true;
 }
 
-/* Public API. No-op before iris_app_run starts or after it exits. */
+/* Public API. No-op before optics_window_run starts or after it exits. */
 OPTICS_WINDOW_API void optics_window_set_cursor(optics_window_cursor cursor) {
-    IrisPlatform *pl = g_active_pl;
+    OpticsWindowPlatform *pl = g_active_pl;
     if (!pl)
         return;
     if (cursor < OPTICS_WINDOW_CURSOR_DEFAULT)
@@ -297,33 +297,33 @@ OPTICS_WINDOW_API void optics_window_set_cursor(optics_window_cursor cursor) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Window state (iris/window.h)                                       */
+/*  Window state (window/window.h)                                       */
 /* ------------------------------------------------------------------ */
 
-/* All iris_window_* APIs operate on g_active_pl — the platform the active
- * iris_app_run call owns. They are documented as thread-affine to
- * iris_app_run and a no-op when no app is active. */
+/* All optics_window_* APIs operate on g_active_pl — the platform the active
+ * optics_window_run call owns. They are documented as thread-affine to
+ * optics_window_run and a no-op when no app is active. */
 
 OPTICS_WINDOW_API void optics_window_minimize(void) {
-    IrisPlatform *pl = g_active_pl;
+    OpticsWindowPlatform *pl = g_active_pl;
     if (pl && pl->window)
         [pl->window miniaturize:nil];
 }
 
 OPTICS_WINDOW_API void optics_window_maximize(void) {
-    IrisPlatform *pl = g_active_pl;
+    OpticsWindowPlatform *pl = g_active_pl;
     if (pl && pl->window && ![pl->window isZoomed])
         [pl->window zoom:nil];
 }
 
 OPTICS_WINDOW_API void optics_window_unmaximize(void) {
-    IrisPlatform *pl = g_active_pl;
+    OpticsWindowPlatform *pl = g_active_pl;
     if (pl && pl->window && [pl->window isZoomed])
         [pl->window zoom:nil];
 }
 
 OPTICS_WINDOW_API void optics_window_fullscreen(void) {
-    IrisPlatform *pl = g_active_pl;
+    OpticsWindowPlatform *pl = g_active_pl;
     if (!pl || !pl->window)
         return;
     if (([pl->window styleMask] & NSWindowStyleMaskFullScreen) == 0)
@@ -331,7 +331,7 @@ OPTICS_WINDOW_API void optics_window_fullscreen(void) {
 }
 
 OPTICS_WINDOW_API void optics_window_unfullscreen(void) {
-    IrisPlatform *pl = g_active_pl;
+    OpticsWindowPlatform *pl = g_active_pl;
     if (!pl || !pl->window)
         return;
     if (([pl->window styleMask] & NSWindowStyleMaskFullScreen) != 0)
@@ -339,7 +339,7 @@ OPTICS_WINDOW_API void optics_window_unfullscreen(void) {
 }
 
 OPTICS_WINDOW_API void optics_window_restore(void) {
-    IrisPlatform *pl = g_active_pl;
+    OpticsWindowPlatform *pl = g_active_pl;
     if (!pl || !pl->window)
         return;
     if ([pl->window isMiniaturized])
@@ -351,7 +351,7 @@ OPTICS_WINDOW_API void optics_window_restore(void) {
 }
 
 OPTICS_WINDOW_API void optics_window_focus(void) {
-    IrisPlatform *pl = g_active_pl;
+    OpticsWindowPlatform *pl = g_active_pl;
     if (!pl || !pl->window)
         return;
     [NSApp activateIgnoringOtherApps:YES];
@@ -359,13 +359,13 @@ OPTICS_WINDOW_API void optics_window_focus(void) {
 }
 
 OPTICS_WINDOW_API void optics_window_close(void) {
-    IrisPlatform *pl = g_active_pl;
+    OpticsWindowPlatform *pl = g_active_pl;
     if (pl)
         pl->running = false;
 }
 
 OPTICS_WINDOW_API void optics_window_start_move(void) {
-    IrisPlatform *pl = g_active_pl;
+    OpticsWindowPlatform *pl = g_active_pl;
     if (!pl || !pl->window)
         return;
     NSEvent *current_event = [NSApp currentEvent];
@@ -374,19 +374,19 @@ OPTICS_WINDOW_API void optics_window_start_move(void) {
 }
 
 OPTICS_WINDOW_API void optics_window_set_min_size(const optics_window_set_min_size_opts *opts) {
-    IrisPlatform *pl = g_active_pl;
+    OpticsWindowPlatform *pl = g_active_pl;
     if (!pl || !pl->window || !opts)
         return;
     pl->min_w = opts->width;
     pl->min_h = opts->height;
     /* {0,0} is AppKit's "no minimum" sentinel, matching the 0-clears
-     * convention of iris/window.h. */
+     * convention of window/window.h. */
     [pl->window setContentMinSize:NSMakeSize(opts->width > 0 ? opts->width : 0,
                                              opts->height > 0 ? opts->height : 0)];
 }
 
 OPTICS_WINDOW_API void optics_window_set_max_size(const optics_window_set_max_size_opts *opts) {
-    IrisPlatform *pl = g_active_pl;
+    OpticsWindowPlatform *pl = g_active_pl;
     if (!pl || !pl->window || !opts)
         return;
     pl->max_w = opts->width;
@@ -397,7 +397,7 @@ OPTICS_WINDOW_API void optics_window_set_max_size(const optics_window_set_max_si
 }
 
 OPTICS_WINDOW_API bool optics_window_get_geometry(int32_t *out_width, int32_t *out_height) {
-    IrisPlatform *pl = g_active_pl;
+    OpticsWindowPlatform *pl = g_active_pl;
     if (!pl)
         return false;
     if (out_width)
@@ -414,7 +414,7 @@ optics_window_create_activation_token(const optics_window_create_activation_toke
 }
 
 OPTICS_WINDOW_API int optics_window_dnd_start(const optics_window_dnd_source *source) {
-    IrisPlatform *pl = g_active_pl;
+    OpticsWindowPlatform *pl = g_active_pl;
     if (!pl || !pl->view || !source)
         return -1;
 
@@ -444,12 +444,12 @@ OPTICS_WINDOW_API int optics_window_dnd_start(const optics_window_dnd_source *so
 }
 
 OPTICS_WINDOW_API bool optics_window_dnd_is_active(void) {
-    IrisPlatform *pl = g_active_pl;
+    OpticsWindowPlatform *pl = g_active_pl;
     return pl && pl->drag_active;
 }
 
 OPTICS_WINDOW_API void optics_window_dnd_cancel(void) {
-    IrisPlatform *pl = g_active_pl;
+    OpticsWindowPlatform *pl = g_active_pl;
     if (pl)
         pl->drag_active = false;
 }
@@ -458,8 +458,8 @@ OPTICS_WINDOW_API void optics_window_dnd_cancel(void) {
 /*  Pointer                                                            */
 /* ------------------------------------------------------------------ */
 
-/* NSEvent buttonNumber (0 = left, 1 = right, 2 = middle) → lens mouse
- * index, via the shared iris_pointer_button layer (platform_input.h).
+/* NSEvent buttonNumber (0 = left, 1 = right, 2 = middle) → ui mouse
+ * index, via the shared optics_window_pointer_button layer (platform_input.h).
  * Buttons ≥ 3 (X1/X2/…) return -1 and the event is dropped, as
  * app_wayland.c does for unknown evdev codes. */
 static int mouse_index_from_event(NSEvent *event) {
@@ -487,7 +487,7 @@ static int mouse_index_from_event(NSEvent *event) {
 /* Reify → run the host seam (event_internal.h) → apply the surviving,
  * possibly host-rewritten event to the accumulator. */
 
-static bool cocoa_emit_pointer(IrisPlatform *pl, optics_window_event_type type, double x, double y) {
+static bool cocoa_emit_pointer(OpticsWindowPlatform *pl, optics_window_event_type type, double x, double y) {
     optics_window_event ev = {.type = type, .pointer = {.x = (float)x, .y = (float)y}};
     if (!optics_window__event_seam_emit(&ev))
         return false;
@@ -496,7 +496,7 @@ static bool cocoa_emit_pointer(IrisPlatform *pl, optics_window_event_type type, 
     return true;
 }
 
-static bool cocoa_emit_button(IrisPlatform *pl, double x, double y, int button_index, bool down) {
+static bool cocoa_emit_button(OpticsWindowPlatform *pl, double x, double y, int button_index, bool down) {
     optics_window_event ev = {
         .type = OPTICS_WINDOW_EVENT_POINTER_BUTTON,
         .button = {.x = (float)x, .y = (float)y, .button = button_index, .pressed = down}};
@@ -516,7 +516,7 @@ static bool cocoa_emit_button(IrisPlatform *pl, double x, double y, int button_i
     return true;
 }
 
-static bool cocoa_emit_scroll(IrisPlatform *pl, double dx, double dy, bool continuous) {
+static bool cocoa_emit_scroll(OpticsWindowPlatform *pl, double dx, double dy, bool continuous) {
     optics_window_event ev = {.type = OPTICS_WINDOW_EVENT_SCROLL,
                      .scroll = {.dx = (float)dx, .dy = (float)dy, .continuous = continuous}};
     if (!optics_window__event_seam_emit(&ev))
@@ -530,7 +530,7 @@ static bool cocoa_emit_scroll(IrisPlatform *pl, double dx, double dy, bool conti
     return true;
 }
 
-static bool cocoa_emit_key(IrisPlatform *pl, int key, bool pressed, bool repeat, uint32_t mods) {
+static bool cocoa_emit_key(OpticsWindowPlatform *pl, int key, bool pressed, bool repeat, uint32_t mods) {
     optics_window_event ev = {.type = OPTICS_WINDOW_EVENT_KEY,
                      .keyboard = {.key = key, .pressed = pressed, .repeat = repeat, .mods = mods}};
     if (!optics_window__event_seam_emit(&ev))
@@ -541,7 +541,7 @@ static bool cocoa_emit_key(IrisPlatform *pl, int key, bool pressed, bool repeat,
     return true;
 }
 
-static bool cocoa_emit_modifiers(IrisPlatform *pl, uint32_t mods) {
+static bool cocoa_emit_modifiers(OpticsWindowPlatform *pl, uint32_t mods) {
     optics_window_event ev = {.type = OPTICS_WINDOW_EVENT_MODIFIERS, .modifiers = {.mods = mods}};
     if (!optics_window__event_seam_emit(&ev))
         return false;
@@ -549,7 +549,7 @@ static bool cocoa_emit_modifiers(IrisPlatform *pl, uint32_t mods) {
     return true;
 }
 
-static bool cocoa_emit_text(IrisPlatform *pl, const char *utf8, size_t n) {
+static bool cocoa_emit_text(OpticsWindowPlatform *pl, const char *utf8, size_t n) {
     optics_window_event ev = {.type = OPTICS_WINDOW_EVENT_TEXT_COMMIT, .text = {.utf8 = utf8, .len = n}};
     if (!optics_window__event_seam_emit(&ev))
         return false;
@@ -558,7 +558,7 @@ static bool cocoa_emit_text(IrisPlatform *pl, const char *utf8, size_t n) {
     return true;
 }
 
-static bool cocoa_emit_preedit(IrisPlatform *pl, const char *utf8, uint32_t cursor, uint32_t sel_lo,
+static bool cocoa_emit_preedit(OpticsWindowPlatform *pl, const char *utf8, uint32_t cursor, uint32_t sel_lo,
                                uint32_t sel_hi) {
     optics_window_event ev = {.type = OPTICS_WINDOW_EVENT_PREEDIT,
                      .preedit = {.utf8 = utf8,
@@ -604,16 +604,16 @@ static void cocoa_emit_close(void) {
     (void)optics_window__event_seam_emit(&ev);
 }
 
-static void update_cursor_pos(IrisPlatform *pl, NSEvent *event) {
+static void update_cursor_pos(OpticsWindowPlatform *pl, NSEvent *event) {
     if (!pl->view)
         return;
     /* The view is flipped (isFlipped == YES), so the converted point is
-     * already in lens's top-left-origin UI space — no Y inversion. */
+     * already in ui's top-left-origin UI space — no Y inversion. */
     NSPoint p = [pl->view convertPoint:[event locationInWindow] fromView:nil];
     (void)cocoa_emit_pointer(pl, OPTICS_WINDOW_EVENT_POINTER_MOVE, p.x, p.y);
 }
 
-static void mouse_button(IrisPlatform *pl, NSEvent *event, bool down) {
+static void mouse_button(OpticsWindowPlatform *pl, NSEvent *event, bool down) {
     int i = mouse_index_from_event(event);
     if (i < 0)
         return;
@@ -621,10 +621,10 @@ static void mouse_button(IrisPlatform *pl, NSEvent *event, bool down) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Keyboard (NSEvent keyCode → lens sentinels)                         */
+/*  Keyboard (NSEvent keyCode → ui sentinels)                         */
 /* ------------------------------------------------------------------ */
 
-/* Hardware (layout-independent) Apple virtual key codes for the keys lens
+/* Hardware (layout-independent) Apple virtual key codes for the keys ui
  * has sentinels for. Only the ones we map are listed. */
 enum {
     kVK_Return = 0x24,
@@ -711,9 +711,9 @@ static int key_sentinel(unsigned short keyCode) {
 /*  View — input, IME (NSTextInputClient), CAMetalLayer backing         */
 /* ------------------------------------------------------------------ */
 
-@implementation IrisView
+@implementation OpticsWindowView
 
-- (instancetype)initWithFrame:(NSRect)frame platform:(IrisPlatform *)pl {
+- (instancetype)initWithFrame:(NSRect)frame platform:(OpticsWindowPlatform *)pl {
     self = [super initWithFrame:frame];
     if (self) {
         _platform = pl;
@@ -804,8 +804,8 @@ static int key_sentinel(unsigned short keyCode) {
 }
 
 - (BOOL)isFlipped {
-    /* lens's UI space is top-left-origin; flipping the view keeps input
-     * coordinates and lens_caret_rect in the same space as view bounds. */
+    /* ui's UI space is top-left-origin; flipping the view keeps input
+     * coordinates and optics_ui_caret_rect in the same space as view bounds. */
     return YES;
 }
 
@@ -911,10 +911,10 @@ static int key_sentinel(unsigned short keyCode) {
 }
 
 /* Scroll: two distinct channels. Trackpads (and Magic Mice) deliver precise
- * deltas in points — those land in iris_input.scroll_pixels_* so widgets do
+ * deltas in points — those land in optics_window_input.scroll_pixels_* so widgets do
  * not multiply finger motion by a line factor. Classic wheel mice deliver
  * line-step deltas — those land in scroll_x/y. Both follow the same sign
- * convention lens uses on Wayland (wheel-down / content-down is negative);
+ * convention ui uses on Wayland (wheel-down / content-down is negative);
  * NSEvent deltas already honour the user's natural-scrolling preference, so
  * they are passed through un-inverted. Momentum phases arrive as precise
  * deltas and are passed through like any other trackpad motion. */
@@ -931,15 +931,15 @@ static int key_sentinel(unsigned short keyCode) {
 
 /* --- Keyboard ------------------------------------------------------ */
 
-/* Manual key processing for events the IME is not composing over: lens key
+/* Manual key processing for events the IME is not composing over: ui key
  * sentinels from the hardware keyCode, ASCII from charactersIgnoringModifiers
  * (so Ctrl/Cmd+letter shortcuts match the xkb keysym behaviour of the
  * Wayland backend), and plain text from characters. skipText is set when the
  * input context already delivered this key's text via insertText: — the key
- * event still goes to lens (Wayland parity: a plain letter is both a key
+ * event still goes to ui (Wayland parity: a plain letter is both a key
  * event AND text), but the text must not be appended twice. */
 - (void)irisHandleKey:(NSEvent *)event skipText:(BOOL)skipText {
-    IrisPlatform *pl = _platform;
+    OpticsWindowPlatform *pl = _platform;
     if (!pl)
         return;
 
@@ -958,7 +958,7 @@ static int key_sentinel(unsigned short keyCode) {
     /* Committed text, only when the input context did not already deliver
      * it and no Command / Control chord is down (otherwise Cmd+C would
      * insert "c"). Control characters (Return "\r", Tab "\t", DEL 0x7f)
-     * are not text — the shared iris_cp_is_text predicate, so all three
+     * are not text — the shared optics_window_cp_is_text predicate, so all three
      * backends agree. */
     NSEventModifierFlags mods = [event modifierFlags];
     if (skipText || (mods & (NSEventModifierFlagCommand | NSEventModifierFlagControl)))
@@ -975,7 +975,7 @@ static int key_sentinel(unsigned short keyCode) {
 }
 
 - (void)keyDown:(NSEvent *)event {
-    IrisPlatform *pl = _platform;
+    OpticsWindowPlatform *pl = _platform;
     if (!pl)
         return;
     _ime_delivered_this_event = false;
@@ -984,7 +984,7 @@ static int key_sentinel(unsigned short keyCode) {
      * composition; the NSTextInputClient callbacks below fire synchronously
      * from inside this call. While a composition is active (running, or
      * just started/committed by this very key) the IME owns the key stream
-     * — candidate-window navigation keys must not reach lens. */
+     * — candidate-window navigation keys must not reach ui. */
     [[self inputContext] handleEvent:event];
     if (was_composing || [self hasMarkedText])
         return;
@@ -993,12 +993,12 @@ static int key_sentinel(unsigned short keyCode) {
 
 - (void)keyUp:(NSEvent *)event {
     /* The input context sees the release first — some IMEs track key-up
-     * state. Then report the release edge to lens: the keyboard contract
+     * state. Then report the release edge to ui: the keyboard contract
      * (platform_internal.h) requires both edges for every reported key,
      * with letters as unshifted lowercase ASCII (charactersIgnoringModifiers
      * is exactly that). Repeat is always false on release. */
     [[self inputContext] handleEvent:event];
-    IrisPlatform *pl = _platform;
+    OpticsWindowPlatform *pl = _platform;
     if (!pl)
         return;
     int fk = key_sentinel([event keyCode]);
@@ -1015,7 +1015,7 @@ static int key_sentinel(unsigned short keyCode) {
 }
 
 - (void)flagsChanged:(NSEvent *)event {
-    IrisPlatform *pl = _platform;
+    OpticsWindowPlatform *pl = _platform;
     if (!pl)
         return;
     NSEventModifierFlags f = [event modifierFlags];
@@ -1049,9 +1049,9 @@ static uint32_t utf8_byte_offset(NSString *s, NSUInteger loc) {
 }
 
 - (void)insertText:(id)string replacementRange:(NSRange)replacementRange {
-    (void)replacementRange; /* lens textfields own the buffer; the IME commit
+    (void)replacementRange; /* ui textfields own the buffer; the IME commit
                              * is plain inserted text from our side          */
-    IrisPlatform *pl = _platform;
+    OpticsWindowPlatform *pl = _platform;
     if (!pl)
         return;
     NSString *s = [string isKindOfClass:[NSAttributedString class]] ? [string string] : string;
@@ -1069,7 +1069,7 @@ static uint32_t utf8_byte_offset(NSString *s, NSUInteger loc) {
         selectedRange:(NSRange)selectedRange
      replacementRange:(NSRange)replacementRange {
     (void)replacementRange;
-    IrisPlatform *pl = _platform;
+    OpticsWindowPlatform *pl = _platform;
     if (!pl)
         return;
     NSString *s = [string isKindOfClass:[NSAttributedString class]] ? [string string] : string;
@@ -1084,7 +1084,7 @@ static uint32_t utf8_byte_offset(NSString *s, NSUInteger loc) {
     const char *utf8 = [_marked_text UTF8String];
     if (utf8) {
         /* boundary-aware copy: a raw byte cap could split a multi-byte
-         * sequence at IRIS_PREEDIT_MAX and hand lens invalid UTF-8. */
+         * sequence at OPTICS_WINDOW_PREEDIT_MAX and hand ui invalid UTF-8. */
         optics_window_utf8_copy(pre, sizeof pre, utf8);
     } else {
         pre[0] = '\0';
@@ -1099,7 +1099,7 @@ static uint32_t utf8_byte_offset(NSString *s, NSUInteger loc) {
     if (len > [_marked_text length] - loc)
         len = [_marked_text length] - loc;
     _selected_in_marked = NSMakeRange(loc, len);
-    /* The preedit buffer caps at IRIS_PREEDIT_MAX - 1 bytes; cocoa_emit_preedit
+    /* The preedit buffer caps at OPTICS_WINDOW_PREEDIT_MAX - 1 bytes; cocoa_emit_preedit
      * truncates on a code-point boundary and clamps the offsets to match. */
     (void)cocoa_emit_preedit(pl, pre, utf8_byte_offset(_marked_text, loc),
                              utf8_byte_offset(_marked_text, loc),
@@ -1124,7 +1124,7 @@ static uint32_t utf8_byte_offset(NSString *s, NSUInteger loc) {
 - (NSRange)selectedRange {
     if ([_marked_text length] > 0)
         return _selected_in_marked;
-    /* lens exposes no app-level selection through this seam. */
+    /* ui exposes no app-level selection through this seam. */
     return NSMakeRange(NSNotFound, 0);
 }
 
@@ -1134,7 +1134,7 @@ static uint32_t utf8_byte_offset(NSString *s, NSUInteger loc) {
 
 - (NSAttributedString *)attributedSubstringForProposedRange:(NSRange)range
                                                 actualRange:(NSRangePointer)actualRange {
-    /* lens owns the text buffer; we cannot hand out attributed substrings.
+    /* ui owns the text buffer; we cannot hand out attributed substrings.
      * Returning nil is documented ("could not extract") and IMEs cope. */
     (void)range;
     if (actualRange)
@@ -1143,12 +1143,12 @@ static uint32_t utf8_byte_offset(NSString *s, NSUInteger loc) {
 }
 
 - (NSUInteger)characterIndexForPoint:(NSPoint)point {
-    /* lens has no point→text-index seam; 0 is a safe, in-range answer. */
+    /* ui has no point→text-index seam; 0 is a safe, in-range answer. */
     (void)point;
     return 0;
 }
 
-/* IME candidate-window anchor. lens_caret_rect is in view (UI) coordinates
+/* IME candidate-window anchor. optics_ui_caret_rect is in view (UI) coordinates
  * — the view is flipped, so no Y inversion. convertRectToScreen: returns
  * global screen coordinates (bottom-left origin), which is exactly the
  * coordinate system this method must answer in; the flip is subsumed by the
@@ -1156,7 +1156,7 @@ static uint32_t utf8_byte_offset(NSString *s, NSUInteger loc) {
 - (NSRect)firstRectForCharacterRange:(NSRange)range actualRange:(NSRangePointer)actualRange {
     if (actualRange)
         *actualRange = range;
-    IrisPlatform *pl = _platform;
+    OpticsWindowPlatform *pl = _platform;
     if (!pl || !pl->ui || ![self window])
         return NSZeroRect;
     optics_gfx_rect caret = pl->ui_frame.text.caret;
@@ -1169,7 +1169,7 @@ static uint32_t utf8_byte_offset(NSString *s, NSUInteger loc) {
 }
 
 /* Swallow unhandled action selectors (moveLeft:, deleteBackward:, …) so
- * AppKit does not beep for keys lens already consumed through iris_input. */
+ * AppKit does not beep for keys ui already consumed through optics_window_input. */
 - (void)doCommandBySelector:(SEL)selector {
     (void)selector;
 }
@@ -1180,16 +1180,16 @@ static uint32_t utf8_byte_offset(NSString *s, NSUInteger loc) {
 /*  Window delegate                                                    */
 /* ------------------------------------------------------------------ */
 
-@interface IrisWindowDelegate : NSObject <NSWindowDelegate> {
+@interface OpticsWindowDelegate : NSObject <NSWindowDelegate> {
   @public
-    __unsafe_unretained IrisPlatform *_platform;
+    __unsafe_unretained OpticsWindowPlatform *_platform;
 }
-- (instancetype)initWithPlatform:(IrisPlatform *)pl;
+- (instancetype)initWithPlatform:(OpticsWindowPlatform *)pl;
 @end
 
-@implementation IrisWindowDelegate
+@implementation OpticsWindowDelegate
 
-- (instancetype)initWithPlatform:(IrisPlatform *)pl {
+- (instancetype)initWithPlatform:(OpticsWindowPlatform *)pl {
     self = [super init];
     if (self)
         _platform = pl;
@@ -1202,12 +1202,12 @@ static uint32_t utf8_byte_offset(NSString *s, NSUInteger loc) {
         cocoa_emit_close();
         _platform->running = false;
     }
-    return NO; /* teardown happens on the iris_app_run_cocoa exit path */
+    return NO; /* teardown happens on the optics_window_run_cocoa exit path */
 }
 
 - (void)windowDidResize:(NSNotification *)notification {
     (void)notification;
-    IrisPlatform *pl = _platform;
+    OpticsWindowPlatform *pl = _platform;
     if (!pl || !pl->view)
         return;
     NSSize s = [pl->view bounds].size;
@@ -1234,7 +1234,7 @@ static uint32_t utf8_byte_offset(NSString *s, NSUInteger loc) {
 
 - (void)windowDidChangeScreen:(NSNotification *)notification {
     (void)notification;
-    IrisPlatform *pl = _platform;
+    OpticsWindowPlatform *pl = _platform;
     if (!pl || !pl->window)
         return;
     pl->refresh_ns = cocoa_query_refresh_ns(pl->window);
@@ -1246,7 +1246,7 @@ static uint32_t utf8_byte_offset(NSString *s, NSUInteger loc) {
 
 - (void)windowDidChangeBackingProperties:(NSNotification *)notification {
     (void)notification;
-    IrisPlatform *pl = _platform;
+    OpticsWindowPlatform *pl = _platform;
     if (!pl || !pl->window)
         return;
     pl->refresh_ns = cocoa_query_refresh_ns(pl->window);
@@ -1259,10 +1259,10 @@ static uint32_t utf8_byte_offset(NSString *s, NSUInteger loc) {
 @end
 
 /* ------------------------------------------------------------------ */
-/*  Clipboard (NSPasteboard) — bridges lens_clipboard to the pasteboard  */
+/*  Clipboard (NSPasteboard) — bridges optics_ui_clipboard to the pasteboard  */
 /* ------------------------------------------------------------------ */
 
-/* lens_clipboard.set_text — replace the general pasteboard's string. */
+/* optics_ui_clipboard.set_text — replace the general pasteboard's string. */
 static void clip_set_text(const char *utf8, size_t len, void *user) {
     (void)user;
     @autoreleasepool {
@@ -1297,14 +1297,14 @@ static void post_app_defined(NSInteger subtype) {
         [NSApp postEvent:ev atStart:NO];
 }
 
-/* lens_clipboard.request_text — snapshot the pasteboard now, deliver later.
- * The lens contract is asynchronous ("answered later by the host calling
- * lens_paste"): lens calls request_text from inside a build callback, and
- * lens_paste must not re-enter lens mid-build, so the text is delivered
+/* optics_ui_clipboard.request_text — snapshot the pasteboard now, deliver later.
+ * The ui contract is asynchronous ("answered later by the host calling
+ * optics_ui_paste"): ui calls request_text from inside a build callback, and
+ * optics_ui_paste must not re-enter ui mid-build, so the text is delivered
  * through a posted ApplicationDefined event handled at the top of the next
- * loop iteration, outside any lens_begin/end pair. */
+ * loop iteration, outside any optics_ui_begin/end pair. */
 static void clip_request_text(void *user) {
-    IrisPlatform *pl = (__bridge IrisPlatform *)user;
+    OpticsWindowPlatform *pl = (__bridge OpticsWindowPlatform *)user;
     @autoreleasepool {
         NSString *s = [[NSPasteboard generalPasteboard] stringForType:NSPasteboardTypeString];
         if (!s)
@@ -1314,7 +1314,7 @@ static void clip_request_text(void *user) {
     }
 }
 
-static void deliver_paste(IrisPlatform *pl) {
+static void deliver_paste(OpticsWindowPlatform *pl) {
     if (!pl->pending_paste)
         return;
     NSString *s = pl->pending_paste;
@@ -1327,10 +1327,10 @@ static void deliver_paste(IrisPlatform *pl) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Build one iris_input from the accumulated state                     */
+/*  Build one optics_window_input from the accumulated state                     */
 /* ------------------------------------------------------------------ */
 
-static void drain_input(IrisPlatform *pl, optics_window_input *in, float dt) {
+static void drain_input(OpticsWindowPlatform *pl, optics_window_input *in, float dt) {
     memset(in, 0, sizeof *in);
     in->cursor = (optics_gfx_point){(float)pl->acc.cx, (float)pl->acc.cy};
     in->display_size = (optics_gfx_point){(float)pl->width, (float)pl->height};
@@ -1366,7 +1366,7 @@ static void drain_input(IrisPlatform *pl, optics_window_input *in, float dt) {
 }
 
 /* Diagnostics go to stderr, never stdout: a consumer's stdout may be an
- * IPC wire (see flux_console_logger). */
+ * IPC wire (see optics_gfx_console_logger). */
 static void log_raw(const optics_window_input *in) {
     static const char *names[OPTICS_WINDOW_BUTTON_COUNT] = {"left", "right", "middle"};
     for (int b = 0; b < OPTICS_WINDOW_BUTTON_COUNT; b++) {
@@ -1420,7 +1420,7 @@ static int64_t cocoa_query_refresh_ns(NSWindow *window) {
 /* True if the input accumulator holds genuine user activity (pointer motion,
  * buttons, scroll, keys, or text/IME) since the last check. Same contract as
  * app_wayland.c's acc_has_user_input; `*pcx`/`*pcy` are updated in place. */
-static bool acc_has_user_input(IrisPlatform *pl, double *pcx, double *pcy) {
+static bool acc_has_user_input(OpticsWindowPlatform *pl, double *pcx, double *pcy) {
     bool moved = (pl->acc.cx != *pcx) || (pl->acc.cy != *pcy);
     *pcx = pl->acc.cx;
     *pcy = pl->acc.cy;
@@ -1439,7 +1439,7 @@ static bool acc_has_user_input(IrisPlatform *pl, double *pcx, double *pcy) {
 /* Kick for the wakeup seam: safe to call from any thread (posting NSEvents
  * from secondary threads is documented), never blocks, and makes the
  * loop's nextEventMatchingMask: wait return the posted ApplicationDefined
- * event; the dispatch site then runs iris_platform_wakeup_drain() on the
+ * event; the dispatch site then runs optics_window_platform_wakeup_drain() on the
  * loop thread. The header's literal CFRunLoopPerformBlock recipe is not
  * used — see the header comment at the top of this file for the rationale. */
 static void optics_window_cocoa_wakeup_kick(void *user) {
@@ -1450,24 +1450,24 @@ static void optics_window_cocoa_wakeup_kick(void *user) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Theme watcher callback (iris/theme.h live watching)                 */
+/*  Theme watcher callback (window/theme.h live watching)                 */
 /* ------------------------------------------------------------------ */
 
-/* Invoked on the iris main thread (KVO on NSApp.effectiveAppearance fires
+/* Invoked on the window main thread (KVO on NSApp.effectiveAppearance fires
  * on the main thread; theme_cocoa.m guarantees main-thread delivery). */
 static void on_color_scheme_changed(optics_window_color_scheme scheme, void *user) {
-    IrisPlatform *pl = (__bridge IrisPlatform *)user;
+    OpticsWindowPlatform *pl = (__bridge OpticsWindowPlatform *)user;
     if (!pl || !pl->ui)
         return;
     optics_window__ui_set_color_scheme(pl->ui, scheme);
 }
 
 /* Accessibility-preference watcher callback (ADR-0075): delivered on the
- * iris main thread by the NSWorkspace accessibility-display-options
+ * window main thread by the NSWorkspace accessibility-display-options
  * notification (a11y_prefs_cocoa.m). Applies the OS accessibility
- * preferences to lens directly (lens is headless and cannot see them). */
+ * preferences to ui directly (ui is headless and cannot see them). */
 static void on_a11y_prefs(const optics_window_a11y_prefs *prefs, void *user) {
-    IrisPlatform *pl = (__bridge IrisPlatform *)user;
+    OpticsWindowPlatform *pl = (__bridge OpticsWindowPlatform *)user;
     if (!pl || !pl->ui)
         return;
     optics_window__ui_set_a11y_prefs(pl->ui, prefs);
@@ -1498,7 +1498,7 @@ static void destroy_vk_surface(const optics_gfx_device *device, VkSurfaceKHR vk_
 }
 
 /* Drawable size in *device* pixels: view bounds × backing scale. */
-static void view_physical_size(IrisPlatform *pl, uint32_t *out_w, uint32_t *out_h) {
+static void view_physical_size(OpticsWindowPlatform *pl, uint32_t *out_w, uint32_t *out_h) {
     NSRect backing = [pl->view convertRectToBacking:[pl->view bounds]];
     uint32_t w = backing.size.width > 1.0 ? (uint32_t)backing.size.width : 1;
     uint32_t h = backing.size.height > 1.0 ? (uint32_t)backing.size.height : 1;
@@ -1511,7 +1511,7 @@ static void view_physical_size(IrisPlatform *pl, uint32_t *out_w, uint32_t *out_
 /* ------------------------------------------------------------------ */
 
 typedef struct cocoa_present_context {
-    IrisPlatform *pl;
+    OpticsWindowPlatform *pl;
     optics_gfx_surface *surface;
     optics_gfx_canvas *canvas;
     const optics_window_opts *cfg;
@@ -1519,9 +1519,9 @@ typedef struct cocoa_present_context {
 
 static void *cocoa_presenter_thread_main(void *arg) {
     cocoa_present_context *ctx = (cocoa_present_context *)arg;
-    IrisPlatform *pl = ctx->pl;
+    OpticsWindowPlatform *pl = ctx->pl;
 
-    (void)pthread_setname_np("iris-presenter");
+    (void)pthread_setname_np("window-presenter");
 
     while (atomic_load_explicit(&pl->presenter_running, memory_order_acquire)) {
         int64_t wait_timeout_ns =
@@ -1564,7 +1564,7 @@ static void *cocoa_presenter_thread_main(void *arg) {
 
                 /* The packet's damage set travels to the pass unchanged
                  * (ADR-0149). CoreAnimation composites layers, so only the
-                 * regions this frame wrote need to reach it; flux's present-time
+                 * regions this frame wrote need to reach it; gfx's present-time
                  * content copy writes exactly those into the drawable. */
                 optics_window_frame_damage dmg = optics_window_frame_packet_damage(pkt);
 
@@ -1630,14 +1630,14 @@ int optics_window_run_cocoa(const optics_window_opts *cfg) {
     bool wakeup_registered = false;
     int rc = 1; /* pessimistic; set to 0 only on success */
 
-    IrisPlatform *pl = nil;
+    OpticsWindowPlatform *pl = nil;
     NSWindow *window = nil;
-    IrisView *view = nil;
-    IrisWindowDelegate *win_delegate = nil;
+    OpticsWindowView *view = nil;
+    OpticsWindowDelegate *win_delegate = nil;
     cocoa_present_context pctx = {0};
 
     @autoreleasepool {
-        pl = [IrisPlatform new];
+        pl = [OpticsWindowPlatform new];
         pl->running = true;
         pl->width = cfg->width > 0 ? cfg->width : 960;
         pl->height = cfg->height > 0 ? cfg->height : 720;
@@ -1648,7 +1648,7 @@ int optics_window_run_cocoa(const optics_window_opts *cfg) {
         pl->acc.cx = pl->acc.cy = -100000.0;
 
         /* Publish `pl` as the active app instance so the context-free
-         * iris_set_cursor() can reach it. Cleared on the way out (success
+         * optics_window_set_cursor() can reach it. Cleared on the way out (success
          * or fail). */
         g_active_pl = pl;
 
@@ -1656,7 +1656,7 @@ int optics_window_run_cocoa(const optics_window_opts *cfg) {
         [NSApplication sharedApplication];
         [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
         /* finishLaunching is once-per-process; guard so a second
-         * iris_app_run in the same process does not re-post it. */
+         * optics_window_run in the same process does not re-post it. */
         static bool did_finish_launching = false;
         if (!did_finish_launching) {
             [NSApp finishLaunching];
@@ -1681,16 +1681,16 @@ int optics_window_run_cocoa(const optics_window_opts *cfg) {
             goto fail;
         }
         [window setReleasedWhenClosed:NO]; /* ARC owns the lifetime */
-        [window setTitle:cfg->title ? [NSString stringWithUTF8String:cfg->title] : @"iris"];
+        [window setTitle:cfg->title ? [NSString stringWithUTF8String:cfg->title] : @"window"];
         /* cfg->app_id is unused on macOS — the bundle owns the identity. */
 
-        view = [[IrisView alloc] initWithFrame:NSMakeRect(0, 0, pl->width, pl->height) platform:pl];
+        view = [[OpticsWindowView alloc] initWithFrame:NSMakeRect(0, 0, pl->width, pl->height) platform:pl];
         if (!view) {
-            fprintf(stderr, "IrisView creation failed\n");
+            fprintf(stderr, "OpticsWindowView creation failed\n");
             goto fail;
         }
         [window setContentView:view];
-        win_delegate = [[IrisWindowDelegate alloc] initWithPlatform:pl];
+        win_delegate = [[OpticsWindowDelegate alloc] initWithPlatform:pl];
         [window setDelegate:win_delegate];
 
         pl->window = window;
@@ -1707,7 +1707,7 @@ int optics_window_run_cocoa(const optics_window_opts *cfg) {
         cocoa_emit_scale(pl->scale);
         [view irisUpdateMetalLayer];
 
-        /* --- Vulkan instance via flux (Metal WSI extensions) -------- */
+        /* --- Vulkan instance via gfx (Metal WSI extensions) -------- */
         const char *inst_exts[] = {
             VK_KHR_SURFACE_EXTENSION_NAME,
             VK_EXT_METAL_SURFACE_EXTENSION_NAME,
@@ -1724,13 +1724,13 @@ int optics_window_run_cocoa(const optics_window_opts *cfg) {
             .frames_in_flight = 2,
         };
         /* MoltenVK's VK_KHR_portability_enumeration / _subset are handled
-         * inside flux_device_create (it auto-enables both when advertised). */
+         * inside optics_gfx_device_create (it auto-enables both when advertised). */
         if (optics_gfx_device_create(&ddesc, &device) != OPTICS_GFX_OK) {
-            fprintf(stderr, "flux_device_create failed (is MoltenVK installed?)\n");
+            fprintf(stderr, "optics_gfx_device_create failed (is MoltenVK installed?)\n");
             goto fail;
         }
 
-        /* --- Metal surface + flux surface/canvas -------------------- */
+        /* --- Metal surface + gfx surface/canvas -------------------- */
         if (![view.layer isKindOfClass:[CAMetalLayer class]]) {
             fprintf(stderr, "view backing layer is not CAMetalLayer\n");
             goto fail;
@@ -1755,14 +1755,14 @@ int optics_window_run_cocoa(const optics_window_opts *cfg) {
             .vsync = false,
         };
         if (optics_gfx_surface_create(device, &sdesc, &surface) != OPTICS_GFX_OK) {
-            fprintf(stderr, "flux_surface_create failed\n");
+            fprintf(stderr, "optics_gfx_surface_create failed\n");
             goto fail;
         }
 
         if (optics_gfx_canvas_create(
                 &(optics_gfx_canvas_desc){.type = OPTICS_GFX_TYPE_CANVAS_DESC, .surface = surface}, &canvas) !=
             OPTICS_GFX_OK) {
-            fprintf(stderr, "flux_canvas_create failed\n");
+            fprintf(stderr, "optics_gfx_canvas_create failed\n");
             goto fail;
         }
 
@@ -1776,14 +1776,14 @@ int optics_window_run_cocoa(const optics_window_opts *cfg) {
                                              .start_drag = cocoa_start_drag,
                                              .user = (__bridge void *)pl},
                             })) {
-            fprintf(stderr, "iris UI host start failed\n");
+            fprintf(stderr, "window UI host start failed\n");
             goto fail;
         }
         ui = cfg->ui;
         ui_started = true;
 
         if (cfg->start && !cfg->start(device, cfg->user)) {
-            fprintf(stderr, "iris host start callback failed\n");
+            fprintf(stderr, "window host start callback failed\n");
             goto fail;
         }
         host_started = true;
@@ -1813,19 +1813,19 @@ int optics_window_run_cocoa(const optics_window_opts *cfg) {
          *
          * The surface presents non-blocking (Mailbox / Immediate) so acquiring an
          * image never freezes input handling. The cadence state machine
-         * (iris_pacer) owns the whole decision: paint, skip, or quiesce — plus
+         * (optics_window_pacer) owns the whole decision: paint, skip, or quiesce — plus
          * the poll budget:
          *
          *   - The display refresh rate is queried dynamically from Cocoa /
          *     NSScreen (cocoa_query_refresh_ns), unlocking 120 Hz ProMotion
          *     displays rather than clamping to 60 Hz (INV-PACE-02).
-         *   - Zero-render skips (iris_request_frame_skip_render) advance the
+         *   - Zero-render skips (optics_window_request_frame_skip_render) advance the
          *     scheduling baseline cleanly, eliminating the 100% CPU spin bug
          *     (INV-PACE-03).
          *   - Time-based UI advances on the simulation clock rather than render
          *     timestamps (INV-PACE-04).
          *
-         * A lens-only host reaches full quiescence (quiesced = true, blocking in
+         * A ui-only host reaches full quiescence (quiesced = true, blocking in
          * nextEventMatchingMask with distantFuture); a host with cfg->record keeps
          * the low idle tick alive so its cfg->build can observe state changes. */
         optics_window_pacer pacer;
@@ -1834,7 +1834,7 @@ int optics_window_run_cocoa(const optics_window_opts *cfg) {
         optics_window_pacer_set_refresh(&pacer, pl->refresh_ns);
 
         int frame_no = 0;
-        /* Sticky until a frame containing the latest lens build is actually
+        /* Sticky until a frame containing the latest ui build is actually
          * presented — see app_wayland.c for the full rationale. */
         bool surface_needs_paint = true;
         bool quiesced = false;
@@ -1846,7 +1846,7 @@ int optics_window_run_cocoa(const optics_window_opts *cfg) {
         pl->ui = ui;
 
         /* Live colour-scheme watching: only when not forcing dark. The KVO
-         * callback fires on this thread and updates the lens theme in place
+         * callback fires on this thread and updates the ui theme in place
          * — the next frame renders with the new palette. -1 means
          * unavailable (macOS < 10.14) — degrade to the startup-only query.
          * The backend registers on its reserved internal slot
@@ -1857,7 +1857,7 @@ int optics_window_run_cocoa(const optics_window_opts *cfg) {
                 (optics_window_theme__watch_backend(on_color_scheme_changed, (__bridge void *)pl) == 0);
 
         /* Accessibility preferences (ADR-0075): apply the OS's
-         * reduced-motion / high-contrast / text-scale preferences to lens
+         * reduced-motion / high-contrast / text-scale preferences to ui
          * at startup, then watch via NSWorkspace's accessibility-display
          * options notification (backend slot, a11y_prefs_internal.h).
          * Applied unconditionally — accessibility is not opt-in. */
@@ -1876,7 +1876,7 @@ int optics_window_run_cocoa(const optics_window_opts *cfg) {
         while (pl->running) {
             @autoreleasepool {
                 /* Wait until the next frame deadline, or wake immediately on incoming
-                 * events. The poll budget is governed by iris_pacer (ADR-0122) and is
+                 * events. The poll budget is governed by optics_window_pacer (ADR-0122) and is
                  * `>= 1 ns` whenever active, preventing busy polling. */
                 NSDate *until;
                 if (quiesced) {
@@ -1937,7 +1937,7 @@ int optics_window_run_cocoa(const optics_window_opts *cfg) {
                 pl->animation_frame_requested = false;
 
                 /* Backing-scale change (window dragged across Retina /
-                 * non-Retina displays): tell lens so its replay transform
+                 * non-Retina displays): tell ui so its replay transform
                  * matches, then re-fit the swapchain below. */
                 bool resized_this_frame = false;
                 if (pl->pending_scale > 0.0f && pl->pending_scale != pl->scale) {
@@ -1981,11 +1981,11 @@ int optics_window_run_cocoa(const optics_window_opts *cfg) {
                     (void)optics_window_a11y_update(ui);
 
                 /* Cursor: follow the hovered widget's semantic hint unless
-                 * the host pinned a cursor with iris_set_cursor. */
+                 * the host pinned a cursor with optics_window_set_cursor. */
                 if (cursor_follow_hint(pl))
                     cursor_apply(pl);
 
-                /* Cadence evaluation via iris_pacer (ADR-0122). */
+                /* Cadence evaluation via optics_window_pacer (ADR-0122). */
                 bool chrome_damaged = pl->ui_frame.damaged;
                 bool surface_forced = resized_this_frame || surface_needs_paint;
 
@@ -2028,7 +2028,7 @@ int optics_window_run_cocoa(const optics_window_opts *cfg) {
                                 pkt->host_list = host_list;
                                 /* Resolve the frame's damage set on the UI
                                  * thread: the presentation thread must not
-                                 * re-query lens, and the set has to travel with
+                                 * re-query ui, and the set has to travel with
                                  * the snapshot it describes. */
                                 pkt->damage_count = optics_window__ui_damage_rects(
                                     ui, pkt->damage, OPTICS_WINDOW_DAMAGE_RECTS_CAPACITY);
@@ -2084,7 +2084,7 @@ int optics_window_run_cocoa(const optics_window_opts *cfg) {
                         cfg->prepare(frame, canvas, device, pl->scale, cfg->user);
 
                     /* Clear to the current theme's body background; recorded
-                     * host content draws *under* lens's chrome. */
+                     * host content draws *under* ui's chrome. */
                     optics_gfx_color clear = pl->ui_frame.clear_color;
                     optics_gfx_color *pass_clear = cfg->no_clear ? NULL : &clear;
                     bool drew = false;
@@ -2094,7 +2094,7 @@ int optics_window_run_cocoa(const optics_window_opts *cfg) {
                     /* Damage scope for this surface (ADR-0149): the set travels
                      * intact to the pass, which scissors each rectangle. A host
                      * with opaque canvas content (or a forced repaint) asks for
-                     * the full extent — its content is not lens-localisable. */
+                     * the full extent — its content is not ui-localisable. */
                     optics_window_frame_damage dmg = {0};
                     const bool localize = !surface_forced && !has_host_content;
                     if (localize) {
@@ -2173,10 +2173,10 @@ int optics_window_run_cocoa(const optics_window_opts *cfg) {
 
         /* --- Cleanup (shared by the success path and every goto fail) --- */
     fail:
-        /* Let the host release every resource created from iris's borrowed
-         * device before that device, the lens context, or the canvas
+        /* Let the host release every resource created from window's borrowed
+         * device before that device, the ui context, or the canvas
          * disappears. Keep the active platform published during the
-         * callback so thread-affine iris helpers remain valid. */
+         * callback so thread-affine window helpers remain valid. */
         if (host_started && cfg->stop)
             cfg->stop(device, cfg->user);
         if (ui_started)
@@ -2200,7 +2200,7 @@ int optics_window_run_cocoa(const optics_window_opts *cfg) {
             optics_gfx_device_wait_idle(device);
         if (ui_started)
             optics_window__ui_destroy(cfg->ui);
-        pl->ui = NULL; /* after this, queued main-thread callbacks must not touch lens */
+        pl->ui = NULL; /* after this, queued main-thread callbacks must not touch ui */
         if (pl->theme_watching)
             optics_window_theme__unwatch_backend();
         if (pl->a11y_prefs_watching)

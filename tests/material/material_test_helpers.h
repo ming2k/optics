@@ -2,10 +2,10 @@
 #define OPTICS_MATERIAL_TEST_MATERIAL_HELPERS_H
 
 /*
- * Shared helpers for the prism integration suites.
+ * Shared helpers for the material integration suites.
  *
- * A prism material paints only inside its own footprints, so its output image is
- * slab-sized rather than capture-sized (prism_material_output documents why).
+ * A material paints only inside its own footprints, so its output image is
+ * slab-sized rather than capture-sized (optics_material_output documents why).
  * Every suite therefore has to draw the result at its placement instead of
  * blitting it edge to edge. Keeping that in one helper means a change to the
  * placement contract touches one line, not every test.
@@ -25,4 +25,4 @@ static inline void test_draw_material(optics_gfx_canvas *canvas, optics_material
         nullptr);
 }
 
-#endif /* PRISM_TEST_MATERIAL_HELPERS_H */
+#endif /* OPTICS_MATERIAL_TEST_MATERIAL_HELPERS_H */

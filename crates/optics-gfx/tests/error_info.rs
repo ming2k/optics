@@ -1,8 +1,8 @@
 //! ErrorInfo / Error::last_info — thread-local diagnostics surfaced safely.
 //!
-//! Contract (C <flux/core.h>): the most recent failure on THIS thread is
-//! recorded with function/file/line/message; strings are owned by flux and
-//! valid until the next flux error. The safe mirror copies them.
+//! Contract (C <optics/gfx/core.h>): the most recent failure on THIS thread is
+//! recorded with function/file/line/message; strings are owned by gfx and
+//! valid until the next gfx error. The safe mirror copies them.
 
 use optics_gfx::Error;
 
@@ -19,7 +19,7 @@ fn last_error_carries_structured_context() {
     // Display must include the result string AND, when the thread slot
     // matches, the recorded context (function/file/message).
     let msg = err.to_string();
-    assert!(msg.contains("flux error"), "got: {msg}");
+    assert!(msg.contains("gfx error"), "got: {msg}");
 
     let info = err.last_info().expect("thread-local diagnostic recorded");
     assert_eq!(info.code, err.0, "diagnostic must match the failing code");

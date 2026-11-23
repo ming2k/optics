@@ -1,7 +1,7 @@
 /*
  * Test compute pipeline create/release: input validation and a
  * minimal happy path. Validation paths run without a device (NULL d
- * short-circuits to FLUX_ERROR_INVALID_ARGUMENT). The
+ * short-circuits to OPTICS_GFX_ERROR_INVALID_ARGUMENT). The
  * push-bytes-too-large path needs a real device for d->props; we
  * skip when no Vulkan is available.
  */

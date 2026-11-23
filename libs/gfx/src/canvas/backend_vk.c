@@ -1,17 +1,17 @@
 /*
- * Vulkan implementation of the canvas rendering backend (flux_canvas_backend).
+ * Vulkan implementation of the canvas rendering backend (optics_gfx_canvas_backend).
  *
  * This owns every GPU touchpoint of the canvas 2D layer: per-canvas state
  * (pipeline layout, colour formats, working-space intermediate targets), the
  * render-pass envelope (barriers, attachments, resolve), scissor, pipeline
  * binding, and the draw tail (transient upload, push constants, vkCmdDraw).
  * Consecutive state-identical submits are batched into a single vkCmdDraw;
- * see the batch block in struct flux_vk_canvas.
+ * see the batch block in struct optics_gfx_vk_canvas.
  * The device-level pipeline cache itself lives in renderer.c
  * (get_canvas_pipeline_id); this file consumes it.
  *
- * All state is held in flux_vk_canvas, reached through flux_canvas::backend_data
- * — struct flux_canvas holds no Vulkan types.
+ * All state is held in optics_gfx_vk_canvas, reached through optics_gfx_canvas::backend_data
+ * — struct optics_gfx_canvas holds no Vulkan types.
  */
 #include "backend.h"
 #include "canvas_tile.h"
@@ -32,7 +32,7 @@ typedef struct canvas_owned_image {
     VkExtent2D extent;
     VkFormat format;
     VkImageLayout layout; /* UNDEFINED before first transition */
-    uint32_t bindless;    /* FLUX_BINDLESS_INVALID unless registered */
+    uint32_t bindless;    /* OPTICS_GFX_BINDLESS_INVALID unless registered */
 } canvas_owned_image;
 
 typedef struct canvas_attachment_set {
@@ -195,7 +195,7 @@ static inline optics_gfx_vk_canvas *vkc(optics_gfx_canvas *c) {
 /* Release an owned attachment through the device retire queue. A previous
  * extent's image may still be referenced by batches in flight on the
  * graphics queue (a resize during recording swaps the attachment while an
- * earlier frame reads it), and flux_canvas_release runs while the surface's
+ * earlier frame reads it), and optics_gfx_canvas_release runs while the surface's
  * frames are in flight; destroying the VkImage inline can fault the engine
  * mid-batch. Retiring defers destruction until the queue provably passed
  * every referencing batch — no wait, no stall. */
@@ -517,7 +517,7 @@ static void mat3_to_push(const optics_gfx_mat3 *m, float out[3][4]) {
  * dest_view == VK_NULL_HANDLE targets the frame's render image.
  *
  * Issuing all `area_count` scissored draws inside one pass rather than opening
- * a separate render pass per rectangle avoids `FLUX_LOAD_DONT_CARE` tile
+ * a separate render pass per rectangle avoids `OPTICS_GFX_LOAD_DONT_CARE` tile
  * clobbering when two damage rectangles share a GPU tile during the decode
  * seed, and eliminates inter-pass write-after-write hazards during encode. */
 static void record_output_blits(optics_gfx_canvas *c, VkImageView dest_view, VkFormat dest_format,
@@ -1245,7 +1245,7 @@ static void vk_end_pass(const optics_gfx_canvas_backend *self, optics_gfx_canvas
     }
 
     /* Output transform into the destination (NULL view = the frame's render
-     * image, filled by flux_frame_begin_pass).
+     * image, filled by optics_gfx_frame_begin_pass).
      *
      * ADR-0149: encode each damage rectangle, not their bounding box. Writing
      * the box would copy the intermediate's between-band pixels — which were
@@ -1265,7 +1265,7 @@ static void vk_end_pass(const optics_gfx_canvas_backend *self, optics_gfx_canvas
         return;
 
     /* Trailing barrier: COLOR_ATTACHMENT -> SHADER_READ_ONLY so a following
-     * flux_effect_blur / draw_image needs no caller sync. */
+     * optics_gfx_effect_blur / draw_image needs no caller sync. */
     color_barrier2(cmd, t->image, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
                    VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
                    VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
@@ -1411,7 +1411,7 @@ static void vk_submit(const optics_gfx_canvas_backend *self, optics_gfx_canvas *
 
     /* Append to the open batch when all draw-visible state matches and
      * the new slice continues the batch's ring run. The ring is a bump
-     * allocator and flux_canvas_vertex is 16-byte/4-aligned, so slices
+     * allocator and optics_gfx_canvas_vertex is 16-byte/4-aligned, so slices
      * from back-to-back canvas submits are exactly contiguous; any
      * interleaved allocation or a wrap breaks contiguity and flushes. */
     if (tile_job_idx == UINT32_MAX && v->batch.tile_job_idx == UINT32_MAX &&
@@ -1570,9 +1570,10 @@ static optics_gfx_result cover_prepare_image(optics_gfx_canvas *c, const canvas_
     optics_gfx_image *img = paint->gradient.image.image;
     optics_gfx_sampler *sampler = paint->gradient.image.sampler;
     if (img && c->frame && optics_gfx_plan_image_pending(&c->frame->plan, img)) {
-        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_STATE,
-                        "canvas sampled a deferred effect output inside a pass; call "
-                        "flux_frame_materialize_image before flux_canvas_begin (ADR-0147)");
+        OPTICS_GFX_FAIL(
+            OPTICS_GFX_ERROR_INVALID_STATE,
+            "canvas sampled a deferred effect output inside a pass; call "
+            "optics_gfx_frame_materialize_image before optics_gfx_canvas_begin (ADR-0147)");
         return OPTICS_GFX_ERROR_INVALID_STATE;
     }
     if (img && !canvas_track_foreign_image(c, img))
@@ -1709,79 +1710,6 @@ static optics_gfx_result vk_submit_cover(const optics_gfx_canvas_backend *self,
     return OPTICS_GFX_OK;
 }
 
-static optics_gfx_result vk_submit_cover_triangles(const optics_gfx_canvas_backend *self,
-                                                   optics_gfx_canvas *c,
-                                                   const optics_gfx_canvas_vertex *verts,
-                                                   uint32_t vertex_count, const canvas_paint *paint,
-                                                   optics_gfx_recti clip) {
-    if (!c || !verts || !paint)
-        return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
-    if (clip.w <= 0 || clip.h <= 0 || vertex_count < 3)
-        return OPTICS_GFX_OK;
-    const uint32_t n_segs = vertex_count - vertex_count % 3;
-    if (!cover_paint_supported(paint))
-        return OPTICS_GFX_ERROR_UNSUPPORTED;
-
-    optics_gfx_recti draw_clip;
-    if (!vk_draw_scissor(c, clip, &draw_clip))
-        return OPTICS_GFX_OK;
-
-    /* One colour for the whole list: the quad carries a single solid colour,
-     * so a mesh with per-vertex colour is not this route's to draw. */
-    float min_x = verts[0].pos[0], max_x = min_x, min_y = verts[0].pos[1], max_y = min_y;
-    for (uint32_t i = 0; i < n_segs; ++i) {
-        if (verts[i].color != verts[0].color)
-            return OPTICS_GFX_ERROR_UNSUPPORTED;
-        min_x = fminf(min_x, verts[i].pos[0]);
-        max_x = fmaxf(max_x, verts[i].pos[0]);
-        min_y = fminf(min_y, verts[i].pos[1]);
-        max_y = fmaxf(max_y, verts[i].pos[1]);
-    }
-    int x0, y0, x1, y1;
-    if (!cover_area(c, (optics_gfx_rect){min_x, min_y, max_x - min_x, max_y - min_y}, draw_clip,
-                    &x0, &y0, &x1, &y1))
-        return OPTICS_GFX_OK;
-
-    optics_gfx_result ir = cover_prepare_image(c, paint);
-    if (ir != OPTICS_GFX_OK)
-        return ir;
-
-    optics_gfx_transient slice;
-    optics_gfx_result r = optics_gfx_frame_alloc_transient(
-        c->frame, &(optics_gfx_frame_alloc_transient_opts){.bytes = (size_t)n_segs *
-                                                                    sizeof(optics_gfx_tile_segment),
-                                                           .alignment = 16,
-                                                           .out = &slice});
-    if (r != OPTICS_GFX_OK)
-        return r;
-
-    /* Each triangle becomes a closed three-segment contour with one common
-     * orientation, so interior edges shared by neighbours cancel and the
-     * union fills under the non-zero rule. A degenerate triangle keeps its
-     * slots as zero-length segments, which contribute nothing. */
-    optics_gfx_tile_segment *segs = slice.cpu;
-    for (uint32_t i = 0; i < n_segs; i += 3) {
-        optics_gfx_point a = {verts[i].pos[0], verts[i].pos[1]};
-        optics_gfx_point b = {verts[i + 1].pos[0], verts[i + 1].pos[1]};
-        optics_gfx_point e = {verts[i + 2].pos[0], verts[i + 2].pos[1]};
-        const float area2 = (b.x - a.x) * (e.y - a.y) - (e.x - a.x) * (b.y - a.y);
-        if (area2 < 0.0f) {
-            const optics_gfx_point t = b;
-            b = e;
-            e = t;
-        }
-        if (area2 == 0.0f)
-            b = e = a;
-        segs[i] = (optics_gfx_tile_segment){.x0 = a.x, .y0 = a.y, .x1 = b.x, .y1 = b.y};
-        segs[i + 1] = (optics_gfx_tile_segment){.x0 = b.x, .y0 = b.y, .x1 = e.x, .y1 = e.y};
-        segs[i + 2] = (optics_gfx_tile_segment){.x0 = e.x, .y0 = e.y, .x1 = a.x, .y1 = a.y};
-    }
-
-    cover_draw(self, c, paint, verts[0].color, slice.cpu, slice.gpu_address, n_segs,
-               OPTICS_GFX_FILL_NON_ZERO, x0, y0, x1, y1);
-    return OPTICS_GFX_OK;
-}
-
 static const optics_gfx_canvas_backend vk_backend = {
     .name = "vulkan",
     .canvas_init = vk_canvas_init,
@@ -1794,7 +1722,6 @@ static const optics_gfx_canvas_backend vk_backend = {
     .bind_program = vk_bind_program,
     .submit = vk_submit,
     .submit_cover = vk_submit_cover,
-    .submit_cover_triangles = vk_submit_cover_triangles,
 };
 
 const optics_gfx_canvas_backend *optics_gfx_canvas_backend_vk(void) {

@@ -1,5 +1,5 @@
 project('optics', ['c'],
-  version : '0.0.82',
+  version : '0.0.83',
   license : 'MIT',
   meson_version : '>=1.8.0',
   default_options : [
@@ -12,13 +12,18 @@ project('optics', ['c'],
 
 cc = meson.get_compiler('c')
 m_dep = cc.find_library('m', required : false)
-pkg = import('pkgconfig')
 
-# Fuzz targets and the ci-fuzz workflow must run under clang (libFuzzer
-# runtime is clang-only). Probe with the clang executable directly —
-# `cc` here is whatever CC meson picked (often gcc, which rejects
-# -fsanitize=fuzzer even when clang and its runtime are installed).
-clang_cc = find_program('clang', required : false, version : '>=10')
+# Shaders are baked into the libraries with C23 #embed; there is no generated
+# header fallback. Reject a toolchain without it here, with a message, instead
+# of at the first shader translation unit (GCC >= 15, Clang >= 19).
+if not cc.compiles('''
+#if !defined(__STDC_VERSION__) || __STDC_VERSION__ < 202311L || !defined(__has_embed)
+#error "C23 with #embed required"
+#endif
+''', args : '-std=c23', name : 'C23 #embed')
+  error('Optics needs a C23 compiler with #embed (GCC >= 15 or Clang >= 19); ' + cc.get_id() + ' ' + cc.version() + ' lacks it.')
+endif
+pkg = import('pkgconfig')
 
 # Soname policy shared by every library in this tree (see
 # docs/reference/api.md).
@@ -26,7 +31,7 @@ clang_cc = find_program('clang', required : false, version : '>=10')
 # Pre-1.0 there is no ABI promise: this tree has repeatedly appended fields to
 # tagged descriptor structs and changed behavior in *patch* releases
 # (`0.0.74 -> 0.0.75` added the Canvas damage scope). A SONAME of
-# `major.minor` collapses every `0.0.x` release onto `libflux.so.0.0`, so a
+# `major.minor` collapses every `0.0.x` release onto `liboptics_gfx.so.0.0`, so a
 # binary built against one release silently loads another and reads a struct
 # whose layout it does not share. The pre-1.0 compatibility boundary is
 # therefore the full version string. From 1.0 on it is `major.minor`, while the
@@ -44,8 +49,6 @@ if host_machine.system() == 'linux'
   add_project_arguments('-D_GNU_SOURCE', language : 'c')
 endif
 add_project_arguments(
-  # -Wno-* spellings are GCC/Clang-only; probe so MSVC cl (which errors
-  # on unknown options) can configure the tree.
   cc.get_supported_arguments('-Wno-unused-parameter', '-Wno-missing-field-initializers'),
   language : 'c',
 )
@@ -64,7 +67,7 @@ opt_scene = get_option('scene')
 opt_motion = get_option('motion')
 opt_svg = get_option('svg')
 opt_material = get_option('material')
-# lens consumes glyph and reticle. The feature graph is explicit here so a
+# ui consumes glyph and svg. The feature graph is explicit here so a
 # disabled dependency cannot turn into a late undefined reference.
 opt_ui = opt_text and opt_svg
 
@@ -102,8 +105,8 @@ else
   material_dep = declare_dependency()
 endif
 
-# iris is the platform shell and needs flux only. lens is the UI engine and
-# needs glyph + reticle. aperture is the one library that links both.
+# window is the platform shell and needs gfx only. ui is the UI engine and
+# needs glyph + svg. app is the one library that links both.
 subdir('libs/window')
 
 if opt_ui
@@ -179,6 +182,7 @@ pkg.generate(
 if get_option('examples')
   subdir('examples/getting_started')
   subdir('examples/showcase')
+  subdir('tools/probes')
 endif
 
 if get_option('fuzz')
@@ -188,35 +192,30 @@ if get_option('fuzz')
   # startup). Both mainline clang and Apple clang provide the runtime;
   # GCC does not (its -fsanitize=fuzzer is not implemented).
   #
-  # The probe is what the fuzz executables actually are: a complete
-  # program with main() (libFuzzer's driver ships one) that references
-  # LLVMFuzzerTestOneInput, linked with -fsanitize=fuzzer. Probed with
-  # clang directly (see clang_cc above): `cc` may be gcc, which rejects
-  # the flag regardless of whether the clang runtime is installed.
+  # The probe is what the fuzz executables actually are: a complete program
+  # with main() (libFuzzer's driver ships one) that references
+  # LLVMFuzzerTestOneInput, linked with -fsanitize=fuzzer. cc.links() builds
+  # it inside meson's private scratch directory.
   libfuzzer_c_args = []
   libfuzzer_link_args = []
   libfuzzer_enabled = false
-  if clang_cc.found() and cc.get_id() == 'clang'
-    # Compile+link a complete fuzz program with clang itself.
-    probe_src = '/tmp/.optics_libfuzzer_probe.c'
-    run_command('sh', '-c',
-      'cat > ' + probe_src + ' <<"EOF"\n'
-      + 'int LLVMFuzzerTestOneInput(const unsigned char *d, unsigned long s);\n'
-      + 'int LLVMFuzzerTestOneInput(const unsigned char *d, unsigned long s) {\n'
-      + '  (void)d; (void)s; return 0;\n'
-      + '}\nEOF', check : false)
-    probe_ok = run_command(clang_cc, '-fsanitize=fuzzer', probe_src,
-                           '-o', '/tmp/.optics_libfuzzer_probe', check : false)
-    if probe_ok.returncode() == 0
+  if cc.get_id() == 'clang'
+    probe_ok = cc.links('''
+#include <stddef.h>
+#include <stdint.h>
+int LLVMFuzzerTestOneInput(const uint8_t *d, size_t s);
+int LLVMFuzzerTestOneInput(const uint8_t *d, size_t s) { (void)d; (void)s; return 0; }
+''', args : '-fsanitize=fuzzer', name : 'libFuzzer runtime')
+    if probe_ok
       libfuzzer_enabled = true
       libfuzzer_c_args = ['-fsanitize=fuzzer-no-link']
       libfuzzer_link_args = ['-fsanitize=fuzzer']
-      message('libFuzzer runtime: OK (clang) — fuzz executables link the engine')
-    else
-      message('libFuzzer runtime unavailable (' + probe_ok.stderr().strip() + ') — standalone harnesses')
     endif
+  endif
+  if libfuzzer_enabled
+    message('libFuzzer runtime: OK — fuzz executables link the engine')
   else
-    message('clang not found — libFuzzer unavailable, standalone harnesses')
+    message('libFuzzer unavailable (needs clang with its fuzzer runtime) — standalone harnesses')
   endif
 endif
 

@@ -1,7 +1,7 @@
 /* test_record_replay.c — subtree display-list record/replay (ADR-0030). */
 
-#include "lens_test.h"
 #include "optics_test.h"
+#include "ui_test.h"
 #include <optics/gfx/canvas_cpu.h>
 #include <optics/ui.h>
 #include <stdio.h>

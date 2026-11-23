@@ -1,8 +1,8 @@
-# aperture — the application shell: lens running in an iris window.
+# app — the application shell: ui running in a native window.
 #
-# iris (window, events, frame cadence) depends on flux only; lens (headless UI
+# window (window, events, frame cadence) depends on gfx only; ui (headless UI
 # engine) depends on no windowing system. This is the one library that links
-# both, implementing iris's UI-host seam (<iris/host.h>) over a lens context.
+# both, implementing window's UI-host seam (<optics/window/host.h>) over a ui context.
 
 app_inc = include_directories('include')
 
@@ -29,7 +29,7 @@ pkg.generate(
   libraries   : app_lib,
   name        : 'optics-app',
   filebase    : 'optics-app',
-  description : 'Application shell binding the lens UI engine to an iris window',
+  description : 'Application shell binding the UI engine to a native window',
   version     : meson.project_version(),
   requires    : ['optics-window >= ' + meson.project_version(), 'optics-ui >= ' + meson.project_version()],
 )

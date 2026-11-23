@@ -10,14 +10,14 @@ static inline optics_gfx_rect rect_intersect(optics_gfx_rect a, optics_gfx_rect 
                              fmaxf(0, fminf(a.y + a.h, b.y + b.h) - y)};
 }
 
-/* ---- deep clone into lensi_alloc memory -------------------------------- */
+/* ---- deep clone into optics_ui__alloc memory -------------------------------- */
 
 static void free_snapshot(optics_ui *ui, optics_ui_ghost_node *g);
 
 static optics_ui_ghost_node *snapshot_node(optics_ui *ui, optics_ui_node *n) {
-    optics_ui_ghost_node *g = lensi_alloc(ui, sizeof *g);
+    optics_ui_ghost_node *g = optics_ui__alloc(ui, sizeof *g);
     if (!g) {
-        lensi_set_overflow(ui);
+        optics_ui__set_overflow(ui);
         return nullptr;
     }
     memset(g, 0, sizeof *g);
@@ -33,10 +33,10 @@ static optics_ui_ghost_node *snapshot_node(optics_ui *ui, optics_ui_node *n) {
     g->frame_clip = n->frame_clip;
 
     if (n->cmd_count) {
-        g->cmds = lensi_alloc(ui, (size_t)n->cmd_count * sizeof *g->cmds);
+        g->cmds = optics_ui__alloc(ui, (size_t)n->cmd_count * sizeof *g->cmds);
         if (!g->cmds) {
-            lensi_free(ui, g);
-            lensi_set_overflow(ui);
+            optics_ui__free(ui, g);
+            optics_ui__set_overflow(ui);
             return nullptr;
         }
         for (uint32_t i = 0; i < n->cmd_count; i++) {
@@ -47,14 +47,14 @@ static optics_ui_ghost_node *snapshot_node(optics_ui *ui, optics_ui_node *n) {
                 g->cmds[i].cmd.image = optics_gfx_image_retain(c->image);
             if (c->kind == OPTICS_UI_DRAW_TEXT && c->text) {
                 size_t len = strlen(c->text) + 1;
-                char *copy = lensi_alloc(ui, len);
+                char *copy = optics_ui__alloc(ui, len);
                 if (copy) {
                     memcpy(copy, c->text, len);
                     g->cmds[i].cmd.text = copy;
                 } else {
                     g->cmds[i].cmd.text = nullptr;
                     free_snapshot(ui, g);
-                    lensi_set_overflow(ui);
+                    optics_ui__set_overflow(ui);
                     return nullptr;
                 }
             }
@@ -71,7 +71,7 @@ static optics_ui_ghost_node *snapshot_node(optics_ui *ui, optics_ui_node *n) {
         optics_ui_ghost_node *cg = snapshot_node(ui, c);
         if (!cg) {
             free_snapshot(ui, g);
-            lensi_set_overflow(ui);
+            optics_ui__set_overflow(ui);
             return nullptr;
         }
         *next = cg;
@@ -91,11 +91,11 @@ static void free_snapshot(optics_ui *ui, optics_ui_ghost_node *g) {
                     optics_gfx_image_release(g->cmds[i].cmd.image);
                 const char *t = g->cmds[i].cmd.text;
                 if (g->cmds[i].cmd.kind == OPTICS_UI_DRAW_TEXT && t)
-                    lensi_free(ui, (void *)t);
+                    optics_ui__free(ui, (void *)t);
             }
-            lensi_free(ui, g->cmds);
+            optics_ui__free(ui, g->cmds);
         }
-        lensi_free(ui, g);
+        optics_ui__free(ui, g);
         g = next;
     }
 }
@@ -107,9 +107,9 @@ static uint32_t snapshot_cmd_count(const optics_ui_node *n) {
     return count;
 }
 
-/* ---- capture (lens_end, after mark_dirty) ----------------------------- */
+/* ---- capture (optics_ui_end, after mark_dirty) ----------------------------- */
 
-void lensi_ghost_capture(optics_ui *ui) {
+void optics_ui__ghost_capture(optics_ui *ui) {
     if (!ui)
         return;
     optics_ui_store *s = &ui->store;
@@ -149,22 +149,22 @@ void lensi_ghost_capture(optics_ui *ui) {
                 break;
             }
         }
-        if (enclosed || ui->ghost_count >= LENSI_GHOST_MAX)
+        if (enclosed || ui->ghost_count >= OPTICS_UI_GHOST_MAX)
             continue;
         optics_gfx_rect rect =
             (n->final_rect.w > 0.0f && n->final_rect.h > 0.0f) ? n->final_rect : n->prev_rect;
         if (rect.w <= 0.0f || rect.h <= 0.0f || snapshot_cmd_count(n) == 0u)
             continue;
 
-        optics_ui_ghost *gh = lensi_alloc(ui, sizeof *gh);
+        optics_ui_ghost *gh = optics_ui__alloc(ui, sizeof *gh);
         if (!gh) {
-            lensi_set_overflow(ui);
+            optics_ui__set_overflow(ui);
             continue;
         }
         memset(gh, 0, sizeof *gh);
         gh->root_id = n->id;
         gh->band = n->band;
-        gh->frames_left = LENSI_GHOST_MAX_FRAMES;
+        gh->frames_left = OPTICS_UI_GHOST_MAX_FRAMES;
         gh->alpha = 1.0f;
         for (uint32_t p = 0; p < ui->ghost_pin_count; p++) {
             if (ui->ghost_pins[p] == n->id) {
@@ -174,7 +174,7 @@ void lensi_ghost_capture(optics_ui *ui) {
         }
         gh->root = snapshot_node(ui, n);
         if (!gh->root) {
-            lensi_free(ui, gh);
+            optics_ui__free(ui, gh);
             continue;
         }
         gh->refreshed_this_frame = true;
@@ -184,7 +184,7 @@ void lensi_ghost_capture(optics_ui *ui) {
 
 /* ---- lifecycle (frame boundaries) --------------------------------------- */
 
-void lensi_ghost_begin_frame(optics_ui *ui) {
+void optics_ui__ghost_begin_frame(optics_ui *ui) {
     if (!ui)
         return;
     for (uint32_t i = 0; i < ui->ghost_count; i++)
@@ -192,29 +192,29 @@ void lensi_ghost_begin_frame(optics_ui *ui) {
     ui->ghost_pin_count = 0;
 }
 
-void lensi_ghost_end_frame(optics_ui *ui) {
+void optics_ui__ghost_end_frame(optics_ui *ui) {
     if (!ui)
         return;
     uint32_t w = 0;
     for (uint32_t i = 0; i < ui->ghost_count; i++) {
         optics_ui_ghost *g = ui->ghosts[i];
         if (g->refreshed_this_frame) {
-            g->frames_left = LENSI_GHOST_MAX_FRAMES;
+            g->frames_left = OPTICS_UI_GHOST_MAX_FRAMES;
             ui->ghosts[w++] = g;
         } else if (g->frames_left > 1) {
             g->frames_left--;
             ui->ghosts[w++] = g;
         } else {
             free_snapshot(ui, g->root);
-            lensi_free(ui, g);
+            optics_ui__free(ui, g);
         }
     }
     ui->ghost_count = w;
 }
 
-/* ---- public API (lens_set_ghost) ---------------------------------------- */
+/* ---- public API (optics_ui_set_ghost) ---------------------------------------- */
 
-void lensi_ghost_pin(optics_ui *ui, optics_ui_id id, float alpha) {
+void optics_ui__ghost_pin(optics_ui *ui, optics_ui_id id, float alpha) {
     if (!ui || id == 0)
         return;
     alpha = alpha < 0.0f ? 0.0f : (alpha > 1.0f ? 1.0f : alpha);
@@ -233,7 +233,7 @@ void lensi_ghost_pin(optics_ui *ui, optics_ui_id id, float alpha) {
             return;
         }
     }
-    if (ui->ghost_pin_count < LENSI_GHOST_MAX) {
+    if (ui->ghost_pin_count < OPTICS_UI_GHOST_MAX) {
         ui->ghost_pins[ui->ghost_pin_count] = id;
         ui->ghost_pin_alphas[ui->ghost_pin_count] = alpha;
         ui->ghost_pin_count++;
@@ -252,7 +252,7 @@ bool ghost_wants(const optics_ui *ui, optics_ui_id id) {
     return false;
 }
 
-bool lensi_ghost_active(const optics_ui *ui) {
+bool optics_ui__ghost_active(const optics_ui *ui) {
     return ui && ui->ghost_count > 0;
 }
 
@@ -269,9 +269,9 @@ static optics_gfx_result compile_ghost_node(optics_ui *ui, optics_gfx_encoder *e
     if (clip.w <= 0.0f || clip.h <= 0.0f)
         return OPTICS_GFX_OK;
     float effective_alpha = ghost_alpha * g->opacity;
-    optics_gfx_result result =
-        lensi_compile_commands(ui, encoder, box, clip, g->cmd_count ? &g->cmds[0].cmd : nullptr,
-                               g->cmd_count, effective_alpha);
+    optics_gfx_result result = optics_ui__compile_commands(ui, encoder, box, clip,
+                                                           g->cmd_count ? &g->cmds[0].cmd : nullptr,
+                                                           g->cmd_count, effective_alpha);
     if (result != OPTICS_GFX_OK)
         return result;
     bool pushed = g->is_scroll && g->first_child;
@@ -295,14 +295,14 @@ static optics_gfx_result compile_ghost_node(optics_ui *ui, optics_gfx_encoder *e
     return OPTICS_GFX_OK;
 }
 
-optics_gfx_result lensi_ghost_compile(optics_ui *ui, optics_gfx_encoder *encoder) {
+optics_gfx_result optics_ui__ghost_compile(optics_ui *ui, optics_gfx_encoder *encoder) {
     optics_gfx_rect no_clip = {-1e6f, -1e6f, 2e6f, 2e6f};
     for (optics_ui_band b = OPTICS_UI_BAND_BASE; b < OPTICS_UI_BAND_COUNT; b++) {
         for (uint32_t i = 0; i < ui->ghost_count; i++) {
             optics_ui_ghost *gh = ui->ghosts[i];
             if (gh->band != b || !gh->root || gh->alpha <= 0.0f)
                 continue;
-            optics_ui_node *live = lensi_store_find(ui, gh->root_id);
+            optics_ui_node *live = optics_ui__store_find(ui, gh->root_id);
             if (live && live->phase != OPTICS_UI_NODE_LEAVING)
                 continue;
             optics_gfx_rect clip = gh->root->has_place_bounds ? gh->root->place_bounds : no_clip;
@@ -317,12 +317,12 @@ optics_gfx_result lensi_ghost_compile(optics_ui *ui, optics_gfx_encoder *encoder
     return OPTICS_GFX_OK;
 }
 
-void lensi_ghost_destroy(optics_ui *ui) {
+void optics_ui__ghost_destroy(optics_ui *ui) {
     if (!ui)
         return;
     for (uint32_t i = 0; i < ui->ghost_count; i++) {
         free_snapshot(ui, ui->ghosts[i]->root);
-        lensi_free(ui, ui->ghosts[i]);
+        optics_ui__free(ui, ui->ghosts[i]);
     }
     ui->ghost_count = 0;
 }

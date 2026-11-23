@@ -2,7 +2,7 @@
  * Curve-flattening tolerance regression.
  *
  * The flattener subdivides against a screen-pixel tolerance derived from the
- * caller-supplied `pixel_scale`, now via the flux_curve kernel (ADR-0115):
+ * caller-supplied `pixel_scale`, now via the curve kernel (ADR-0115):
  * each cubic is reduced to line/quadratic pieces with a bounded deviation and
  * each piece is sampled at its Wang segment count. The test compiles
  * `curve_flatten.c` into the binary so we can call `flatten_path_to_contours`
@@ -12,7 +12,7 @@
 #include "optics_test.h"
 #include <optics/gfx.h>
 
-/* `curve_flatten.c` (and the kernel it calls) use FLUX_FAIL on scratch
+/* `curve_flatten.c` (and the kernel it calls) use OPTICS_GFX_FAIL on scratch
  * exhaustion; not triggered by these tests, but the symbol must still
  * resolve. */
 void optics_gfx_set_last_error(optics_gfx_result code, const char *function, const char *file,
@@ -153,8 +153,8 @@ int main(void) {
     }
 
     /* --- dynamic growth beyond 2048 points and 64 contours ---------------
-     * Previously FLUX_CANVAS_PATH_SCRATCH_CAP (2048) and
-     * FLUX_CANVAS_MAX_CONTOURS (64) silently dropped trailing geometry.
+     * Previously OPTICS_GFX_CANVAS_PATH_SCRATCH_CAP (2048) and
+     * OPTICS_GFX_CANVAS_MAX_CONTOURS (64) silently dropped trailing geometry.
      * Dynamic flattening preserves every point and contour. */
     optics_gfx_arena_reset(&arena);
     {

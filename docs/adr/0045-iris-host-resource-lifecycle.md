@@ -3,6 +3,9 @@ id: ADR-0045
 title: "Iris host resource lifecycle callbacks"
 status: accepted
 date: 2026-07-26
+scope: window application entry point
+superseded_by: null
+negative_knowledge: true
 ---
 
 # ADR-0045: Iris host resource lifecycle callbacks

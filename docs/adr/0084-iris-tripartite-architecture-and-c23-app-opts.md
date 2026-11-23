@@ -3,6 +3,9 @@ id: ADR-0084
 title: "Iris tripartite architecture and C23 app-opts descriptor"
 status: accepted
 date: 2026-08-26
+scope: window (OS platform shell & application runtime), window-rs (Rust bindings)
+superseded_by: null
+negative_knowledge: false
 ---
 
 # ADR-0084: Iris tripartite architecture and C23 app-opts descriptor

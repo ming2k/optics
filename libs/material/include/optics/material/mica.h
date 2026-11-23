@@ -1,5 +1,5 @@
 /*
- * prism/mica.h — mica foundation material library component.
+ * material/mica.h — mica foundation material library component.
  *
  * Mica (Fluent Design inspired) is an opaque/translucent foundation material
  * that incorporates the desktop wallpaper and theme color to paint long-lived
@@ -64,7 +64,7 @@ typedef struct optics_material_mica_group {
 
 /* Dispatch-wide caller policy. */
 typedef struct optics_material_mica_desc {
-    optics_material_struct_type type; /* PRISM_TYPE_MICA_DESC */
+    optics_material_struct_type type; /* OPTICS_MATERIAL_TYPE_MICA_DESC */
     const void *next;
     optics_gfx_image *wallpaper; /* Clean wallpaper image (optional if blurred_wallpaper set) */
     optics_gfx_image
@@ -105,9 +105,9 @@ typedef struct optics_material_mica_desc {
 
 typedef struct optics_material_mica_filter optics_material_mica_filter;
 
-/* Options descriptor for prism_mica_filter_warmup (ADR-0141). */
+/* Options descriptor for optics_material_mica_filter_warmup (ADR-0141). */
 typedef struct optics_material_mica_warmup_opts {
-    optics_gfx_format format; /* Target image format (default 0 -> FLUX_FORMAT_RGBA8_UNORM) */
+    optics_gfx_format format; /* Target image format (default 0 -> OPTICS_GFX_FORMAT_RGBA8_UNORM) */
 } optics_material_mica_warmup_opts;
 
 OPTICS_MATERIAL_NODISCARD OPTICS_MATERIAL_API optics_gfx_result
@@ -135,4 +135,4 @@ OPTICS_MATERIAL_NODISCARD OPTICS_MATERIAL_API optics_gfx_result optics_material_
 }
 #endif
 
-#endif /* PRISM_MICA_H */
+#endif /* OPTICS_MATERIAL_MICA_H */

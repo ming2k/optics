@@ -1,7 +1,7 @@
 /* theme_watch_stub.c — fallback when libsystemd is not available.
  *
  * Reports the live-watching feature as unavailable. Callers fall back to
- * the startup-only iris_query_system_color_scheme().
+ * the startup-only optics_window_query_system_color_scheme().
  */
 
 #include "theme_watch_internal.h"
@@ -27,4 +27,4 @@ int optics_window_theme__watch_backend(optics_window_color_scheme_changed_fn cb,
 
 void optics_window_theme__unwatch_backend(void) { /* no-op */ }
 
-#endif /* !IRIS_HAVE_PORTAL_WATCH */
+#endif /* !OPTICS_WINDOW_HAVE_PORTAL_WATCH */

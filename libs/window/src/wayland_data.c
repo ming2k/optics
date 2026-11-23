@@ -2,12 +2,12 @@
  * selection, asynchronous offer reads and drag-and-drop.
  *
  * Everything here answers to the seat owned by app_wayland.c and delivers its
- * results to the UI host on the iris main thread. */
+ * results to the UI host on the window main thread. */
 
 #include "wayland_internal.h"
 
 /* ------------------------------------------------------------------ */
-/*  Clipboard (wl_data_device) — bridges lens_clipboard to the selection */
+/*  Clipboard (wl_data_device) — bridges optics_ui_clipboard to the selection */
 /* ------------------------------------------------------------------ */
 
 /* Offers announce their MIME types via offer events before the
@@ -101,7 +101,7 @@ static const char *offer_pick_mime(const struct wp_offer_mimes *m) {
  * Runs on the async reader thread for every path (paste, primary paste,
  * drop) — never on the UI thread (cross-platform.md invariant 4). */
 #define WP_DND_READ_TIMEOUT_MS 2000
-#define WP_DROP_MAX (1u << 20) /* 1 MiB — matches lens's paste staging cap */
+#define WP_DROP_MAX (1u << 20) /* 1 MiB — matches ui's paste staging cap */
 
 static char *read_offer_fd(int fd, int timeout_ms, size_t *out_len) {
     *out_len = 0;
@@ -131,7 +131,7 @@ static char *read_offer_fd(int fd, int timeout_ms, size_t *out_len) {
             break;
         }
         if (total + (size_t)r > WP_DROP_MAX) {
-            fprintf(stderr, "iris: drop/paste payload exceeds %u bytes; truncated\n",
+            fprintf(stderr, "window: drop/paste payload exceeds %u bytes; truncated\n",
                     (unsigned)WP_DROP_MAX);
             size_t room = WP_DROP_MAX - total;
             if (room) {
@@ -167,7 +167,7 @@ static char *read_offer_fd(int fd, int timeout_ms, size_t *out_len) {
  * selection or drop payload — a stuck or malicious source must not hang
  * the app. Every read (clipboard paste, middle-click primary paste, DND
  * drop) runs on a detached helper thread with a hard deadline, and
- * completion is posted through iris_post_to_main_thread — which also makes
+ * completion is posted through optics_window_post_to_main_thread — which also makes
  * the self-paste case correct: the main thread keeps dispatching, so our
  * own data source can answer. */
 #define WP_PASTE_TIMEOUT_MS 5000
@@ -187,7 +187,7 @@ typedef struct wp_paste_result {
     struct wl_data_offer *offer;
 } wp_paste_result;
 
-/* Runs on the iris main thread via iris_post_to_main_thread. pl->ui is
+/* Runs on the window main thread via optics_window_post_to_main_thread. pl->ui is
  * checked (not just pl): teardown clears it before draining the queue. */
 static void paste_deliver(void *user) {
     wp_paste_result *res = user;
@@ -692,7 +692,7 @@ void wp_maybe_create_primsel_device(wp_platform *pl) {
 }
 
 /* Middle-click paste: request the primary selection's text and deliver it
- * through the same async paste channel as the clipboard (lens_paste routes
+ * through the same async paste channel as the clipboard (optics_ui_paste routes
  * it to the focused text widget, so a middle click anywhere pastes into
  * whatever holds focus — the standard desktop behaviour). */
 void wp_primsel_paste(wp_platform *pl) {
@@ -719,7 +719,7 @@ void wp_primsel_paste(wp_platform *pl) {
         optics_window_fd_close_record(fds[0], "fd_pipe_read");
 }
 
-/* lens_clipboard.set_text — advertise `utf8` as the system selection, and
+/* optics_ui_clipboard.set_text — advertise `utf8` as the system selection, and
  * mirror it onto the primary selection (the X11-style middle-click
  * clipboard) so explicit copies are also middle-pasteable. */
 void wp_clip_set_text(const char *utf8, size_t len, void *user) {
@@ -765,11 +765,11 @@ void wp_clip_set_text(const char *utf8, size_t len, void *user) {
     }
 }
 
-/* lens_clipboard.request_text — the lens contract is asynchronous
+/* optics_ui_clipboard.request_text — the ui contract is asynchronous
  * (cross-platform.md invariant 4): the answer MUST arrive later via
- * lens_paste, never synchronously inside the request. The pipe is drained
+ * optics_ui_paste, never synchronously inside the request. The pipe is drained
  * on a detached helper thread with a hard deadline (start_offer_read), and
- * completion is posted through iris_post_to_main_thread — which also makes
+ * completion is posted through optics_window_post_to_main_thread — which also makes
  * the self-paste case correct: the main thread keeps dispatching, so our
  * own data source can answer. */
 void wp_clip_request_text(void *user) {

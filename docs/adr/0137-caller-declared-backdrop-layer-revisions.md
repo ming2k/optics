@@ -3,8 +3,8 @@ id: ADR-0137
 title: "Caller-declared content revisions for prism backdrop-layer output caching"
 status: accepted
 date: 2026-11-02
+scope: libs/material, architecture
 superseded_by: null
-scope: libs/prism, architecture
 negative_knowledge: true
 ---
 

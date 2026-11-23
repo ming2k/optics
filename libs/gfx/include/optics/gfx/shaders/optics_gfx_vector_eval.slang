@@ -1,10 +1,10 @@
 /*
- * flux_vector_eval.slang — the single Slang definition for analytic fragment
+ * optics_gfx_vector_eval.slang — the single Slang definition for analytic fragment
  * vector evaluation (ADR-0116, ADR-0117, ADR-0121).
  *
- * <flux/curve.h> and <flux/canvas_tile.h> provide host-side line segment
- * representations; tests/flux/integration/test_scene_vector.c pins the 3D
- * evaluation and tests/flux/unit/test_canvas_coverage.c pins the 2D evaluation.
+ * <optics/gfx/curve.h> and <optics/gfx/canvas_tile.h> provide host-side line segment
+ * representations; tests/gfx/integration/test_scene_vector.c pins the 3D
+ * evaluation and tests/gfx/unit/test_canvas_coverage.c pins the 2D evaluation.
  */
 
 #ifndef OPTICS_GFX_VECTOR_EVAL_SLANG
@@ -154,4 +154,4 @@ float optics_gfx_vector_area_coverage(float area, uint32_t fill_rule)
     return clamp(c, 0.0f, 1.0f);
 }
 
-#endif /* FLUX_VECTOR_EVAL_SLANG */
+#endif /* OPTICS_GFX_VECTOR_EVAL_SLANG */

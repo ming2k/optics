@@ -3,13 +3,13 @@
  * Connects to the AT-SPI bus (discovered via org.a11y.Bus on the session
  * bus), registers the application as org.a11y.atspi.Application at
  * /org/a11y/atspi/accessible/root, and exposes a fallback vtable covering
- * /org/a11y/atspi/accessible/<node id> for every widget that lens's
- * iris_ui_host.a11y_walk reports.
+ * /org/a11y/atspi/accessible/<node id> for every widget that ui's
+ * optics_window_ui_host.a11y_walk reports.
  *
- * Reconciliation (iris_a11y_update):
- *   - Walk lens semantics, deep-copying names/values into bridge-owned
- *     storage (the lens pointers are per-frame arena memory).
- *   - Diff against last frame (iris_a11y__diff, a11y_util.c): emit
+ * Reconciliation (optics_window_a11y_update):
+ *   - Walk ui semantics, deep-copying names/values into bridge-owned
+ *     storage (the ui pointers are per-frame arena memory).
+ *   - Diff against last frame (optics_window_a11y__diff, a11y_util.c): emit
  *     ChildrenChanged for added/removed ids, PropertyChange for
  *     name/role/value changes, StateChanged for checked/expanded/selected
  *     flips; focus is pointer-tracked and emits StateChanged:focused.
@@ -25,14 +25,14 @@
  * What AT-SPI clients get today (e.g. orca):
  *   - A read-only widget tree with Name, Role, RoleName, State, Parent,
  *     ChildCount, ChildAtIndex, plus Action (DoAction activates through
- *     iris_ui_host.a11y_activate — ADR-0062), Text, and Value. Enough for orca to
+ *     optics_window_ui_host.a11y_activate — ADR-0062), Text, and Value. Enough for orca to
  *     read the UI aloud, announce focus/tree/name/value changes, echo
  *     typed text (TextChanged deltas), and operate controls.
  *
  * What they can't do yet: set values/selections programmatically, or hear
  * live-region announcements. Those land in subsequent revisions.
  *
- * Build gate: IRIS_HAVE_ATSPI (defined when libsystemd is available).
+ * Build gate: OPTICS_WINDOW_HAVE_ATSPI (defined when libsystemd is available).
  */
 
 #include "a11y_internal.h"
@@ -49,11 +49,11 @@
 #include <systemd/sd-bus.h>
 
 /* ------------------------------------------------------------------ */
-/*  AT-SPI role/state constants and the lens→AT-SPI mapping live in    */
+/*  AT-SPI role/state constants and the ui→AT-SPI mapping live in    */
 /*  a11y_util.c (pure, unit-tested against at-spi2-core's              */
-/*  atspi-constants.h): iris_a11y__map_role / iris_a11y__role_name /   */
-/*  iris_a11y__state_bits and the IRIS_ATSPI_ROLE_* /                  */
-/*  IRIS_ATSPI_STATE_* enums come from there.                          */
+/*  atspi-constants.h): optics_window_a11y__map_role / optics_window_a11y__role_name /   */
+/*  optics_window_a11y__state_bits and the OPTICS_WINDOW_ATSPI_ROLE_* /                  */
+/*  OPTICS_WINDOW_ATSPI_STATE_* enums come from there.                          */
 /* ------------------------------------------------------------------ */
 
 /* ------------------------------------------------------------------ */
@@ -75,7 +75,7 @@ typedef struct {
      * focused-off event. */
     optics_window_node_id focused;
 
-    /* Set by the walk when the tree exceeds IRIS_A11Y_MAX_NODES. */
+    /* Set by the walk when the tree exceeds OPTICS_WINDOW_A11Y_MAX_NODES. */
     bool truncated;
 } a11y_state;
 
@@ -140,12 +140,12 @@ static int parse_path(const char *path, optics_window_node_id *out) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Action.DoAction → iris_ui_host.a11y_activate (ADR-0062)                    */
+/*  Action.DoAction → optics_window_ui_host.a11y_activate (ADR-0062)                    */
 /* ------------------------------------------------------------------ */
 
-/* The live lens context, captured each iris_a11y_update. DoAction handlers
+/* The live ui context, captured each optics_window_a11y_update. DoAction handlers
  * run on the main thread inside the bus pump, so calling straight into
- * lens is safe; the activation lands next frame like any input. Cleared on
+ * ui is safe; the activation lands next frame like any input. Cleared on
  * shutdown. */
 static const optics_window_ui_host *g_ui_host = nullptr;
 
@@ -164,7 +164,7 @@ static int m_get_name(sd_bus_message *m, void *u, sd_bus_error *e) {
     if (parse_path(path, &id) != 0)
         return sd_bus_reply_method_return(m, "s", "");
     if (id == 0)
-        return sd_bus_reply_method_return(m, "s", "iris application");
+        return sd_bus_reply_method_return(m, "s", "window application");
     optics_window_a11y__node *n = find_node(id);
     return sd_bus_reply_method_return(m, "s", n ? node_string(n) : "");
 }
@@ -205,7 +205,7 @@ static int m_get_role_name(sd_bus_message *m, void *u, sd_bus_error *e) {
 }
 
 static int m_get_description(sd_bus_message *m, void *u, sd_bus_error *e) {
-    /* Description isn't exposed by lens semantics yet; return empty. */
+    /* Description isn't exposed by ui semantics yet; return empty. */
     (void)u;
     (void)e;
     return sd_bus_reply_method_return(m, "s", "");
@@ -276,7 +276,7 @@ static int m_get_state(sd_bus_message *m, void *u, sd_bus_error *e) {
     /* AT-SPI state is two uint32 bitfields returned as an ARRAY of two
      * uint32 ("au" — the vtable declares it and sd-bus validates outgoing
      * replies against the declaration; a "uu" reply is rejected). Built
-     * from lens's IRIS_A11Y_* flags by the shared mapper (a11y_util.c). */
+     * from ui's OPTICS_WINDOW_A11Y_* flags by the shared mapper (a11y_util.c). */
     uint32_t lo = 0, hi = 0;
     const char *path = sd_bus_message_get_path(m);
     optics_window_node_id id = 0;
@@ -418,7 +418,7 @@ static int m_get_interfaces(sd_bus_message *m, void *u, sd_bus_error *e) {
 static int m_get_toolkit_name(sd_bus_message *m, void *u, sd_bus_error *e) {
     (void)u;
     (void)e;
-    return sd_bus_reply_method_return(m, "s", "iris");
+    return sd_bus_reply_method_return(m, "s", "window");
 }
 static int m_get_version(sd_bus_message *m, void *u, sd_bus_error *e) {
     (void)u;
@@ -449,7 +449,7 @@ static int p_get_app_id(sd_bus *bus, const char *path, const char *interface, co
     (void)property;
     (void)u;
     (void)e;
-    return sd_bus_message_append(reply, "s", "iris");
+    return sd_bus_message_append(reply, "s", "window");
 }
 
 /* ------------------------------------------------------------------ */
@@ -488,7 +488,7 @@ static const sd_bus_vtable g_accessible_vtable[] = {
  * the registry, which forwards signals from this interface). One fixed
  * "siiva{sv}" shape for every member: detail name, detail1, detail2,
  * variant payload, properties dict. Declared here so introspection shows
- * the events each object can emit; emission is in iris_a11y_update. */
+ * the events each object can emit; emission is in optics_window_a11y_update. */
 static const sd_bus_vtable g_event_object_vtable[] = {
     SD_BUS_VTABLE_START(0),
     SD_BUS_SIGNAL("ChildrenChanged", "siiva{sv}", 0),
@@ -543,7 +543,7 @@ static int action_keybinding(sd_bus_message *m, void *u, sd_bus_error *e) {
     (void)e;
     int32_t idx = 0;
     (void)sd_bus_message_read(m, "i", &idx);
-    /* lens does not surface keybindings per widget; report none. */
+    /* ui does not surface keybindings per widget; report none. */
     return sd_bus_reply_method_return(m, "s", "");
 }
 
@@ -595,7 +595,7 @@ static int action_do(sd_bus_message *m, void *u, sd_bus_error *e) {
     int ok = 0;
     if (n && idx == 0 && optics_window_a11y__supports_action(n->role) && g_ui_host &&
         g_ui_host->a11y_activate) {
-        /* ADR-0062: hand the activation to lens's interaction path; it
+        /* ADR-0062: hand the activation to ui's interaction path; it
          * reports clicked for the node next frame (disabled is respected,
          * pointer occlusion is not). No pointer synthesis. */
         g_ui_host->a11y_activate(g_ui_host->user, id);
@@ -690,7 +690,7 @@ static int text_get_all(sd_bus_message *m, void *u, sd_bus_error *e) {
 static int text_caret(sd_bus_message *m, void *u, sd_bus_error *e) {
     (void)u;
     (void)e;
-    /* lens exposes a caret rect (for IME) but not a byte/char offset; report
+    /* ui exposes a caret rect (for IME) but not a byte/char offset; report
      * the caret at the end so orca reads the full contents. */
     return sd_bus_reply_method_return(
         m, "i", (int32_t)optics_window_a11y__char_count_utf8(text_value_of(node_on_path(m))));
@@ -701,7 +701,7 @@ static int text_set_caret(sd_bus_message *m, void *u, sd_bus_error *e) {
     (void)e;
     int32_t off = 0;
     (void)sd_bus_message_read(m, "i", &off);
-    /* Read-only from the AT side: lens has no set-caret-by-offset API. */
+    /* Read-only from the AT side: ui has no set-caret-by-offset API. */
     return sd_bus_reply_method_return(m, "b", 0);
 }
 
@@ -722,7 +722,7 @@ static int text_get_selection(sd_bus_message *m, void *u, sd_bus_error *e) {
 static int text_no_op_b(sd_bus_message *m, void *u, sd_bus_error *e) {
     (void)u;
     (void)e;
-    /* AddSelection / RemoveSelection / SetSelection — lens exposes no
+    /* AddSelection / RemoveSelection / SetSelection — ui exposes no
      * selection API; report unsupported. */
     return sd_bus_reply_method_return(m, "b", 0);
 }
@@ -767,7 +767,7 @@ static int value_get_current(sd_bus_message *m, void *u, sd_bus_error *e) {
 static int value_get_zero(sd_bus_message *m, void *u, sd_bus_error *e) {
     (void)u;
     (void)e;
-    /* lens does not expose slider min / max / step in semantics. */
+    /* ui does not expose slider min / max / step in semantics. */
     return sd_bus_reply_method_return(m, "d", 0.0);
 }
 
@@ -776,7 +776,7 @@ static int value_set_current(sd_bus_message *m, void *u, sd_bus_error *e) {
     (void)e;
     double v = 0.0;
     (void)sd_bus_message_read(m, "d", &v);
-    /* lens sliders are input-driven; no set-value seam yet. */
+    /* ui sliders are input-driven; no set-value seam yet. */
     return sd_bus_reply_method_return(m, "");
 }
 
@@ -1028,7 +1028,7 @@ OPTICS_WINDOW_API int optics_window_a11y_init(void) {
                                      "org.a11y.atspi.Value", g_value_vtable, nullptr, nullptr);
 
     /* 7. Event.Object on the root and the fallback prefix: declares the
-     *    signals iris_a11y_update emits (ChildrenChanged / PropertyChange /
+     *    signals optics_window_a11y_update emits (ChildrenChanged / PropertyChange /
      *    StateChanged, "siiva{sv}") so introspection advertises them. */
     (void)sd_bus_add_object_vtable(g_a11y_bus, nullptr, "/org/a11y/atspi/accessible/root",
                                    "org.a11y.atspi.Event.Object", g_event_object_vtable, nullptr);
@@ -1062,7 +1062,7 @@ OPTICS_WINDOW_API int optics_window_a11y_init(void) {
 
 /* Event-loop integration point (src/a11y_internal.h): the backend polls
  * this fd and pumps on signal, so AT-SPI method calls are answered on the
- * iris main thread, serialized with iris_a11y_update(). Not exported. */
+ * window main thread, serialized with optics_window_a11y_update(). Not exported. */
 int optics_window_a11y__fd(void) {
     if (!g_a11y_bus)
         return -1;
@@ -1111,7 +1111,7 @@ static void visit_fn(const optics_window_semantics *s, optics_gfx_rect bounds,
         g_state.truncated = true;
         return;
     }
-    /* Deep copy: s->name / s->value point into lens's per-frame arena and
+    /* Deep copy: s->name / s->value point into ui's per-frame arena and
      * dangle past the next UI frame; the snapshot must own its strings
      * so AT-SPI method handlers (which run whenever the bus is pumped)
      * never read reclaimed arena memory. */
@@ -1258,9 +1258,9 @@ OPTICS_WINDOW_API int optics_window_a11y_update(const optics_window_ui_host *ui)
         static bool warned = false;
         if (!warned) {
             fprintf(stderr,
-                    "iris a11y: semantic tree exceeds %d nodes; the accessibility "
+                    "window a11y: semantic tree exceeds %d nodes; the accessibility "
                     "view is silently truncated past that (fix the host UI or raise "
-                    "IRIS_A11Y_MAX_NODES)\n",
+                    "OPTICS_WINDOW_A11Y_MAX_NODES)\n",
                     OPTICS_WINDOW_A11Y_MAX_NODES);
             warned = true;
         }
@@ -1322,4 +1322,4 @@ OPTICS_WINDOW_API int optics_window_a11y_update(const optics_window_ui_host *ui)
     return 0;
 }
 
-#endif /* IRIS_HAVE_ATSPI */
+#endif /* OPTICS_WINDOW_HAVE_ATSPI */

@@ -3,7 +3,7 @@ id: ADR-0131
 title: "Bindless slots carry an occupancy bitmap: a double release is an error, not a silent alias"
 status: accepted
 date: 2026-11-02
-scope: [flux]
+scope: [gfx]
 superseded_by: null
 negative_knowledge: true
 ---

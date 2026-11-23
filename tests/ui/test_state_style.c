@@ -3,8 +3,8 @@
  */
 
 #include "../../libs/ui/src/internal.h"
-#include "lens_test.h"
 #include "optics_test.h"
+#include "ui_test.h"
 #include <optics/ui.h>
 
 static const optics_ui_input IN0 = {.display_size = {400, 200}, .dt_seconds = 0.016f};
@@ -75,7 +75,7 @@ static void test_focus_visible_is_keyboard_only(void) {
     optics_ui_button(ui, &(optics_ui_button_opts){.label = "B"});
     optics_ui_test_end(ui);
 
-    /* Frame 2: Tab moves focus to A during lens_end. */
+    /* Frame 2: Tab moves focus to A during optics_ui_end. */
     optics_ui_input in = IN0;
     in.keys[0] = (optics_ui_key_event){.key = OPTICS_UI_KEY_TAB, .pressed = true, .repeat = false};
     in.key_count = 1;
@@ -138,9 +138,9 @@ static void test_resolver_null_instance_is_verbatim_theme(void) {
     OT_EXPECT(optics_ui_create(&(optics_ui_desc){}, &ui) == OPTICS_GFX_OK);
     optics_ui_theme t = optics_ui_theme_dark();
     optics_ui_style_resolved r =
-        lensi_style_resolve(ui, nullptr, &t,
-                            OPTICS_UI_STATE_HOVERED | OPTICS_UI_STATE_PRESSED |
-                                OPTICS_UI_STATE_FOCUSED | OPTICS_UI_STATE_DISABLED);
+        optics_ui__style_resolve(ui, nullptr, &t,
+                                 OPTICS_UI_STATE_HOVERED | OPTICS_UI_STATE_PRESSED |
+                                     OPTICS_UI_STATE_FOCUSED | OPTICS_UI_STATE_DISABLED);
     OT_EXPECT(r.bg == t.color_bg);
     OT_EXPECT(r.bg_hover == t.color_hover);
     OT_EXPECT(r.bg_pressed == t.color_active);
@@ -168,22 +168,24 @@ static void test_resolver_override_and_derivation(void) {
     inst.bg = red;
     inst.padding = 3.0f;
 
-    optics_ui_style_resolved r = lensi_style_resolve(ui, &inst, &t, OPTICS_UI_STATE_HOVERED);
+    optics_ui_style_resolved r = optics_ui__style_resolve(ui, &inst, &t, OPTICS_UI_STATE_HOVERED);
     OT_EXPECT(r.bg == red);
     OT_EXPECT(r.fg == t.color_fg);
     OT_EXPECT(r.accent == t.color_accent);
     OT_EXPECT_NEAR(r.padding, 3.0f, 0.0f);
     OT_EXPECT_NEAR(r.gap, t.gap, 0.0f);
-    OT_EXPECT(r.bg_hover == lensi_lerp_color(red, t.color_fg, LENSI_STYLE_HOVER_LIFT));
-    OT_EXPECT(r.bg_pressed == lensi_lerp_color(red, t.color_fg, LENSI_STYLE_PRESSED_DEPTH));
+    OT_EXPECT(r.bg_hover == optics_ui__lerp_color(red, t.color_fg, OPTICS_UI_STYLE_HOVER_LIFT));
+    OT_EXPECT(r.bg_pressed ==
+              optics_ui__lerp_color(red, t.color_fg, OPTICS_UI_STYLE_PRESSED_DEPTH));
     OT_EXPECT(r.bg_hover != t.color_hover);
 
     optics_gfx_color green = optics_gfx_color_rgba(0x20, 0xc0, 0x20, 0xff);
     inst.fields |= OPTICS_UI_STYLE_BG_HOVER;
     inst.bg_hover = green;
-    r = lensi_style_resolve(ui, &inst, &t, OPTICS_UI_STATE_HOVERED);
+    r = optics_ui__style_resolve(ui, &inst, &t, OPTICS_UI_STATE_HOVERED);
     OT_EXPECT(r.bg_hover == green);
-    OT_EXPECT(r.bg_pressed == lensi_lerp_color(red, t.color_fg, LENSI_STYLE_PRESSED_DEPTH));
+    OT_EXPECT(r.bg_pressed ==
+              optics_ui__lerp_color(red, t.color_fg, OPTICS_UI_STYLE_PRESSED_DEPTH));
 
     optics_ui_release(ui);
 }
@@ -198,21 +200,22 @@ static void test_resolver_disabled_dims_last(void) {
     inst.fields = OPTICS_UI_STYLE_BG;
     inst.bg = red;
 
-    optics_ui_style_resolved en = lensi_style_resolve(ui, &inst, &t, 0);
-    optics_ui_style_resolved dis = lensi_style_resolve(
+    optics_ui_style_resolved en = optics_ui__style_resolve(ui, &inst, &t, 0);
+    optics_ui_style_resolved dis = optics_ui__style_resolve(
         ui, &inst, &t,
         OPTICS_UI_STATE_DISABLED | OPTICS_UI_STATE_HOVERED | OPTICS_UI_STATE_PRESSED);
 
-    OT_EXPECT(dis.bg == lensi_lerp_color(en.bg, t.color_disabled, LENSI_STYLE_DISABLED_DIM));
+    OT_EXPECT(dis.bg ==
+              optics_ui__lerp_color(en.bg, t.color_disabled, OPTICS_UI_STYLE_DISABLED_DIM));
     OT_EXPECT(dis.bg_hover ==
-              lensi_lerp_color(en.bg_hover, t.color_disabled, LENSI_STYLE_DISABLED_DIM));
+              optics_ui__lerp_color(en.bg_hover, t.color_disabled, OPTICS_UI_STYLE_DISABLED_DIM));
     OT_EXPECT(dis.bg_pressed ==
-              lensi_lerp_color(en.bg_pressed, t.color_disabled, LENSI_STYLE_DISABLED_DIM));
+              optics_ui__lerp_color(en.bg_pressed, t.color_disabled, OPTICS_UI_STYLE_DISABLED_DIM));
     OT_EXPECT(dis.fg == t.color_fg);
     OT_EXPECT(dis.accent == t.color_accent);
 
-    optics_ui_style_resolved a = lensi_style_resolve(ui, &inst, &t, OPTICS_UI_STATE_HOVERED);
-    optics_ui_style_resolved b = lensi_style_resolve(ui, &inst, &t, OPTICS_UI_STATE_HOVERED);
+    optics_ui_style_resolved a = optics_ui__style_resolve(ui, &inst, &t, OPTICS_UI_STATE_HOVERED);
+    optics_ui_style_resolved b = optics_ui__style_resolve(ui, &inst, &t, OPTICS_UI_STATE_HOVERED);
     OT_EXPECT(memcmp(&a, &b, sizeof a) == 0);
     OT_EXPECT(inst.fields == OPTICS_UI_STYLE_BG);
     OT_EXPECT(inst.bg == red);

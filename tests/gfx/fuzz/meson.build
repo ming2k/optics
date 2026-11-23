@@ -20,7 +20,7 @@
 
 fs = import('fs')
 
-flux_fuzz_inc = include_directories('..')
+optics_gfx_fuzz_inc = include_directories('..')
 
 # Common harness shim providing a standalone main() that reads a file from
 # argv[1] (or stdin) and forwards it to LLVMFuzzerTestOneInput. When built
@@ -72,7 +72,7 @@ foreach h : fuzz_harnesses
   deps = h['deps']
   if libfuzzer_enabled
     exe = executable(h['name'], srcs,
-      include_directories : flux_fuzz_inc,
+      include_directories : optics_gfx_fuzz_inc,
       dependencies        : deps,
       c_args              : libfuzzer_c_args,
       link_args           : libfuzzer_link_args,
@@ -80,7 +80,7 @@ foreach h : fuzz_harnesses
     )
   else
     exe = executable(h['name'], srcs + fuzz_main_src,
-      include_directories : flux_fuzz_inc,
+      include_directories : optics_gfx_fuzz_inc,
       dependencies        : deps,
       install             : false,
     )

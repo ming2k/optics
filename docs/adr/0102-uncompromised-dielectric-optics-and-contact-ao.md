@@ -3,7 +3,7 @@ id: ADR-0102
 title: "Decoupled Dielectric Optics, Contact Ambient Occlusion, and Uncompromised Material Contrast"
 status: accepted
 date: 2026-09-18
-scope: libs/prism, libs/lens, examples/showcase
+scope: libs/material, libs/ui, examples/showcase
 superseded_by: null
 negative_knowledge: true
 ---

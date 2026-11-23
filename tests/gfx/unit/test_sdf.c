@@ -173,11 +173,11 @@ static float clampf_(float x, float lo, float hi) {
 
 /* The squircle field: a rounded rect whose corner arc blends a circular arc
  * (curvature 0) with an L4 superellipse (curvature 1). INV-SDF-02 requires one
- * definition; this pins it against the expression the Prism material shipped,
+ * definition; this pins it against the expression the material shipped,
  * and pins the degenerate case. */
 static float squircle_reference(float px, float py, float cx, float cy, float hw, float hh,
                                 float req_r, float curvature) {
-    /* Prism's shipped `squircle_sdf`, written out independently. */
+    /* material's shipped `squircle_sdf`, written out independently. */
     float radius = clampf_(req_r, 0.0f, fminf(hw, hh));
     float qx = fabsf(px - cx) - hw + radius;
     float qy = fabsf(py - cy) - hh + radius;
@@ -198,7 +198,7 @@ static void test_squircle(void) {
     const float hw = 8.0f, hh = 5.0f, r = 2.0f;
 
     /* curvature == 0 is *exactly* the circular-corner field: the squircle family
-     * contains flux_sdf_round_rect as its degenerate case, so turning a corner
+     * contains optics_gfx_sdf_round_rect as its degenerate case, so turning a corner
      * round never discontinuously changes shape when curvature is introduced. */
     for (int i = -40; i <= 40; ++i) {
         for (int j = -40; j <= 40; ++j) {
@@ -208,7 +208,7 @@ static void test_squircle(void) {
         }
     }
 
-    /* Differential parity with the shipped Prism expression, curvature and all. */
+    /* Differential parity with the shipped material expression, curvature and all. */
     const float curve[5] = {0.0f, 0.25f, 0.5f, 0.85f, 1.0f};
     for (int c = 0; c < 5; ++c) {
         for (int i = -40; i <= 40; ++i) {
@@ -257,8 +257,8 @@ static void test_squircle(void) {
 /* ------------------------------------------------------------------ */
 
 /* The normal is the derivative of the distance, not a neighbour of it. Wherever
- * the field is differentiable, flux_sdf_squircle_sample's normal must equal a
- * central difference of flux_sdf_squircle itself. This is the assertion that
+ * the field is differentiable, optics_gfx_sdf_squircle_sample's normal must equal a
+ * central difference of optics_gfx_sdf_squircle itself. This is the assertion that
  * makes "one expression, its own derivative" checkable rather than
  * aspirational: a wrong quotient rule, a dropped chain-rule term, or a gradient
  * taken from a *different* field all land here. */

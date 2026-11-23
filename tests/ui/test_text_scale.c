@@ -13,8 +13,8 @@
  */
 
 #include "../../libs/ui/src/internal.h"
-#include "lens_test.h"
 #include "optics_test.h"
+#include "ui_test.h"
 
 #include <optics/ui.h>
 
@@ -63,14 +63,14 @@ static void test_resolver_scales_font_only(void) {
     optics_ui_theme t = optics_ui_theme_dark();
 
     /* Baseline at 1.0 */
-    optics_ui_style_resolved r1 = lensi_style_resolve(ui, nullptr, &t, 0);
+    optics_ui_style_resolved r1 = optics_ui__style_resolve(ui, nullptr, &t, 0);
     OT_EXPECT_NEAR(r1.font_size, t.font_size, 0.001f);
     OT_EXPECT_NEAR(r1.padding, t.padding, 0.001f);
     OT_EXPECT_NEAR(r1.border_width, t.border_width, 0.001f);
 
     /* At 1.5x: font_size grows, padding/border untouched */
     optics_ui_set_text_scale(ui, 1.5f);
-    optics_ui_style_resolved r15 = lensi_style_resolve(ui, nullptr, &t, 0);
+    optics_ui_style_resolved r15 = optics_ui__style_resolve(ui, nullptr, &t, 0);
     OT_EXPECT_NEAR(r15.font_size, t.font_size * 1.5f, 0.001f);
     OT_EXPECT_NEAR(r15.padding, t.padding, 0.001f);
     OT_EXPECT_NEAR(r15.border_width, t.border_width, 0.001f);
@@ -79,7 +79,7 @@ static void test_resolver_scales_font_only(void) {
     optics_ui_style s = optics_ui_style_init();
     s.fields = OPTICS_UI_STYLE_FONT_SIZE;
     s.font_size = 20.0f;
-    optics_ui_style_resolved r_inst = lensi_style_resolve(ui, &s, &t, 0);
+    optics_ui_style_resolved r_inst = optics_ui__style_resolve(ui, &s, &t, 0);
     OT_EXPECT_NEAR(r_inst.font_size, 20.0f * 1.5f, 0.001f);
 
     optics_ui_release(ui);
@@ -192,9 +192,9 @@ static void test_text_scale_switch_invalidates(void) {
     OT_EXPECT(optics_ui_create(&(optics_ui_desc){}, &ui) == OPTICS_GFX_OK);
 
     optics_ui_theme t = optics_ui_theme_dark();
-    optics_ui_style_resolved r1 = lensi_style_resolve(ui, nullptr, &t, 0);
+    optics_ui_style_resolved r1 = optics_ui__style_resolve(ui, nullptr, &t, 0);
     optics_ui_set_text_scale(ui, 1.25f);
-    optics_ui_style_resolved r2 = lensi_style_resolve(ui, nullptr, &t, 0);
+    optics_ui_style_resolved r2 = optics_ui__style_resolve(ui, nullptr, &t, 0);
     OT_EXPECT(r1.font_size != r2.font_size);
 
     optics_ui_release(ui);

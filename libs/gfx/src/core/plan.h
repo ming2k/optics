@@ -18,7 +18,7 @@
  * render pass, so a boundary is the only place a secondary may be executed;
  * it is also, by construction, before any later pass can sample the result.
  * A consumer that needs the pixels while it records its own compute (a
- * material filter) calls flux_frame_materialize_image, which requires and
+ * material filter) calls optics_gfx_frame_materialize_image, which requires and
  * flushes at its own boundary — so the producer is always ahead of the
  * consumer in the command stream.
  *
@@ -75,10 +75,10 @@ struct optics_gfx_deferred_token {
  * submission, so the caller needs no extra synchronisation. */
 typedef void (*optics_gfx_plan_record_fn)(void *params, VkCommandBuffer cmd);
 
-/* What the caller hands to flux_plan_register. */
+/* What the caller hands to optics_gfx_plan_register. */
 typedef struct optics_gfx_plan_pass_desc {
     optics_gfx_plan_record_fn record;
-    void *params;      /* lives in the plan arena (flux_plan_alloc_params) */
+    void *params;      /* lives in the plan arena (optics_gfx_plan_alloc_params) */
     const char *label; /* debug label for the frame's pass scope */
 
     /* Images this pass reads, each with the explicit token of the pass that
@@ -107,7 +107,7 @@ typedef struct optics_gfx_plan {
     alignas(16) unsigned char arena[OPTICS_GFX_PLAN_ARENA_BYTES];
     size_t arena_used;
 
-    uint32_t executed_total; /* read by flux_frame_plan_stats */
+    uint32_t executed_total; /* read by optics_gfx_frame_plan_stats */
     uint32_t fallback_total; /* passes that fell back to eager execution */
 } optics_gfx_plan;
 
@@ -139,7 +139,7 @@ uint32_t optics_gfx_plan_token_index(const optics_gfx_plan *p,
 
 /* Mark every producer `image` depends on as required and build their bodies.
  * Idempotent. Returns false only when a required pass could not be built.
- * Does not execute: execution belongs to flux_plan_flush, at a boundary. */
+ * Does not execute: execution belongs to optics_gfx_plan_flush, at a boundary. */
 bool optics_gfx_plan_require_image(optics_gfx_plan *p, struct optics_gfx_image *image);
 
 /* True when `image` is a registered pass output that has not been executed
@@ -156,4 +156,4 @@ void optics_gfx_plan_flush(optics_gfx_plan *p, VkCommandBuffer cmd);
  * number pruned this frame. Called at submit, after the last boundary. */
 uint32_t optics_gfx_plan_finalize(optics_gfx_plan *p, VkCommandBuffer cmd);
 
-#endif /* FLUX_CORE_PLAN_H */
+#endif /* OPTICS_GFX_CORE_PLAN_H */

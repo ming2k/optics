@@ -3,7 +3,7 @@ id: ADR-0167
 title: "A scoped frame clip follows placed overlays — the clip a chrome strip needs is not a parent viewport"
 status: accepted
 date: 2026-11-17
-scope: [lens]
+scope: [ui]
 superseded_by: null
 negative_knowledge: true
 ---

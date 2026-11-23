@@ -1,12 +1,12 @@
 /*
  * Matrix math.
  *
- * flux_mat3x2 (2D affine) layout matches CoreGraphics / Cairo:
+ * optics_gfx_mat3x2 (2D affine) layout matches CoreGraphics / Cairo:
  *   [ a c tx ]     m[0] m[2] m[4]
  *   [ b d ty ]  =  m[1] m[3] m[5]
  *   (x, y) -> (a*x + c*y + tx,  b*x + d*y + ty)
  *
- * flux_mat4 layout is column-major. Indexed as m[col*4 + row]:
+ * optics_gfx_mat4 layout is column-major. Indexed as m[col*4 + row]:
  *   m[ 0 4  8 12]
  *   m[ 1 5  9 13]
  *   m[ 2 6 10 14]
@@ -17,7 +17,7 @@
  *   - Vulkan-style clip: depth in [0, 1], Y axis flipped (negative
  *     m[5]) so that +Y in NDC points down.
  *
- * flux_mat4_multiply(a, b) is a*b in math notation; a vector
+ * optics_gfx_mat4_multiply(a, b) is a*b in math notation; a vector
  * transformed by (M*v) applies translation last.
  *
  * Invert behaviour: both inverts return identity on a singular
@@ -304,7 +304,7 @@ optics_gfx_mat4 optics_gfx_mat4_look_at(optics_gfx_vec3 eye, optics_gfx_vec3 cen
 }
 
 /* ================================================================== */
-/*  mat3 (color-space transforms; column-major like flux_mat4)        */
+/*  mat3 (color-space transforms; column-major like optics_gfx_mat4)        */
 /* ================================================================== */
 
 optics_gfx_mat3 optics_gfx_mat3_identity(void) {

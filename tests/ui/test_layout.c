@@ -1,12 +1,12 @@
 /* test_layout.c — two-pass flexbox geometry (ADR-0005). CPU-only.
  *
- * Geometry expectations are derived through lens_text_measure rather than
+ * Geometry expectations are derived through optics_ui_text_measure rather than
  * hard-coded numbers, so the test passes against any text backend
  * (monospace stub or FT/HB) — what we're checking is that layout sums
  * those measurements correctly, not the exact glyph metrics. */
 
-#include "lens_test.h"
 #include "optics_test.h"
+#include "ui_test.h"
 #include <optics/ui.h>
 
 static float btn_w(optics_ui *ui, const char *s) {
@@ -157,8 +157,8 @@ static void test_column_stacks_children(void) {
     optics_ui_release(ui);
 }
 
-/* lens_flex(...) must apply to the *next node whether it is a widget OR a
- * container* (header contract). A terse lens_row/lens_column used to drop the
+/* optics_ui_flex(...) must apply to the *next node whether it is a widget OR a
+ * container* (header contract). A terse optics_ui_row_begin/optics_ui_column_begin used to drop the
  * pending flex, collapsing to content height — so a flexed strip could not
  * fill its parent (e.g. a bottom-pinned settings button never reached the
  * bottom edge). */
@@ -575,7 +575,7 @@ static void test_stack_layering_layout(void) {
 
     /* Stack container: width 100, height 100.
      * Base card: 100 x 100.
-     * Top-right badge: 24 x 24 with align = LENS_END, cross = LENS_START.
+     * Top-right badge: 24 x 24 with align = OPTICS_UI_END, cross = OPTICS_UI_START.
      * Expected badge x = 76, y = 0.
      */
     optics_ui_begin(ui, &in);

@@ -1,7 +1,7 @@
 /* test_tab_strip.c — tab strip drag-to-reorder verification. */
 
-#include "lens_test.h"
 #include "optics_test.h"
+#include "ui_test.h"
 #include <optics/ui/icon.h>
 #include <optics/ui/patterns.h>
 #include <stdio.h>
@@ -204,7 +204,7 @@ int main(void) {
     optics_ui_test_end(ui);
 
     /* Close button on hover: hover over tab 0's close button (x ≈ 70, y ≈ 18).
-     * Press and release triggers LENS_TAB_ACTION_CLOSE. */
+     * Press and release triggers OPTICS_UI_TAB_ACTION_CLOSE. */
     in.mouse_released[OPTICS_UI_MOUSE_LEFT] = false;
     in.cursor = (optics_gfx_point){70, 18};
     in.mouse_down[OPTICS_UI_MOUSE_LEFT] = true;

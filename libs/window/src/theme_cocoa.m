@@ -4,9 +4,9 @@
  * bestMatchFromAppearancesWithNames: against DarkAqua decides dark/light.
  * Live watching is KVO on the same property: AppKit updates
  * effectiveAppearance on the main thread while processing events, so the
- * observer callback already runs on the iris main thread and can invoke the
- * iris_color_scheme_changed_fn directly (theme.h contract: callbacks run on
- * the thread executing iris_app_run, serialized with the event loop). A
+ * observer callback already runs on the window main thread and can invoke the
+ * optics_window_color_scheme_changed_fn directly (theme.h contract: callbacks run on
+ * the thread executing optics_window_run, serialized with the event loop). A
  * defensive off-main-thread fallback routes through the wakeup seam
  * (platform_wakeup.h) in case AppKit ever delivers the change elsewhere.
  *
@@ -14,7 +14,7 @@
  * for a UI library, same as the Linux fallback) and watching reports
  * unavailable (-1), matching the documented fallback behaviour.
  *
- * Compiled with ARC (see the darwin branch in libs/iris/meson.build).
+ * Compiled with ARC (see the darwin branch in libs/window/meson.build).
  *
  * UNVERIFIED ASSUMPTIONS (no Apple SDK on the authoring machine):
  *  1. NSApplication.effectiveAppearance is KVO-observable (documented by
@@ -67,12 +67,12 @@ OPTICS_WINDOW_API bool optics_window_system_prefers_dark(void) {
 /* ------------------------------------------------------------------ */
 
 /* One watcher per process, carrying TWO independent registrations: the
- * host's public slot (iris_color_scheme_watch) and the platform backend's
- * internal slot (iris_theme__watch_backend, theme_watch_internal.h) — the
- * backend's apply-to-lens registration must not consume or overwrite the
+ * host's public slot (optics_window_color_scheme_watch) and the platform backend's
+ * internal slot (optics_window_theme__watch_backend, theme_watch_internal.h) — the
+ * backend's apply-to-ui registration must not consume or overwrite the
  * host's. The observer object owns both cb/user pairs; the context pointer
  * distinguishes our observation from any subclass's. */
-@interface IrisThemeWatcher : NSObject {
+@interface OpticsThemeWatcher : NSObject {
   @public
     optics_window_color_scheme_changed_fn cb;
     void *user;
@@ -82,7 +82,7 @@ OPTICS_WINDOW_API bool optics_window_system_prefers_dark(void) {
 }
 @end
 
-static IrisThemeWatcher *g_theme_watcher = nil;
+static OpticsThemeWatcher *g_theme_watcher = nil;
 
 /* Fallback delivery for the (unexpected) case the KVO callback fires off
  * the main thread: heap-carried record drained by the wakeup seam on the
@@ -104,7 +104,7 @@ static void theme_deliver_on_main(void *p) {
     free(d);
 }
 
-@implementation IrisThemeWatcher
+@implementation OpticsThemeWatcher
 
 /* Deliver one scheme change to both registered slots, on the main thread
  * if we are already on it, else through the wakeup seam. */
@@ -148,7 +148,7 @@ OPTICS_WINDOW_API int optics_window_color_scheme_watch(optics_window_color_schem
     if (@available(macOS 10.14, *)) {
         NSApplication *app = [NSApplication sharedApplication];
         if (!g_theme_watcher)
-            g_theme_watcher = [IrisThemeWatcher new];
+            g_theme_watcher = [OpticsThemeWatcher new];
         g_theme_watcher->cb = cb_;
         g_theme_watcher->user = user_;
         if (!g_theme_watcher->observing) {
@@ -186,7 +186,7 @@ int optics_window_theme__watch_backend(optics_window_color_scheme_changed_fn cb_
     if (@available(macOS 10.14, *)) {
         NSApplication *app = [NSApplication sharedApplication];
         if (!g_theme_watcher)
-            g_theme_watcher = [IrisThemeWatcher new];
+            g_theme_watcher = [OpticsThemeWatcher new];
         g_theme_watcher->backend_cb = cb_;
         g_theme_watcher->backend_user = user_;
         if (!g_theme_watcher->observing) {

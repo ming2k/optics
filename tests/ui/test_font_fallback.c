@@ -1,7 +1,7 @@
 /* test_font_fallback.c — font fallback chain (FcFontSort). */
 
-#include "lens_test.h"
 #include "optics_test.h"
+#include "ui_test.h"
 #include <optics/ui.h>
 #include <string.h>
 

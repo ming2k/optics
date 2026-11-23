@@ -3,7 +3,7 @@
 
 1. Shared-library translation units under `libs/` may not write to stdout.
    Diagnostics go to stderr; stdout belongs to the application or IPC wire.
-2. `libs/flux` (Layer 0) may not reference named materials or `prism_*`
+2. `libs/gfx` may not reference named materials or `optics_material_*`
    symbols. The Meson dependency graph already prevents a link; this catches a
    source-level reference before it becomes a build-file change.
 

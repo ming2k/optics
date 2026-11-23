@@ -1,7 +1,7 @@
 /* test_menu.c — verification for cascading menu and menubar pattern. */
 
-#include "lens_test.h"
 #include "optics_test.h"
+#include "ui_test.h"
 #include <optics/ui/patterns.h>
 
 int main(void) {

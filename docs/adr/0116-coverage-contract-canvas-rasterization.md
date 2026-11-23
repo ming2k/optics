@@ -3,8 +3,8 @@ id: ADR-0116
 title: "Coverage-contract canvas rasterization — analytic coverage backends, MSAA retired"
 status: accepted
 date: 2026-10-25
+scope: libs/gfx, libs/ui, bindings
 superseded_by: null
-scope: libs/flux, libs/lens, bindings
 negative_knowledge: true
 ---
 

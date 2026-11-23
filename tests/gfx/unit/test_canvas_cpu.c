@@ -1,6 +1,6 @@
 /*
  * Headless CPU-canvas rendering test. No Vulkan device or window: it exercises
- * the software backend (flux_canvas_backend_cpu) end to end — create, record,
+ * the software backend (optics_gfx_canvas_backend_cpu) end to end — create, record,
  * read back pixels — across the solid, SDF rounded-rect, and gradient paths.
  */
 #include "optics_test.h"

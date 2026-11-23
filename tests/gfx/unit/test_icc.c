@@ -2,14 +2,14 @@
  * ICC parser tests (ADR-0070), profiles synthesized via icc_testkit.h:
  *
  *   - matrix + sRGB-parametric-TRC profile extracts exactly onto
- *     FLUX_COLOR_SPACE_SRGB;
- *   - matrix + gamma-TRC profile extracts BT.709 + FLUX_TRANSFER_GAMMA;
+ *     OPTICS_GFX_COLOR_SPACE_SRGB;
+ *   - matrix + gamma-TRC profile extracts BT.709 + OPTICS_GFX_TRANSFER_GAMMA;
  *   - a table-TRC matrix profile falls to the LUT bake;
  *   - an mft1 LUT profile bakes a LUT (parametric query declines);
  *   - malformed inputs fail with the right error codes.
  *
  * Image color-space snapshot/COW is device-bound and lives in
- * tests/flux/integration/test_color_management.c; this file stays device-free
+ * tests/gfx/integration/test_color_management.c; this file stays device-free
  * by construction so the unit suite has no Vulkan dependency.
  */
 #include "../icc_testkit.h"
@@ -31,7 +31,7 @@ int main(void) {
     icc_tag_def defs[8];
     size_t dlen = 0;
 
-    /* --- 1. matrix + sRGB parametric TRC -> FLUX_COLOR_SPACE_SRGB --- */
+    /* --- 1. matrix + sRGB parametric TRC -> OPTICS_GFX_COLOR_SPACE_SRGB --- */
     {
         uint32_t n = icc_build_matrix_tags(data, defs, 0, &dlen);
         size_t size = icc_build_profile(profile, "mntr", "XYZ ", data, dlen, defs, n);
@@ -151,7 +151,7 @@ int main(void) {
         OT_EXPECT(optics_gfx_icc_profile_create(profile, size, &p) == OPTICS_GFX_OK);
         optics_gfx_icc_profile_release(p);
 
-        /* 4-channel input/output is not an RGB profile flux can consume. */
+        /* 4-channel input/output is not an RGB profile gfx can consume. */
         len = icc_build_mab_identity(data, &defs[0], 4, 3);
         size = icc_build_profile(profile, "mntr", "XYZ ", data, len, defs, 1);
         p = nullptr;

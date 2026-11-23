@@ -9,7 +9,7 @@
  * missing glyphs fall back through the chain. See text_internal.h for
  * the shared state. */
 
-#include "glyph_internal.h"
+#include "text_internal.h"
 
 #include <math.h>
 #include <stdarg.h>
@@ -146,7 +146,7 @@ static int txt_load_patch_face(optics_text_ctx *t, int slot_idx, uint32_t cp) {
     if (slot->count >= MAX_TOTAL_FACES)
         return -1;
 
-    /* Deliberately the plain generic family name, NOT the FLUX_TEXT_FONT
+    /* Deliberately the plain generic family name, NOT the OPTICS_TEXT_FONT
      * override the primary chain honoured — patch queries stay on the
      * generic family so an env override cannot skew rare-codepoint
      * fallback (same semantics as before the platform split). */
@@ -179,9 +179,10 @@ static int txt_load_patch_face(optics_text_ctx *t, int slot_idx, uint32_t cp) {
 
     txt_face *f = &slot->faces[slot->count];
     memset(f, 0, sizeof *f);
-    f->path = txt_strdup(m.path);
+    f->path = m.path; /* steal both owned fields; the match is cleared below */
+    m.path = nullptr;
     f->index = m.index;
-    f->charset = m.charset; /* steal; the interface has no charset copy op */
+    f->charset = m.charset;
     m.charset = nullptr;
     int new_idx = slot->count;
     txtp_font_match_clear(&m);
@@ -269,7 +270,8 @@ bool txt_init_slot_faces(optics_text_ctx *t, int slot_idx, float weight, bool it
             continue;
 
         txt_face *f = &slot->faces[slot->count];
-        f->path = txt_strdup(m->path);
+        f->path = m->path; /* steal; txtp_font_list_free skips NULLed fields */
+        m->path = nullptr;
 
         /* The platform face index carries the chosen TTC member and, for
          * variable fonts under fontconfig, the requested named instance in
@@ -278,7 +280,7 @@ bool txt_init_slot_faces(optics_text_ctx *t, int slot_idx, float weight, bool it
          * render at regular — forward the index instead. */
         f->index = m->index;
 
-        f->charset = m->charset; /* steal; the interface has no charset copy op */
+        f->charset = m->charset;
         m->charset = nullptr;
 
         slot->count++;
@@ -332,7 +334,7 @@ optics_text_ctx *txt_engine_init(optics_gfx_device *dev) {
     }
     /* Retained, matching the canvas discipline: the atlas image and the
      * nearest sampler are released at shutdown and must never see a dead
-     * device. flux_device_retain is NULL-safe. */
+     * device. optics_gfx_device_retain is NULL-safe. */
     t->dev = optics_gfx_device_retain(dev);
     txt_observe_acquire(t, "context", 0);
 
@@ -360,7 +362,7 @@ optics_text_ctx *txt_engine_init(optics_gfx_device *dev) {
     }
 
     /* Glyph cache: bounded open-addressing table with LRU eviction at
-     * GLYPH_HASH_CAP. Sized to start small (grows on demand up to the
+     * OPTICS_TEXT_HASH_CAP. Sized to start small (grows on demand up to the
      * cap); eviction only fires when the working set genuinely exceeds
      * the cap, which is rare even for long CJK sessions. */
     t->cache = glyph_cache_new(t->dev, OPTICS_TEXT_HASH_INIT, OPTICS_TEXT_HASH_CAP);
@@ -474,7 +476,7 @@ void txt_engine_shutdown(optics_text_ctx *t) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Public lifecycle (glyph/glyph.h)                              */
+/*  Public lifecycle (<optics/text.h>)                            */
 /* ------------------------------------------------------------------ */
 
 optics_gfx_result optics_text_create(const optics_text_desc *desc, optics_text_ctx **out) {

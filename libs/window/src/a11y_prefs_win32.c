@@ -17,9 +17,9 @@
  *                   mapping matches what Win32 apps observe.
  *
  * Live watch needs no thread (same as theme_win32.c): WM_SETTINGCHANGE is
- * broadcast to top-level windows on the iris main thread's message loop.
- * iris_a11y_prefs_watch only registers the callback; app_win32.c calls
- * iris_a11y_prefs_win32__notify_setting_change() from WM_SETTINGCHANGE,
+ * broadcast to top-level windows on the window main thread's message loop.
+ * optics_window_a11y_prefs_watch only registers the callback; app_win32.c calls
+ * optics_window_a11y_prefs_win32__notify_setting_change() from WM_SETTINGCHANGE,
  * which re-queries and fires synchronously when the set changed.
  *
  * NOT YET VERIFIED ON A REAL WINDOWS MACHINE (zig compile-check only), the
@@ -43,7 +43,7 @@
 
 #include <optics/window/a11y_prefs.h>
 
-/* Registered watchers, touched on the iris main thread only. Two
+/* Registered watchers, touched on the window main thread only. Two
  * independent slots: the host's public one and the platform backend's
  * (a11y_prefs_internal.h). */
 static optics_window_a11y_prefs_changed_fn g_cb = nullptr;
@@ -112,7 +112,7 @@ void optics_window_a11y_prefs__unwatch_backend(void) {
 }
 
 /* Internal seam (a11y_prefs_internal.h contract): called by app_win32.c's
- * WndProc on WM_SETTINGCHANGE. Runs on the iris main thread; fires the
+ * WndProc on WM_SETTINGCHANGE. Runs on the window main thread; fires the
  * registered callbacks synchronously when the preference set changed. */
 void optics_window_a11y_prefs_win32__notify_setting_change(void) {
     optics_window_a11y_prefs now = optics_window_a11y_prefs_query();

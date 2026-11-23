@@ -3,6 +3,9 @@ id: ADR-0062
 title: "Bidirectional accessibility — a11y action invocation and text-changed events"
 status: accepted
 date: 2026-08-10
+scope: ui (action injection seam) + window (AT-SPI Action/Text wiring)
+superseded_by: null
+negative_knowledge: true
 ---
 
 # ADR-0062: Bidirectional accessibility — a11y action invocation and text-changed events

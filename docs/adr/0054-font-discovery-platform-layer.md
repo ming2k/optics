@@ -3,6 +3,9 @@ id: ADR-0054
 title: "Font discovery as a platform layer (fontconfig / DirectWrite / CoreText)"
 status: accepted
 date: 2026-08-08
+scope: gfx-text (libs/gfx/text)
+superseded_by: null
+negative_knowledge: true
 ---
 
 # ADR-0054: Font discovery as a platform layer (fontconfig / DirectWrite / CoreText)

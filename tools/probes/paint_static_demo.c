@@ -1,4 +1,4 @@
-/* paint_static_demo.c — integration check for iris_record_mark_static.
+/* paint_static_demo.c — integration check for optics_window_record_mark_static.
  *
  * Runs a real window for a fixed wall time with a record callback that
  * declares itself static on a duty cycle (animate 1s, static 1s, ...), and
@@ -6,10 +6,8 @@
  * present far fewer frames than the animating phases (ideally zero beyond
  * the first), proving the skip works end-to-end on the live compositor.
  *
- * Build & run from the optics worktree:
- *   cc -o /tmp/paint_static_demo examples/iris/paint_static_demo.c \
- *      -Ilibs/iris/include -Ilibs/lens/include -Ilibs/flux/include \
- *      $(pkg-config --cflags --libs iris lens flux) && /tmp/paint_static_demo
+ * Built with -Dexamples=true (tools/probes/meson.build):
+ *   ./build/tools/probes/paint_static_demo
  */
 
 #include <optics/app.h>
@@ -41,9 +39,9 @@ static void build(optics_ui *ui, const optics_ui_input *in, void *user) {
     /* A trivial, non-animating tree: any chrome damage here is zero after
      * the first frame, so the record callback alone decides the cadence.
      *
-     * Note: iris already brackets this callback with lens_begin/lens_end —
-     * a build must only *emit* widgets. Calling lens_begin again here would
-     * reset the frame mid-build and wipe the lens_input iris just filled in
+     * Note: window already brackets this callback with optics_ui_begin/optics_ui_end —
+     * a build must only *emit* widgets. Calling optics_ui_begin again here would
+     * reset the frame mid-build and wipe the optics_ui_input window just filled in
      * (observed as `chrome_damaged` staying true forever, which made the
      * static declaration below unobservable). */
     optics_ui_column_begin(ui, nullptr);
@@ -79,7 +77,7 @@ static void record(optics_gfx_encoder *enc, float scale, void *user) {
      * from build (see above); during animated phases this callback actually
      * draws (a cheap solid would go here).
      *
-     * The request is phase-gated on purpose. iris_request_animation_frame()
+     * The request is phase-gated on purpose. optics_window_request_animation_frame()
      * says "my content is about to change", which by contract outranks the
      * static declaration — a record callback that always requests would
      * therefore keep the window permanently animated and the static phase
@@ -106,7 +104,7 @@ int main(void) {
     d.last_report = 0.0;
 
     optics_app_opts cfg = {};
-    cfg.title = "iris paint_static demo";
+    cfg.title = "window paint_static demo";
     cfg.app_id = "optics.paint_static_demo";
     cfg.width = 520;
     cfg.height = 180;
@@ -115,7 +113,7 @@ int main(void) {
     cfg.record = record;
     cfg.user = &d;
 
-    /* Drive for ~8 seconds by asking the loop to stop: iris has no public
+    /* Drive for ~8 seconds by asking the loop to stop: window has no public
      * "quit" in this rev, so the demo relies on the runner closing the
      * window; a wrapper script can use a timeout + SIGKILL. */
     int rc = optics_app_run(&cfg);

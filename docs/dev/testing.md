@@ -93,7 +93,7 @@ implementation.
 
 ```c
 #include "optics_test.h"
-#include "lens_test.h"   /* only when the headless lens frame protocol is used */
+#include "ui_test.h"   /* only when the headless ui frame protocol is used */
 
 int main(void) {
     OT_EXPECT(1 + 1 == 2);
@@ -136,7 +136,7 @@ memory-type selection.
 ```text
 tests/
 ├── meson.build          topology: support first, then each layer
-├── support/             optics_test + gfx_test + lens_test
+├── support/             optics_test + gfx_test + ui_test
 ├── gfx/                 unit/, integration/, bench/, fuzz/
 ├── text/                unit/, integration/
 ├── material/            unit/, integration/
@@ -162,7 +162,7 @@ The `lint` lane also runs tree-level gates that no single test binary can own:
 | `test_layers` | Every registered test has exactly one layer/lane; no private harness reappears. |
 | `wayland_listeners` | Every Wayland listener event has a non-NULL slot. |
 | `version_lockstep_tree` | Meson, the umbrella header, every library header, and the Cargo workspace name one version. |
-| `library_purity` | Shared libraries do not write to stdout; `flux` does not reference named materials. |
+| `library_purity` | Shared libraries do not write to stdout; `gfx` does not reference named materials. |
 | `c23_lexical` | No code-level `NULL`/`{0}` remains, and every `typedef enum` has an explicit underlying type. |
 | `api_surface` | No prohibited `_ex`/`_wrapped`/`_sized`/variant suffixes appear in public headers. |
 | `docs_links` | Every relative documentation link resolves; public docs do not link into `docs/dev/`. |
@@ -241,12 +241,12 @@ pass.
 
 | Symptom | Inspect first |
 |---------|---------------|
-| `flux` unit failure | The matching file in `tests/gfx/unit/` and its source module. |
+| `gfx` unit failure | The matching file in `tests/gfx/unit/` and its source module. |
 | Vulkan test skips | Vulkan 1.3 device discovery, ICD selection, and required extensions. |
 | Vulkan validation error | The integration test's frame/resource lifetime and `libs/gfx/src/`. |
-| `lens` widget or layout failure | The same-named test in `tests/ui/` and `libs/ui/src/`. |
-| `iris` theme or API failure | `libs/window/src/theme_linux.c` or `libs/window/src/app.c`. |
-| E2E pixel mismatch | Start at the first failing layer in the chain: reticle raster, lens snapshot, display-list serialization, or CPU replay. |
+| `ui` widget or layout failure | The same-named test in `tests/ui/` and `libs/ui/src/`. |
+| `window` theme or API failure | `libs/window/src/theme_linux.c` or `libs/window/src/app.c`. |
+| E2E pixel mismatch | Start at the first failing layer in the chain: svg raster, ui snapshot, display-list serialization, or CPU replay. |
 | Layer guardrail failure | `tools/check_test_layers.py` output; the test's Meson registration and `tests/e2e/` include discipline. |
 | Window is blank or examples fail to start | Wayland/GLFW setup and the relevant example; this path is not covered by headless tests. |
 
@@ -257,7 +257,7 @@ build:
 
 ```bash
 meson setup build-asan -Dtests=true \
-  -Db_sanitize=address,undefined
+  -Db_sanitize=address,undefined -Db_lundef=false
 meson compile -C build-asan
 meson test -C build-asan --no-suite bench --no-suite fuzz
 ```
@@ -273,7 +273,7 @@ Whenever any sanitizer is configured, Meson automatically activates the default
 - **Suppression Binding (`LSAN_OPTIONS`)**: Automatically resolves and prepends
   `tools/config/lsan.supp`, suppressing upstream process-lifetime pattern caches
   (`fontconfig`). Vulkan ICD caches are pinned with `RTLD_NODELETE` in
-  `tests/support/flux_test.c`.
+  `tests/support/gfx_test.c`.
 - **Diagnostic Hardening**: Prepends `ASAN_OPTIONS=abort_on_error=1:halt_on_error=0`
   and `UBSAN_OPTIONS=print_stacktrace=1` to ensure failures produce immediate
   backtraces.
@@ -321,7 +321,7 @@ layer guardrail, and run the exact layer you touched.
 ## Golden References
 
 `tests/material/golden/liquid_glass_default.pam` is a tolerance golden: a
-rendered reference that `tests/material/integration/test_prism_golden.c`
+rendered reference that `tests/material/integration/test_material_golden.c`
 compares against with a per-channel tolerance (12/255) and a small
 outlier allowance, layered over driver-independent hard invariants
 (exact silhouette, edge-direction preservation, rim-brightness
@@ -344,7 +344,7 @@ Driver validity, and its limits:
 - Regenerate deliberately, never casually:
 
 ```bash
-OPTICS_MATERIAL_GOLDEN_UPDATE=1 ./build/tests/material/integration/test_prism_golden
+OPTICS_MATERIAL_GOLDEN_UPDATE=1 ./build/tests/material/integration/test_material_golden
 git diff tests/material/golden/   # the reference must be part of the change
 ```
 

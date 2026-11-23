@@ -1,5 +1,5 @@
 /*
- * test_acrylic.c — integration test for prism acrylic material.
+ * test_acrylic.c — integration test for material acrylic material.
  *
  * Verifies:
  *   - Lifecycle: creation, retention, refcounting, and safe destruction.

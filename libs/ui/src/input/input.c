@@ -3,7 +3,7 @@
 #include "../internal.h"
 
 /* Append a focusable id to this frame's tab order (arena-backed).
- * tab_cap survives the per-frame reset (see lens_begin), so the first
+ * tab_cap survives the per-frame reset (see optics_ui_begin), so the first
  * push of a frame sizes the allocation at last frame's high-water in one
  * step instead of re-walking the doubling chain. */
 static void tab_push(optics_ui *ui, optics_ui_id id) {
@@ -13,7 +13,7 @@ static void tab_push(optics_ui *ui, optics_ui_id id) {
             nc = nc * 2;
         optics_ui_id *na = optics_gfx_arena_alloc(&ui->arena, nc * sizeof *na);
         if (!na) {
-            lensi_set_overflow(ui);
+            optics_ui__set_overflow(ui);
             return;
         }
         if (ui->tab_order)
@@ -24,17 +24,18 @@ static void tab_push(optics_ui *ui, optics_ui_id id) {
     ui->tab_order[ui->tab_count++] = id;
 }
 
-bool lensi_point_clipped_by_scroll(const optics_ui_node *n, optics_gfx_point p) {
-    return lensi_snapshot_point_clipped(n, p);
+bool optics_ui__point_clipped_by_scroll(const optics_ui_node *n, optics_gfx_point p) {
+    return optics_ui__snapshot_point_clipped(n, p);
 }
 
 /* Compute hover/press/click/focus for a widget using its prev_rect
  * (last frame's final_rect). New widgets (no prev_rect) report nothing
  * this frame — the documented one-frame latency. Also produces the
- * interaction-owned LENS_STATE_* bits (ADR-0058); the widget ORs in the
+ * interaction-owned OPTICS_UI_STATE_* bits (ADR-0058); the widget ORs in the
  * bits only it knows (SELECTED/ACTIVE/DRAGGED) before publishing the
  * response. */
-optics_ui_response lensi_interact(optics_ui *ui, optics_ui_node *n, bool focusable, bool disabled) {
+optics_ui_response optics_ui__interact(optics_ui *ui, optics_ui_node *n, bool focusable,
+                                       bool disabled) {
     optics_ui_response r = {};
     r.id = n->id;
     r.rect = n->prev_rect;
@@ -52,7 +53,7 @@ optics_ui_response lensi_interact(optics_ui *ui, optics_ui_node *n, bool focusab
      * pointer/keyboard activation, single-shot, regardless of pointer
      * position or occlusion (AT users navigate the semantic tree, not
      * pixels). Focus moves as with a pointer press; the modality is not
-     * keyboard traversal, so no focus ring (same as lens_set_focus). The
+     * keyboard traversal, so no focus ring (same as optics_ui_set_focus). The
      * disabled early-return above already blocked disabled nodes. */
     if (ui->a11y_activate_id == n->id) {
         ui->a11y_activate_id = 0; /* consumed: one request fires once */
@@ -64,11 +65,11 @@ optics_ui_response lensi_interact(optics_ui *ui, optics_ui_node *n, bool focusab
         }
     }
 
-    bool inside = n->has_prev && lensi_point_in(ui->input.cursor, n->prev_rect) &&
-                  !lensi_point_clipped_by_scroll(n, ui->input.cursor);
+    bool inside = n->has_prev && optics_ui__point_in(ui->input.cursor, n->prev_rect) &&
+                  !optics_ui__point_clipped_by_scroll(n, ui->input.cursor);
     /* Occlusion: a node in a strictly higher band (last-frame geometry)
      * swallows hover/press for any widget beneath it (ADR-0060). */
-    if (inside && lensi_widget_occluded(ui, n))
+    if (inside && optics_ui__widget_occluded(ui, n))
         inside = false;
     if (inside) {
         r.hovered = true;
@@ -99,7 +100,7 @@ optics_ui_response lensi_interact(optics_ui *ui, optics_ui_node *n, bool focusab
         r.state |= OPTICS_UI_STATE_PRESSED;
 
     /* Right / middle button: simple click, no drag capture (v0.1).
-     * The application reads these from lens_get_response() for context
+     * The application reads these from optics_ui_get_response() for context
      * menus and auxiliary actions. */
     const int R = OPTICS_UI_MOUSE_RIGHT;
     if (inside && ui->input.mouse_released[R])

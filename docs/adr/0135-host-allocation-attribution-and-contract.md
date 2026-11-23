@@ -3,7 +3,7 @@ id: ADR-0135
 title: "Host allocation is attributed: flux_device_alloc carries owner and kind, and the contract is finally tested"
 status: accepted
 date: 2026-11-02
-scope: [flux, prism, lens, glyph, tests, tools, bindings]
+scope: [gfx, material, ui, text, tests, tools, bindings]
 superseded_by: null
 negative_knowledge: true
 ---

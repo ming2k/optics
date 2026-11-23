@@ -6,7 +6,7 @@ name: ci-cross
 #
 # Suites: 'integration'/'bench'/'fuzz' need a real GPU (or lavapipe) — the
 # GPU-less GitHub runners skip them here. The 'unit' suite is designed to
-# stay green without a Vulkan ICD (see tests/flux/integration/meson.build).
+# stay green without a Vulkan ICD (see tests/gfx/integration/meson.build).
 
 on:
   push:
@@ -92,7 +92,7 @@ jobs:
           echo "/opt/slang/bin" >> "$GITHUB_PATH"
 
       # Homebrew's vulkan-loader ships vulkan.pc; MoltenVK is plugged in as
-      # the ICD. flux auto-enables VK_KHR_portability_enumeration /
+      # the ICD. gfx auto-enables VK_KHR_portability_enumeration /
       # VK_KHR_portability_subset when advertised (required by MoltenVK).
       # Use Homebrew LLVM clang for native C23 #embed support.
       - name: Configure

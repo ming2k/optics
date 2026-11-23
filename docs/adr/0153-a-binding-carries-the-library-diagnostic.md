@@ -3,7 +3,7 @@ id: ADR-0153
 title: "A binding must carry the library's diagnostic, not just its result code"
 status: accepted
 date: 2026-11-06
-scope: [bindings, flux, lens]
+scope: [bindings, gfx, ui]
 superseded_by: null
 negative_knowledge: true
 ---

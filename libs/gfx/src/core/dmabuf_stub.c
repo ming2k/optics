@@ -1,11 +1,11 @@
 /*
- * flux/dmabuf_stub.c - non-Linux stand-in for dmabuf.c.
+ * gfx/dmabuf_stub.c - non-Linux stand-in for dmabuf.c.
  *
  * dma-buf import/export is a Linux-only facility (file-descriptor based
  * external memory + sync_file fences). meson swaps this file in for
  * dmabuf.c when the host is not Linux: every public entry point from
- * include/flux/dmabuf.h keeps its signature and fails with
- * FLUX_ERROR_UNSUPPORTED (capability queries report false), so portable
+ * <optics/gfx/dmabuf.h> keeps its signature and fails with
+ * OPTICS_GFX_ERROR_UNSUPPORTED (capability queries report false), so portable
  * callers compile and degrade cleanly.
  *
  * The internal acquire-semaphore pool helpers are no-ops here: with no
@@ -75,7 +75,7 @@ optics_gfx_result optics_gfx_image_import_dmabuf(optics_gfx_device *d,
     *out = nullptr;
     if (desc->type != OPTICS_GFX_TYPE_DMABUF_IMAGE_DESC) {
         OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT,
-                        "desc->type != FLUX_TYPE_DMABUF_IMAGE_DESC");
+                        "desc->type != OPTICS_GFX_TYPE_DMABUF_IMAGE_DESC");
         return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
     }
     if (desc->width == 0 || desc->height == 0) {

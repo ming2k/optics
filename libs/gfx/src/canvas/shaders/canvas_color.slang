@@ -1,5 +1,5 @@
 /*
- * canvas_color.slang — flux color-management shared Slang module (ADR-0069).
+ * canvas_color.slang — gfx color-management shared Slang module (ADR-0069).
  *
  * Ports of the scalar transfer functions in src/math/colorspace.c.
  * Values flowing through the canvas/scene pipelines are premultiplied
@@ -15,7 +15,7 @@
 #define OPTICS_GFX_TF_PQ     3
 #define OPTICS_GFX_TF_HLG    4
 
-/* flux_canvas_push.kind high bits (src/canvas/internal.h). */
+/* optics_gfx_canvas_push.kind high bits (src/canvas/internal.h). */
 #define OPTICS_GFX_CANVAS_PUSH_DECODE_SRGB 0x100u
 /* color_params holds a live buffer reference (ADR-0070). */
 #define OPTICS_GFX_CANVAS_PUSH_HAS_COLOR_PARAMS 0x200u
@@ -193,4 +193,4 @@ float optics_gfx_dither_tpdf(float2 frag_coord, float levels) {
     return (r + r2 - 1.0f) * (0.45f / levels);
 }
 
-#endif /* FLUX_COLOR_SLANG */
+#endif /* OPTICS_GFX_COLOR_SLANG */

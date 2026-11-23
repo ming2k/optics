@@ -3,6 +3,9 @@ id: ADR-0091
 title: "Drawing, group composition, and explicit effects"
 status: accepted
 date: 2026-09-14
+scope: Flux drawing semantics and Prism effect construction
+superseded_by: null
+negative_knowledge: true
 ---
 
 # ADR-0091: Drawing, group composition, and explicit effects

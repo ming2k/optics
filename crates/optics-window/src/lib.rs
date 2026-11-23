@@ -1,7 +1,7 @@
-//! Safe Rust bindings to **iris** — the platform shell of the optics stack.
+//! Safe Rust bindings to **window** — the platform shell of the optics stack.
 //!
-//! iris owns the native window, the event pump and the frame cadence, and
-//! depends on flux only. This crate wraps the parts of it an application
+//! window owns the native window, the event pump and the frame cadence, and
+//! depends on gfx only. This crate wraps the parts of it an application
 //! calls directly:
 //!
 //! - window control ([`window_close`], [`window_maximize`], ...) and
@@ -11,7 +11,7 @@
 //! - native file dialogs ([`pick_file`], [`FileDialog`]), capability queries
 //!   and drag-and-drop.
 //!
-//! Running an application with a lens UI is the `aperture` crate's job
+//! Running an application with a UI is the `app` crate's job
 //! (`optics_app::Application`); it builds on this one. The raw UI-host seam a
 //! different UI layer would implement is available through [`sys`].
 
@@ -20,23 +20,23 @@
 use std::ffi::CString;
 use std::os::raw::c_int;
 
-/// Raw-bindings escape hatch (see the `flux` crate's note). Kept `pub`
+/// Raw-bindings escape hatch (see the `gfx` crate's note). Kept `pub`
 /// deliberately as the one documented unsafe escape hatch.
 pub use optics_window_sys as sys;
 
-/// Request one more frame at Iris's active animation cadence.
+/// Request one more frame at window's active animation cadence.
 ///
 /// Call this during a build or record callback while host-owned, time-based
 /// content is moving. Repeating it every frame sustains the animation; once
-/// requests stop, Iris can return to its low-power idle cadence. Calls outside
-/// an active [`Application::run`] are harmless no-ops.
+/// requests stop, window can return to its low-power idle cadence. Calls outside
+/// an active `optics_app::Application::run` are harmless no-ops.
 pub fn request_animation_frame() {
     unsafe { sys::optics_window_request_animation_frame() };
 }
 
 /// Declare the current frame's host canvas content static.
 ///
-/// Recorded host content is opaque to lens, so the backend normally
+/// Recorded host content is opaque to ui, so the backend normally
 /// keeps painting every scheduled frame — including a full clear to the
 /// theme background. When the host knows its scene is pixel-identical to
 /// what is already on screen (a paused animation, a settled audio
@@ -50,7 +50,7 @@ pub fn request_animation_frame() {
 /// scheduled frame, including skipped ones; a declaration made in record is
 /// cleared with the first skipped frame and the cadence bounces back).
 /// Any user input, a resize or buffer-scale change, a following
-/// [`request_animation_frame`], or lens-reported chrome damage forces the
+/// [`request_animation_frame`], or ui-reported chrome damage forces the
 /// next frame to present again.
 ///
 /// While static, the backend keeps a low idle tick (~4 Hz) so build (and
@@ -75,7 +75,7 @@ pub fn record_mark_static() {
 /// declaring exactly one). Unlike [`record_mark_static`], a fresh
 /// [`request_animation_frame`] does **not** veto this declaration — the two
 /// together are precisely the streaming shape. Any user input, a resize or
-/// buffer-scale change, or lens-reported chrome damage still forces a real
+/// buffer-scale change, or ui-reported chrome damage still forces a real
 /// present. Call from the **build** callback; consumed once, re-issue every
 /// frame it applies to. No-op without an active app or without a record
 /// callback.
@@ -122,7 +122,7 @@ pub type ColorSchemeChangedFn =
 /// an `Err` when live watching is unavailable (no platform support, or the
 /// OS settings source is unreachable) — callers then fall back to the
 /// startup-only [`query_system_color_scheme`]. Changes are delivered on the
-/// iris main thread through the backend's event loop; no fd/pump plumbing
+/// window main thread through the backend's event loop; no fd/pump plumbing
 /// is exposed.
 ///
 /// # Safety
@@ -130,7 +130,7 @@ pub type ColorSchemeChangedFn =
 /// `user` must be a valid pointer (or null) for the lifetime of the watch —
 /// it is passed verbatim to the C callback and dereferenced there. Most
 /// applications do not call this directly: when driven by
-/// [`Application::run`] with [`Config::force_dark`] unset, the Wayland
+/// `optics_app::Application::run` with `optics_app::Config::force_dark` unset, the Wayland
 /// backend wires the watcher into its poll loop automatically.
 pub unsafe fn watch_system_color_scheme(
     cb: ColorSchemeChangedFn,
@@ -169,10 +169,10 @@ pub fn stop_color_scheme_watcher() {
     unsafe { sys::optics_window_color_scheme_unwatch() }
 }
 
-/// Cursor appearance the host wants iris to show over its window.
+/// Cursor appearance the host wants window to show over its window.
 ///
-/// This is an L3 concern: iris owns the window and the cursor surface, so it
-/// owns cursor appearance too. While the host cursor is `Default`, iris shows
+/// This is an L3 concern: window owns the window and the cursor surface, so it
+/// owns cursor appearance too. While the host cursor is `Default`, window shows
 /// the semantic cursor the UI layer reports for the widget under the pointer;
 /// hosts use [`set_cursor`] for custom canvas regions and other
 /// application-specific overrides.
@@ -223,7 +223,7 @@ impl Cursor {
 /// platforms — Wayland included — so hosts do not need to re-assert a custom
 /// cursor every frame, only to keep it pinned).
 ///
-/// No-op when iris was built without cursor-shape support (the compositor's
+/// No-op when window was built without cursor-shape support (the compositor's
 /// default arrow stays) or before the application loop starts. Thread-
 /// affine: call from the same thread that drives the run loop.
 pub fn set_cursor(cursor: Cursor) {
@@ -330,7 +330,7 @@ fn _keep_c_int_in_scope(_: c_int) {}
 // =====================================================================
 
 /// Ask the active window to close. The loop exits and
-/// [`Application::run`] returns, exactly as if the user clicked the
+/// `optics_app::Application::run` returns, exactly as if the user clicked the
 /// title-bar close button.
 pub fn window_close() {
     unsafe { sys::optics_window_close() };
@@ -443,13 +443,13 @@ pub fn window_create_activation_token(app_id: Option<&str>) -> Option<String> {
 }
 
 // =====================================================================
-//  Cross-thread wakeup (app.h — the ONLY thread-safe iris entry point)
+//  Cross-thread wakeup (app.h — the ONLY thread-safe window entry point)
 // =====================================================================
 
-/// Schedule `f` to run on the iris main thread, outside any
+/// Schedule `f` to run on the window main thread, outside any
 /// `optics_ui_begin/end` pair.
 ///
-/// This is the one iris API that is safe to call from ANY thread; it is
+/// This is the one window API that is safe to call from ANY thread; it is
 /// how a worker thread wakes the loop (the loop may be idle at ~4 Hz —
 /// post to get a frame promptly). FIFO per posting thread. Returns
 /// `false` when no run loop is active (dropped), or when the closure
@@ -891,7 +891,7 @@ impl Default for FileDialog<'_> {
 //  Capability query (capability.h)
 // =====================================================================
 
-/// A build-level capability. See the C header (`iris/capability.h`) for
+/// A build-level capability. See the C header (`window/capability.h`) for
 /// each value's degradation contract.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Capability {
@@ -930,13 +930,13 @@ impl Capability {
 }
 
 /// Does this build implement `capability`? Static per-build answer,
-/// callable before [`Application::run`], from any thread. Branch your UI
+/// callable before `optics_app::Application::run`, from any thread. Branch your UI
 /// on this — not on platform names.
 pub fn supports(capability: Capability) -> bool {
     unsafe { sys::optics_window_supports(capability.raw()) != 0 }
 }
 
-/// The backend this libiris was built with: `"wayland"`, `"win32"`,
+/// The backend this liboptics_window was built with: `"wayland"`, `"win32"`,
 /// `"cocoa"`, or `"none"`. For diagnostics; prefer [`supports`] for
 /// behaviour.
 pub fn backend_name() -> &'static str {
@@ -1049,11 +1049,11 @@ mod tests {
     #[test]
     fn version_string_matches_buildtime_macros() {
         // The bindings and the C library are versioned independently (the
-        // Cargo workspace is 0.1.0; libiris is 0.0.30) — so we cannot
+        // Cargo workspace is 0.1.0; liboptics_window is 0.0.30) — so we cannot
         // assert equality against a Cargo version, but we CAN assert the
         // runtime string parses and the compile-time C macros the -sys
         // crate exports agree with it. A drifted build (bindings compiled
-        // against a different libiris) must fail here, not in production.
+        // against a different liboptics_window) must fail here, not in production.
         let runtime = version();
         assert!(
             runtime.split('.').count() == 3,
@@ -1172,7 +1172,7 @@ mod tests {
     #[test]
     fn pick_save_path_null_buffer_rejects_without_portal() {
         // Pickers reject NULL buffers / zero capacity before contacting the
-        // portal (matching the C contract in tests/iris/test_app_api.c).
+        // portal (matching the C contract in tests/window/test_app_api.c).
         // A valid buffer in an active desktop session would pop up a live picker.
         let opts = sys::optics_window_file_dialog_opts {
             title: std::ptr::null(),

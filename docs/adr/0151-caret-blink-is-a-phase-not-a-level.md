@@ -3,7 +3,7 @@ id: ADR-0151
 title: "A caret blink is a phase, not a level — lens owns the clock, the host forwards the edge"
 status: accepted
 date: 2026-11-06
-scope: [lens, iris, bindings, app]
+scope: [ui, window, bindings, app]
 superseded_by: null
 negative_knowledge: true
 ---

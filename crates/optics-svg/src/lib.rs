@@ -1,4 +1,4 @@
-//! Safe Rust bindings for **reticle** — the Optics vector-document compiler
+//! Safe Rust bindings for **svg** — the Optics vector-document compiler
 //! (ADR-0150, ADR-0161).
 //!
 //! One parse, many paints. [`Document::parse`] turns SVG static vector art into
@@ -44,7 +44,7 @@ pub fn version_check(major: u32, minor: u32, patch: u32) -> bool {
 
 /// Live document count for the whole process.
 ///
-/// This is the drain counter for the `reticle` resource kind: read it
+/// This is the drain counter for the `svg` resource kind: read it
 /// before and after a batch of parses to prove the release path balances. A
 /// document that is still counted after its last owner dropped is a leak, and
 /// this is the only way to observe it from Rust.
@@ -69,7 +69,7 @@ pub enum Error {
     /// The library returned a code this binding does not know (a newer library
     /// than the bindings). Treated as an error, never as success.
     Unsupported,
-    /// Any other flux error code.
+    /// Any other gfx error code.
     Backend(i32),
 }
 
@@ -266,7 +266,7 @@ impl Document {
         Error::check(unsafe { sys::optics_svg_draw(&raw) })
     }
 
-    /// Rasterize the document headlessly, using flux's device-less software
+    /// Rasterize the document headlessly, using gfx's device-less software
     /// canvas. No GPU, device or window is involved, so this is safe on a worker
     /// thread and in CI.
     pub fn rasterize(&self, options: RasterizeOptions) -> Result<Pixmap, Error> {
@@ -467,7 +467,7 @@ impl Gradient {
 
 /// Where a document is painted.
 ///
-/// A canvas is only recordable while a pass is open, and the safe flux API hands
+/// A canvas is only recordable while a pass is open, and the safe gfx API hands
 /// out [`optics_gfx::CanvasCommands`] — never the `Canvas` itself — for exactly that
 /// window. Taking `&CanvasCommands` therefore makes the borrow checker enforce
 /// the pass lifetime, instead of leaving the caller to promise it.
@@ -572,7 +572,7 @@ impl Default for DrawOptions {
 /// Pixel layout of a [`Pixmap`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PixelFormat {
-    /// Premultiplied RGBA8, row-major — flux's native CPU canvas layout.
+    /// Premultiplied RGBA8, row-major — gfx's native CPU canvas layout.
     Rgba8Premul,
     /// Premultiplied BGRA8 — the layout DRM/KMS cursor planes and
     /// `B8G8R8A8_UNORM` sampling read. Produced by channel swap, not by a second

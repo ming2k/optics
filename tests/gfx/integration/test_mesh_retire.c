@@ -1,5 +1,5 @@
 /*
- * flux_mesh retire queue: a mesh released right after a frame that
+ * optics_gfx_mesh retire queue: a mesh released right after a frame that
  * drew it must keep its vertex/index buffers alive until the GPU
  * provably passes that batch. The pre-fix behaviour destroyed both
  * buffers and freed their memory inline — the same hazard that

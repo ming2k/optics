@@ -12,8 +12,8 @@
  *                   absence rather than an invented factor.
  *
  * Live watch: NSWorkspace posts NSWorkspaceAccessibilityDisplayOptionsDidChangeNotification
- * on the main run loop — the iris app loop already drains that run loop in
- * app_cocoa.m, so an NSNotificationCenter observer delivers on the iris
+ * on the main run loop — the window app loop already drains that run loop in
+ * app_cocoa.m, so an NSNotificationCenter observer delivers on the window
  * main thread directly (no wakeup-seam detour needed). Contrast changes
  * also surface as a distributed notification; the workspace one covers it.
  */
@@ -25,7 +25,7 @@
 
 #include <optics/window/a11y_prefs.h>
 
-/* Registered watchers, touched on the iris main thread only. Two
+/* Registered watchers, touched on the window main thread only. Two
  * independent slots: the host's public one and the platform backend's. */
 static optics_window_a11y_prefs_changed_fn g_cb = NULL;
 static void *g_user = NULL;
@@ -62,7 +62,7 @@ static int ensure_observer(void) {
     if (@available(macOS 10.10, *)) {
         /* NSWorkspaceAccessibilityDisplayOptionsDidChangeNotification is
          * delivered on the workspace's notification centre, which forwards
-         * to the main run loop — exactly where the iris app loop drains
+         * to the main run loop — exactly where the window app loop drains
          * events (app_cocoa.m nextEventMatchingMask). */
         g_observer = [[NSNotificationCenter defaultCenter]
             addObserverForName:NSWorkspaceAccessibilityDisplayOptionsDidChangeNotification

@@ -3,13 +3,13 @@
  * misuse it exists for — a label pointer that was NOT registered this
  * frame — and must never fire on legitimate patterns.
  *
- * The library compiles with LENS_DEBUG_BORROWS (always, in this repo),
+ * The library compiles with OPTICS_UI_DEBUG_BORROWS (always, in this repo),
  * so the registry is live. We exercise it three ways:
  *
  *   1. legitimate: heap-owned labels registered via normal widget
  *      builds across many frames — must not abort;
  *   2. arena-copied strings (placeholder) — exempt by construction;
- *   3. the violation itself: call lensi_gen_widget_id with a pointer
+ *   3. the violation itself: call optics_ui__gen_widget_id with a pointer
  *      that was never registered THIS frame (we deregister by resetting
  *      the registry, simulating frame N+1 receiving frame N's stack
  *      pointer). Must abort — verified by running this test as a
@@ -19,8 +19,8 @@
  * child process (abort) checked by exit status.
  */
 #include "../../libs/ui/src/internal.h"
-#include "lens_test.h"
 #include "optics_test.h"
+#include "ui_test.h"
 #include <optics/ui.h>
 
 #include <signal.h>
@@ -44,11 +44,11 @@ int main(int argc, char **argv) {
         optics_ui_label(ui, &(optics_ui_label_opts){.box = {.id = frame_buf}, .text = "x"});
 
         /* Simulate frame N+1 receiving frame N's stack pointer WITHOUT a
-         * re-registration: clear the registry (as lens_begin would) and
+         * re-registration: clear the registry (as optics_ui_begin would) and
          * hand the stale pointer to a fresh check. The checker must
          * abort. */
         ui->borrow_count = 0;
-        lensi_borrow_check(ui, frame_buf, "self-test violation");
+        optics_ui__borrow_check(ui, frame_buf, "self-test violation");
         return 0; /* unreached if the checker works */
     }
 

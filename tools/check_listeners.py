@@ -55,7 +55,7 @@ not `const`, a table declared without an initializer (populated at runtime), an
 array of tables, and a tree with a Wayland backend but zero tables found (which
 is how a broken parser would present itself).
 
-Sunset: `libs/iris` is the only consumer. This guardrail, its contract file, and
+Sunset: `libs/window` is the only consumer. This guardrail, its contract file, and
 its test are deleted in the same commit that removes the Wayland backend — the
 contract exists to protect a backend, not to outlive it.
 """
@@ -292,7 +292,7 @@ def load_protocol_events(roots: list[Path]) -> tuple[dict[str, list[str]], list[
 def render_contract(events_by_iface: dict[str, list[str]], corpus: str) -> str:
     lines = [
         "# wayland-listeners.toml — the pinned event contract for every Wayland",
-        "# listener table in libs/iris (INV-ARCH-WLSLOT).",
+        "# listener table in libs/window (INV-ARCH-WLSLOT).",
         "#",
         "# Why pinned instead of read from the installed wayland-protocols at check",
         "# time: a verdict that depends on the host either fails where the package is",

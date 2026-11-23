@@ -3,7 +3,7 @@
  * Builds a synthetic scene laid out like a skinned VRM avatar (a long
  * spine-to-fingertip chain with siblings), where every node array is in an
  * order that forces the convergence loop to do the full O(n^2) work. Times
- * many `vista_scene_apply_animation` calls.
+ * many `optics_scene_apply_animation` calls.
  *
  * Usage: bench_sg_worlds [node_count] [iterations]
  */

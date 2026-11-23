@@ -3,7 +3,7 @@ id: ADR-0136
 title: "Device-less by design: the process-level icon registry and the parser behind it allocate from libc, and say so"
 status: accepted
 date: 2026-11-02
-scope: [lens, tools]
+scope: [ui, tools]
 superseded_by: null
 negative_knowledge: true
 ---

@@ -25,7 +25,7 @@
 
 /* Always returns zeroed memory. If the caller supplied an allocator,
  * we zero the result ourselves because a user `alloc` may not. The
- * library treats `flux_internal_alloc` as zalloc throughout, so the
+ * library treats `optics_gfx_internal_alloc` as zalloc throughout, so the
  * contract is consistent regardless of allocator origin. */
 void *optics_gfx_internal_alloc(optics_gfx_device *d, size_t bytes) {
     void *p;
@@ -46,14 +46,14 @@ void *optics_gfx_internal_alloc(optics_gfx_device *d, size_t bytes) {
      * VkDeviceMemory, which does know its size at both ends. */
     if (p)
         OPTICS_GFX_OBSERVE_ACQUIRE(d, OPTICS_GFX_SCOPE_DEVICE, OPTICS_GFX_LIFETIME_CONTEXT, "host",
-                                   "flux/core", 0, OPTICS_GFX_SITE_HOST_ALLOC);
+                                   "gfx/core", 0, OPTICS_GFX_SITE_HOST_ALLOC);
     return p;
 }
 
 void optics_gfx_internal_free(optics_gfx_device *d, void *ptr) {
     if (!ptr)
         return;
-    OPTICS_GFX_OBSERVE_RELEASE(d, OPTICS_GFX_SCOPE_DEVICE, "host", "flux/core", 0);
+    OPTICS_GFX_OBSERVE_RELEASE(d, OPTICS_GFX_SCOPE_DEVICE, "host", "gfx/core", 0);
     if (d && d->allocator.free)
         d->allocator.free(ptr, d->allocator.user);
     else
@@ -149,7 +149,7 @@ static bool feature_bundle_supported(const VkExtensionProperties *available, uin
     (void)count;
     return features == 0;
 }
-#endif /* FLUX_HAVE_DMABUF */
+#endif /* OPTICS_GFX_HAVE_DMABUF */
 
 typedef struct optics_gfx_device_config {
     const optics_gfx_device_drm_node_desc *drm_node;
@@ -299,9 +299,9 @@ static optics_gfx_result create_instance(optics_gfx_device *d, const optics_gfx_
 
     VkApplicationInfo ai = {
         .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
-        .pApplicationName = "flux app",
+        .pApplicationName = "optics app",
         .applicationVersion = 0,
-        .pEngineName = "flux",
+        .pEngineName = "optics",
         .engineVersion = OPTICS_GFX_VERSION_NUMBER,
         .apiVersion = VK_API_VERSION_1_3,
     };
@@ -608,7 +608,7 @@ static optics_gfx_result pick_queue_families(optics_gfx_device *d) {
         if (families[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) {
             d->graphics_family = i;
             /* Timestamp support is a per-queue-family property; capture it
-             * for flux_device_get_limits (feature discovery by query, not
+             * for optics_gfx_device_get_limits (feature discovery by query, not
              * by watching timestamp collection come back empty). */
             d->graphics_queue_timestamp_valid_bits = families[i].timestampValidBits;
             break;
@@ -696,7 +696,7 @@ static optics_gfx_result append_feature_extensions(const char **extensions, uint
     (void)features;
     return OPTICS_GFX_OK;
 }
-#endif /* FLUX_HAVE_DMABUF */
+#endif /* OPTICS_GFX_HAVE_DMABUF */
 
 static optics_gfx_result create_logical_device(optics_gfx_device *d,
                                                const optics_gfx_device_desc *desc,
@@ -765,7 +765,7 @@ static optics_gfx_result create_logical_device(optics_gfx_device *d,
     }
 
     /* Enable VK_EXT_memory_budget when advertised. Without this the
-     * budget query in flux_device_memory_budget chains a struct whose
+     * budget query in optics_gfx_device_memory_budget chains a struct whose
      * extension is not enabled, which the spec forbids. */
     if (available && has_extension(available, avail, VK_EXT_MEMORY_BUDGET_EXTENSION_NAME)) {
         optics_gfx_result memory_budget_result = append_device_extension(
@@ -893,7 +893,7 @@ static optics_gfx_result create_logical_device(optics_gfx_device *d,
 
     /* Optional core feature used by POINT_LIST consumers. Enabling every
      * supported device lets procedural-particle pipelines use gl_PointSize
-     * above 1 without making large points a baseline requirement for Flux. */
+     * above 1 without making large points a baseline requirement for gfx. */
     feat2.features.largePoints = have2.features.largePoints;
     d->large_points_enabled = have2.features.largePoints;
 
@@ -962,7 +962,7 @@ static optics_gfx_result create_logical_device(optics_gfx_device *d,
     }
 
     /* Pipeline cache — seeded from the consumer's storage if a
-     * persistence hook was wired into flux_device_desc (Skia
+     * persistence hook was wired into optics_gfx_device_desc (Skia
      * PersistentCache model). With no hook the cache starts cold
      * and lives only for the device lifetime. The library never
      * touches the filesystem itself. */
@@ -990,7 +990,7 @@ static optics_gfx_result create_logical_device(optics_gfx_device *d,
 /* ------------------------------------------------------------------ */
 /*  Pipeline cache flush (consumer-driven)                            */
 /*                                                                    */
-/*  If the consumer wired a save hook into flux_device_desc, hand the */
+/*  If the consumer wired a save hook into optics_gfx_device_desc, hand the */
 /*  current VkPipelineCache blob to it. The library owns no storage   */
 /*  strategy; this just bridges Vulkan's blob out to the callback.    */
 /* ------------------------------------------------------------------ */
@@ -1033,7 +1033,8 @@ optics_gfx_result optics_gfx_device_create(const optics_gfx_device_desc *desc,
     if (!desc || !out)
         return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
     if (desc->type != OPTICS_GFX_TYPE_DEVICE_DESC) {
-        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT, "desc->type != FLUX_TYPE_DEVICE_DESC");
+        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT,
+                        "desc->type != OPTICS_GFX_TYPE_DEVICE_DESC");
         return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
     }
     if ((desc->required_instance_extension_count && !desc->required_instance_extensions) ||
@@ -1068,7 +1069,7 @@ optics_gfx_result optics_gfx_device_create(const optics_gfx_device_desc *desc,
     }
     atomic_init(&d->ref_count, 1u);
     /* Zeroed by calloc, but the bindless sentinel is all-ones — the
-     * lock-free fast path in flux_device_default_sampler_handle treats
+     * lock-free fast path in optics_gfx_device_default_sampler_handle treats
      * anything else as a published handle. */
     atomic_init(&d->default_sampler_handle, OPTICS_GFX_BINDLESS_INVALID);
     d->allocator = desc->allocator;
@@ -1086,8 +1087,8 @@ optics_gfx_result optics_gfx_device_create(const optics_gfx_device_desc *desc,
         goto fail;
 
     /* The per-surface frame slot array is fixed at
-     * FLUX_MAX_FRAMES_IN_FLIGHT entries; values above are silently
-     * clamped in flux_surface_create. Surface the clamp here so the
+     * OPTICS_GFX_MAX_FRAMES_IN_FLIGHT entries; values above are silently
+     * clamped in optics_gfx_surface_create. Surface the clamp here so the
      * caller learns at device-bringup time, not later when a surface
      * ends up with fewer frames than requested. */
     if (desc->frames_in_flight > OPTICS_GFX_MAX_FRAMES_IN_FLIGHT) {
@@ -1095,11 +1096,11 @@ optics_gfx_result optics_gfx_device_create(const optics_gfx_device_desc *desc,
         if (d->log) {
             char buf[160];
             snprintf(buf, sizeof(buf),
-                     "flux_device_create: desc->frames_in_flight=%u exceeds "
-                     "FLUX_MAX_FRAMES_IN_FLIGHT=%u; clamped (per-surface frame "
+                     "optics_gfx_device_create: desc->frames_in_flight=%u exceeds "
+                     "OPTICS_GFX_MAX_FRAMES_IN_FLIGHT=%u; clamped (per-surface frame "
                      "slot array is fixed-size)",
                      desc->frames_in_flight, OPTICS_GFX_MAX_FRAMES_IN_FLIGHT);
-            d->log(OPTICS_GFX_LOG_WARN, "flux_device_create", 0, "%s", buf, d->log_user);
+            d->log(OPTICS_GFX_LOG_WARN, "optics_gfx_device_create", 0, "%s", buf, d->log_user);
         }
     }
 
@@ -1117,8 +1118,9 @@ optics_gfx_result optics_gfx_device_create(const optics_gfx_device_desc *desc,
     /* Reject hosts that can't satisfy the library's push-constant
      * budget before we waste time creating the logical device. */
     if (d->props.limits.maxPushConstantsSize < OPTICS_GFX_DEVICE_REQUIRED_PUSH_BYTES) {
-        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_UNSUPPORTED,
-                        "device.limits.maxPushConstantsSize below FLUX_DEVICE_REQUIRED_PUSH_BYTES");
+        OPTICS_GFX_FAIL(
+            OPTICS_GFX_ERROR_UNSUPPORTED,
+            "device.limits.maxPushConstantsSize below OPTICS_GFX_DEVICE_REQUIRED_PUSH_BYTES");
         r = OPTICS_GFX_ERROR_UNSUPPORTED;
         goto fail;
     }
@@ -1200,7 +1202,7 @@ optics_gfx_result optics_gfx_device_create(const optics_gfx_device_desc *desc,
                  d->props.deviceName, d->graphics_family, d->transfer_family,
                  d->transfer_dedicated ? " dedicated" : "", d->validation_enabled ? "on" : "off",
                  d->headless ? "yes" : "no");
-        d->log(OPTICS_GFX_LOG_INFO, "flux", 0, "%s", buf, d->log_user);
+        d->log(OPTICS_GFX_LOG_INFO, "gfx", 0, "%s", buf, d->log_user);
     }
 
     *out = d;
@@ -1434,7 +1436,7 @@ void optics_gfx_device_release(optics_gfx_device *d) {
  *
  *     char name[80];
  *     snprintf(name, sizeof(name), ...);
- *     flux_vk_set_name(d, type, handle, name);   // name dies on return
+ *     optics_gfx_vk_set_name(d, type, handle, name);   // name dies on return
  *
  * which relies on the driver copying the string. That is not a contract.
  */
@@ -1578,14 +1580,13 @@ static bool device_has_recording_frame(const optics_gfx_device *d) {
  * The `+ 1` covers a recording frame only. A device with no frame in
  * recording state has nothing that could still reference the resource, so the
  * tag is the current serial and the release becomes reclaimable as soon as every
- * submission has completed — which is exactly what flux_device_wait_idle
+ * submission has completed — which is exactly what optics_gfx_device_wait_idle
  * establishes. Without that distinction a host that released its last material
  * and waited for idle kept the memory until it submitted another (empty) frame,
- * making wait_idle an unreliable reclamation point. See
- * flux_device_reclaim_retired.
+ * making wait_idle an unreliable reclamation point.
  *
  * Backpressure: the FIFO holds real GPU memory alive, so it has a hard
- * entry bound (FLUX_RETIRE_MAX_PENDING). The bound is only reachable
+ * entry bound (OPTICS_GFX_RETIRE_MAX_PENDING). The bound is only reachable
  * when the watermark is frozen — the host stopped submitting frames (or
  * no fence ever completes) while resources keep being released. Passing
  * the bound forces a full drain: wait for the queue, advance the
@@ -1609,7 +1610,7 @@ static void zombie_park(optics_gfx_device *d, optics_gfx_retire_zombie *z) {
 
     if (pending >= OPTICS_GFX_RETIRE_MAX_PENDING) {
         /* Keep submissions excluded through the sweep. A plain
-         * flux_device_wait_idle() only advances completed_serial to the
+         * optics_gfx_device_wait_idle() only advances completed_serial to the
          * latest submitted batch, while zombies are deliberately tagged one
          * serial beyond it to cover a frame that is still recording. At the
          * hard bound we take the documented slow path: no resource whose
@@ -1661,7 +1662,7 @@ void optics_gfx_device_retire_image(optics_gfx_device *d, VkImageView view, VkIm
             vkDestroyImageView(d->device, view, nullptr);
         if (image) {
             vkDestroyImage(d->device, image, nullptr);
-            OPTICS_GFX_OBSERVE_RELEASE(d, OPTICS_GFX_SCOPE_DEVICE, "vk_image", "flux/core", 0);
+            OPTICS_GFX_OBSERVE_RELEASE(d, OPTICS_GFX_SCOPE_DEVICE, "vk_image", "gfx/core", 0);
         }
         if (alloc && alloc->memory) {
             optics_gfx_vk_alloc copy = *alloc;
@@ -1688,7 +1689,7 @@ void optics_gfx_device_retire_buffer(optics_gfx_device *d, VkBuffer buffer,
                                      const optics_gfx_vk_alloc *alloc) {
     optics_gfx_retire_zombie *z = optics_gfx_internal_alloc(d, sizeof(*z));
     if (!z) {
-        /* Same OOM trade-off as flux_device_retire_image: block until
+        /* Same OOM trade-off as optics_gfx_device_retire_image: block until
          * the queue is idle rather than leak the GPU objects. */
         optics_gfx_vk_wait_idle(d);
         if (buffer)
@@ -1709,14 +1710,14 @@ void optics_gfx_device_retire_buffer(optics_gfx_device *d, VkBuffer buffer,
 void optics_gfx_device_retire_sampler(optics_gfx_device *d, VkSampler sampler, uint32_t bindless) {
     optics_gfx_retire_zombie *z = optics_gfx_internal_alloc(d, sizeof(*z));
     if (!z) {
-        /* Same OOM trade-off as flux_device_retire_image: block until
+        /* Same OOM trade-off as optics_gfx_device_retire_image: block until
          * the queue is idle rather than leak the GPU objects. */
         optics_gfx_vk_wait_idle(d);
         if (bindless != OPTICS_GFX_BINDLESS_INVALID)
             optics_gfx_bindless_release(d, bindless);
         if (sampler) {
             vkDestroySampler(d->device, sampler, nullptr);
-            OPTICS_GFX_OBSERVE_RELEASE(d, OPTICS_GFX_SCOPE_DEVICE, "vk_sampler", "flux/core", 0);
+            OPTICS_GFX_OBSERVE_RELEASE(d, OPTICS_GFX_SCOPE_DEVICE, "vk_sampler", "gfx/core", 0);
         }
         return;
     }
@@ -1791,35 +1792,36 @@ void optics_gfx_device_drain_retire(optics_gfx_device *d) {
 /* Device-owned host allocation (ADR-0135).
  *
  * The ownership pair is what makes adoption safe: a peer library routing its
- * memory through here is attributed to itself rather than to flux. Counting
+ * memory through here is attributed to itself rather than to gfx. Counting
  * still happens at one chokepoint, but with the caller's (owner, kind, scope)
- * instead of a hardcoded flux pair.
+ * instead of a hardcoded gfx pair.
  *
- * flux_internal_alloc stays the funnel for flux's own objects and keeps
- * reporting owner="flux/core"; this function deliberately does not use it,
- * because that would re-attribute the caller's memory to flux. */
+ * optics_gfx_internal_alloc stays the funnel for gfx's own objects and keeps
+ * reporting owner="gfx/core"; this function deliberately does not use it,
+ * because that would re-attribute the caller's memory to gfx. */
 optics_gfx_result optics_gfx_device_alloc(optics_gfx_device *d,
                                           const optics_gfx_device_alloc_opts *opts, void **out) {
     if (!out)
         return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
     *out = nullptr;
     if (!opts || opts->type != OPTICS_GFX_TYPE_DEVICE_ALLOC_OPTS) {
-        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT, "flux_device_alloc_opts.type mismatch");
+        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT,
+                        "optics_gfx_device_alloc_opts.type mismatch");
         return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
     }
     /* Required, not defaulted: an allocation with no owner is exactly the
      * unattributable row this ADR exists to remove. */
     if (!opts->owner || !opts->kind) {
         OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT,
-                        "flux_device_alloc requires owner and kind");
+                        "optics_gfx_device_alloc requires owner and kind");
         return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
     }
     if ((uint32_t)opts->scope >= (uint32_t)OPTICS_GFX_SCOPE_COUNT) {
-        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT, "flux_device_alloc: bad scope");
+        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT, "optics_gfx_device_alloc: bad scope");
         return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
     }
     if (opts->bytes == 0) {
-        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT, "flux_device_alloc: zero bytes");
+        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT, "optics_gfx_device_alloc: zero bytes");
         return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
     }
 
@@ -2202,7 +2204,7 @@ static optics_gfx_result write_image(optics_gfx_device *d, uint32_t binding, VkI
     optics_gfx_platform_mutex_unlock(&d->bindless.lock);
     *out = pack_handle(binding, slot);
     OPTICS_GFX_OBSERVE_ACQUIRE(d, OPTICS_GFX_SCOPE_DEVICE, OPTICS_GFX_LIFETIME_CONTEXT, "bindless",
-                               "flux/core", 0, OPTICS_GFX_SITE_BINDLESS);
+                               "gfx/core", 0, OPTICS_GFX_SITE_BINDLESS);
     return OPTICS_GFX_OK;
 }
 
@@ -2247,11 +2249,11 @@ void optics_gfx_bindless_release(optics_gfx_device *d, optics_gfx_bindless_handl
                      "bindless release refused: binding=%u slot=%u was not live "
                      "(double release or foreign handle)",
                      binding, slot);
-            d->log(OPTICS_GFX_LOG_ERROR, "flux", 0, "%s", buf, d->log_user);
+            d->log(OPTICS_GFX_LOG_ERROR, "gfx", 0, "%s", buf, d->log_user);
         }
         return;
     }
-    OPTICS_GFX_OBSERVE_RELEASE(d, OPTICS_GFX_SCOPE_DEVICE, "bindless", "flux/core", 0);
+    OPTICS_GFX_OBSERVE_RELEASE(d, OPTICS_GFX_SCOPE_DEVICE, "bindless", "gfx/core", 0);
     /* Note: the descriptor write is not cleared. PARTIALLY_BOUND +
      * UPDATE_UNUSED_WHILE_PENDING means the stale descriptor is
      * harmless as long as nothing indexes the freed slot. Callers

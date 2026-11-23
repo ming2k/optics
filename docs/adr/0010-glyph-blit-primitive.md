@@ -3,6 +3,9 @@ id: ADR-0010
 title: "Glyph-blit primitive — text rendering at the canvas seam, shaping stays out"
 status: accepted
 date: 2026-05-24
+scope: text
+superseded_by: null
+negative_knowledge: true
 ---
 
 # ADR-0010: Glyph-blit primitive — text rendering at the canvas seam, shaping stays out

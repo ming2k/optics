@@ -1,6 +1,6 @@
 # Optics Engineering Standards
 
-This directory defines the authoritative engineering, architectural, and quality standards for the Optics monorepo (`flux`, `glyph`, `vista`, `prism`, `transit`, `lens`, `iris`).
+This directory defines the authoritative engineering, architectural, and quality standards for the Optics monorepo (`gfx`, `text`, `svg`, `scene`, `material`, `motion`, `window`, `ui`, `app`).
 
 Optics maintains a **flat, high-cohesion, practical, and code-aligned standards suite directly inside `docs/dev/standards/`**, decoupled from external governance meta-frameworks and nested junk-drawer directories.
 

@@ -652,7 +652,7 @@ bool optics_svg_priv_intern_gradient(optics_svg_document *doc, const optics_svg_
     return true;
 }
 
-/* Build the flux-facing gradient for `raw` as referenced by a shape whose
+/* Build the gfx-facing gradient for `raw` as referenced by a shape whose
  * user-space bounds are `bounds`. */
 static bool build_gradient(const optics_svg_document *doc, const optics_svg_raw_gradient *raw,
                            optics_gfx_rect bounds, float paint_opacity, optics_svg_gradient *out) {
@@ -670,7 +670,7 @@ static bool build_gradient(const optics_svg_document *doc, const optics_svg_raw_
 
     /* In user space the geometry attributes are user units; in objectBoundingBox
      * space they are fractions of the shape's bounds. Baking the mapping into
-     * `start`/`end`/`radius` is what lets flux paint a gradient without knowing
+     * `start`/`end`/`radius` is what lets gfx paint a gradient without knowing
      * what an objectBoundingBox is. */
     float x1 = find_field_owner(doc, raw, OPTICS_SVG_INTERNAL_FIELD_X1)->x1;
     float y1 = find_field_owner(doc, raw, OPTICS_SVG_INTERNAL_FIELD_Y1)->y1;
@@ -691,7 +691,7 @@ static bool build_gradient(const optics_svg_document *doc, const optics_svg_raw_
         y1 = bounds.y + y1 * bounds.h;
         y2 = bounds.y + y2 * bounds.h;
         cy = bounds.y + cy * bounds.h;
-        /* flux radial gradients are circular; the objectBoundingBox mapping is
+        /* gfx radial gradients are circular; the objectBoundingBox mapping is
          * anisotropic. The normalised diagonal is the standard circular
          * approximation and preserves the gradient's visual extent. */
         radius = radius * 0.5f * sqrtf(bounds.w * bounds.w + bounds.h * bounds.h);
@@ -724,7 +724,7 @@ static bool build_gradient(const optics_svg_document *doc, const optics_svg_raw_
             optics_gfx_color_rgba_premul(stops[i].r, stops[i].g, stops[i].b, a);
         out->stop_count++;
     }
-    /* flux needs at least two stops to interpolate; one stop means "flat
+    /* gfx needs at least two stops to interpolate; one stop means "flat
      * colour" in SVG, which a duplicated stop expresses exactly. */
     if (out->stop_count == 1) {
         out->stops[1] = out->stops[0];
@@ -761,7 +761,7 @@ static bool build_gradient(const optics_svg_document *doc, const optics_svg_raw_
 }
 
 /* Turn one raw paint into a resolved paint, interning any gradient it needs.
- * A paint that cannot be resolved degrades to RETICLE_PAINT_NONE: the shape keeps
+ * A paint that cannot be resolved degrades to OPTICS_SVG_PAINT_NONE: the shape keeps
  * its geometry (a caller may still tint it) but paints nothing by default, which
  * is what a dangling `url(#missing)` means in SVG anyway. */
 static void resolve_paint(optics_svg_document *doc, const optics_svg_raw_paint *raw,

@@ -1,14 +1,14 @@
 /*
- * flux/effect.h — image-domain effects (blur, shadow, tone-map). *
- * Effects read flux_image inputs, write a flux_image output, and
+ * gfx/effect.h — image-domain effects (blur, shadow, tone-map). *
+ * Effects read optics_gfx_image inputs, write a optics_gfx_image output, and
  * are recordable into any VkCommandBuffer. Inside a frame, pull
- * the cmd buffer from flux_frame_vk_command_buffer(); outside a
+ * the cmd buffer from optics_gfx_frame_vk_command_buffer(); outside a
  * frame, the caller supplies a one-shot command buffer.
  *
- * Intended consumers: prism (the material library) and end-user
- * showcases/effects. This header is the seam where flux (rendering
- * mechanism) meets named materials (ADR-0063): flux owns the effect
- * runtime, prism owns material identity. It is public by design —
+ * Intended consumers: material (the material library) and end-user
+ * showcases/effects. This header is the seam where gfx (rendering
+ * mechanism) meets named materials (ADR-0063): gfx owns the effect
+ * runtime, material owns material identity. It is public by design —
  * applications may compose custom image-domain effects — but there is
  * no stable-API commitment beyond the stack's own deprecation policy
  * (docs/reference/api.md).
@@ -17,12 +17,12 @@
  *   The effect owns the output image. It is leased exclusively from a
  *   per-device pool keyed by (format, width, height). A writable intermediate
  *   or output is never reused by another command buffer in the same reset
- *   epoch. The returned flux_image * remains valid until
- *   flux_effect_reset(device) or device destruction.
+ *   epoch. The returned optics_gfx_image * remains valid until
+ *   optics_gfx_effect_reset(device) or device destruction.
  *
  *   To take a long-lived copy, run the effect and then
- *   flux_effect_promote() the leased image into a caller-owned,
- *   refcounted flux_image (see below).
+ *   optics_gfx_effect_promote() the leased image into a caller-owned,
+ *   refcounted optics_gfx_image (see below).
  *
  * Threading
  *   Effects are not thread-safe per device. Serialize calls per
@@ -34,7 +34,7 @@
 #ifndef OPTICS_GFX_EFFECT_H
 #define OPTICS_GFX_EFFECT_H
 
-#include <optics/gfx/canvas.h> /* flux_image */
+#include <optics/gfx/canvas.h> /* optics_gfx_image */
 #include <optics/gfx/core.h>
 #include <optics/gfx/vulkan.h> /* VkCommandBuffer */
 
@@ -50,9 +50,9 @@ extern "C" {
  * dimensions as the input; its format follows the input: RGBA8_UNORM
  * for 8-bit SDR content, RGBA16_SFLOAT for 16F working-space content
  * (ADR-0069 — linear-light blurring, requires rgba16f storage support;
- * a 16F input on a device without it fails with FLUX_ERROR_UNSUPPORTED).
+ * a 16F input on a device without it fails with OPTICS_GFX_ERROR_UNSUPPORTED).
  * Kernel radius is derived
- * from sigma; sigma is clamped to [0, FLUX_EFFECT_BLUR_SIGMA_MAX]
+ * from sigma; sigma is clamped to [0, OPTICS_GFX_EFFECT_BLUR_SIGMA_MAX]
  * — values outside that range are clamped silently.
  *
  * A sigma of 0 is a no-op (the output aliases the input's contents
@@ -74,7 +74,7 @@ typedef struct optics_gfx_effect_region {
 } optics_gfx_effect_region;
 
 typedef struct optics_gfx_effect_blur_desc {
-    optics_gfx_struct_type type; /* FLUX_TYPE_EFFECT_BLUR_DESC */
+    optics_gfx_struct_type type; /* OPTICS_GFX_TYPE_EFFECT_BLUR_DESC */
     const void *next;
     optics_gfx_image *input; /* borrowed, not retained; safe to release right
                               * after the call — destruction defers through the
@@ -84,13 +84,13 @@ typedef struct optics_gfx_effect_blur_desc {
 
 #define OPTICS_GFX_EFFECT_BLUR_DESC_INIT {.type = OPTICS_GFX_TYPE_EFFECT_BLUR_DESC}
 
-/* Optional `flux_effect_blur_desc.next` payload for region-aware reusable
+/* Optional `optics_gfx_effect_blur_desc.next` payload for region-aware reusable
  * blur. Keeping this in the extension chain preserves the binary size and
- * layout of flux_effect_blur_desc. A NULL extension means the full input.
- * This extension is accepted by flux_blur_filter_apply only; the exact
- * flux_effect_blur operator rejects it. */
+ * layout of optics_gfx_effect_blur_desc. A NULL extension means the full input.
+ * This extension is accepted by optics_gfx_blur_filter_apply only; the exact
+ * optics_gfx_effect_blur operator rejects it. */
 typedef struct optics_gfx_effect_blur_regions_desc {
-    optics_gfx_struct_type type; /* FLUX_TYPE_EFFECT_BLUR_REGIONS_DESC */
+    optics_gfx_struct_type type; /* OPTICS_GFX_TYPE_EFFECT_BLUR_REGIONS_DESC */
     const void *next;
     const optics_gfx_effect_region *regions;
     uint32_t region_count;
@@ -102,10 +102,10 @@ typedef struct optics_gfx_effect_blur_regions_desc {
  * first use per device and cached for the device's lifetime.
  *
  * Errors:
- *   FLUX_ERROR_INVALID_ARGUMENT — null cmd/desc/out, wrong type,
+ *   OPTICS_GFX_ERROR_INVALID_ARGUMENT — null cmd/desc/out, wrong type,
  *     null input, or input format unsupported by the operator.
- *   FLUX_ERROR_OUT_OF_MEMORY    — transient pool exhausted.
- *   FLUX_ERROR_BACKEND_FAILURE  — Vulkan pipeline or image
+ *   OPTICS_GFX_ERROR_OUT_OF_MEMORY    — transient pool exhausted.
+ *   OPTICS_GFX_ERROR_BACKEND_FAILURE  — Vulkan pipeline or image
  *     creation failed. */
 typedef struct optics_gfx_effect_blur_opts {
     VkCommandBuffer cmd;
@@ -116,7 +116,7 @@ typedef struct optics_gfx_effect_blur_opts {
 OPTICS_GFX_NODISCARD OPTICS_GFX_API optics_gfx_result
 optics_gfx_effect_blur(const optics_gfx_effect_blur_opts *opts);
 
-/* Reusable, frame-slot-safe realtime blur. Unlike flux_effect_blur's exact
+/* Reusable, frame-slot-safe realtime blur. Unlike optics_gfx_effect_blur's exact
  * Gaussian kernel, this path uses a two-level Dual-Kawase pyramid: two
  * downsample and two upsample passes with a fixed sample count. Requested
  * sigma controls sample offsets instead of loop length, so an animated
@@ -136,9 +136,9 @@ optics_gfx_effect_blur(const optics_gfx_effect_blur_opts *opts);
  * handle immediately, but the four dispatches are only built when something
  * requires the pixels. A pass nothing samples is pruned at submit and costs
  * no GPU time, so callers do not need to guard the call by hand. Consumers
- * that record their own compute (Prism materials, custom passes) call
- * flux_frame_materialize_image at their boundary; a canvas draw that samples
- * a still-pending output is rejected with FLUX_ERROR_INVALID_STATE. */
+ * that record their own compute (materials, custom passes) call
+ * optics_gfx_frame_materialize_image at their boundary; a canvas draw that samples
+ * a still-pending output is rejected with OPTICS_GFX_ERROR_INVALID_STATE. */
 typedef struct optics_gfx_blur_filter optics_gfx_blur_filter;
 
 typedef struct optics_gfx_blur_filter_apply_opts {
@@ -164,15 +164,15 @@ OPTICS_GFX_NODISCARD OPTICS_GFX_API optics_gfx_result optics_gfx_blur_filter_app
  * Dual-Kawase pyramid dispatch.
  *
  * ADR-0147: the returned image may belong to a deferred pass that has not
- * been executed yet. Materialize it (`flux_frame_materialize_image`) before
+ * been executed yet. Materialize it (`optics_gfx_frame_materialize_image`) before
  * anything samples it; a draw inside a canvas pass that reaches a pending
  * output is rejected.
  *
  * Errors:
- *   FLUX_ERROR_INVALID_ARGUMENT — null filter/opts/frame/out.
- *   FLUX_ERROR_INVALID_STATE    — frame not recording, or slot has no
+ *   OPTICS_GFX_ERROR_INVALID_ARGUMENT — null filter/opts/frame/out.
+ *   OPTICS_GFX_ERROR_INVALID_STATE    — frame not recording, or slot has no
  *     valid recorded blur output.
- *   FLUX_ERROR_OUT_OF_RANGE     — frame slot index >= FLUX_MAX_FRAMES_IN_FLIGHT. */
+ *   OPTICS_GFX_ERROR_OUT_OF_RANGE     — frame slot index >= OPTICS_GFX_MAX_FRAMES_IN_FLIGHT. */
 OPTICS_GFX_NODISCARD OPTICS_GFX_API optics_gfx_result optics_gfx_blur_filter_current(
     optics_gfx_blur_filter *filter, const optics_gfx_blur_filter_current_opts *opts);
 
@@ -189,10 +189,10 @@ OPTICS_GFX_NODISCARD OPTICS_GFX_API optics_gfx_result optics_gfx_blur_filter_cur
  *
  * The operator is geometry-neutral (ADR-0074): shape geometry arrives
  * only through the mask. Building the mask is the caller's job — the
- * canvas already draws rounded rects, and prism owns its own SDF path.
+ * canvas already draws rounded rects, and material owns its own SDF path.
  *
- * The blur is the same separable two-pass Gaussian as flux_effect_blur;
- * FLUX_EFFECT_SHADOW_BLUR_MAX bounds it. A sigma of 0 produces a hard
+ * The blur is the same separable two-pass Gaussian as optics_gfx_effect_blur;
+ * OPTICS_GFX_EFFECT_SHADOW_BLUR_MAX bounds it. A sigma of 0 produces a hard
  * (unblurred) offset copy of the mask. `offset_x`/`offset_y` are in
  * input pixels, +x right, +y down; the shadow is sampled at
  * (p - offset), so positive y moves the shadow down. `tint_red`/
@@ -204,22 +204,22 @@ OPTICS_GFX_NODISCARD OPTICS_GFX_API optics_gfx_result optics_gfx_blur_filter_cur
  * allocation churn beyond the transient pool's normal lease path.
  *
  * Errors:
- *   FLUX_ERROR_INVALID_ARGUMENT — null cmd/desc/out, wrong type, null
+ *   OPTICS_GFX_ERROR_INVALID_ARGUMENT — null cmd/desc/out, wrong type, null
  *     or handle-less input, or non-finite offset/tint/alpha/blur.
- *   FLUX_ERROR_OUT_OF_MEMORY    — transient pool exhausted.
- *   FLUX_ERROR_BACKEND_FAILURE  — pipeline or image creation failed.
- *   FLUX_ERROR_UNSUPPORTED      — 16F input on a device without
+ *   OPTICS_GFX_ERROR_OUT_OF_MEMORY    — transient pool exhausted.
+ *   OPTICS_GFX_ERROR_BACKEND_FAILURE  — pipeline or image creation failed.
+ *   OPTICS_GFX_ERROR_UNSUPPORTED      — 16F input on a device without
  *     rgba16f storage, or an unsupported input format. */
 #define OPTICS_GFX_EFFECT_SHADOW_BLUR_MAX 64.0f
 
 typedef struct optics_gfx_effect_shadow_desc {
-    optics_gfx_struct_type type; /* FLUX_TYPE_EFFECT_SHADOW_DESC */
+    optics_gfx_struct_type type; /* OPTICS_GFX_TYPE_EFFECT_SHADOW_DESC */
     const void *next;            /* must be NULL (no extensions yet) */
     optics_gfx_image *input;     /* borrowed, not retained; safe to release right
                                   * after the call — destruction defers through the
                                   * device retire queue past the recorded dispatch */
     float blur;                  /* Gaussian sigma in pixels, [0,
-                                  * FLUX_EFFECT_SHADOW_BLUR_MAX] */
+                                  * OPTICS_GFX_EFFECT_SHADOW_BLUR_MAX] */
     float offset_x;              /* shadow offset, pixels, +x right */
     float offset_y;              /* shadow offset, pixels, +y down */
     float tint_red;              /* straight colour, input colour space */
@@ -244,18 +244,18 @@ typedef struct optics_gfx_effect_shadow_opts {
 OPTICS_GFX_NODISCARD OPTICS_GFX_API optics_gfx_result
 optics_gfx_effect_shadow(const optics_gfx_effect_shadow_opts *opts);
 
-/* Reusable, frame-slot-safe realtime shadow. The exact flux_effect_shadow
+/* Reusable, frame-slot-safe realtime shadow. The exact optics_gfx_effect_shadow
  * leases its intermediates from the per-device transient pool, so a caller
  * driving it every frame would hold one lease per dispatch until
- * flux_effect_reset — wrong for a live compositor that never resets. This
+ * optics_gfx_effect_reset — wrong for a live compositor that never resets. This
  * filter instead owns its two intermediates and output per frame-in-flight
- * slot (the same ownership model as flux_blur_filter): begin_frame has
+ * slot (the same ownership model as optics_gfx_blur_filter): begin_frame has
  * already waited for the selected slot before that slot is reused, so no
  * transient-pool growth, lease accumulation, or device-wide wait occurs.
  * Dispatch shape is fixed per extent; blur/offset/tint/alpha vary per frame
  * without pipeline churn (ADR-0074).
  *
- * Accepts the same flux_effect_shadow_desc as flux_effect_shadow (its `next`
+ * Accepts the same optics_gfx_effect_shadow_desc as optics_gfx_effect_shadow (its `next`
  * must be NULL). The image returned by apply is borrowed from the filter and
  * remains valid until the same slot is applied again, the filter is
  * released, or its input extent/format changes. Do not release it.
@@ -282,11 +282,11 @@ OPTICS_GFX_NODISCARD OPTICS_GFX_API optics_gfx_result optics_gfx_shadow_filter_a
 /*  Promote a transient output to a caller-owned image                */
 /* ------------------------------------------------------------------ */
 
-/* Copy `transient` (an image returned by flux_effect_blur or any
- * later effect operator) into a fresh caller-owned flux_image with
+/* Copy `transient` (an image returned by optics_gfx_effect_blur or any
+ * later effect operator) into a fresh caller-owned optics_gfx_image with
  * the same width, height, and format. The returned image has the
- * regular flux_image lifecycle: refcount 1, bindless-sampled,
- * released with flux_image_release, unaffected by flux_effect_reset.
+ * regular optics_gfx_image lifecycle: refcount 1, bindless-sampled,
+ * released with optics_gfx_image_release, unaffected by optics_gfx_effect_reset.
  *
  * Synchronous: records and submits a one-shot graphics-queue
  * command buffer and waits for completion. Caller must have
@@ -295,10 +295,10 @@ OPTICS_GFX_NODISCARD OPTICS_GFX_API optics_gfx_result optics_gfx_shadow_filter_a
  * call — promote does not re-synchronise on the caller's behalf.
  *
  * Errors:
- *   FLUX_ERROR_INVALID_ARGUMENT — null transient/out, or `transient`
+ *   OPTICS_GFX_ERROR_INVALID_ARGUMENT — null transient/out, or `transient`
  *     is not an effect output (no storage bindless handle).
- *   FLUX_ERROR_OUT_OF_MEMORY    — destination image allocation failed.
- *   FLUX_ERROR_BACKEND_FAILURE  — Vulkan command-buffer or queue
+ *   OPTICS_GFX_ERROR_OUT_OF_MEMORY    — destination image allocation failed.
+ *   OPTICS_GFX_ERROR_BACKEND_FAILURE  — Vulkan command-buffer or queue
  *     submission failed. */
 OPTICS_GFX_NODISCARD OPTICS_GFX_API optics_gfx_result
 optics_gfx_effect_promote(optics_gfx_image *transient, optics_gfx_image **out);
@@ -312,11 +312,11 @@ optics_gfx_effect_promote(optics_gfx_image *transient, optics_gfx_image **out);
  * must already have completed, and no recorded command buffer that references
  * one may be submitted later. With multiple frames in flight, a CPU frame
  * boundary is not sufficient; wait all relevant fences or call
- * flux_device_wait_idle first. Old output pointers are invalid after reset. */
+ * optics_gfx_device_wait_idle first. Old output pointers are invalid after reset. */
 OPTICS_GFX_API void optics_gfx_effect_reset(optics_gfx_device *device);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* FLUX_EFFECT_H */
+#endif /* OPTICS_GFX_EFFECT_H */

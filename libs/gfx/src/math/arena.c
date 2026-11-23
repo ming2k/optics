@@ -16,7 +16,7 @@ static void libc_free(void *p, void *u) {
     free(p);
 }
 
-/* `realloc` is not part of flux_allocator (ADR-0135): no library called it, so
+/* `realloc` is not part of optics_gfx_allocator (ADR-0135): no library called it, so
  * its semantics were undefined by construction. The arena is a bump allocator
  * and never grows; it allocates once and frees once. */
 static const optics_gfx_allocator libc_allocator = {
@@ -69,7 +69,7 @@ void *optics_gfx_arena_alloc_aligned(optics_gfx_arena *a, size_t bytes, size_t a
 
 void optics_gfx_arena_reset(optics_gfx_arena *a) {
     if (a) {
-        OPTICS_GFX_PROFILE_PLOT("flux.arena_used_bytes", (double)a->used);
+        OPTICS_GFX_PROFILE_PLOT("gfx.arena_used_bytes", (double)a->used);
         a->used = 0;
     }
 }

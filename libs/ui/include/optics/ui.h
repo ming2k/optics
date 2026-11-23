@@ -1,28 +1,29 @@
 /*
- * lens/lens.h — immediate-mode façade over a retained-mode core.
+ * ui/ui.h — immediate-mode façade over a retained-mode core.
  *
- * One library (liblens), one umbrella header. You write immediate-mode
- * code each frame; lens reconciles it against a retained tree that owns
+ * One library (liboptics_ui), one umbrella header. You write immediate-mode
+ * code each frame; ui reconciles it against a retained tree that owns
  * layout, interaction, animation, and the draw list.
  *
  * Design contract (see docs/adr):
- *   - Public symbols are `lens_*`; library internals use a `lensi_*`
- *     prefix and are not exported (ADR-0031).
- *   - Every widget call computes a stable lens_id from an id stack; the
+ *   - Public symbols are `optics_ui_*`; library internals use an
+ *     `optics_ui__*` prefix and are not exported (ADR-0031, ADR-0170).
+ *   - Every widget call computes a stable optics_ui_id from an id stack; the
  *     id keys the retained store (ADR-0026, ADR-0027).
- *   - lens draws only through <flux/canvas.h> (ADR-0025).
+ *   - ui draws only through <optics/gfx/canvas.h> (ADR-0025).
  *   - Per frame:
- *       lens_begin(ui, &input) ->
- *       build (lens_row / lens_button / ...) ->
- *       lens_end(ui)            (reconcile, layout, interaction) ->
- *       lens_snapshot_create(...) -> lens_snapshot_submit(...) -> lens_snapshot_activate(...)
+ *       optics_ui_begin(ui, &input) ->
+ *       build (optics_ui_row_begin / optics_ui_button / ...) ->
+ *       optics_ui_end(ui)            (reconcile, layout, interaction) ->
+ *       optics_ui_snapshot_create(...) -> optics_ui_snapshot_submit(...) ->
+ * optics_ui_snapshot_activate(...)
  */
 
 #ifndef OPTICS_UI_H
 #define OPTICS_UI_H
 
-/* Self-contained: lens.h uses bool, uint32_t, size_t directly and must
- * not rely on flux headers happening to provide them first. */
+/* Self-contained: ui.h uses bool, uint32_t, size_t directly and must
+ * not rely on gfx headers happening to provide them first. */
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -30,7 +31,7 @@
 #include <optics/gfx/canvas.h>
 #include <optics/gfx/core.h>
 #include <optics/gfx/math.h>
-#include <optics/ui/export.h> /* LENS_API — single source of truth */
+#include <optics/ui/export.h> /* OPTICS_UI_API — single source of truth */
 #include <optics/ui/icon.h>
 #include <optics/ui/material.h>
 
@@ -41,20 +42,20 @@ extern "C" {
 /* ================================================================== */
 /*  Visibility                                                        */
 /* ================================================================== */
-/* LENS_API is defined in <lens/export.h>, included above. Do not define */
+/* OPTICS_UI_API is defined in <optics/ui/export.h>, included above. Do not define */
 /* it here: two spellings of one export macro drift apart.              */
 
 #define OPTICS_UI_VERSION_MAJOR 0
 #define OPTICS_UI_VERSION_MINOR 0
-#define OPTICS_UI_VERSION_PATCH 82
+#define OPTICS_UI_VERSION_PATCH 83
 
-/* Stringify helpers used by lens_version_string(); LENS_STRINGIFY_ adds the
+/* Stringify helpers used by optics_ui_version_string(); OPTICS_UI_STRINGIFY_ adds the
  * indirection level required for macro-expansion of literal tokens. */
 #define OPTICS_UI_STRINGIFY_(x) #x
 #define OPTICS_UI_STRINGIFY(x) OPTICS_UI_STRINGIFY_(x)
 
 /* Packed integer version, monotonic — identical layout to
- * FLUX_VERSION_NUMBER (major in bits 16..23, minor 8..15, patch 0..7).
+ * OPTICS_GFX_VERSION_NUMBER (major in bits 16..23, minor 8..15, patch 0..7).
  * The whole stack shares one versioning scheme so a consumer can check
  * every library it loads the same way. */
 #define OPTICS_UI_VERSION_NUMBER                                                                   \
@@ -107,13 +108,13 @@ typedef enum optics_ui_node_phase : uint32_t {
 #define OPTICS_UI_INPUT_MAX_KEYS 16
 
 /* Portable key sentinels. The application maps platform keycodes to
- * these when filling lens_key_event.key. Codes outside this range pass
+ * these when filling optics_ui_key_event.key. Codes outside this range pass
  * through untouched (custom shortcuts).
  *
  * Printable ASCII (0x20-0x7E) arrives as key events carrying the ASCII
- * codepoint itself (unshifted: 'a' not 'A') — the iris backends
+ * codepoint itself (unshifted: 'a' not 'A') — the window backends
  * guarantee this on every platform, so character shortcuts ('z', ',',
- * space) can be matched straight off lens_key_event.key. Non-ASCII
+ * space) can be matched straight off optics_ui_key_event.key. Non-ASCII
  * printable input never arrives as a key event; it only enters
  * text_utf8 through the IME/layout commit path. */
 #define OPTICS_UI_KEY_ESCAPE 256
@@ -140,7 +141,7 @@ typedef enum optics_ui_node_phase : uint32_t {
 #define OPTICS_UI_KEY_F11 290
 #define OPTICS_UI_KEY_F12 291
 
-/* Modifier masks for lens_input.mods. */
+/* Modifier masks for optics_ui_input.mods. */
 #define OPTICS_UI_MOD_SHIFT (1u << 0)
 #define OPTICS_UI_MOD_CTRL (1u << 1)
 #define OPTICS_UI_MOD_ALT (1u << 2)
@@ -155,7 +156,7 @@ typedef struct optics_ui_key_event {
 #define OPTICS_UI_PREEDIT_MAX 256
 
 typedef struct optics_ui_input {
-    uint32_t size; /* sizeof(lens_input); 0 = trust
+    uint32_t size; /* sizeof(optics_ui_input); 0 = trust
                       full struct (forward-compat
                       guard, ADR-0036) */
 
@@ -199,7 +200,7 @@ typedef struct optics_ui_input {
     uint32_t ime_delete_after;
 
     /* Tablet / pen state this frame (size-guarded append; hosts built
-     * against older headers keep working — lens reads these only when
+     * against older headers keep working — ui reads these only when
      * `size` covers them). `pen_active` is true while a tool is in
      * proximity AND down; `pen_pressure` is normalised 0..1 (hosts should
      * pass 1.0 for tools without pressure so opacity math degrades to
@@ -212,16 +213,16 @@ typedef struct optics_ui_input {
     bool pen_eraser;
 } optics_ui_input;
 
-/* Host clipboard interface (ADR-0036). Supplied in lens_desc; optional.
+/* Host clipboard interface (ADR-0036). Supplied in optics_ui_desc; optional.
  * Paste is asynchronous (matches Wayland wl_data_device): a request is
- * answered later by the host calling lens_paste. */
+ * answered later by the host calling optics_ui_paste. */
 typedef struct optics_ui_clipboard {
-    void (*request_text)(void *user); /* -> lens_paste */
+    void (*request_text)(void *user); /* -> optics_ui_paste */
     void (*set_text)(const char *utf8, size_t len, void *user);
     void *user;
 } optics_ui_clipboard;
 
-/* Host Drag-and-Drop interface (ADR-0086). Supplied in lens_desc; optional. */
+/* Host Drag-and-Drop interface (ADR-0086). Supplied in optics_ui_desc; optional. */
 typedef struct optics_ui_dnd_host {
     int (*start_drag)(const char *text, size_t len, uint32_t actions, void *user);
     void *user;
@@ -231,8 +232,8 @@ typedef struct optics_ui_dnd_host {
 /*  Interaction result (ADR-0029; state bits ADR-0058)                */
 /* ================================================================== */
 
-/* Widget state bits, OR'd into lens_response.state. The interaction core
- * (lensi_interact) produces HOVERED/PRESSED/FOCUSED/FOCUS_VISIBLE/DISABLED
+/* Widget state bits, OR'd into optics_ui_response.state. The interaction core
+ * (optics_ui__interact) produces HOVERED/PRESSED/FOCUSED/FOCUS_VISIBLE/DISABLED
  * for every widget; each widget ORs in the bits only it can know —
  * SELECTED from a selection argument, ACTIVE from a toggle value, DRAGGED
  * while a captured pointer drives a value. FOCUS_VISIBLE is FOCUSED via
@@ -263,10 +264,10 @@ typedef struct optics_ui_response {
     bool focused;
     bool submitted; /* textedit: Return pressed on single-line input */
     bool tabbed;    /* textedit: Tab pressed when accept_tab enabled */
-    uint32_t state; /* lens_widget_state bits (ADR-0058) */
+    uint32_t state; /* optics_ui_widget_state bits (ADR-0058) */
 } optics_ui_response;
 
-/* Semantic cursor requested by the hovered Lens widget. Lens only reports
+/* Semantic cursor requested by the hovered ui widget. ui only reports
  * intent; the windowing host remains responsible for mapping it to the
  * platform cursor API once per frame. */
 typedef enum optics_ui_cursor_hint : uint32_t {
@@ -302,7 +303,7 @@ typedef enum optics_ui_role : uint32_t {
     OPTICS_UI_ROLE_LINK,     /* inline navigation action (distinct from BUTTON) */
 } optics_ui_role;
 
-/* State bits for lens_semantics.flags. */
+/* State bits for optics_ui_semantics.flags. */
 enum {
     OPTICS_UI_A11Y_FOCUSED = 1u << 0,
     OPTICS_UI_A11Y_DISABLED = 1u << 1,
@@ -323,7 +324,7 @@ typedef struct optics_ui_semantics {
  * for icon-only controls whose visible label is not the accessible name.
  * Zeroed fields are left at the widget's default; `flags` are OR'd on. */
 typedef struct optics_ui_a11y_desc {
-    optics_ui_role role; /* LENS_ROLE_NONE = keep the widget default */
+    optics_ui_role role; /* OPTICS_UI_ROLE_NONE = keep the widget default */
     const char *name;    /* NULL = keep                            */
     const char *value;   /* NULL = keep                            */
     uint32_t flags;      /* added to the existing state bits        */
@@ -334,7 +335,7 @@ OPTICS_UI_API void optics_ui_a11y(optics_ui *ui, const optics_ui_a11y_desc *desc
 /* Read-only walk of the activated snapshot. Failed or skipped presentation
  * leaves its geometry and semantic content unchanged. Visits every node carrying non-decorative
  * semantics in pre-order with its solved bounds and its nearest semantic ancestor. The platform
- * AT-SPI bridge (or a test) consumes it; lens calls no assistive API itself (same host separation
+ * AT-SPI bridge (or a test) consumes it; ui calls no assistive API itself (same host separation
  * as input, ADR-0029). */
 typedef void (*optics_ui_a11y_visit_fn)(const optics_ui_semantics *s, optics_gfx_rect bounds,
                                         optics_ui_id id, optics_ui_id parent, void *user);
@@ -342,11 +343,11 @@ OPTICS_UI_API void optics_ui_accessibility_walk(const optics_ui *ui, optics_ui_a
                                                 void *user);
 
 /* Request activation of a widget by id (ADR-0062) — the write direction of
- * the a11y seam. The host's AT bridge (iris's AT-SPI Action.DoAction)
- * calls this when an assistive client activates a control; lens records a
+ * the a11y seam. The host's AT bridge (window's AT-SPI Action.DoAction)
+ * calls this when an assistive client activates a control; ui records a
  * single pending activation id and the next frame's build reports
  * `clicked` for that node through the normal interaction path
- * (lensi_interact), so every focusable widget is activatable without
+ * (optics_ui__interact), so every focusable widget is activatable without
  * per-widget code.
  *
  * Semantics: the request fires once (single-shot). It is respected only
@@ -354,8 +355,8 @@ OPTICS_UI_API void optics_ui_accessibility_walk(const optics_ui *ui, optics_ui_a
  * occlusion does not block it (AT users navigate the semantic tree, not
  * pixels). An unconsumed request is dropped at frame end — a widget that
  * vanished or is disabled simply never fires. Focus moves to the
- * activated node. Threading is the same as lens_paste: the host's main
- * thread, outside lens_begin/end is the intended window, though a call
+ * activated node. Threading is the same as optics_ui_paste: the host's main
+ * thread, outside optics_ui_begin/end is the intended window, though a call
  * mid-build takes effect for widgets built after it. */
 OPTICS_UI_API void optics_ui_a11y_activate(optics_ui *ui, optics_ui_id id);
 
@@ -364,7 +365,7 @@ OPTICS_UI_API void optics_ui_a11y_activate(optics_ui *ui, optics_ui_id id);
 /* ================================================================== */
 
 typedef struct optics_ui_theme {
-    uint32_t size; /* sizeof(lens_theme); forward-compat guard */
+    uint32_t size; /* sizeof(optics_ui_theme); forward-compat guard */
 
     optics_gfx_color color_bg;
     optics_gfx_color color_fg;
@@ -450,15 +451,15 @@ OPTICS_UI_API optics_ui_theme optics_ui_theme_for_material(optics_ui_material_ki
 /* ================================================================== */
 /*  Style cascade (ADR-0058, amended by ADR-0061)                     */
 /*                                                                    */
-/*  A lens_style is a sparse set of style ATOMS. Every field is       */
+/*  A optics_ui_style is a sparse set of style ATOMS. Every field is       */
 /*  optional: the `fields` mask names the fields that carry values.   */
 /*  The mask doubles as the forward-compat guard: a caller compiled   */
 /*  against an older header never sets bits it does not know, and the */
 /*  library never reads fields whose bit is clear.                    */
 /*                                                                    */
 /*  Resolution is one fixed per-field cascade (ADR-0061):             */
-/*      per-call style (lens_box.style)                               */
-/*        > nearest enclosing scope (lens_push_style)                 */
+/*      per-call style (optics_ui_box.style)                               */
+/*        > nearest enclosing scope (optics_ui_push_style)                 */
 /*        > theme                                                     */
 /*  Unset fields fall through each layer; the resolver's derivation   */
 /*  order (hover/pressed derivation, disabled dim) is unchanged and   */
@@ -466,7 +467,7 @@ OPTICS_UI_API optics_ui_theme optics_ui_theme_for_material(optics_ui_material_ki
 /*  output is the verbatim theme, so default rendering is unchanged.  */
 /* ================================================================== */
 
-/* Field tags for lens_style.fields — one bit per optional field. */
+/* Field tags for optics_ui_style.fields — one bit per optional field. */
 typedef enum optics_ui_style_field : uint32_t {
     OPTICS_UI_STYLE_BG = 1u << 0,         /* resting surface           */
     OPTICS_UI_STYLE_BG_HOVER = 1u << 1,   /* hovered surface           */
@@ -486,7 +487,7 @@ typedef enum optics_ui_style_field : uint32_t {
 } optics_ui_style_field;
 
 typedef struct optics_ui_style {
-    uint32_t fields; /* LENS_STYLE_* mask: which fields below are set */
+    uint32_t fields; /* OPTICS_UI_STYLE_* mask: which fields below are set */
     optics_gfx_color bg;
     optics_gfx_color bg_hover;
     optics_gfx_color bg_pressed;
@@ -515,11 +516,11 @@ static inline optics_ui_style optics_ui_style_init(void) {
     return (optics_ui_style)OPTICS_UI_STYLE_INIT;
 }
 
-/* The output of style resolution (ADR-0058/0061): lens_style with every
+/* The output of style resolution (ADR-0058/0061): optics_ui_style with every
  * slot concrete — the per-call > scope > theme cascade, hover/pressed
  * derivation, and the disabled dim have already been applied in the
  * resolver's documented order, so a consumer reads slots directly.
- * `disabled` is the designed disabled-surface colour; lens_style has no
+ * `disabled` is the designed disabled-surface colour; optics_ui_style has no
  * instance slot for it, so it is always the theme token. The outline slots
  * resolve to transparent/0 when unset (no theme tokens exist for them).
  * Skins (ADR-0059) receive this in the widget record. */
@@ -544,14 +545,14 @@ typedef struct optics_ui_style_resolved {
 } optics_ui_style_resolved;
 
 /* Scoped style stack (ADR-0061 item 4): every widget declared between
- * lens_push_style and lens_pop_style resolves its unset style atoms
+ * optics_ui_push_style and optics_ui_pop_style resolves its unset style atoms
  * against the merged scope — the primitive from which callers build their
  * own design-system scopes ("danger", "sidebar"). This is a strictly
  * nested scope, NOT a floating "applies to the next widget" modifier (the
- * ordering hazard lens_box's documentation rejects): it affects exactly
+ * ordering hazard optics_ui_box's documentation rejects): it affects exactly
  * the widgets declared between push and pop, including the terse forms,
- * and lens_begin resets the stack every frame so a forgotten pop cannot
- * leak across frames. Overflow of the scope stack flags lens_overflowed. */
+ * and optics_ui_begin resets the stack every frame so a forgotten pop cannot
+ * leak across frames. Overflow of the scope stack flags optics_ui_overflowed. */
 OPTICS_UI_API void optics_ui_push_style(optics_ui *ui, optics_ui_style style);
 OPTICS_UI_API void optics_ui_pop_style(optics_ui *ui);
 
@@ -560,8 +561,8 @@ OPTICS_UI_API void optics_ui_pop_style(optics_ui *ui);
 /* ================================================================== */
 
 /* Typeface family for subsequently built widgets. Values mirror
- * glyph_family so the seam can cast between them. LENS_TEXT_FAMILY_DEFAULT
- * keeps the engine's default (sans-serif). Like lens_set_theme, this is a
+ * glyph_family so the seam can cast between them. OPTICS_UI_TEXT_FAMILY_DEFAULT
+ * keeps the engine's default (sans-serif). Like optics_ui_set_theme, this is a
  * context switch read at widget-build time: set it, build the widgets that
  * need another voice (e.g. a serif display title), then set it back. */
 typedef enum optics_ui_text_family : uint32_t {
@@ -581,7 +582,7 @@ typedef struct optics_ui_text_metrics {
 } optics_ui_text_metrics;
 
 /* Query descriptor, not a widget descriptor: text measurement has no layout
- * box. Widget `lens_*_opts` still begin with `lens_box` at offset 0. */
+ * box. Widget `optics_ui_*_opts` still begin with `optics_ui_box` at offset 0. */
 typedef struct optics_ui_text_measure_opts {
     const char *utf8; /* NUL-terminated text to shape */
     float size_px;    /* 0 uses the engine default */
@@ -597,7 +598,7 @@ optics_ui_text_measure(optics_ui *ui, const optics_ui_text_measure_opts *opts);
  * shared engine's `glyph_compact`). The engine grows layout/run/
  * codepoint scratch to the largest text ever shaped and keeps it; for a
  * one-off megabyte paste that peak lingers for the session. Call this
- * from the host's idle path (iris does, on the low-power frame cadence)
+ * from the host's idle path (window does, on the low-power frame cadence)
  * — cheap enough to call every frame, and the next measure/draw
  * reallocates to whatever it actually needs. Null-safe. */
 OPTICS_UI_API void optics_ui_text_compact(optics_ui *ui);
@@ -610,7 +611,7 @@ OPTICS_UI_API void optics_ui_text_compact(optics_ui *ui);
 /*  interaction, animation, and accessibility; the skin receives a    */
 /*  plain-data record (kind + state + bounds + resolved style +       */
 /*  content) and is the only code that writes draw commands. Skins    */
-/*  are replaceable context-wide (lens_set_skin); NULL restores the   */
+/*  are replaceable context-wide (optics_ui_set_skin); NULL restores the   */
 /*  built-in default, so default rendering is unchanged.              */
 /* ================================================================== */
 
@@ -637,8 +638,8 @@ static_assert((uint32_t)OPTICS_UI_WIDGET_KIND_USER_BASE == 0x40000000u,
 static_assert((uint32_t)OPTICS_UI_WIDGET_KIND_COUNT <= (uint32_t)OPTICS_UI_WIDGET_KIND_USER_BASE,
               "built-in kinds must never enter the host-reserved range");
 
-/* One wrapped line of text for a LENS_WIDGET_LABEL record (and the visible
- * body lines of a multiline LENS_WIDGET_TEXTEDIT record): the widget owns
+/* One wrapped line of text for a OPTICS_UI_WIDGET_LABEL record (and the visible
+ * body lines of a multiline OPTICS_UI_WIDGET_TEXTEDIT record): the widget owns
  * wrapping / windowing (behaviour), the skin only draws. Strings are
  * borrowed for the frame; coordinates are node-local. */
 typedef struct optics_ui_text_line {
@@ -663,7 +664,7 @@ typedef enum optics_ui_checkbox_appearance : uint32_t {
     OPTICS_UI_CHECKBOX_RADIO = 2,  /* radio circle */
 } optics_ui_checkbox_appearance;
 
-/* Per-kind content payload for lens_widget_record.
+/* Per-kind content payload for optics_ui_widget_record.
  *
  * Borrow contract (ADR-0085): every string/line pointer in this struct
  * is valid only for the skin-emission call that carries it — the widget
@@ -709,7 +710,7 @@ typedef struct optics_ui_widget_content {
 /* Everything a skin needs to draw one widget for one frame.
  *
  * `bounds` is the widget's content box in NODE-LOCAL coordinates — the
- * same space the skin's emission calls (and lens_draw_cmd.rel) use. Its
+ * same space the skin's emission calls (and optics_ui_draw_cmd.rel) use. Its
  * origin is always (0,0) because the final position is solved by layout
  * after the skin runs; w/h are this frame's measured size (fixed-size
  * hints applied). `last_bounds` is last frame's arranged rect in UI
@@ -718,11 +719,11 @@ typedef struct optics_ui_widget_content {
  * chrome with the arranged size (the slider track) read last_bounds. */
 typedef struct optics_ui_widget_record {
     optics_ui_widget_kind kind;
-    uint32_t state;                 /* lens_widget_state bits (ADR-0058) */
+    uint32_t state;                 /* optics_ui_widget_state bits (ADR-0058) */
     optics_gfx_rect bounds;         /* node-local content box            */
     optics_gfx_rect last_bounds;    /* last frame's arranged rect        */
     optics_ui_style_resolved style; /* resolved instance/theme style     */
-    uint32_t style_fields;          /* LENS_STYLE_* bits the instance set;
+    uint32_t style_fields;          /* OPTICS_UI_STYLE_* bits the instance set;
                                        0 = everything came from the theme */
     float hover_t;                  /* eased hover, updated this frame   */
     float active_t;                 /* eased active, updated this frame  */
@@ -732,15 +733,15 @@ typedef struct optics_ui_widget_record {
 /* A skin draws one widget for one frame. It must not retain the record,
  * the node, or content strings past the call. `node` is the widget's
  * retained slot — skins push commands onto it and may read its public
- * accessors (e.g. lens_node_bounds), nothing more. */
+ * accessors (e.g. optics_ui_node_bounds), nothing more. */
 typedef void (*optics_ui_skin_fn)(optics_ui *ui, optics_ui_node *node,
                                   const optics_ui_widget_record *rec);
 
-/* Skin + caller context. The plain lens_skin_fn signature has no closure
+/* Skin + caller context. The plain optics_ui_skin_fn signature has no closure
  * slot, which forced any stateful skin (a spring indicator carrying its
  * own physics) to reach the state through a process global — the exact
  * hazard ADR-0059 flagged as future work. This form passes `user` back on
- * every emission; register it with lens_set_skin_userdata. */
+ * every emission; register it with optics_ui_set_skin_userdata. */
 typedef void (*optics_ui_skin_userdata_fn)(optics_ui *ui, optics_ui_node *node,
                                            const optics_ui_widget_record *rec, void *user);
 
@@ -754,22 +755,22 @@ OPTICS_UI_API void optics_ui_set_skin(optics_ui *ui, optics_ui_widget_kind kind,
  * `user` is stored verbatim and passed back unmodified; the library never
  * dereferences it. NULL fn restores the default (user is then ignored).
  * Registered userdata skins also receive first-touch zeroes from
- * lens_skin_scratch like any other skin. */
+ * optics_ui_skin_scratch like any other skin. */
 OPTICS_UI_API void optics_ui_set_skin_userdata(optics_ui *ui, optics_ui_widget_kind kind,
                                                optics_ui_skin_userdata_fn fn, void *user);
 /* The built-in default skin for a kind — for wrapping: call it from a
  * custom skin to keep the stock chrome, then add your own. */
 OPTICS_UI_API optics_ui_skin_fn optics_ui_default_skin(optics_ui_widget_kind kind);
 
-/* Per-node scratch storage for skins (ADR-0061 item 9): LENS_SKIN_SCRATCH_FLOATS
+/* Per-node scratch storage for skins (ADR-0061 item 9): OPTICS_UI_SKIN_SCRATCH_FLOATS
  * retained floats, zeroed on the node's first touch, living and dying with the
  * node (ADR-0038's GC reclaims the node and the scratch goes with it).
  * This is the inline fast path for the common case (one 1-D spring:
  * position/velocity/target/stamp). Need more — an X/Y pair of springs, a
- * scale+opacity+rotation bundle? Graduate to lens_node_state(node, bytes):
+ * scale+opacity+rotation bundle? Graduate to optics_ui_node_state(node, bytes):
  * arbitrary size, same zero-on-first-touch, same GC lifetime, no external
  * hashtable required. This is mechanism, not animation: the library stores
- * state; it never integrates anything. See libs/transit (ADR-0077, ADR-0106) for the
+ * state; it never integrates anything. See libs/motion (ADR-0077, ADR-0106) for the
  * math to run on it. */
 #define OPTICS_UI_SKIN_SCRATCH_FLOATS 4
 OPTICS_UI_API float *optics_ui_skin_scratch(optics_ui *ui, optics_ui_node *node);
@@ -830,13 +831,13 @@ OPTICS_UI_API void optics_ui_skin_clip_pop(optics_ui *ui, optics_ui_node *node);
 /* Emit a skin record for a HOST-RESERVED widget kind (ADR-0073).
  *
  * This is the emission half of the user-widget contract: a composite
- * built from lens_pressable_begin + children calls this with its own
+ * built from optics_ui_pressable_begin + children calls this with its own
  * user-range kind and the skin registered for that kind fires — identity
  * and re-skinning parity with built-ins, with no library-side
  * measure/interact behavior implied. `kind` outside the reserved range is
  * rejected (built-in kinds emit through their own widget entry points,
  * with their own records; going around them here would bypass their
- * semantics). Content fields default as in lens_widget_record; set what
+ * semantics). Content fields default as in optics_ui_widget_record; set what
  * the skin needs via `content`. No-op (not an error) when the node is
  * NULL or no skin is registered for the kind. */
 typedef struct optics_ui_skin_emit_user_opts {
@@ -853,8 +854,8 @@ OPTICS_UI_API void optics_ui_skin_emit_user(optics_ui *ui,
 /* ================================================================== */
 
 typedef struct optics_ui_desc {
-    /* Size guard, same pattern as lens_input/lens_theme (ADR-0032): set
-     * to sizeof(lens_desc). 0 = legacy caller (pre-guard layout trusted
+    /* Size guard, same pattern as optics_ui_input/optics_ui_theme (ADR-0032): set
+     * to sizeof(optics_ui_desc). 0 = legacy caller (pre-guard layout trusted
      * whole). The library copies only min(caller, library) bytes, so a
      * caller built against an older or newer header degrades cleanly
      * instead of over-reading. Future fields append after `clipboard`. */
@@ -880,7 +881,7 @@ typedef struct optics_ui_desc {
 OPTICS_GFX_NODISCARD OPTICS_UI_API optics_gfx_result optics_ui_create(const optics_ui_desc *desc,
                                                                       optics_ui **out);
 
-/* Zero-init + append-safe descriptor preset (matches the FLUX_*_DESC_INIT
+/* Zero-init + append-safe descriptor preset (matches the OPTICS_GFX_*_DESC_INIT
  * convention). New code should prefer this over a bare {0}: it pins the
  * size guard so a future field append can't silently leave it stale. */
 #define OPTICS_UI_DESC_INIT /* clang-format off */ \
@@ -895,7 +896,7 @@ OPTICS_UI_API optics_ui_theme optics_ui_get_theme(const optics_ui *ui);
  * carries it as a build-time stamp. Its own visual commands form one
  * isolated opacity group; children independently capture the current setting.
  * Rects, borders, text, icons, images and scrollbars fade together. Like
- * the style scope stack, the switch resets to 1.0 at every lens_begin, so
+ * the style scope stack, the switch resets to 1.0 at every optics_ui_begin, so
  * a forgotten restore cannot dim the next frame; within a frame, set it
  * back after building the faded subtree. Mechanism, not animation: the
  * host owns the clock. */
@@ -905,17 +906,17 @@ OPTICS_UI_API float optics_ui_dt(const optics_ui *ui); /* frame delta, seconds *
 
 /* Scoped frame clip.
  *
- * Every node built between `lens_clip_begin` and `lens_clip_end` inherits
+ * Every node built between `optics_ui_clip_begin` and `optics_ui_clip_end` inherits
  * `opts.rect` as a build-time stamp. The stamp clips the node's own draw
  * commands, its children, its snapshot/hit region, and — unlike a parent
- * container's flow clip — a placed (`LENS_PLACE_ABS`) node that escapes
+ * container's flow clip — a placed (`OPTICS_UI_PLACE_ABS`) node that escapes
  * its ancestors. This is the clip for a chrome overlay whose children are
  * deliberately placed outside the parent's box (a carousel strip, a
  * floating panel with absolute labels).
  *
  * Nested calls intersect with the enclosing clip. The stack resets at
- * every `lens_begin`; an unbalanced `lens_clip_end` is a no-op and a
- * deeper-than-supported push sets `lens_overflowed` rather than dropping
+ * every `optics_ui_begin`; an unbalanced `optics_ui_clip_end` is a no-op and a
+ * deeper-than-supported push sets `optics_ui_overflowed` rather than dropping
  * the matching pop. Coordinates and the input frame are output-logical
  * pixels. */
 typedef struct optics_ui_clip_opts {
@@ -929,10 +930,10 @@ OPTICS_UI_API void optics_ui_clip_end(optics_ui *ui);
  *
  * Call this every frame while an exit animation runs for a subtree the
  * build no longer produces: it re-pins the subtree's snapshot (captured
- * at its last live lens_end) and paints it at `alpha` through the same
+ * at its last live optics_ui_end) and paints it at `alpha` through the same
  * command emitter and alpha bake as a live subtree (ADR-0068 semantics).
  * No call → the snapshot counts down and expires after
- * LENSI_GHOST_MAX_FRAMES frames. Unknown or never-seen ids are ignored
+ * OPTICS_UI_GHOST_MAX_FRAMES frames. Unknown or never-seen ids are ignored
  * (advisory, never a host crash). Ghosts never hit-test, focus, or enter
  * the accessibility tree; they render after live content in their band.
  * Mechanism, not animation: the host owns the clock and the easing. */
@@ -944,7 +945,7 @@ typedef struct optics_ui_set_ghost_opts {
 OPTICS_UI_API void optics_ui_set_ghost(optics_ui *ui, const optics_ui_set_ghost_opts *opts);
 
 /* Device-pixel scale (HiDPI). The application reports the compositor /
- * window-system scale here; layout, input, and `lens_input.display_size`
+ * window-system scale here; layout, input, and `optics_ui_input.display_size`
  * stay in *logical* pixels, and snapshot publication captures the scale
  * transform by this factor so 1 logical pixel maps to `scale` device
  * pixels. Default 1.0. */
@@ -956,10 +957,10 @@ OPTICS_UI_API float optics_ui_scale(const optics_ui *ui);
  * point sizes) applied at the resolved-style funnel, so glyphs, caret
  * metrics, and every widget height derived from a font token grow
  * together: text scales, boxes follow, nothing clips. Orthogonal to
- * lens_set_scale (device pixels): a 1.25 text scale at 2x DPI renders
+ * optics_ui_set_scale (device pixels): a 1.25 text scale at 2x DPI renders
  * 1.25x taller glyphs at the same 2x raster density. Pure-px geometry
- * (padding, stroke widths) deliberately stays put. Lens executes the
- * factor; the host owns the policy (iris reads the system preference on
+ * (padding, stroke widths) deliberately stays put. ui executes the
+ * factor; the host owns the policy (window reads the system preference on
  * all backends). Non-finite and <= 0 are ignored. Default 1.0. Not
  * frame-scoped — persists like scale/reduced_motion. */
 OPTICS_UI_API void optics_ui_set_text_scale(optics_ui *ui, float factor);
@@ -975,7 +976,7 @@ typedef struct optics_ui_scene_snapshot optics_ui_scene_snapshot;
 
 /* Create an immutable snapshot of the resolved layout tree and compiled visuals.
  * The published snapshot is GPU-independent, owned, and survives destruction of
- * the mutable lens context. */
+ * the mutable ui context. */
 OPTICS_GFX_NODISCARD OPTICS_UI_API optics_gfx_result
 optics_ui_snapshot_create(optics_ui *ui, optics_ui_scene_snapshot **out_snapshot);
 OPTICS_UI_API optics_ui_scene_snapshot *
@@ -986,7 +987,7 @@ OPTICS_GFX_NODISCARD OPTICS_UI_API optics_gfx_result
 optics_ui_snapshot_submit(const optics_ui_scene_snapshot *snapshot, optics_gfx_canvas *canvas);
 
 /* Generation progression & presentation handshake (ADR-0094).
- * A new generation is published at each lens_end. The presentation engine
+ * A new generation is published at each optics_ui_end. The presentation engine
  * activates the corresponding snapshot upon successful frame presentation. */
 OPTICS_UI_API uint64_t optics_ui_generation(const optics_ui *ui);
 /* Activate exactly the successfully presented snapshot, or explicitly select
@@ -1007,14 +1008,14 @@ OPTICS_UI_API bool optics_ui_overflowed(const optics_ui *ui);
 /* True if the same widget id was linked more than once under one parent in
  * the frame just built. The later occurrence is omitted because retained ids
  * name nodes one-to-one; callers building repeated labels must scope them
- * with lens_push_id[_int] or pass an explicit lens_box.id. */
+ * with optics_ui_push_id[_int] or pass an explicit optics_ui_box.id. */
 OPTICS_UI_API bool optics_ui_has_duplicate_ids(const optics_ui *ui);
 
 /* True if an eased value (hover/active fade, …) was still in transit during
  * the frame just built. An input-driven host that only paints on events should
  * schedule one more frame while this holds so animations settle to rest instead
- * of freezing mid-fade when input stops. Valid between lens_end and the next
- * lens_begin. */
+ * of freezing mid-fade when input stops. Valid between optics_ui_end and the next
+ * optics_ui_begin. */
 OPTICS_UI_API bool optics_ui_anim_pending(const optics_ui *ui);
 
 /* True if the frame just built would paint anything different from what is
@@ -1030,8 +1031,8 @@ OPTICS_UI_API bool optics_ui_anim_pending(const optics_ui *ui);
  * true while any widget held focus.
  *
  * A damage-driven host may skip the whole acquire/paint/present cycle when
- * this returns false. Read-only; valid between lens_end and the next
- * lens_begin. Resize/scale changes are host-visible, not lens state — the
+ * this returns false. Read-only; valid between optics_ui_end and the next
+ * optics_ui_begin. Resize/scale changes are host-visible, not ui state — the
  * host must still paint the first frame after those itself. */
 OPTICS_UI_API bool optics_ui_frame_needs_repaint(const optics_ui *ui);
 
@@ -1043,7 +1044,7 @@ OPTICS_UI_API bool optics_ui_frame_needs_repaint(const optics_ui *ui);
  * contained in another: damage is a set, so a host may scissor each one
  * independently, hand the whole list to a per-plane damage hint, or — when its
  * presentation API only accepts one rectangle — union them with
- * `flux_rect_union` at that boundary. This is the *only* damage query. There is
+ * `optics_gfx_rect_union` at that boundary. This is the *only* damage query. There is
  * deliberately no single-rect variant: a producer that answers with a box before
  * the consumer has seen the set destroys the localization irrecoverably, and the
  * union of two edge bands is the whole output (ADR-0143).
@@ -1061,7 +1062,7 @@ OPTICS_UI_API bool optics_ui_frame_needs_repaint(const optics_ui *ui);
  *
  * Degradation is always toward covering more, never less. A frame that needs a
  * repaint but names no region reports the viewport. A frame whose damage exceeds
- * `LENS_DAMAGE_RECTS_CAPACITY` — a compile-time bound, so the walk allocates
+ * `OPTICS_UI_DAMAGE_RECTS_CAPACITY` — a compile-time bound, so the walk allocates
  * nothing — reports the viewport, because the regions that did not fit have no
  * coordinates to contribute and any smaller answer would strand their pixels. */
 enum : uint32_t {
@@ -1078,15 +1079,15 @@ typedef struct optics_ui_damage_opts {
 
 /* Returns the number of rectangles written. When damage exceeds
  * `opts->capacity` the answer is one full-viewport rectangle and the count is 1.
- * When the frame needs no repaint the count is 0. Valid between lens_end and the
- * next lens_begin. */
+ * When the frame needs no repaint the count is 0. Valid between optics_ui_end and the
+ * next optics_ui_begin. */
 OPTICS_UI_API uint32_t optics_ui_damage_rects(const optics_ui *ui,
                                               const optics_ui_damage_opts *opts);
 
 /* Accessibility reduced-motion switch. When enabled, every eased value in
- * lens resolves to its target within one frame — no fades, slides, or other
- * transitions — and lens_anim_pending stays false. The host owns the policy
- * (user preference); lens executes it. Default false. */
+ * ui resolves to its target within one frame — no fades, slides, or other
+ * transitions — and optics_ui_anim_pending stays false. The host owns the policy
+ * (user preference); ui executes it. Default false. */
 OPTICS_UI_API void optics_ui_set_reduced_motion(optics_ui *ui, bool reduced);
 OPTICS_UI_API bool optics_ui_reduced_motion(const optics_ui *ui);
 
@@ -1103,7 +1104,7 @@ OPTICS_UI_API optics_ui_id optics_ui_current_id(const optics_ui *ui, const char 
 /*  Identity & per-widget options                                     */
 /* ================================================================== */
 
-/* lens_box — per-widget layout, identity, and state, common to every
+/* optics_ui_box — per-widget layout, identity, and state, common to every
  * widget descriptor. Each field applies to *this* call only; there are
  * no floating "applies to the next/last widget" modifiers, so there is
  * no ordering hazard. Zeroed fields take the widget default. */
@@ -1137,7 +1138,7 @@ typedef struct optics_ui_layout_opts {
     float gap;               /* between children, main axis                  */
     float pad;               /* inside the container, all sides              */
     optics_ui_align align;   /* main-axis distribution                       */
-    optics_ui_align cross;   /* cross-axis alignment; LENS_STRETCH fills    */
+    optics_ui_align cross;   /* cross-axis alignment; OPTICS_UI_STRETCH fills    */
     optics_gfx_color bg;     /* background fill; alpha 0 = transparent       */
     float radius;            /* corner radius                                */
     optics_gfx_color border; /* border stroke                                */
@@ -1163,8 +1164,8 @@ typedef struct optics_ui_grid_opts {
     float row_gap;
     float pad;
     float row_height;        /* fixed uniform row height; 0 = content height */
-    optics_ui_align align;   /* cell horizontal alignment (default LENS_START) */
-    optics_ui_align cross;   /* cell vertical alignment (default LENS_STRETCH) */
+    optics_ui_align align;   /* cell horizontal alignment (default OPTICS_UI_START) */
+    optics_ui_align cross;   /* cell vertical alignment (default OPTICS_UI_STRETCH) */
     optics_gfx_color bg;     /* background fill; alpha 0 = transparent       */
     float radius;            /* corner radius                                */
     optics_gfx_color border; /* border stroke                                */
@@ -1272,7 +1273,7 @@ typedef struct optics_ui_label_opts {
     float size;            /* <= 0 = theme font size */
     float weight;          /* <= 0 = theme regular weight */
     bool wrap;             /* wrap text on max_width or container bounds */
-    optics_ui_align align; /* LENS_START, LENS_CENTER, LENS_END */
+    optics_ui_align align; /* OPTICS_UI_START, OPTICS_UI_CENTER, OPTICS_UI_END */
 } optics_ui_label_opts;
 
 OPTICS_UI_API optics_ui_response optics_ui_label(optics_ui *ui, const optics_ui_label_opts *opts);
@@ -1301,7 +1302,7 @@ OPTICS_UI_API optics_ui_response optics_ui_image(optics_ui *ui, const optics_ui_
 /* 4. Separator — horizontal or vertical dividing line */
 typedef struct optics_ui_separator_opts {
     optics_ui_box box;
-    optics_ui_axis axis; /* LENS_ROW (horizontal line) or LENS_COLUMN (vertical line) */
+    optics_ui_axis axis; /* OPTICS_UI_ROW (horizontal line) or OPTICS_UI_COLUMN (vertical line) */
     float thickness;     /* <= 0 = 1.0f */
 } optics_ui_separator_opts;
 
@@ -1413,28 +1414,33 @@ OPTICS_UI_API void optics_ui_set_cursor_hint(optics_ui *ui, optics_ui_cursor_hin
 
 #if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 static_assert(offsetof(optics_ui_layout_opts, box) == 0,
-              "lens_layout_opts.box must be at offset 0");
-static_assert(offsetof(optics_ui_grid_opts, box) == 0, "lens_grid_opts.box must be at offset 0");
+              "optics_ui_layout_opts.box must be at offset 0");
+static_assert(offsetof(optics_ui_grid_opts, box) == 0,
+              "optics_ui_grid_opts.box must be at offset 0");
 static_assert(offsetof(optics_ui_scroll_opts, box) == 0,
-              "lens_scroll_opts.box must be at offset 0");
+              "optics_ui_scroll_opts.box must be at offset 0");
 static_assert(offsetof(optics_ui_pressable_opts, box) == 0,
-              "lens_pressable_opts.box must be at offset 0");
-static_assert(offsetof(optics_ui_place_opts, box) == 0, "lens_place_opts.box must be at offset 0");
-static_assert(offsetof(optics_ui_label_opts, box) == 0, "lens_label_opts.box must be at offset 0");
-static_assert(offsetof(optics_ui_icon_opts, box) == 0, "lens_icon_opts.box must be at offset 0");
-static_assert(offsetof(optics_ui_image_opts, box) == 0, "lens_image_opts.box must be at offset 0");
+              "optics_ui_pressable_opts.box must be at offset 0");
+static_assert(offsetof(optics_ui_place_opts, box) == 0,
+              "optics_ui_place_opts.box must be at offset 0");
+static_assert(offsetof(optics_ui_label_opts, box) == 0,
+              "optics_ui_label_opts.box must be at offset 0");
+static_assert(offsetof(optics_ui_icon_opts, box) == 0,
+              "optics_ui_icon_opts.box must be at offset 0");
+static_assert(offsetof(optics_ui_image_opts, box) == 0,
+              "optics_ui_image_opts.box must be at offset 0");
 static_assert(offsetof(optics_ui_separator_opts, box) == 0,
-              "lens_separator_opts.box must be at offset 0");
+              "optics_ui_separator_opts.box must be at offset 0");
 static_assert(offsetof(optics_ui_button_opts, box) == 0,
-              "lens_button_opts.box must be at offset 0");
+              "optics_ui_button_opts.box must be at offset 0");
 static_assert(offsetof(optics_ui_checkbox_opts, box) == 0,
-              "lens_checkbox_opts.box must be at offset 0");
+              "optics_ui_checkbox_opts.box must be at offset 0");
 static_assert(offsetof(optics_ui_selectable_opts, box) == 0,
-              "lens_selectable_opts.box must be at offset 0");
+              "optics_ui_selectable_opts.box must be at offset 0");
 static_assert(offsetof(optics_ui_slider_opts, box) == 0,
-              "lens_slider_opts.box must be at offset 0");
+              "optics_ui_slider_opts.box must be at offset 0");
 static_assert(offsetof(optics_ui_textedit_opts, box) == 0,
-              "lens_textedit_opts.box must be at offset 0");
+              "optics_ui_textedit_opts.box must be at offset 0");
 #endif
 
 /* ================================================================== */
@@ -1460,8 +1466,8 @@ OPTICS_UI_API optics_gfx_rect optics_ui_caret_rect(const optics_ui *ui);
 /* Current caret blink phase: true while the caret is in its visible half of
  * the blink cycle (ADR-0151).
  *
- * Lens owns the blink clock because only lens can make it a *damage* signal.
- * The clock advances once per frame by `lens_input.dt_seconds`, so a host
+ * ui owns the blink clock because only ui can make it a *damage* signal.
+ * The clock advances once per frame by `optics_ui_input.dt_seconds`, so a host
  * that paces frames from the display's pulse gets a display-sampled blink for
  * free, and a host that skips frames resumes on the phase it would have
  * reached. A skin checks this before drawing the caret; the host never has to
@@ -1472,9 +1478,9 @@ OPTICS_UI_API optics_gfx_rect optics_ui_caret_rect(const optics_ui *ui);
 OPTICS_UI_API bool optics_ui_caret_visible(const optics_ui *ui);
 
 /* Override the caret blink period in seconds. `period <= 0` disables the
- * blink: the caret then stays solid, and lens reports no caret damage at all.
+ * blink: the caret then stays solid, and ui reports no caret damage at all.
  * Accessibility preference (reduced motion) is a host policy, so the host
- * decides; lens executes. */
+ * decides; ui executes. */
 OPTICS_UI_API void optics_ui_set_caret_blink(optics_ui *ui, float period_seconds);
 
 /* True when the caret's blink phase differs from the phase the last activated
@@ -1484,7 +1490,7 @@ OPTICS_UI_API void optics_ui_set_caret_blink(optics_ui *ui, float period_seconds
  * pacer as "one frame is owed", and never model a blink yourself. Comparing
  * against the *presented* phase rather than the last built one is what makes
  * a skipped frame keep its flip pending instead of dropping it, and it is why
- * a host cannot derive this from `lens_caret_visible` alone (that is only the
+ * a host cannot derive this from `optics_ui_caret_visible` alone (that is only the
  * current phase, with no memory of what reached the display).
  *
  * False when no caret is focused: a phase flip nobody can see is not damage. */
@@ -1493,9 +1499,9 @@ OPTICS_UI_API bool optics_ui_caret_flip_pending(const optics_ui *ui);
 /* True when a caret blink clock is running: a text widget holds focus and the
  * blink is enabled (ADR-0151).
  *
- * A host needs this distinct from `lens_caret_flip_pending`, and the two are
+ * A host needs this distinct from `optics_ui_caret_flip_pending`, and the two are
  * not interchangeable. The clock only advances inside a build (it integrates
- * `lens_input.dt_seconds`), so a host that stopped producing frames could
+ * `optics_ui_input.dt_seconds`), so a host that stopped producing frames could
  * never observe the next flip — the caret would freeze mid-blink. This level
  * therefore tells the pacer to keep its *low idle tick* alive; it does not ask
  * for a paint, and it must not buy the active-rate cadence. The paint is owed
@@ -1507,7 +1513,7 @@ OPTICS_UI_API bool optics_ui_caret_clock_live(const optics_ui *ui);
  * set_content_type). Refreshed every frame by the focused text widget
  * alongside the caret rect; `utf8 == NULL` when no text widget is focused.
  * The buffer is BORROWED from the widget — valid until the next
- * lens_begin. `cursor` is the caret byte offset in `utf8`. */
+ * optics_ui_begin. `cursor` is the caret byte offset in `utf8`. */
 typedef struct optics_ui_text_context {
     const char *utf8;
     uint32_t len;
@@ -1532,20 +1538,20 @@ typedef struct optics_ui_take_paste_opts {
     uint32_t cap;
 } optics_ui_take_paste_opts;
 
-/* Place text on the system clipboard (calls the host lens_clipboard.set_text
+/* Place text on the system clipboard (calls the host optics_ui_clipboard.set_text
  * if any). No-op when no clipboard interface was supplied. */
 OPTICS_UI_API void optics_ui_copy(optics_ui *ui, const optics_ui_copy_opts *opts);
 
-/* Ask the host for clipboard text (calls lens_clipboard.request_text). The
- * host later delivers it via lens_paste. */
+/* Ask the host for clipboard text (calls optics_ui_clipboard.request_text). The
+ * host later delivers it via optics_ui_paste. */
 OPTICS_UI_API void optics_ui_request_paste(optics_ui *ui);
 
-/* Host-driven delivery of clipboard text into lens. Queues the payload
+/* Host-driven delivery of clipboard text into ui. Queues the payload
  * for the focused text widget to consume on the next frame's build. */
 OPTICS_UI_API void optics_ui_paste(optics_ui *ui, const optics_ui_paste_opts *opts);
 
 /* Drain a pending paste payload for an app-owned editing surface (one that
- * renders text outside lens widgets and therefore has no focused widget to
+ * renders text outside ui widgets and therefore has no focused widget to
  * consume the queue). Copies up to `cap-1` payload bytes into `dst`,
  * NUL-terminates, and returns the payload byte length excluding the NUL.
  * Returns 0 when nothing is pending; a drained payload is consumed.
@@ -1601,7 +1607,7 @@ OPTICS_UI_API bool optics_ui_dnd_source(optics_ui *ui, const optics_ui_dnd_sourc
 OPTICS_UI_API bool optics_ui_dnd_drop_target(optics_ui *ui,
                                              const optics_ui_dnd_drop_target_opts *opts);
 
-/* Platform delivery of drop payload into lens. */
+/* Platform delivery of drop payload into ui. */
 OPTICS_UI_API void optics_ui_deliver_drop(optics_ui *ui, const optics_ui_deliver_drop_opts *opts);
 
 /* Retrieve and consume pending drop payload during drop frame. Returns bytes copied. */
@@ -1611,7 +1617,7 @@ OPTICS_UI_API uint32_t optics_ui_take_drop(optics_ui *ui, const optics_ui_take_d
 /*  Escape hatch — retained nodes (ADR-0031)                          */
 /*                                                                    */
 /*  Handles are borrows valid only within the current frame. Re-resolve*/
-/*  by lens_id each frame; never cache a node pointer past lens_begin.  */
+/*  by optics_ui_id each frame; never cache a node pointer past optics_ui_begin.  */
 /* ================================================================== */
 
 OPTICS_UI_API optics_ui_node *optics_ui_root(optics_ui *ui);
@@ -1632,4 +1638,4 @@ OPTICS_UI_API void *optics_ui_node_state(optics_ui_node *n, size_t bytes);
 }
 #endif
 
-#endif /* LENS_H */
+#endif /* OPTICS_UI_H */

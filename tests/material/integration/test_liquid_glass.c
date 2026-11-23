@@ -1,8 +1,8 @@
 /*
- * Liquid glass material (prism) over a canvas render-target capture
- * (ADR-0017): render canvas content into a flux_image, blur it with the
- * flux reusable blur filter, composite analytic glass bodies with the
- * prism material filter, and draw the result back onto a frame.
+ * Liquid glass material (material) over a canvas render-target capture
+ * (ADR-0017): render canvas content into a optics_gfx_image, blur it with the
+ * gfx reusable blur filter, composite analytic glass bodies with the
+ * material filter, and draw the result back onto a frame.
  *
  * Asserts:
  *   - the analytic rounded SDF masks every optical layer (bounding-box
@@ -28,7 +28,7 @@
 #define W 64u
 #define H 64u
 #define BYTES (W * H * 4u)
-#define TEST_FRAME_SLOTS 3u /* mirrors FLUX_MAX_FRAMES_IN_FLIGHT */
+#define TEST_FRAME_SLOTS 3u /* mirrors OPTICS_GFX_MAX_FRAMES_IN_FLIGHT */
 
 static uint32_t render_liquid_glass_frame(optics_gfx_surface *surface, optics_gfx_canvas *canvas,
                                           optics_gfx_image *target,
@@ -345,7 +345,7 @@ int main(void) {
      * guarantee. Whether a *specific* GPU actually reorders in the absence of
      * the barrier is not observable from here — the deterministic half of this
      * decision (`liquid_glass_region_overlaps_any`) is unit-tested separately in
-     * tests/prism/unit/test_liquid_glass_regions.c. */
+     * tests/material/unit/test_liquid_glass_regions.c. */
     {
         optics_material_liquid_glass_group faint = OPTICS_MATERIAL_LIQUID_GLASS_GROUP_INIT;
         optics_material_liquid_glass_group solid = OPTICS_MATERIAL_LIQUID_GLASS_GROUP_INIT;

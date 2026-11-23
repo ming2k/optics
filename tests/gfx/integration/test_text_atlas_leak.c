@@ -276,7 +276,7 @@ int main(void) {
     return OT_REPORT();
 }
 
-#else /* !GLYPH_HAVE_FTHB */
+#else /* !OPTICS_TEXT_HAVE_FTHB */
 
 int main(void) {
     return OT_REPORT();

@@ -1,7 +1,7 @@
 # Getting Started
 
 You will build the Optics monorepo, run its correctness tests, and launch the
-smallest `flux` example. Allow about five minutes after the dependencies are
+smallest `gfx` example. Allow about five minutes after the dependencies are
 installed.
 
 ## Step 1 — Prepare the Environment
@@ -43,7 +43,7 @@ meson setup build -Dexamples=true -Dtests=true
 meson compile -C build
 ```
 
-The one root build compiles `flux`, `lens`, `iris`, the enabled sibling
+The one root build compiles `gfx`, `ui`, `window`, the enabled sibling
 libraries, and their examples and tests. No intermediate install is needed.
 
 ## Step 3 — Run the Tests
@@ -63,7 +63,7 @@ output is stored in `build/meson-logs/testlog.txt`; pass `-v` to
 ./build/examples/getting_started/hello_triangle
 ```
 
-A window opens with a coloured triangle. This program uses `flux-core`
+A window opens with a coloured triangle. This program uses `gfx-core`
 directly: it creates a device and surface, records a dynamic-rendering pass,
 submits the frame, and presents it. Close the window to exit.
 
@@ -84,8 +84,8 @@ example instead:
 ./build/examples/showcase/widget_gallery
 ```
 
-The `flux` examples show direct rendering, the `lens` example exercises the
-headless UI engine, and the `iris` example supplies the Wayland window and
+The `gfx` examples show direct rendering, the `ui` example exercises the
+headless UI engine, and the `window` example supplies the Wayland window and
 event loop for a complete UI application.
 
 ## What's Next

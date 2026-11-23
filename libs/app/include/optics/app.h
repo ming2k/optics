@@ -1,26 +1,27 @@
 /*
- * aperture/aperture.h — the application shell: lens running in an iris window.
+ * app/app.h — the application shell: ui running in a native window.
  *
- * iris owns the window, the event pump and the frame cadence and depends on
- * flux only. lens is a headless UI engine and depends on no windowing system.
- * aperture is the one place the two meet: it implements iris's UI-host seam
- * (<iris/host.h>) over a lens context, once, for every platform backend.
+ * window owns the window, the event pump and the frame cadence and depends on
+ * gfx only. ui is a headless UI engine and depends on no windowing system.
+ * app is the one place the two meet: it implements window's UI-host seam
+ * (<optics/window/host.h>) over a ui context, once, for every platform backend.
  *
- *     aperture_app_run(&(aperture_app_opts){
+ *     optics_app_run(&(optics_app_opts){
  *         .title = "Hello",
- *         .build = build,          // immediate-mode lens widgets, every frame
+ *         .build = build,          // immediate-mode ui widgets, every frame
  *     });
  *
- * What aperture does on the application's behalf:
- *   - creates the lens context on iris's device and releases it in order;
- *   - folds iris_input into lens_input and runs lens_begin / build / lens_end;
- *   - publishes lens snapshots to iris's presentation pipeline;
+ * What app does on the application's behalf:
+ *   - creates the ui context on window's device and releases it in order;
+ *   - folds optics_window_input into optics_ui_input and runs optics_ui_begin / build /
+ * optics_ui_end;
+ *   - publishes ui snapshots to window's presentation pipeline;
  *   - maps the OS colour scheme and accessibility preferences onto the theme;
- *   - wires the lens clipboard and drag source to the window's;
- *   - exposes the lens semantic tree to the platform accessibility bridge.
+ *   - wires the ui clipboard and drag source to the window's;
+ *   - exposes the ui semantic tree to the platform accessibility bridge.
  *
- * Window, cursor, file-dialog and capability APIs are iris's and are used
- * directly (<iris/iris.h>).
+ * Window, cursor, file-dialog and capability APIs are window's and are used
+ * directly (<optics/window.h>).
  */
 #ifndef OPTICS_APP_H
 #define OPTICS_APP_H
@@ -48,12 +49,12 @@ extern "C" {
 #define OPTICS_APP_API
 #endif
 
-/* Per-frame build callback. `ui` is live inside an open lens_begin/lens_end
- * pair; `in` is the input lens is consuming this frame (read-only — filter
+/* Per-frame build callback. `ui` is live inside an open optics_ui_begin/optics_ui_end
+ * pair; `in` is the input ui is consuming this frame (read-only — filter
  * events in `on_event`, before they are folded). */
 typedef void (*optics_app_build_fn)(optics_ui *ui, const optics_ui_input *in, void *user);
 
-/* Application-resource lifecycle. `start` runs once the device and the lens
+/* Application-resource lifecycle. `start` runs once the device and the ui
  * context exist and before the first frame; returning false aborts the run.
  * `stop` runs after the frame loop while both are still alive, and only when
  * `start` was absent or returned true. */
@@ -107,4 +108,4 @@ OPTICS_APP_API bool optics_app_get_geometry(int32_t *out_width, int32_t *out_hei
 }
 #endif
 
-#endif /* APERTURE_H */
+#endif /* OPTICS_APP_H */

@@ -31,7 +31,7 @@ fn main() {
         .raw_line("pub use optics_ui_sys::{optics_ui, optics_ui_input};")
         .layout_tests(false)
         .generate()
-        .expect("bindgen failed to generate aperture bindings");
+        .expect("bindgen failed to generate app bindings");
 
     write_bindings(&bindings);
 }

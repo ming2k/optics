@@ -1,7 +1,7 @@
 /*
- * iris/a11y.h — platform-agnostic accessibility bridge (ADR-0035, ADR-0103).
+ * window/a11y.h — platform-agnostic accessibility bridge (ADR-0035, ADR-0103).
  *
- * Bridges the live UI semantic tree (iris_ui_host.a11y_walk) to the host
+ * Bridges the live UI semantic tree (optics_window_ui_host.a11y_walk) to the host
  * operating system's assistive technology subsystem:
  *   - Linux: Asynchronous AT-SPI2 over D-Bus
  *   - Windows: Microsoft UI Automation (UIA) Provider
@@ -12,7 +12,7 @@
  *      are asynchronous or fail-fast (<= 50ms). Never stalls the main thread,
  *      window mapping, or swapchain frame pacing.
  *   2. Zero Cost When Inactive: If no screen reader or assistive technology
- *      client is monitoring the desktop session, iris_a11y_is_active() reports
+ *      client is monitoring the desktop session, optics_window_a11y_is_active() reports
  *      false, allowing callers to bypass tree diffing and IPC serialization.
  *   3. Thread-Affine: All entry points run on the main UI thread, serialized
  *      with frame composition and the UI frame.
@@ -57,7 +57,7 @@ typedef enum optics_window_role : uint32_t {
     OPTICS_WINDOW_ROLE_LINK,
 } optics_window_role;
 
-/* State bits for iris_semantics.flags. */
+/* State bits for optics_window_semantics.flags. */
 enum {
     OPTICS_WINDOW_A11Y_FOCUSED = 1u << 0,
     OPTICS_WINDOW_A11Y_DISABLED = 1u << 1,
@@ -86,7 +86,7 @@ typedef void (*optics_window_a11y_visit_fn)(const optics_window_semantics *s,
 
 /* Initialise the accessibility bridge: connects to the platform assistive
  * technology infrastructure and registers the root application accessible.
- * Safe to call at application startup before iris_app_run().
+ * Safe to call at application startup before optics_window_run().
  *
  * Returns 0 on success, -1 if the bridge is unavailable on this platform.
  * Asynchronous and fail-soft: never blocks the calling thread on external
@@ -99,9 +99,9 @@ OPTICS_WINDOW_API int optics_window_a11y_init(void);
 [[nodiscard]] OPTICS_WINDOW_API bool optics_window_a11y_is_active(void);
 
 /* Reconcile the platform accessibility hierarchy with the UI layer's live
- * semantic tree, read through `ui->a11y_walk`. iris_app_run calls this once
+ * semantic tree, read through `ui->a11y_walk`. optics_window_run calls this once
  * per frame after `ui->frame`; hosts driving their own loop do the same, on
- * the iris main thread.
+ * the window main thread.
  *
  * Returns 0 on success, -1 if the bridge is not active. */
 OPTICS_WINDOW_API int optics_window_a11y_update(const optics_window_ui_host *ui);
@@ -114,4 +114,4 @@ OPTICS_WINDOW_API void optics_window_a11y_shutdown(void);
 }
 #endif
 
-#endif /* IRIS_A11Y_H */
+#endif /* OPTICS_WINDOW_A11Y_H */

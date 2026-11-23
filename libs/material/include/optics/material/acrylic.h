@@ -1,5 +1,5 @@
 /*
- * prism/acrylic.h — acrylic material library component.
+ * material/acrylic.h — acrylic material library component.
  *
  * Acrylic (Fluent Design inspired) is a layered translucent surface:
  *   1. Dual-Kawase backdrop blur with saturation boost;
@@ -50,7 +50,7 @@ typedef struct optics_material_acrylic_group {
 
 /* Dispatch-wide caller policy. */
 typedef struct optics_material_acrylic_desc {
-    optics_material_struct_type type; /* PRISM_TYPE_ACRYLIC_DESC */
+    optics_material_struct_type type; /* OPTICS_MATERIAL_TYPE_ACRYLIC_DESC */
     const void *next;
     optics_gfx_image *input;
     optics_gfx_image *blurred_input;
@@ -77,9 +77,9 @@ typedef struct optics_material_acrylic_desc {
 
 typedef struct optics_material_acrylic_filter optics_material_acrylic_filter;
 
-/* Options descriptor for prism_acrylic_filter_warmup (ADR-0141). */
+/* Options descriptor for optics_material_acrylic_filter_warmup (ADR-0141). */
 typedef struct optics_material_acrylic_warmup_opts {
-    optics_gfx_format format; /* Target image format (default 0 -> FLUX_FORMAT_RGBA8_UNORM) */
+    optics_gfx_format format; /* Target image format (default 0 -> OPTICS_GFX_FORMAT_RGBA8_UNORM) */
 } optics_material_acrylic_warmup_opts;
 
 OPTICS_MATERIAL_NODISCARD OPTICS_MATERIAL_API optics_gfx_result
@@ -111,4 +111,4 @@ optics_material_acrylic_filter_apply(optics_material_acrylic_filter *filter,
 }
 #endif
 
-#endif /* PRISM_ACRYLIC_H */
+#endif /* OPTICS_MATERIAL_ACRYLIC_H */

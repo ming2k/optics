@@ -6,8 +6,8 @@
  *  - Shift+Tab reverse focus traversal
  */
 
-#include "lens_test.h"
 #include "optics_test.h"
+#include "ui_test.h"
 #include <optics/ui.h>
 
 static const optics_ui_input IN0 = {.display_size = {400, 300}, .dt_seconds = 0.016f};
@@ -255,7 +255,7 @@ static void test_shift_tab_reverse_focus(void) {
     optics_ui_input in3 = in;
     in3.key_count = 1;
     in3.keys[0] = (optics_ui_key_event){.key = OPTICS_UI_KEY_TAB, .pressed = true};
-    in3.mods = (1u << 0); /* LENS_MOD_SHIFT */
+    in3.mods = (1u << 0); /* OPTICS_UI_MOD_SHIFT */
     optics_ui_begin(ui, &in3);
     (void)optics_ui_button(ui, &(optics_ui_button_opts){.label = "A"}).clicked;
     (void)optics_ui_button(ui, &(optics_ui_button_opts){.label = "B"}).clicked;

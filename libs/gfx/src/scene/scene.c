@@ -88,7 +88,8 @@ optics_gfx_result optics_gfx_mesh_create(optics_gfx_device *d, const optics_gfx_
     if (!d || !desc || !out)
         return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
     if (desc->type != OPTICS_GFX_TYPE_MESH_DESC) {
-        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT, "desc->type != FLUX_TYPE_MESH_DESC");
+        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT,
+                        "desc->type != OPTICS_GFX_TYPE_MESH_DESC");
         return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
     }
     if (!desc->vertices || desc->vertex_count == 0) {
@@ -97,7 +98,7 @@ optics_gfx_result optics_gfx_mesh_create(optics_gfx_device *d, const optics_gfx_
     }
     const optics_gfx_mesh_skin_desc *skin = desc->next;
     if (skin && (skin->type != OPTICS_GFX_TYPE_MESH_SKIN_DESC || skin->next || !skin->vertices)) {
-        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT, "invalid flux_mesh_skin_desc");
+        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT, "invalid optics_gfx_mesh_skin_desc");
         return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
     }
     *out = nullptr;
@@ -182,7 +183,7 @@ void optics_gfx_mesh_release(optics_gfx_mesh *m) {
         return;
 
     optics_gfx_device *d = m->device;
-    /* Same in-flight hazard as flux_buffer_release: the vertex/index
+    /* Same in-flight hazard as optics_gfx_buffer_release: the vertex/index
      * buffers may still be bound to batches executing on the graphics
      * queue. Each buffer is parked on the device retire queue on its
      * own; the two zombies share no state, so teardown order is
@@ -243,7 +244,7 @@ typedef struct scene_params_push {
 } scene_params_push;
 
 static_assert(sizeof(scene_params_push) <= OPTICS_GFX_DEVICE_REQUIRED_PUSH_BYTES,
-              "scene_params_push exceeds FLUX_DEVICE_REQUIRED_PUSH_BYTES");
+              "scene_params_push exceeds OPTICS_GFX_DEVICE_REQUIRED_PUSH_BYTES");
 
 /* Shared surface block, std430. Mirrors the leading fields of UnlitParams
  * and the material fields of PhongParams in the scene shaders. */
@@ -252,7 +253,7 @@ typedef struct scene_surface_params {
     float uv_scale_offset[4];          /* scale.xy, offset.xy */
     float uv_rotation_alpha_cutoff[4]; /* cos, sin, cutoff, unused */
     uint32_t texture_info[4];          /* image, sampler, alpha mode, textured */
-    uint64_t color_params_address;     /* flux_image_color_params BDA; 0 = none */
+    uint64_t color_params_address;     /* optics_gfx_image_color_params BDA; 0 = none */
     uint32_t color_flags;              /* SCENE_COLOR_* */
     uint32_t _color_pad;
 } scene_surface_params;
@@ -498,12 +499,13 @@ optics_gfx_result optics_gfx_material_create(optics_gfx_device *d,
     if (!d || !desc || !out)
         return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
     if (desc->type != OPTICS_GFX_TYPE_MATERIAL_DESC) {
-        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT, "desc->type != FLUX_TYPE_MATERIAL_DESC");
+        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT,
+                        "desc->type != OPTICS_GFX_TYPE_MATERIAL_DESC");
         return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
     }
     if (desc->kind != OPTICS_GFX_MATERIAL_UNLIT && desc->kind != OPTICS_GFX_MATERIAL_PHONG &&
         desc->kind != OPTICS_GFX_MATERIAL_VECTOR) {
-        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT, "unknown flux_material_kind");
+        OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT, "unknown optics_gfx_material_kind");
         return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
     }
     const optics_gfx_material_surface_desc *surface = nullptr;
@@ -512,7 +514,8 @@ optics_gfx_result optics_gfx_material_create(optics_gfx_device *d,
         vec_desc = (const optics_gfx_material_vector_desc *)desc->next;
         if (!vec_desc || vec_desc->type != OPTICS_GFX_TYPE_MATERIAL_VECTOR_DESC ||
             !vec_desc->segments_buffer) {
-            OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT, "invalid flux_material_vector_desc");
+            OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT,
+                            "invalid optics_gfx_material_vector_desc");
             return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
         }
     } else {
@@ -522,7 +525,7 @@ optics_gfx_result optics_gfx_material_create(optics_gfx_device *d,
                          surface->alpha_mode != OPTICS_GFX_MATERIAL_ALPHA_MASK &&
                          surface->alpha_mode != OPTICS_GFX_MATERIAL_ALPHA_BLEND))) {
             OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT,
-                            "invalid flux_material_surface_desc");
+                            "invalid optics_gfx_material_surface_desc");
             return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
         }
     }
@@ -702,7 +705,7 @@ static void fill_phong_params(scene_phong_params *p, const optics_gfx_mat4 *view
     memcpy(p->world, world.m, sizeof(p->world));
 
     /* Column i of transpose(inverse(world)) is row i of inverse(world);
-     * flux_mat4 is column-major, so row i reads m[i], m[4+i], m[8+i].
+     * optics_gfx_mat4 is column-major, so row i reads m[i], m[4+i], m[8+i].
      * The inverse is per-draw on purpose: world differs per mesh, so a
      * cache would not hit. */
     optics_gfx_mat4 inv = optics_gfx_mat4_invert(world);
@@ -766,7 +769,7 @@ static void scene_draw(optics_gfx_frame *f, const optics_gfx_camera *cam, optics
         return;
 
     /* MVP = projection * view * world (column-major, multiplied via
-     * flux_mat4_multiply which mirrors math notation a*b). */
+     * optics_gfx_mat4_multiply which mirrors math notation a*b). */
     optics_gfx_mat4 view_proj = optics_gfx_mat4_multiply(cam->projection, cam->view);
     optics_gfx_mat4 mvp = optics_gfx_mat4_multiply(view_proj, world);
     bool skinned = mesh->skin_buffer && joint_matrices && joint_count > 0;
@@ -786,7 +789,7 @@ static void scene_draw(optics_gfx_frame *f, const optics_gfx_camera *cam, optics
 
     /* Skip redundant rebinds: the frame mirrors the bindings scene
      * last made on this command buffer (reset every begin_frame and by
-     * every flux_frame_begin_pass — other modules' passes bind their
+     * every optics_gfx_frame_begin_pass — other modules' passes bind their
      * own pipelines, e.g. the canvas end_pass output blit, and bindings
      * persist across the passes of one command buffer). The mirror
      * therefore holds for the consecutive scene draws of one pass; the

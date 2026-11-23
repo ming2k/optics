@@ -1,4 +1,4 @@
-/* test_uri.c — iris_file_uri_to_path decoding contract.
+/* test_uri.c — optics_window_file_uri_to_path decoding contract.
  *
  * Headless: pure string transformation, no platform or portal deps.
  */

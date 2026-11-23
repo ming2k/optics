@@ -5,8 +5,8 @@
  * library translation units: it links the public libraries exactly as an
  * application does, then proves the whole chain:
  *
- *   SVG source -> reticle document -> reticle raster      (document layer)
- *   SVG source -> lens runtime icon -> lens snapshot      (UI layer)
+ *   SVG source -> svg document -> svg raster      (document layer)
+ *   SVG source -> ui runtime icon -> ui snapshot      (UI layer)
  *   snapshot -> immutable DisplayList -> serialized bytes (protocol layer)
  *   bytes -> deserialized DisplayList -> CPU canvas pixels (raster layer)
  *
@@ -15,8 +15,8 @@
  * when every unit test is green.
  */
 
-#include "lens_test.h"
 #include "optics_test.h"
+#include "ui_test.h"
 
 #include <optics/gfx/canvas.h>
 #include <optics/gfx/canvas_cpu.h>

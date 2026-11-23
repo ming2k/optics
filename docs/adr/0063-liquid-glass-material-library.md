@@ -3,6 +3,9 @@ id: ADR-0063
 title: "Liquid glass moves to the prism material library"
 status: accepted
 date: 2026-08-11
+scope: unrecorded
+superseded_by: null
+negative_knowledge: true
 ---
 
 # ADR-0063: Liquid glass moves to the prism material library

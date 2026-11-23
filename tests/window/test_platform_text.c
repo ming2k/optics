@@ -1,11 +1,11 @@
 /* test_platform_text.c — UTF-8 boundary-aware truncation (platform_text.c).
  *
  * Headless: these helpers decide how IME commits / preedits / clipboard
- * payloads are clipped into lens's fixed-size input buffers on every
+ * payloads are clipped into ui's fixed-size input buffers on every
  * backend, so the exact boundary behaviour is pinned down here.
  *
  * platform_text.c is compiled directly into this test (the helpers are
- * internal / hidden-visibility, so they are not exported from libiris.so).
+ * internal / hidden-visibility, so they are not exported from liboptics_window.so).
  */
 
 #include "optics_test.h"
@@ -67,10 +67,10 @@ int main(void) {
     optics_window_utf8_copy(buf, sizeof buf, nullptr);
     OT_EXPECT_STR_EQ(buf, "");
 
-    /* --- iris_input staging sizes (the buffers the backends clip into) ---
+    /* --- optics_window_input staging sizes (the buffers the backends clip into) ---
      * text_utf8 grew to 256 for full-sentence IME conversion and preedit to
-     * IRIS_PREEDIT_MAX=256; the Wayland accumulator mirrors these sizes and
-     * static_asserts against them, so pin the lens side here. */
+     * OPTICS_WINDOW_PREEDIT_MAX=256; the Wayland accumulator mirrors these sizes and
+     * static_asserts against them, so pin the ui side here. */
     OT_EXPECT(sizeof((optics_window_input *)0)->text_utf8 == 256);
     OT_EXPECT(sizeof((optics_window_input *)0)->preedit_utf8 == 256);
     OT_EXPECT(OPTICS_WINDOW_PREEDIT_MAX == 256);
@@ -130,7 +130,7 @@ int main(void) {
     OT_EXPECT(optics_window_text_memento_update(&mem, &mem_len, &mem_cursor, "", 0, 0) == true);
     optics_window_text_memento_clear(&mem, &mem_len, &mem_cursor);
 
-    /* --- iris_cp_is_text: what the backends deliver as committed text ---
+    /* --- optics_window_cp_is_text: what the backends deliver as committed text ---
      *
      * C0 controls are not text (the key event carries them), and neither
      * is DEL 0x7f — the Delete keysym's xkb UTF-8 mapping and Win32's

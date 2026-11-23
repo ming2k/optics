@@ -1,7 +1,7 @@
 /* test_scroll.c — scroll container offset handling. */
 
-#include "lens_test.h"
 #include "optics_test.h"
+#include "ui_test.h"
 #include <math.h>
 #include <optics/gfx/canvas_cpu.h>
 #include <optics/ui.h>

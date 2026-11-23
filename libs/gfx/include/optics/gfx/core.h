@@ -1,18 +1,18 @@
 /*
- * flux/core.h — device, surface, frame, allocator, logger, results.
+ * gfx/core.h — device, surface, frame, allocator, logger, results.
  *
- * Pure C. No <vulkan/vulkan.h> in this header. Pull <flux/vulkan.h>
- * at the seam where you hand flux a VkSurfaceKHR or pull a raw
+ * Pure C. No <vulkan/vulkan.h> in this header. Pull <optics/gfx/vulkan.h>
+ * at the seam where you hand gfx a VkSurfaceKHR or pull a raw
  * VkCommandBuffer back.
  *
  * Design contract:
- *   - Opaque handles. Never dereference flux_device, flux_surface,
- *     flux_frame, flux_image. They are forward declarations.
+ *   - Opaque handles. Never dereference optics_gfx_device, optics_gfx_surface,
+ *     optics_gfx_frame, optics_gfx_image. They are forward declarations.
  *   - Refcount the heavy (device, surface, GPU resources);
  *     value types live on the caller's stack or in an arena.
- *   - Every fallible call returns flux_result and is marked
+ *   - Every fallible call returns optics_gfx_result and is marked
  *     [[nodiscard]].
- *   - Descriptor structs open with `flux_struct_type type;
+ *   - Descriptor structs open with `optics_gfx_struct_type type;
  *     const void *next;` for extension chains (Vulkan sType/pNext
  *     pattern).
  */
@@ -30,7 +30,7 @@ extern "C" {
 
 /* A rectangle in surface-local physical pixels. Kept in core.h because damage
  * is a first-class frame input/output, not a canvas-private detail. The math
- * helpers remain in <flux/math.h>. */
+ * helpers remain in <optics/gfx/math.h>. */
 typedef struct optics_gfx_rect {
     float x, y, w, h;
 } optics_gfx_rect;
@@ -67,7 +67,7 @@ typedef struct optics_gfx_rect {
 
 #define OPTICS_GFX_VERSION_MAJOR 0
 #define OPTICS_GFX_VERSION_MINOR 0
-#define OPTICS_GFX_VERSION_PATCH 82
+#define OPTICS_GFX_VERSION_PATCH 83
 
 /* Packed integer version, monotonic: bits 16..23 major, 8..15 minor,
  * 0..7 patch. 0.0.1 == 0x00000001; 1.2.3 == 0x00010203. */
@@ -107,7 +107,7 @@ OPTICS_GFX_NODISCARD OPTICS_GFX_API const char *optics_gfx_result_string(optics_
  * Thread-local: each thread keeps its own slot. A non-OK return on
  * thread A does not affect what thread B observes.
  *
- * The string fields are owned by flux (typically literals or static
+ * The string fields are owned by gfx (typically literals or static
  * buffers); never free them. The strings remain valid until the next
  * non-OK return on the same thread, after which they may be
  * overwritten in place. Any pointer may be NULL.
@@ -115,8 +115,8 @@ OPTICS_GFX_NODISCARD OPTICS_GFX_API const char *optics_gfx_result_string(optics_
  * Call after a non-OK return for context. */
 typedef struct optics_gfx_error_info {
     optics_gfx_result code;
-    const char *function; /* "flux_device_create" */
-    const char *file;     /* source file inside flux */
+    const char *function; /* "optics_gfx_device_create" */
+    const char *file;     /* source file inside gfx */
     int line;
     const char *message;  /* human-readable detail; may be NULL */
     int32_t backend_code; /* e.g. VkResult cast to int when relevant */
@@ -124,32 +124,32 @@ typedef struct optics_gfx_error_info {
 
 /* Copies the most recent thread-local diagnostic into *out. The
  * `out` struct becomes the caller's; the string pointers inside it
- * follow the lifetime rules documented on flux_error_info above. */
+ * follow the lifetime rules documented on optics_gfx_error_info above. */
 OPTICS_GFX_API void optics_gfx_get_last_error(optics_gfx_error_info *out);
 
 /* Record a diagnostic for a failure a *consumer library* detected.
  *
- * Flux owns the thread-local slot, but validation does not stop at flux's
- * boundary: lens rejects a snapshot activation for a stale generation, a
- * mismatched owner, an in-progress build — failures flux never sees, with the
+ * gfx owns the thread-local slot, but validation does not stop at gfx's
+ * boundary: ui rejects a snapshot activation for a stale generation, a
+ * mismatched owner, an in-progress build — failures gfx never sees, with the
  * same result codes. Without this, a binding reading the slot after such a
- * failure gets whatever the *previous* flux call left there: a diagnostic for a
+ * failure gets whatever the *previous* gfx call left there: a diagnostic for a
  * different function, or none at all.
  *
  * Call it immediately before returning the non-OK code, so the slot describes
  * this failure at the moment the caller can still read it. `function` and
- * `message` must outlive the slot's contents (a literal, or `flux_error_format`
- * for composed text); file/line point at the rejecting site.
+ * `message` must outlive the slot's contents (a literal or other static storage); file/line point
+ * at the rejecting site.
  *
  * `function` is the *entry point the caller invoked*, not this helper — e.g.
- * "lens_snapshot_activate" — because that is what the caller's log needs to name.
- * The slot is thread-local, matching flux's own failures: one thread's
+ * "optics_ui_snapshot_activate" — because that is what the caller's log needs to name.
+ * The slot is thread-local, matching gfx's own failures: one thread's
  * diagnostic never affects another's. */
 OPTICS_GFX_API void optics_gfx_set_diagnostic(const optics_gfx_error_info *info);
 
 /* Compose a message into the thread-local formatting arena and return it, for
- * passing to `flux_set_diagnostic` when the text needs values spliced in. The
- * returned pointer is valid until the next `flux_set_diagnostic` on this thread.
+ * passing to `optics_gfx_set_diagnostic` when the text needs values spliced in. The
+ * returned pointer is valid until the next `optics_gfx_set_diagnostic` on this thread.
  * Truncates rather than failing: a diagnostic must never be the reason a call
  * fails differently. */
 [[nodiscard]] OPTICS_GFX_API const char *optics_gfx_diagnostic_format(const char *fmt, ...);
@@ -159,8 +159,8 @@ OPTICS_GFX_API void optics_gfx_set_diagnostic(const optics_gfx_error_info *info)
 /* ================================================================== */
 
 /* Backend-neutral pixel/attachment format used by canvas images and
- * scene materials. Mapped to VkFormat by flux_format_to_vk
- * (declared in <flux/vulkan.h>). The UNORM/SRGB distinction follows
+ * scene materials. Mapped to VkFormat by optics_gfx_format_to_vk
+ * (declared in <optics/gfx/vulkan.h>). The UNORM/SRGB distinction follows
  * Vulkan: UNORM writes data verbatim; SRGB applies the sRGB
  * transfer function on store. */
 typedef enum optics_gfx_format : uint32_t {
@@ -198,8 +198,8 @@ typedef enum optics_gfx_format : uint32_t {
 /* A color space is { primaries, transfer function } — the parametric
  * model VkColorSpaceKHR, DXGI, the Wayland color-management protocol
  * and CSS Color 4 have converged on. There is deliberately no range
- * field: flux renders RGB only; video-range YUV belongs to the decoder
- * that hands flux RGB content.
+ * field: gfx renders RGB only; video-range YUV belongs to the decoder
+ * that hands gfx RGB content.
  *
  * All named primaries are D65; custom primaries carry their own white
  * point and conversions adapt chromatically (Bradford). */
@@ -209,7 +209,7 @@ typedef enum optics_gfx_color_primaries : uint32_t {
     OPTICS_GFX_PRIMARIES_DISPLAY_P3 = 1, /* D65 */
     OPTICS_GFX_PRIMARIES_BT2020 = 2,     /* D65 */
     OPTICS_GFX_PRIMARIES_ADOBE_RGB = 3,  /* D65 */
-    OPTICS_GFX_PRIMARIES_CUSTOM = 4,     /* chromaticities from flux_color_space.xy */
+    OPTICS_GFX_PRIMARIES_CUSTOM = 4,     /* chromaticities from optics_gfx_color_space.xy */
 } optics_gfx_color_primaries;
 
 /* Transfer function between linear-light and encoded values. PQ and
@@ -220,7 +220,7 @@ typedef enum optics_gfx_color_primaries : uint32_t {
 typedef enum optics_gfx_transfer_func : uint32_t {
     OPTICS_GFX_TRANSFER_LINEAR = 0,
     OPTICS_GFX_TRANSFER_SRGB = 1,
-    OPTICS_GFX_TRANSFER_GAMMA = 2, /* pure power law, exponent from flux_color_space.gamma */
+    OPTICS_GFX_TRANSFER_GAMMA = 2, /* pure power law, exponent from optics_gfx_color_space.gamma */
     OPTICS_GFX_TRANSFER_PQ = 3,    /* ST 2084 */
     OPTICS_GFX_TRANSFER_HLG = 4,
 } optics_gfx_transfer_func;
@@ -228,14 +228,14 @@ typedef enum optics_gfx_transfer_func : uint32_t {
 typedef struct optics_gfx_color_space {
     optics_gfx_color_primaries primaries;
     optics_gfx_transfer_func transfer;
-    float gamma; /* FLUX_TRANSFER_GAMMA only; 0 otherwise */
+    float gamma; /* OPTICS_GFX_TRANSFER_GAMMA only; 0 otherwise */
     struct {
         float rx, ry, gx, gy, bx, by;
         float wx, wy; /* white point */
-    } xy;             /* FLUX_PRIMARIES_CUSTOM only; zero otherwise */
+    } xy;             /* OPTICS_GFX_PRIMARIES_CUSTOM only; zero otherwise */
 } optics_gfx_color_space;
 
-/* Brace-initializer presets (same convention as FLUX_SURFACE_DESC_INIT).
+/* Brace-initializer presets (same convention as OPTICS_GFX_SURFACE_DESC_INIT).
  * The set follows CSS Color 4 plus the HDR surface spaces. */
 #define OPTICS_GFX_COLOR_SPACE_SRGB                                                                \
     {                                                                                              \
@@ -306,11 +306,11 @@ typedef enum optics_gfx_struct_type : uint32_t {
     OPTICS_GFX_TYPE_SURFACE_READBACK_DESC = 18,
     OPTICS_GFX_TYPE_CANVAS_PASS_DESC = 19,
     /* 20 was the liquid-glass material's descriptor tag — retired when the
-     * material moved to the prism library (ADR-0063). Never reuse. */
+     * material moved to the material library (ADR-0063). Never reuse. */
     OPTICS_GFX_TYPE_MESH_SKIN_DESC = 21,
     OPTICS_GFX_TYPE_MATERIAL_SURFACE_DESC = 22,
     OPTICS_GFX_TYPE_EFFECT_BLUR_REGIONS_DESC = 23,
-    /* 24 was FLUX_TYPE_CANVAS_NO_STENCIL_DESC — retired when analytic
+    /* 24 was the no-stencil canvas descriptor's tag — retired when analytic
      * tiled coverage replaced stencil-then-cover (ADR-0116/0120). Never reuse. */
     OPTICS_GFX_TYPE_DEVICE_DRM_NODE_DESC = 25,
     OPTICS_GFX_TYPE_DEVICE_FEATURES_DESC = 26,
@@ -339,27 +339,32 @@ typedef enum optics_gfx_struct_type : uint32_t {
  * so a drifted header fails far from the cause). If any of these asserts
  * fires, a value was inserted or reordered instead of appended — see
  * docs/reference/api.md before changing them. */
-static_assert(OPTICS_GFX_TYPE_DEVICE_DESC == 1, "flux_struct_type: append only — never renumber");
+static_assert(OPTICS_GFX_TYPE_DEVICE_DESC == 1,
+              "optics_gfx_struct_type: append only — never renumber");
 static_assert(OPTICS_GFX_TYPE_EFFECT_SHADOW_DESC == 40,
-              "flux_struct_type: append only — never renumber");
-static_assert(OPTICS_GFX_TYPE_OBSERVE_OPTS == 48, "flux_struct_type: append only — never renumber");
+              "optics_gfx_struct_type: append only — never renumber");
+static_assert(OPTICS_GFX_TYPE_OBSERVE_OPTS == 48,
+              "optics_gfx_struct_type: append only — never renumber");
 static_assert(OPTICS_GFX_TYPE_OBSERVE_REPORT_OPTS == 49,
-              "flux_struct_type: append only — never renumber");
+              "optics_gfx_struct_type: append only — never renumber");
 static_assert(OPTICS_GFX_TYPE_DEVICE_ALLOC_OPTS == 50,
-              "flux_struct_type: append only — never renumber");
+              "optics_gfx_struct_type: append only — never renumber");
 static_assert(OPTICS_GFX_TYPE_DEVICE_FREE_OPTS == 51,
-              "flux_struct_type: append only — never renumber");
+              "optics_gfx_struct_type: append only — never renumber");
 static_assert(OPTICS_GFX_TYPE_DEFERRED_PASS_DESC == 52,
-              "flux_struct_type: append only — never renumber");
+              "optics_gfx_struct_type: append only — never renumber");
 static_assert(OPTICS_GFX_TYPE_DISPLAY_LIST_SERIALIZE_OPTS == 53,
-              "flux_struct_type: append only — never renumber");
+              "optics_gfx_struct_type: append only — never renumber");
 static_assert(OPTICS_GFX_TYPE_DISPLAY_LIST_DESERIALIZE_OPTS == 54,
-              "flux_struct_type: append only — never renumber");
+              "optics_gfx_struct_type: append only — never renumber");
 
 /* ================================================================== */
 /*  C23 Type-Safe Compound Literal Initializer (RFC-0094 / ADR-0087)  */
 /* ================================================================== */
 
+/* `TypeName` is the type's suffix as spelled: OPTICS_GFX_INIT(buffer_desc,
+ * .size = 64) yields an optics_gfx_buffer_desc tagged OPTICS_GFX_TYPE_BUFFER_DESC.
+ * The OPTICS_GFX_TYPE_<suffix> aliases below map each suffix to its tag. */
 #define OPTICS_GFX_INIT(TypeName, ...)                                                             \
     ((optics_gfx_##TypeName){.type = OPTICS_GFX_TYPE_##TypeName, .next = nullptr, __VA_ARGS__})
 
@@ -388,24 +393,6 @@ static_assert(OPTICS_GFX_TYPE_DISPLAY_LIST_DESERIALIZE_OPTS == 54,
 #define OPTICS_GFX_TYPE_display_list_serialize_opts OPTICS_GFX_TYPE_DISPLAY_LIST_SERIALIZE_OPTS
 #define OPTICS_GFX_TYPE_display_list_deserialize_opts OPTICS_GFX_TYPE_DISPLAY_LIST_DESERIALIZE_OPTS
 
-typedef struct optics_gfx_device_desc optics_gfx_DEVICE_DESC;
-typedef struct optics_gfx_surface_desc optics_gfx_SURFACE_DESC;
-typedef struct optics_gfx_frame_begin_desc optics_gfx_FRAME_BEGIN_DESC;
-typedef struct optics_gfx_pass_desc optics_gfx_PASS_DESC;
-typedef struct optics_gfx_image_desc optics_gfx_IMAGE_DESC;
-typedef struct optics_gfx_canvas_desc optics_gfx_CANVAS_DESC;
-typedef struct optics_gfx_mesh_desc optics_gfx_MESH_DESC;
-typedef struct optics_gfx_material_desc optics_gfx_MATERIAL_DESC;
-typedef struct optics_gfx_compute_pipeline_desc optics_gfx_COMPUTE_PIPELINE_DESC;
-typedef struct optics_gfx_sampler_desc optics_gfx_SAMPLER_DESC;
-typedef struct optics_gfx_buffer_desc optics_gfx_BUFFER_DESC;
-typedef struct optics_gfx_graphics_pipeline_desc optics_gfx_GRAPHICS_PIPELINE_DESC;
-typedef struct optics_gfx_effect_blur_desc optics_gfx_EFFECT_BLUR_DESC;
-typedef struct optics_gfx_target_desc optics_gfx_TARGET_DESC;
-typedef struct optics_gfx_cpu_target_desc optics_gfx_CPU_TARGET_DESC;
-typedef struct optics_gfx_canvas_pass_desc optics_gfx_CANVAS_PASS_DESC;
-typedef struct optics_gfx_glyph_run_desc optics_gfx_GLYPH_RUN_DESC;
-
 /* ================================================================== */
 /*  Allocation scope (ADR-0129; declared here because core.h owns the
     allocation entry points that take it)                              */
@@ -414,11 +401,11 @@ typedef struct optics_gfx_glyph_run_desc optics_gfx_GLYPH_RUN_DESC;
 /* Where an acquisition belongs. The scope decides *when* a non-zero live count
  * becomes a defect, not how it is counted. */
 typedef enum optics_gfx_scope : uint32_t {
-    /* flux GPU and host objects. Drain point: device teardown, after the
+    /* gfx GPU and host objects. Drain point: device teardown, after the
      * retire queue has drained (so in-flight work is never reported). */
     OPTICS_GFX_SCOPE_DEVICE = 0,
-    /* Per-context state above flux: lens store, glyph atlas, vista scene,
-     * prism material caches. Drain point: the owning context's release. */
+    /* Per-context state above gfx: ui store, glyph atlas, scene graph,
+     * material caches. Drain point: the owning context's release. */
     OPTICS_GFX_SCOPE_CONTEXT = 1,
     /* Process-global OS objects: file descriptors, Wayland protocol objects,
      * VkSurfaceKHR. Process-global ledger; pass nullptr as the device.
@@ -475,10 +462,10 @@ typedef struct optics_gfx_icc_profile optics_gfx_icc_profile;
 /* ------------------------------------------------------------------ */
 
 /* Parses and validates an ICC v2/v4 display/scanner-class RGB profile.
- * The parser implements the bounded subset flux consumes: matrix +
+ * The parser implements the bounded subset gfx consumes: matrix +
  * TRC profiles (curveType gamma, parametricCurveType 0-4) and A2B0
  * LUT profiles (mft1/mft2/mAB); anything else is
- * FLUX_ERROR_UNSUPPORTED. Parsing never touches the GPU. */
+ * OPTICS_GFX_ERROR_UNSUPPORTED. Parsing never touches the GPU. */
 OPTICS_GFX_NODISCARD OPTICS_GFX_API optics_gfx_result
 optics_gfx_icc_profile_create(const void *data, size_t size, optics_gfx_icc_profile **out);
 OPTICS_GFX_NODISCARD OPTICS_GFX_API optics_gfx_icc_profile *
@@ -486,7 +473,7 @@ optics_gfx_icc_profile_retain(optics_gfx_icc_profile *p);
 OPTICS_GFX_API void optics_gfx_icc_profile_release(optics_gfx_icc_profile *p);
 
 /* When the profile is exactly representable in the parametric model
- * (matrix + a transfer curve from the flux set), fills `out` and
+ * (matrix + a transfer curve from the gfx set), fills `out` and
  * returns true. LUT-only profiles return false; they are still usable
  * on images, where they are baked into a 3D LUT at creation. */
 OPTICS_GFX_API bool optics_gfx_icc_profile_color_space(const optics_gfx_icc_profile *p,
@@ -496,19 +483,19 @@ OPTICS_GFX_API bool optics_gfx_icc_profile_color_space(const optics_gfx_icc_prof
 /*  Sampled image (refcounted GPU resource)                           */
 /* ------------------------------------------------------------------ */
 
-/* What an image is for. One vocabulary for creation (flux_image_desc::usage)
+/* What an image is for. One vocabulary for creation (optics_gfx_image_desc::usage)
  * and for the capability query below. */
 typedef enum optics_gfx_image_usage : uint32_t {
     /* Sampled content, uploaded from `initial_data` or by region updates. */
     OPTICS_GFX_IMAGE_USAGE_SAMPLED = 0,
     /* STORAGE | SAMPLED | TRANSFER, parked in SHADER_READ_ONLY_OPTIMAL: the
      * intermediate currency of compute effects. Bring it to GENERAL around a
-     * dispatch with flux_image_transition (<flux/vulkan.h>). RGBA8/BGRA8 UNORM
+     * dispatch with optics_gfx_frame_pipeline_barrier (<optics/gfx/vulkan.h>). RGBA8/BGRA8 UNORM
      * always; RGBA16_SFLOAT where the device supports rgba16f storage. Holds
      * only a weak device reference: keep the device alive for its lifetime. */
     OPTICS_GFX_IMAGE_USAGE_COMPUTE_WRITE = 1,
     /* COLOR_ATTACHMENT | SAMPLED with undefined initial contents. Prepare it
-     * before flux_frame_begin_pass and finish it after flux_frame_end_pass;
+     * before optics_gfx_frame_begin_pass and finish it after optics_gfx_frame_end_pass;
      * outside that interval it is sampleable. */
     OPTICS_GFX_IMAGE_USAGE_RENDER_TARGET = 2,
 } optics_gfx_image_usage;
@@ -517,7 +504,7 @@ typedef enum optics_gfx_image_usage : uint32_t {
  * modules. Pixel uploads are tightly packed and copied before create/update
  * returns. Render-target helpers keep the image sampleable between passes. */
 typedef struct optics_gfx_image_desc {
-    optics_gfx_struct_type type; /* FLUX_TYPE_IMAGE_DESC */
+    optics_gfx_struct_type type; /* OPTICS_GFX_TYPE_IMAGE_DESC */
     const void *next;
     uint32_t width;
     uint32_t height;
@@ -529,7 +516,7 @@ typedef struct optics_gfx_image_desc {
 
 #define OPTICS_GFX_IMAGE_DESC_INIT {.type = OPTICS_GFX_TYPE_IMAGE_DESC}
 
-/* Optional flux_image_desc extension tagging the content's color space
+/* Optional optics_gfx_image_desc extension tagging the content's color space
  * (ADR-0069/0070). Untagged images keep the format-derived default:
  * 8-bit formats are sRGB, RGBA16_SFLOAT is working-space linear.
  *
@@ -537,10 +524,10 @@ typedef struct optics_gfx_image_desc {
  * takes precedence: a parametric-extractable profile behaves like
  * `space`; a LUT-only profile is baked into a 3D LUT at creation and
  * sampled by the canvas image pipeline. Both are read only during
- * flux_image_create. Tagging changes how texels are decoded into the
+ * optics_gfx_image_create. Tagging changes how texels are decoded into the
  * working space — it never re-encodes the stored pixels. */
 typedef struct optics_gfx_image_color_space_desc {
-    optics_gfx_struct_type type; /* FLUX_TYPE_IMAGE_COLOR_SPACE_DESC */
+    optics_gfx_struct_type type; /* OPTICS_GFX_TYPE_IMAGE_COLOR_SPACE_DESC */
     const void *next;
     const optics_gfx_color_space *space; /* nullable */
     const optics_gfx_icc_profile *icc;   /* nullable; precedence over space */
@@ -577,7 +564,7 @@ OPTICS_GFX_API optics_gfx_format optics_gfx_image_format(const optics_gfx_image 
  * the caller's own device reference. */
 OPTICS_GFX_API optics_gfx_device *optics_gfx_image_device(const optics_gfx_image *image);
 
-/* Render-target images (FLUX_IMAGE_USAGE_RENDER_TARGET) bracket their pass: */
+/* Render-target images (OPTICS_GFX_IMAGE_USAGE_RENDER_TARGET) bracket their pass: */
 OPTICS_GFX_NODISCARD OPTICS_GFX_API optics_gfx_result
 optics_gfx_frame_prepare_image_target(optics_gfx_frame *frame, optics_gfx_image *target);
 OPTICS_GFX_NODISCARD OPTICS_GFX_API optics_gfx_result
@@ -593,8 +580,8 @@ OPTICS_GFX_API bool optics_gfx_device_supports_image_usage(const optics_gfx_devi
 /* Upload tightly packed pixels into an in-bounds sub-region. The image view
  * and bindless handle remain valid across the update. Requires the image to
  * be in its steady sampled state (SHADER_READ_ONLY_OPTIMAL — true after
- * flux_image_create and after flux_frame_finish_image_target); anything
- * else returns FLUX_ERROR_INVALID_STATE. */
+ * optics_gfx_image_create and after optics_gfx_frame_finish_image_target); anything
+ * else returns OPTICS_GFX_ERROR_INVALID_STATE. */
 typedef struct optics_gfx_image_update_region_opts {
     uint32_t x;
     uint32_t y;
@@ -611,9 +598,9 @@ OPTICS_GFX_NODISCARD OPTICS_GFX_API optics_gfx_result optics_gfx_image_update_re
 
 /* Emit a printf-style diagnostic through a device's logger (if any).
  * No-op when the device has no logger wired. Modules that treat
- * `flux_device` as opaque (and consumers) use this instead of
- * dereferencing `flux_device_desc.log` directly; it forwards to the
- * same `flux_log_fn` the desc supplied. `category` is a short tag the
+ * `optics_gfx_device` as opaque (and consumers) use this instead of
+ * dereferencing `optics_gfx_device_desc.log` directly; it forwards to the
+ * same `optics_gfx_log_fn` the desc supplied. `category` is a short tag the
  * logger can filter on (e.g. "glyph", "vulkan-validation"). */
 OPTICS_GFX_API void optics_gfx_device_log(optics_gfx_device *d, optics_gfx_log_level level,
                                           const char *category, const char *fmt, ...)
@@ -626,11 +613,11 @@ OPTICS_GFX_API void optics_gfx_device_log(optics_gfx_device *d, optics_gfx_log_l
  *
  * Modelled on Skia's PersistentCache: the library owns the in-memory
  * VkPipelineCache; the consumer owns the cross-session storage
- * strategy (a file, a content store, nothing). flux never touches the
+ * strategy (a file, a content store, nothing). gfx never touches the
  * filesystem — without these hooks the cache lives only for the
  * device lifetime and is discarded at release.
  *
- * Wire both into flux_device_desc to opt in:
+ * Wire both into optics_gfx_device_desc to opt in:
  *
  *   .pipeline_cache_load     = my_load,
  *   .pipeline_cache_save     = my_save,
@@ -644,12 +631,12 @@ OPTICS_GFX_API void optics_gfx_device_log(optics_gfx_device *d, optics_gfx_log_l
  *   save  — receives the blob produced by vkGetPipelineCacheData. The
  *           library owns `data` for the call's duration; copy it if
  *           you need it beyond the return. Called once, at
- *           flux_device_release, after all GPU work has drained. May
+ *           optics_gfx_device_release, after all GPU work has drained. May
  *           be NULL (write-only / fresh cache each run).
  *
  * Both callbacks receive the same `userdata` pointer set on the desc.
- * They are invoked from the thread calling flux_device_create /
- * flux_device_release. */
+ * They are invoked from the thread calling optics_gfx_device_create /
+ * optics_gfx_device_release. */
 typedef void *(*optics_gfx_pipeline_cache_load_fn)(void *userdata, size_t *out_size);
 typedef void (*optics_gfx_pipeline_cache_save_fn)(void *userdata, const void *data, size_t size);
 
@@ -663,15 +650,15 @@ typedef enum optics_gfx_validation_mode : uint32_t {
     OPTICS_GFX_VALIDATION_ON = 2,
 } optics_gfx_validation_mode;
 
-/* Optional flux_device_desc extension that makes physical-device selection
+/* Optional optics_gfx_device_desc extension that makes physical-device selection
  * strict. The target is a Linux DRM primary or render node identified by its
  * character-device major/minor pair. A Vulkan physical device matches when
  * VK_EXT_physical_device_drm reports the target as either its primary or
  * render node. If the extension is unavailable or no matching device also
- * satisfies the base descriptor, flux_device_create returns
- * FLUX_ERROR_UNSUPPORTED; it never falls back to a different GPU. */
+ * satisfies the base descriptor, optics_gfx_device_create returns
+ * OPTICS_GFX_ERROR_UNSUPPORTED; it never falls back to a different GPU. */
 typedef struct optics_gfx_device_drm_node_desc {
-    optics_gfx_struct_type type; /* FLUX_TYPE_DEVICE_DRM_NODE_DESC */
+    optics_gfx_struct_type type; /* OPTICS_GFX_TYPE_DEVICE_DRM_NODE_DESC */
     const void *next;
     uint32_t drm_major;
     uint32_t drm_minor;
@@ -689,7 +676,7 @@ typedef uint64_t optics_gfx_device_feature_flags;
 #define OPTICS_GFX_DEVICE_FEATURE_DMABUF_SYNC_FILE 0x0000000000000002ULL
 
 typedef struct optics_gfx_device_features_desc {
-    optics_gfx_struct_type type; /* FLUX_TYPE_DEVICE_FEATURES_DESC */
+    optics_gfx_struct_type type; /* OPTICS_GFX_TYPE_DEVICE_FEATURES_DESC */
     const void *next;
     optics_gfx_device_feature_flags required;
     optics_gfx_device_feature_flags optional;
@@ -712,7 +699,7 @@ typedef struct optics_gfx_drm_device_identity {
 } optics_gfx_drm_device_identity;
 
 typedef struct optics_gfx_device_desc {
-    optics_gfx_struct_type type; /* FLUX_TYPE_DEVICE_DESC */
+    optics_gfx_struct_type type; /* OPTICS_GFX_TYPE_DEVICE_DESC */
     const void *next;
 
     optics_gfx_allocator allocator; /* zero-init = libc malloc */
@@ -747,12 +734,12 @@ OPTICS_GFX_NODISCARD OPTICS_GFX_API optics_gfx_result
 optics_gfx_device_create(const optics_gfx_device_desc *desc, optics_gfx_device **out_device);
 
 /* Semantic capabilities enabled on the logical device. This includes
- * capabilities requested through flux_device_features_desc and capabilities
+ * capabilities requested through optics_gfx_device_features_desc and capabilities
  * implied by a complete legacy required-device-extension bundle. */
 OPTICS_GFX_API optics_gfx_device_feature_flags
 optics_gfx_device_enabled_features(const optics_gfx_device *d);
 
-/* Device limits relevant to flux callers — the query the API previously
+/* Device limits relevant to gfx callers — the query the API previously
  * lacked (feature discovery was "try it and watch it fail"). Values come
  * from the Vulkan physical device; every field is zeroed when `d` is
  * NULL. Out-param form so the struct can grow: zero-init, fill what you
@@ -761,15 +748,15 @@ optics_gfx_device_enabled_features(const optics_gfx_device *d);
  * whole struct as it knows it, so link against matching headers or rely
  * on the documented pre-1.0 rebuild rule). */
 typedef struct optics_gfx_device_limits {
-    uint32_t struct_size;           /* sizeof(flux_device_limits)             */
-    uint32_t max_image_dimension1d; /* max flux_image_create width            */
+    uint32_t struct_size;           /* sizeof(optics_gfx_device_limits)             */
+    uint32_t max_image_dimension1d; /* max optics_gfx_image_create width            */
     uint32_t max_image_dimension2d; /* max width/height of 2D images/surfaces */
     uint32_t max_image_dimension3d; /* max extent of 3D images (0 = none)     */
     uint32_t max_color_attachments; /* per-pass color attachment count        */
     uint32_t max_framebuffer_width;
     uint32_t max_framebuffer_height;
     uint32_t max_frames_in_flight; /* library cap actually applied (see
-                                    * FLUX_MAX_FRAMES_IN_FLIGHT)             */
+                                    * OPTICS_GFX_MAX_FRAMES_IN_FLIGHT)             */
     uint64_t min_uniform_buffer_offset_alignment;
     uint64_t min_storage_buffer_offset_alignment;
     uint64_t buffer_image_granularity;
@@ -779,7 +766,7 @@ typedef struct optics_gfx_device_limits {
 
 #define OPTICS_GFX_DEVICE_LIMITS_INIT {.struct_size = sizeof(optics_gfx_device_limits)}
 
-/* Fill `out` with the device's limits. Returns FLUX_ERROR_INVALID_ARGUMENT
+/* Fill `out` with the device's limits. Returns OPTICS_GFX_ERROR_INVALID_ARGUMENT
  * if `out` is NULL; never fails otherwise. */
 OPTICS_GFX_NODISCARD OPTICS_GFX_API optics_gfx_result
 optics_gfx_device_get_limits(const optics_gfx_device *d, optics_gfx_device_limits *out);
@@ -802,22 +789,22 @@ OPTICS_GFX_API void optics_gfx_device_wait_idle(const optics_gfx_device *d);
 /* ================================================================== */
 
 /* Peer libraries must allocate through here rather than libc, so the
- * consumer's flux_allocator is honoured and the memory is attributed in the
+ * consumer's optics_gfx_allocator is honoured and the memory is attributed in the
  * observation ledger.
  *
  * The ownership pair is required, not optional: before it existed, routing a
- * library through this funnel re-attributed its leaks to "flux/core", which is
+ * library through this funnel re-attributed its leaks to "gfx/core", which is
  * the misattribution ADR-0134 removed. `owner` and `kind` must be literals
  * (they are interned by content, not copied).
  *
  * Break-clean note: this replaced the positional
- * `flux_device_alloc(d, bytes)` intentionally. The old form could not express
+ * `optics_gfx_device_alloc(d, bytes)` intentionally. The old form could not express
  * ownership, and a `_ex` tier is forbidden by docs/dev/standards/api-design.md. */
 typedef struct optics_gfx_device_alloc_opts {
-    optics_gfx_struct_type type; /* FLUX_TYPE_DEVICE_ALLOC_OPTS */
+    optics_gfx_struct_type type; /* OPTICS_GFX_TYPE_DEVICE_ALLOC_OPTS */
     const void *next;
     size_t bytes;
-    const char *owner;      /* subsystem: "prism/material", "glyph/core", … */
+    const char *owner;      /* subsystem: "material", "text/core", … */
     const char *kind;       /* resource: "filter_mica", "atlas", "store", … */
     optics_gfx_scope scope; /* DEVICE for device-bound, CONTEXT for context-bound */
 } optics_gfx_device_alloc_opts;
@@ -835,7 +822,7 @@ optics_gfx_device_alloc(optics_gfx_device *d, const optics_gfx_device_alloc_opts
  * A host may legitimately free from a different call site than it allocated in,
  * which is why the pair is repeated rather than stored in a hidden header. */
 typedef struct optics_gfx_device_free_opts {
-    optics_gfx_struct_type type; /* FLUX_TYPE_DEVICE_FREE_OPTS */
+    optics_gfx_struct_type type; /* OPTICS_GFX_TYPE_DEVICE_FREE_OPTS */
     const void *next;
     void *ptr; /* nullptr is a no-op */
     const char *owner;
@@ -866,7 +853,7 @@ OPTICS_GFX_API void optics_gfx_device_memory_budget(const optics_gfx_device *d,
  * dma-buf memory) actually occupy; bytes_reserved is what the allocator
  * holds from the driver in total, including empty pool blocks kept for
  * reuse. All counters return to zero once every resource is released
- * and the retire queue has drained (see flux_device_wait_idle). */
+ * and the retire queue has drained (see optics_gfx_device_wait_idle). */
 typedef struct optics_gfx_memory_stats {
     uint64_t bytes_in_use;
     uint64_t bytes_reserved;
@@ -883,8 +870,8 @@ OPTICS_GFX_API void optics_gfx_device_memory_stats(optics_gfx_device *d,
                                                    optics_gfx_memory_stats *out);
 
 /* Batched uploads. Between begin and flush, upload work from
- * flux_image_create, flux_image_update_region, flux_mesh_create and
- * flux_buffer_create (GPU_LOCAL with initial_data) accumulates into one
+ * optics_gfx_image_create, optics_gfx_image_update_region, optics_gfx_mesh_create and
+ * optics_gfx_buffer_create (GPU_LOCAL with initial_data) accumulates into one
  * queue submission instead of one submission per resource — this is
  * the fast path for bulk asset loading.
  *
@@ -892,12 +879,12 @@ OPTICS_GFX_API void optics_gfx_device_memory_stats(optics_gfx_device *d,
  * outside a batch) submit the copy work and return without waiting for
  * the GPU. A resource is safe to sample as soon as its creating call
  * returns, because every later batch on the same queue is ordered after
- * the copies; flux_surface_begin_frame flushes any open batch before
+ * the copies; optics_gfx_surface_begin_frame flushes any open batch before
  * recording, so an unflushed batch can never be sampled by a frame.
  * Non-frame consumers (compute dispatch, readback) must flush
  * explicitly. begin/flush are device-global; the upload calls
  * themselves may run on any thread. Nested begin is reference-counted:
- * it returns FLUX_OK and bumps the batch depth so every scope's flush
+ * it returns OPTICS_GFX_OK and bumps the batch depth so every scope's flush
  * wait covers it; only the outermost flush submits (inner uploads are
  * already recorded in the same batch). Flushing with no batch open is
  * a harmless no-op. */
@@ -910,7 +897,7 @@ optics_gfx_uploads_flush(optics_gfx_device *d);
 /*  Buffer                                                            */
 /* ================================================================== */
 
-/* Bitmask of intended uses; OR these together in flux_buffer_desc.usage.
+/* Bitmask of intended uses; OR these together in optics_gfx_buffer_desc.usage.
  * The library maps them to VkBufferUsageFlags internally and adds
  * TRANSFER_DST automatically when initial_data is provided. */
 typedef enum optics_gfx_buffer_usage : uint32_t {
@@ -933,13 +920,13 @@ typedef enum optics_gfx_buffer_location : uint32_t {
 } optics_gfx_buffer_location;
 
 typedef struct optics_gfx_buffer_desc {
-    optics_gfx_struct_type type; /* FLUX_TYPE_BUFFER_DESC */
+    optics_gfx_struct_type type; /* OPTICS_GFX_TYPE_BUFFER_DESC */
     const void *next;
     size_t size;
-    uint32_t usage; /* OR of flux_buffer_usage bits */
+    uint32_t usage; /* OR of optics_gfx_buffer_usage bits */
     optics_gfx_buffer_location location;
     /* If true, the buffer is created with SHADER_DEVICE_ADDRESS and
-     * flux_buffer_device_address() returns the 64-bit address. */
+     * optics_gfx_buffer_device_address() returns the 64-bit address. */
     bool device_address;
     /* Optional: upload `size` bytes at create time. For GPU_LOCAL
      * buffers this routes through the staging path; for HOST_VISIBLE
@@ -968,11 +955,11 @@ OPTICS_GFX_API size_t optics_gfx_buffer_size(const optics_gfx_buffer *b);
 /*  Render target                                                     */
 /*                                                                    */
 /*  A refcounted depth or colour image + view that a caller owns and  */
-/*  hands to a pass via flux_pass_desc (peer-defined attachments,     */
+/*  hands to a pass via optics_gfx_pass_desc (peer-defined attachments,     */
 /*  ADR-0001). This is how consumers get a depth attachment without    */
-/*  writing raw Vulkan image/memory/view plumbing: flux owns the      */
+/*  writing raw Vulkan image/memory/view plumbing: gfx owns the      */
 /*  image, the backing GPU allocator memory, and the view, mirroring  */
-/*  the refcount lifecycle of flux_buffer / flux_mesh.                */
+/*  the refcount lifecycle of optics_gfx_buffer / optics_gfx_mesh.                */
 /* ================================================================== */
 
 typedef enum optics_gfx_target_usage : uint32_t {
@@ -981,10 +968,10 @@ typedef enum optics_gfx_target_usage : uint32_t {
 } optics_gfx_target_usage;
 
 typedef struct optics_gfx_target_desc {
-    optics_gfx_struct_type type; /* FLUX_TYPE_TARGET_DESC */
+    optics_gfx_struct_type type; /* OPTICS_GFX_TYPE_TARGET_DESC */
     const void *next;
-    uint32_t usage;           /* OR of flux_target_usage */
-    optics_gfx_format format; /* e.g. FLUX_FORMAT_D32_SFLOAT */
+    uint32_t usage;           /* OR of optics_gfx_target_usage */
+    optics_gfx_format format; /* e.g. OPTICS_GFX_FORMAT_D32_SFLOAT */
     uint32_t width;
     uint32_t height;
 } optics_gfx_target_desc;
@@ -992,7 +979,7 @@ typedef struct optics_gfx_target_desc {
 #define OPTICS_GFX_TARGET_DESC_INIT {.type = OPTICS_GFX_TYPE_TARGET_DESC}
 
 typedef struct optics_gfx_cpu_target_desc {
-    optics_gfx_struct_type type; /* FLUX_TYPE_CPU_TARGET_DESC */
+    optics_gfx_struct_type type; /* OPTICS_GFX_TYPE_CPU_TARGET_DESC */
     const void *next;
     uint32_t width;
     uint32_t height;
@@ -1031,7 +1018,7 @@ OPTICS_GFX_API const uint8_t *optics_gfx_target_cpu_pixels(const optics_gfx_targ
 /* Record the layout transition that makes `target` usable as the attachment
  * selected by its usage. The target's previous contents are discarded, so
  * the following pass must clear or otherwise fully overwrite it. Call once
- * per frame before flux_frame_begin_pass. A target reused across frames must
+ * per frame before optics_gfx_frame_begin_pass. A target reused across frames must
  * be dedicated to that frame-in-flight slot (or otherwise externally
  * synchronized). */
 OPTICS_GFX_API void optics_gfx_frame_prepare_target(optics_gfx_frame *f,
@@ -1042,15 +1029,15 @@ OPTICS_GFX_API void optics_gfx_frame_prepare_target(optics_gfx_frame *f,
 /* ================================================================== */
 
 typedef struct optics_gfx_surface_desc {
-    optics_gfx_struct_type type; /* FLUX_TYPE_SURFACE_DESC */
+    optics_gfx_struct_type type; /* OPTICS_GFX_TYPE_SURFACE_DESC */
     const void *next;
     void *vk_surface_khr; /* VkSurfaceKHR; caller-created via GLFW/SDL/raw.
                            * NULL selects an OFFSCREEN surface (ADR-0013):
-                           * no swapchain or window; flux owns RGBA8 color
+                           * no swapchain or window; gfx owns RGBA8 color
                            * images at width x height (both required
                            * non-zero). The frame loop is unchanged —
-                           * flux_frame_present completes the frame without
-                           * presenting — and flux_surface_read_pixels
+                           * optics_gfx_frame_present completes the frame without
+                           * presenting — and optics_gfx_surface_read_pixels
                            * reads the result back. */
     uint32_t width;
     uint32_t height;
@@ -1060,13 +1047,13 @@ typedef struct optics_gfx_surface_desc {
 
 #define OPTICS_GFX_SURFACE_DESC_INIT {.type = OPTICS_GFX_TYPE_SURFACE_DESC}
 
-/* Optional flux_surface_desc extension for an exportable offscreen surface.
- * `modifiers` is the consumer-supported DRM_FORMAT_MOD_* set. Flux intersects
+/* Optional optics_gfx_surface_desc extension for an exportable offscreen surface.
+ * `modifiers` is the consumer-supported DRM_FORMAT_MOD_* set. gfx intersects
  * it with the Vulkan device's renderable/exportable single-plane modifiers;
- * surface creation fails with FLUX_ERROR_UNSUPPORTED when the intersection is
- * empty. The array is read only during flux_surface_create. */
+ * surface creation fails with OPTICS_GFX_ERROR_UNSUPPORTED when the intersection is
+ * empty. The array is read only during optics_gfx_surface_create. */
 typedef struct optics_gfx_surface_dmabuf_desc {
-    optics_gfx_struct_type type; /* FLUX_TYPE_SURFACE_DMABUF_DESC */
+    optics_gfx_struct_type type; /* OPTICS_GFX_TYPE_SURFACE_DMABUF_DESC */
     const void *next;
     const uint64_t *modifiers;
     uint32_t modifier_count;
@@ -1074,40 +1061,40 @@ typedef struct optics_gfx_surface_dmabuf_desc {
 
 #define OPTICS_GFX_SURFACE_DMABUF_DESC_INIT {.type = OPTICS_GFX_TYPE_SURFACE_DMABUF_DESC}
 
-/* Optional flux_surface_desc extension for a CPU-readable offscreen surface.
+/* Optional optics_gfx_surface_desc extension for a CPU-readable offscreen surface.
  * On a dma-buf-capable device an offscreen surface is normally made
  * exportable, which transfers each submitted image to the foreign consumer
- * and makes flux_surface_read_pixels refuse it. Setting `require_readback`
+ * and makes optics_gfx_surface_read_pixels refuse it. Setting `require_readback`
  * keeps the surface non-exportable (OPTIMAL-tiling, slab-allocated) so
  * readback always works — the right pick for screenshot/capture targets
  * that never leave the process. Mutually exclusive with
- * flux_surface_dmabuf_desc (FLUX_ERROR_INVALID_ARGUMENT). Ignored on
+ * optics_gfx_surface_dmabuf_desc (OPTICS_GFX_ERROR_INVALID_ARGUMENT). Ignored on
  * windowed surfaces. */
 typedef struct optics_gfx_surface_readback_desc {
-    optics_gfx_struct_type type; /* FLUX_TYPE_SURFACE_READBACK_DESC */
+    optics_gfx_struct_type type; /* OPTICS_GFX_TYPE_SURFACE_READBACK_DESC */
     const void *next;
     bool require_readback;
 } optics_gfx_surface_readback_desc;
 
 #define OPTICS_GFX_SURFACE_READBACK_DESC_INIT {.type = OPTICS_GFX_TYPE_SURFACE_READBACK_DESC}
 
-/* Optional flux_surface_desc extension constraining the pixel format of
+/* Optional optics_gfx_surface_desc extension constraining the pixel format of
  * an OFFSCREEN surface, most preferred first (the format field ADR-0013
  * anticipated). The container must suit the transfer function of the
  * space being written: sRGB/gamma encodings accept any colour format,
- * PQ/HLG require FLUX_FORMAT_RGB10A2_UNORM or FLUX_FORMAT_RGBA16_SFLOAT,
- * linear requires FLUX_FORMAT_RGBA16_SFLOAT. Flux picks the first listed
+ * PQ/HLG require OPTICS_GFX_FORMAT_RGB10A2_UNORM or OPTICS_GFX_FORMAT_RGBA16_SFLOAT,
+ * linear requires OPTICS_GFX_FORMAT_RGBA16_SFLOAT. gfx picks the first listed
  * format that is both suitable and device-supported (including dma-buf
- * modifier support when flux_surface_dmabuf_desc requests export) and
- * fails with FLUX_ERROR_UNSUPPORTED when nothing qualifies.
+ * modifier support when optics_gfx_surface_dmabuf_desc requests export) and
+ * fails with OPTICS_GFX_ERROR_UNSUPPORTED when nothing qualifies.
  *
  * Without this extension the container is derived from the transfer:
  * BGRA8 for sRGB/gamma (the historic default), RGB10A2 then RGBA16F for
  * PQ/HLG, RGBA16F for linear. Ignored on windowed surfaces, where the
  * swapchain negotiation owns the format. The array is read only during
- * flux_surface_create; the winner is reported via flux_surface_info.format. */
+ * optics_gfx_surface_create; the winner is reported via optics_gfx_surface_info.format. */
 typedef struct optics_gfx_surface_offscreen_format_desc {
-    optics_gfx_struct_type type; /* FLUX_TYPE_SURFACE_OFFSCREEN_FORMAT_DESC */
+    optics_gfx_struct_type type; /* OPTICS_GFX_TYPE_SURFACE_OFFSCREEN_FORMAT_DESC */
     const void *next;
     const optics_gfx_format *formats;
     uint32_t format_count;
@@ -1116,10 +1103,10 @@ typedef struct optics_gfx_surface_offscreen_format_desc {
 #define OPTICS_GFX_SURFACE_OFFSCREEN_FORMAT_DESC_INIT                                              \
     {.type = OPTICS_GFX_TYPE_SURFACE_OFFSCREEN_FORMAT_DESC}
 
-/* Optional flux_surface_desc extension listing the color spaces the
- * application can present, most preferred first (ADR-0069). Flux walks
+/* Optional optics_gfx_surface_desc extension listing the color spaces the
+ * application can present, most preferred first (ADR-0069). gfx walks
  * the list in order and picks the first space the swapchain can do;
- * the winner is reported through flux_surface_info.color_space.
+ * the winner is reported through optics_gfx_surface_info.color_space.
  *
  * Without this extension the legacy behavior is kept: `hdr_preferred`
  * maps to the preference list [BT2020_PQ, SCRGB, SRGB], otherwise
@@ -1129,10 +1116,10 @@ typedef struct optics_gfx_surface_offscreen_format_desc {
  * Adobe RGB, custom primaries) never match on a windowed surface;
  * on an offscreen surface the first listed space is adopted verbatim,
  * with the pixel container chosen by transfer function (see
- * flux_surface_offscreen_format_desc). The array is read only during
- * flux_surface_create. */
+ * optics_gfx_surface_offscreen_format_desc). The array is read only during
+ * optics_gfx_surface_create. */
 typedef struct optics_gfx_surface_color_space_desc {
-    optics_gfx_struct_type type; /* FLUX_TYPE_SURFACE_COLOR_SPACE_DESC */
+    optics_gfx_struct_type type; /* OPTICS_GFX_TYPE_SURFACE_COLOR_SPACE_DESC */
     const void *next;
     const optics_gfx_color_space *spaces;
     uint32_t space_count;
@@ -1140,7 +1127,7 @@ typedef struct optics_gfx_surface_color_space_desc {
 
 #define OPTICS_GFX_SURFACE_COLOR_SPACE_DESC_INIT {.type = OPTICS_GFX_TYPE_SURFACE_COLOR_SPACE_DESC}
 
-/* Optional flux_surface_desc extension tuning HDR presentation
+/* Optional optics_gfx_surface_desc extension tuning HDR presentation
  * (ADR-0069). Meaningful only when the negotiated color space is HDR
  * (PQ or HLG); ignored otherwise.
  *
@@ -1151,12 +1138,12 @@ typedef struct optics_gfx_surface_color_space_desc {
  *
  * The remaining fields carry HDR10 static metadata
  * (SMPTE ST 2086 / CTA-861.3): with `has_metadata` set and the device
- * advertising VK_EXT_hdr_metadata, flux calls vkSetHdrMetadataEXT on
+ * advertising VK_EXT_hdr_metadata, gfx calls vkSetHdrMetadataEXT on
  * the (re)created swapchain. Mastering chromaticities are CIE 1931 xy;
  * luminances are cd/m² (min in the ST 2086 0.0001-unit sense is
  * NOT used here — plain cd/m²). */
 typedef struct optics_gfx_surface_hdr_desc {
-    optics_gfx_struct_type type; /* FLUX_TYPE_SURFACE_HDR_DESC */
+    optics_gfx_struct_type type; /* OPTICS_GFX_TYPE_SURFACE_HDR_DESC */
     const void *next;
     float sdr_white_nits; /* 0 = 203 default */
     bool has_metadata;
@@ -1172,24 +1159,24 @@ typedef struct optics_gfx_surface_hdr_desc {
 
 #define OPTICS_GFX_SURFACE_HDR_DESC_INIT {.type = OPTICS_GFX_TYPE_SURFACE_HDR_DESC}
 
-/* Optional flux_surface_desc extension pinning the space pixels are
+/* Optional optics_gfx_surface_desc extension pinning the space pixels are
  * *written in*, decoupled from the swapchain's negotiated space
  * (ADR-0069). This is the legacy-platform display-profile path: the
  * host supplies the display's actual color space (parametric, or an
- * ICC profile extractable to one), flux converts working space ->
+ * ICC profile extractable to one), gfx converts working space ->
  * content space in the output transform, and the swapchain stays a
  * plain sRGB/scRGB container the compositor passes through.
  *
  * Do NOT combine this with color-managed compositors (Wayland
  * color-management, Windows ACM): there the compositor performs the
  * display transform and double-conversion results. On those platforms
- * negotiate the true space via flux_surface_color_space_desc instead.
+ * negotiate the true space via optics_gfx_surface_color_space_desc instead.
  *
  * Offscreen surfaces: equivalent to requesting the space through
- * flux_surface_color_space_desc (the container follows the transfer;
- * see flux_surface_offscreen_format_desc). */
+ * optics_gfx_surface_color_space_desc (the container follows the transfer;
+ * see optics_gfx_surface_offscreen_format_desc). */
 typedef struct optics_gfx_surface_output_color_desc {
-    optics_gfx_struct_type type; /* FLUX_TYPE_SURFACE_OUTPUT_COLOR_DESC */
+    optics_gfx_struct_type type; /* OPTICS_GFX_TYPE_SURFACE_OUTPUT_COLOR_DESC */
     const void *next;
     optics_gfx_color_space content_space; /* the display's actual space */
     const optics_gfx_icc_profile *icc;    /* optional; must be parametric-extractable */
@@ -1204,11 +1191,11 @@ typedef struct optics_gfx_surface_info {
     uint32_t image_count;
     bool hdr; /* surface is actually HDR (PQ, HLG, or extended-linear) */
     /* The color space the surface actually presents in (the negotiated
-     * swapchain space). Content rendered through flux is transformed
+     * swapchain space). Content rendered through gfx is transformed
      * into `content_space` at output (ADR-0069). */
     optics_gfx_color_space color_space;
     /* What pixels are written in: equals color_space unless a
-     * flux_surface_output_color_desc pinned the display's actual space
+     * optics_gfx_surface_output_color_desc pinned the display's actual space
      * (the legacy-platform pre-conversion path). */
     optics_gfx_color_space content_space;
     /* Pixel format of the surface's images: the negotiated swapchain
@@ -1242,10 +1229,10 @@ OPTICS_GFX_API void optics_gfx_surface_release(optics_gfx_surface *s);
  * can outlive a frame fence) — a queue/slot-scoped quiesce, not a
  * device-wide stall; the transfer queue and unrelated work keep running
  * (ADR-0021). Drops and rebuilds swapchain images and per-image views;
- * in-flight flux_frame handles obtained from this surface become invalid
- * and the next flux_surface_begin_frame returns the first frame of the
+ * in-flight optics_gfx_frame handles obtained from this surface become invalid
+ * and the next optics_gfx_surface_begin_frame returns the first frame of the
  * new chain. Safe to call from the window resize callback. Returns
- * FLUX_ERROR_INVALID_ARGUMENT if w or h is 0. */
+ * OPTICS_GFX_ERROR_INVALID_ARGUMENT if w or h is 0. */
 OPTICS_GFX_NODISCARD OPTICS_GFX_API optics_gfx_result
 optics_gfx_surface_resize(optics_gfx_surface *s, uint32_t w, uint32_t h);
 OPTICS_GFX_API void optics_gfx_surface_get_info(const optics_gfx_surface *s,
@@ -1255,16 +1242,16 @@ OPTICS_GFX_API void optics_gfx_surface_get_info(const optics_gfx_surface *s,
  * origin (`captured_width * captured_height * 4` bytes; `bytes` must be at
  * least that). A full-frame request uses the surface extent; a region request
  * uses that region's extent.
- * Windowed and exportable surfaces require flux_frame_request_readback on the
+ * Windowed and exportable surfaces require optics_gfx_frame_request_readback on the
  * submitted frame. Plain offscreen surfaces retain their legacy behaviour of
  * reading the most recently submitted image. Waits for the relevant GPU work
- * to complete first. Returns FLUX_ERROR_INVALID_STATE when no readable frame
+ * to complete first. Returns OPTICS_GFX_ERROR_INVALID_STATE when no readable frame
  * is available. */
 OPTICS_GFX_NODISCARD OPTICS_GFX_API optics_gfx_result
 optics_gfx_surface_read_pixels(optics_gfx_surface *s, void *dst, size_t bytes);
 
 /* Allocate persistent readback staging ahead of the first capture. This is
- * optional (flux_frame_request_readback allocates it lazily) but lets
+ * optional (optics_gfx_frame_request_readback allocates it lazily) but lets
  * latency-sensitive callers keep allocation out of the trigger frame. Resize
  * retires this staging, so callers may prepare again afterward. */
 OPTICS_GFX_NODISCARD OPTICS_GFX_API optics_gfx_result
@@ -1279,8 +1266,8 @@ optics_gfx_surface_prepare_readback_region(optics_gfx_surface *s, uint32_t width
 
 /* Non-blocking readiness query for a frame copied to persistent readback
  * staging. `out_ready` becomes true once that frame's image-to-buffer copy has
- * completed. Returns FLUX_ERROR_INVALID_STATE before the first captured frame
- * and FLUX_ERROR_UNSUPPORTED when the surface has no persistent readback
+ * completed. Returns OPTICS_GFX_ERROR_INVALID_STATE before the first captured frame
+ * and OPTICS_GFX_ERROR_UNSUPPORTED when the surface has no persistent readback
  * staging (a plain offscreen surface before any on-demand request). */
 OPTICS_GFX_NODISCARD OPTICS_GFX_API optics_gfx_result
 optics_gfx_surface_read_pixels_ready(optics_gfx_surface *s, bool *out_ready);
@@ -1288,8 +1275,8 @@ optics_gfx_surface_read_pixels_ready(optics_gfx_surface *s, bool *out_ready);
 /* Detach a completed on-demand snapshot from its surface without copying its
  * pixels. The returned immutable handle owns the mapped staging allocation,
  * can outlive or move to a different thread from the surface, and is consumed
- * with flux_readback_read_pixels before flux_readback_release. Query its exact
- * source offset/extent with flux_readback_get_region. This is
+ * with optics_gfx_readback_read_pixels before optics_gfx_readback_release. Query its exact
+ * source offset/extent with optics_gfx_readback_get_region. This is
  * unsupported for require_readback surfaces, whose staging is continuously
  * surface-owned. The caller should first observe `out_ready == true`. */
 OPTICS_GFX_NODISCARD OPTICS_GFX_API optics_gfx_result
@@ -1309,9 +1296,9 @@ OPTICS_GFX_API void optics_gfx_readback_release(optics_gfx_readback *readback);
  * transfer; the fd is a handle to the same GPU memory the compositor
  * composites directly. Waits for the frame's GPU work to complete first.
  *
- * flux_surface_exportable() reports whether the surface was created
+ * optics_gfx_surface_exportable() reports whether the surface was created
  * exportable (device had the needed extensions + a suitable modifier was
- * found). flux_surface_dmabuf_modifier() / _stride() return the DRM
+ * found). optics_gfx_surface_dmabuf_modifier() / _stride() return the DRM
  * modifier and row stride the host pairs with the fd when building a
  * zwp_linux_buffer_params_v1.
  *
@@ -1324,10 +1311,10 @@ OPTICS_GFX_API void optics_gfx_readback_release(optics_gfx_readback *readback);
  * The v1 export contract is one plane, offset 0, BGRA8, with the returned
  * modifier and stride; surfaces that cannot meet it are not exportable.
  *
- * Returns FLUX_ERROR_UNSUPPORTED on a windowed or non-exportable surface,
- * FLUX_ERROR_INVALID_STATE before the first submitted frame. */
+ * Returns OPTICS_GFX_ERROR_UNSUPPORTED on a windowed or non-exportable surface,
+ * OPTICS_GFX_ERROR_INVALID_STATE before the first submitted frame. */
 /* An exported offscreen image lease. The surface's frame ring will not reuse
- * the leased image slot until `flux_surface_dmabuf_lease_release` is called.
+ * the leased image slot until `optics_gfx_surface_dmabuf_lease_release` is called.
  * A lease retains its surface; callers may release it from their page-flip
  * completion path. Release is idempotent only in the sense that the pointer
  * becomes invalid: call it exactly once. */
@@ -1339,15 +1326,15 @@ OPTICS_GFX_API uint32_t optics_gfx_surface_dmabuf_stride(const optics_gfx_surfac
 
 /* Export the most recently submitted frame. The returned fd is owned by the
  * caller and must be closed. The returned lease owns the image lifetime:
- * until it is released, flux_surface_begin_frame for that slot returns
- * FLUX_ERROR_BUSY. One lease may be held per submitted image. */
+ * until it is released, optics_gfx_surface_begin_frame for that slot returns
+ * OPTICS_GFX_ERROR_BUSY. One lease may be held per submitted image. */
 OPTICS_GFX_NODISCARD OPTICS_GFX_API optics_gfx_result optics_gfx_surface_export_dmabuf(
     optics_gfx_surface *s, int *out_fd, optics_gfx_surface_dmabuf_lease **out_lease);
 
 /* Explicit-sync export for a submitted exportable offscreen frame. Returns a
  * dma-buf fd plus a Linux sync_file fd signalled by the same Vulkan submission
  * that released image ownership to VK_QUEUE_FAMILY_FOREIGN_EXT. Unlike
- * flux_surface_export_dmabuf, this does not wait for the GPU on the CPU.
+ * optics_gfx_surface_export_dmabuf, this does not wait for the GPU on the CPU.
  * Both descriptors and the image lease belong to the caller on success.
  * Requires VK_KHR_external_semaphore_fd and may be called once per submitted
  * slot. */
@@ -1356,7 +1343,7 @@ optics_gfx_surface_export_dmabuf_explicit(optics_gfx_surface *s, int *out_fd, in
                                           optics_gfx_surface_dmabuf_lease **out_lease);
 
 /* Release an exported image lease. After this returns the slot may be
- * reacquired by flux_surface_begin_frame on the next call. */
+ * reacquired by optics_gfx_surface_begin_frame on the next call. */
 OPTICS_GFX_API void optics_gfx_surface_dmabuf_lease_release(optics_gfx_surface_dmabuf_lease *lease);
 
 /* Persistent/pooled export for a consumer that publishes one fd per ring slot
@@ -1375,7 +1362,7 @@ optics_gfx_surface_export_dmabuf_pooled_explicit(optics_gfx_surface *s, int *out
 /* Offscreen surfaces: the frame slot index of the most recently submitted
  * frame (0..frames_in_flight-1), or UINT32_MAX before the first submit.
  * The host uses this to align a per-slot dma-buf buffer pool with the
- * image whose memory flux_surface_export_dmabuf will export. */
+ * image whose memory optics_gfx_surface_export_dmabuf will export. */
 OPTICS_GFX_API uint32_t optics_gfx_surface_last_slot(const optics_gfx_surface *s);
 
 /* ================================================================== */
@@ -1395,7 +1382,7 @@ enum : uint32_t {
  * temporary container.
  *
  * For a canvas pass, an empty set means "the whole destination" (see
- * flux_canvas_pass_desc::damage). For a frame's repaint scope, use the
+ * optics_gfx_canvas_pass_desc::damage). For a frame's repaint scope, use the
  * companion `out_full` flag: empty + full=false means "nothing to paint". The
  * two meanings are never inferred from the same field. */
 typedef struct optics_gfx_damage {
@@ -1408,13 +1395,15 @@ typedef struct optics_gfx_damage {
 /* ================================================================== */
 
 typedef struct optics_gfx_frame_begin_desc {
-    optics_gfx_struct_type type; /* FLUX_TYPE_FRAME_BEGIN_DESC */
+    optics_gfx_struct_type type; /* OPTICS_GFX_TYPE_FRAME_BEGIN_DESC */
     const void *next;
-    uint64_t timeout_ns; /* 0 = FLUX_DEFAULT_FRAME_TIMEOUT_NS (2s) unless non_blocking is true */
-    bool non_blocking; /* true = return FLUX_ERROR_TIMEOUT immediately if acquire/fence not ready */
+    uint64_t
+        timeout_ns; /* 0 = OPTICS_GFX_DEFAULT_FRAME_TIMEOUT_NS (2s) unless non_blocking is true */
+    bool non_blocking; /* true = return OPTICS_GFX_ERROR_TIMEOUT immediately if acquire/fence not
+                          ready */
     /* What changed in the scene this frame is about to record, in physical
-     * surface pixels. Flux unions this with the history the acquired image
-     * missed and exposes the result through flux_frame_repaint_scope().
+     * surface pixels. gfx unions this with the history the acquired image
+     * missed and exposes the result through optics_gfx_frame_repaint_scope().
      *
      * `damage_full` means "the whole extent changed / could not be
      * localised". Empty damage with damage_full=false means "no new damage"
@@ -1426,7 +1415,7 @@ typedef struct optics_gfx_frame_begin_desc {
 
 /* Default fence/acquire timeout for frame begin, image upload, and one-shot
  * GPU submissions. 2 seconds: long enough for any realistic GPU workload,
- * short enough that a hung GPU/driver surfaces as FLUX_ERROR_TIMEOUT rather
+ * short enough that a hung GPU/driver surfaces as OPTICS_GFX_ERROR_TIMEOUT rather
  * than freezing the caller thread indefinitely. */
 #define OPTICS_GFX_DEFAULT_FRAME_TIMEOUT_NS (2000000000ull)
 
@@ -1440,7 +1429,7 @@ OPTICS_GFX_NODISCARD OPTICS_GFX_API optics_gfx_result optics_gfx_surface_begin_f
     optics_gfx_surface *s, const optics_gfx_frame_begin_desc *desc, optics_gfx_frame **out_frame);
 
 /* Upper bound on frames in flight per surface. Frame-slot consumers
- * (filters keyed by flux_frame_index) size their per-slot storage with
+ * (filters keyed by optics_gfx_frame_index) size their per-slot storage with
  * this. */
 #define OPTICS_GFX_MAX_FRAMES_IN_FLIGHT 3
 
@@ -1454,7 +1443,7 @@ typedef enum optics_gfx_frame_state : uint32_t {
 } optics_gfx_frame_state;
 
 OPTICS_GFX_API optics_gfx_frame_state optics_gfx_frame_get_state(const optics_gfx_frame *f);
-/* True between flux_frame_begin_pass and flux_frame_end_pass. Compute
+/* True between optics_gfx_frame_begin_pass and optics_gfx_frame_end_pass. Compute
  * effects must be recorded outside a pass — a recording frame with no
  * active pass is the "frame pass boundary" effect APIs require. */
 OPTICS_GFX_API bool optics_gfx_frame_has_active_pass(const optics_gfx_frame *f);
@@ -1463,10 +1452,10 @@ OPTICS_GFX_API bool optics_gfx_frame_has_active_pass(const optics_gfx_frame *f);
 OPTICS_GFX_API optics_gfx_device *optics_gfx_frame_device(const optics_gfx_frame *f);
 
 /* Capture the exact color attachment produced by this recording frame.
- * flux_frame_submit inserts an image-to-buffer copy before the final present
+ * optics_gfx_frame_submit inserts an image-to-buffer copy before the final present
  * or dma-buf ownership transition. The copied pixels remain unchanged by
- * later frames and can be polled with flux_surface_read_pixels_ready, then
- * retrieved with flux_surface_read_pixels. A later request replaces the
+ * later frames and can be polled with optics_gfx_surface_read_pixels_ready, then
+ * retrieved with optics_gfx_surface_read_pixels. A later request replaces the
  * surface's previous snapshot. */
 OPTICS_GFX_NODISCARD OPTICS_GFX_API optics_gfx_result
 optics_gfx_frame_request_readback(optics_gfx_frame *f);
@@ -1480,9 +1469,9 @@ OPTICS_GFX_NODISCARD OPTICS_GFX_API optics_gfx_result optics_gfx_frame_request_r
 
 /* Frames follow a strict single-use state machine:
  * begin_frame -> submit -> present (or abandon). Calling a transition out of
- * order or more than once returns FLUX_ERROR_INVALID_STATE. The frame pointer
+ * order or more than once returns OPTICS_GFX_ERROR_INVALID_STATE. The frame pointer
  * is a surface-owned borrow and becomes invalid when present or abandon
- * returns. On offscreen surfaces, flux_frame_abandon releases the frame-slot
+ * returns. On offscreen surfaces, optics_gfx_frame_abandon releases the frame-slot
  * borrow without advancing current_frame, so a rejected external KMS flip
  * reuses the same free backbuffer slot on retry instead of rotating into an
  * active scanout buffer. */
@@ -1491,12 +1480,12 @@ OPTICS_GFX_NODISCARD OPTICS_GFX_API optics_gfx_result optics_gfx_frame_present(o
 OPTICS_GFX_API void optics_gfx_frame_abandon(optics_gfx_frame *f);
 
 /* Per-frame transient memory — GPU-visible, mapped, recycled after
- * FLUX_FRAMES_IN_FLIGHT frames. Returns aligned pointer + offset
- * relative to the underlying buffer (which lives in <flux/vulkan.h>).
+ * OPTICS_GFX_MAX_FRAMES_IN_FLIGHT frames. Returns aligned pointer + offset
+ * relative to the underlying buffer (which lives in <optics/gfx/vulkan.h>).
  *
  *   gpu_address  is the buffer-device-address of `cpu`. It is 0 only
  *                if the device was created without the
- *                bufferDeviceAddress feature; on conformant flux
+ *                bufferDeviceAddress feature; on conformant gfx
  *                devices it is always non-zero for a valid slice. */
 typedef struct optics_gfx_transient {
     void *cpu;
@@ -1506,8 +1495,8 @@ typedef struct optics_gfx_transient {
 } optics_gfx_transient;
 
 /* `alignment` must be a power of two between 1 and 256 inclusive.
- * Larger alignments are rejected with FLUX_ERROR_INVALID_ARGUMENT.
- * Returns FLUX_ERROR_OUT_OF_RANGE if the per-frame ring is exhausted. */
+ * Larger alignments are rejected with OPTICS_GFX_ERROR_INVALID_ARGUMENT.
+ * Returns OPTICS_GFX_ERROR_OUT_OF_RANGE if the per-frame ring is exhausted. */
 typedef struct optics_gfx_frame_alloc_transient_opts {
     size_t bytes;
     size_t alignment;
@@ -1519,7 +1508,7 @@ OPTICS_GFX_NODISCARD OPTICS_GFX_API optics_gfx_result optics_gfx_frame_alloc_tra
 
 /* Materialize a deferred effect output (ADR-0147).
  *
- * An effect applied through flux_blur_filter_apply records its dispatches
+ * An effect applied through optics_gfx_blur_filter_apply records its dispatches
  * lazily: the work exists on paper the moment the call returns, but its
  * command buffer is only built and submitted when something asks for the
  * pixels. This call is that ask, for consumers that record into the frame's
@@ -1527,13 +1516,13 @@ OPTICS_GFX_NODISCARD OPTICS_GFX_API optics_gfx_result optics_gfx_frame_alloc_tra
  * being a deferred pass themselves.
  *
  * Must be called at a pass boundary — no canvas pass active — because
- * compute cannot be recorded inside a render pass. Returns FLUX_OK for an
+ * compute cannot be recorded inside a render pass. Returns OPTICS_GFX_OK for an
  * image that is not deferred (a plain image, or an already-materialized
  * output), so callers need no special case.
  *
  * Errors:
- *   FLUX_ERROR_INVALID_ARGUMENT — null frame or image.
- *   FLUX_ERROR_INVALID_STATE    — a canvas pass is active, or the frame is
+ *   OPTICS_GFX_ERROR_INVALID_ARGUMENT — null frame or image.
+ *   OPTICS_GFX_ERROR_INVALID_STATE    — a canvas pass is active, or the frame is
  *                                 not recording. */
 OPTICS_GFX_NODISCARD OPTICS_GFX_API optics_gfx_result
 optics_gfx_frame_materialize_image(optics_gfx_frame *f, optics_gfx_image *image);
@@ -1542,14 +1531,14 @@ optics_gfx_frame_materialize_image(optics_gfx_frame *f, optics_gfx_image *image)
 /*  Deferred pass plan accounting (ADR-0147)                          */
 /* ================================================================== */
 
-/* An effect applied through flux_blur_filter_apply (or another deferred
+/* An effect applied through optics_gfx_blur_filter_apply (or another deferred
  * operator) registers a pass instead of recording its dispatches. The pass
  * is built and executed only if something requires its output; otherwise it
  * is pruned at submit and costs no GPU time.
  *
  * These counters make that difference observable, which is what lets a test
  * assert pruning rather than merely hope for it. They are per frame and
- * reset by flux_surface_begin_frame. */
+ * reset by optics_gfx_surface_begin_frame. */
 typedef struct optics_gfx_frame_plan_counters {
     uint32_t registered; /* passes registered this frame */
     uint32_t executed;   /* passes whose dispatches actually ran */
@@ -1557,7 +1546,7 @@ typedef struct optics_gfx_frame_plan_counters {
     uint32_t fallbacks;  /* passes that fell back to eager execution */
 } optics_gfx_frame_plan_counters;
 
-/* Read the frame's plan counters. Returns FLUX_ERROR_INVALID_STATE when the
+/* Read the frame's plan counters. Returns OPTICS_GFX_ERROR_INVALID_STATE when the
  * frame is not recording (the counters describe a live plan, not history). */
 OPTICS_GFX_NODISCARD OPTICS_GFX_API optics_gfx_result
 optics_gfx_frame_plan_stats(const optics_gfx_frame *f, optics_gfx_frame_plan_counters *out);
@@ -1568,7 +1557,7 @@ optics_gfx_frame_plan_stats(const optics_gfx_frame *f, optics_gfx_frame_plan_cou
  * This is NOT the swapchain image the frame renders into. A swapchain may
  * carry more images than there are frames in flight, and the image index is
  * chosen by the presentation engine at acquire time. Content-preservation
- * and damage history must key on `flux_frame_image_index`: one entry per
+ * and damage history must key on `optics_gfx_frame_image_index`: one entry per
  * image, never one per frame slot. */
 OPTICS_GFX_API uint32_t optics_gfx_frame_index(const optics_gfx_frame *f);
 
@@ -1581,7 +1570,7 @@ OPTICS_GFX_API uint32_t optics_gfx_frame_image_index(const optics_gfx_frame *f);
  *
  * The answer is the union of (a) every write committed since this image last
  * became current and (b) the current frame's damage passed to
- * flux_surface_begin_frame. On a windowed surface whose persistent content
+ * optics_gfx_surface_begin_frame. On a windowed surface whose persistent content
  * image holds the authoritative frame, history is repaired by an internal
  * copy and the returned scope is only the current damage; the API hides that
  * distinction from the caller.
@@ -1591,8 +1580,8 @@ OPTICS_GFX_API uint32_t optics_gfx_frame_image_index(const optics_gfx_frame *f);
  * `*out_full = false` with `*out_count == 0` means nothing needs painting.
  *
  * The caller owns `out_rects`; `capacity` must be at least
- * FLUX_DAMAGE_CAPACITY to receive every case. If the scope does not fit,
- * FLUX_ERROR_OUT_OF_RANGE is returned and `*out_full` is set so the caller can
+ * OPTICS_GFX_DAMAGE_CAPACITY to receive every case. If the scope does not fit,
+ * OPTICS_GFX_ERROR_OUT_OF_RANGE is returned and `*out_full` is set so the caller can
  * conservatively repaint everything. */
 typedef struct optics_gfx_frame_repaint_scope_opts {
     optics_gfx_rect *out_rects;
@@ -1655,4 +1644,4 @@ OPTICS_GFX_NODISCARD OPTICS_GFX_API optics_gfx_result optics_gfx_frame_collect_t
 }
 #endif
 
-#endif /* FLUX_CORE_H */
+#endif /* OPTICS_GFX_CORE_H */

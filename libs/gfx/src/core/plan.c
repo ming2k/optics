@@ -278,8 +278,8 @@ static bool plan_build_pass(optics_gfx_plan *p, uint32_t index) {
 
     if (pass->effect_record) {
         optics_gfx_vk_cmd_begin_label(p->device, pass->effect_segment,
-                                      pass->label ? pass->label : "flux.plan.pass");
-        OPTICS_GFX_PROFILE_ZONE(z_pass, "flux.plan.pass");
+                                      pass->label ? pass->label : "gfx.plan.pass");
+        OPTICS_GFX_PROFILE_ZONE(z_pass, "gfx.plan.pass");
         pass->effect_record(pass->effect_params, pass->effect_segment);
         OPTICS_GFX_PROFILE_ZONE_END(z_pass);
         optics_gfx_vk_cmd_end_label(p->device, pass->effect_segment);

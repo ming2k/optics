@@ -1,11 +1,11 @@
 /*
- * vista — public API implementation.
+ * scene — public API implementation.
  *
- * The scene owns refcounted flux_mesh handles and a node tree with cached
- * world matrices. Draw records one flux_scene_draw_mesh(_lit) per primitive,
+ * The scene owns refcounted optics_gfx_mesh handles and a node tree with cached
+ * world matrices. Draw records one optics_gfx_scene_draw_mesh(_lit) per primitive,
  * composed with the owning node's world matrix, into the caller's active
  * pass. The scene never touches the canvas or scene module internals — it is
- * a pure consumer of the flux_scene_draw_mesh primitive (ADR-0016).
+ * a pure consumer of the optics_gfx_scene_draw_mesh primitive (ADR-0016).
  */
 #include "internal.h"
 
@@ -18,10 +18,10 @@
 #include <string.h>
 
 /* ---- Version accessors ------------------------------------------------
- * All derived from the VISTA_VERSION_* macros. This file previously
+ * All derived from the OPTICS_SCENE_VERSION_* macros. This file previously
  * hard-coded the string "0.0.29" while the header macros had moved on
  * to 0.0.36 — a stale literal that no test could catch. The string is
- * now built by the macros, and tools/check-version-lockstep.sh keeps
+ * now built by the macros, and tools/check_versions.py keeps
  * every library's macros in lockstep so this class of drift is
  * structurally impossible. */
 
@@ -285,7 +285,7 @@ optics_scene_data_build(optics_gfx_device *device, const optics_scene_data_build
     /* Context-scope row (ADR-0134): a scene outlives frames and dies with the
      * app's asset set. */
     OPTICS_GFX_OBSERVE_ACQUIRE(sc->device, OPTICS_GFX_SCOPE_CONTEXT, OPTICS_GFX_LIFETIME_CONTEXT,
-                               "scene", "vista/scene", 0, OPTICS_GFX_SITE_NONE);
+                               "scene", "scene/scene", 0, OPTICS_GFX_SITE_NONE);
     return OPTICS_GFX_OK;
 }
 
@@ -313,7 +313,7 @@ OPTICS_SCENE_API void optics_scene_release(optics_scene *scene) {
     for (uint32_t i = 0; i < scene->material_count; ++i)
         optics_gfx_material_release(scene->materials[i]);
     optics_gfx_material_release(scene->fallback_material);
-    OPTICS_GFX_OBSERVE_RELEASE(scene->device, OPTICS_GFX_SCOPE_CONTEXT, "scene", "vista/scene", 0);
+    OPTICS_GFX_OBSERVE_RELEASE(scene->device, OPTICS_GFX_SCOPE_CONTEXT, "scene", "scene/scene", 0);
     if (scene->device)
         optics_gfx_device_release(scene->device);
     free(scene->materials);
@@ -334,7 +334,7 @@ optics_scene_set_materials(optics_scene *scene, const optics_scene_set_materials
     optics_gfx_material *fallback = opts->fallback;
     optics_gfx_material **replacement = nullptr;
     if (material_count > 0) {
-        /* Pointer array: the element is a flux_material *, not a struct. */
+        /* Pointer array: the element is a optics_gfx_material *, not a struct. */
         replacement =
             calloc(material_count, sizeof(*replacement)); // NOLINT(bugprone-sizeof-expression)
         if (!replacement)
@@ -572,7 +572,7 @@ OPTICS_SCENE_API bool optics_scene_bounds(const optics_scene *scene,
     optics_gfx_vec3 wmax = {-1e30f, -1e30f, -1e30f};
     bool any = false;
 
-    /* Match vista_draw's visibility rule: when the scene has a node
+    /* Match optics_scene_draw's visibility rule: when the scene has a node
      * tree, primitives are drawn via their owning node's world matrix;
      * a node-less scene draws all primitives with an identity world. */
     if (scene->node_count > 0) {

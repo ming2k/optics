@@ -10,7 +10,7 @@
  *
  * Row resolution is by *content* hash of (scope, kind, owner), confirmed with
  * strcmp. Pointer identity would be cheaper but wrong: rows interned by
- * libflux must be readable by a test binary, a host, or a Rust binding that
+ * liboptics_gfx must be readable by a test binary, a host, or a Rust binding that
  * passes its own copy of the same literals. That mistake would have made the
  * ledger write-only from outside the library.
  *
@@ -20,7 +20,7 @@
  * diagnostic) while still guaranteeing a reporter never sees a row whose
  * kind/owner pointers are still NULL.
  *
- * The ledger never silently truncates: once FLUX_OBSERVE_MAX_ROWS is
+ * The ledger never silently truncates: once OPTICS_GFX_OBSERVE_MAX_ROWS is
  * exhausted, `overflowed_kinds` increments and every report says so. A partial
  * report that claims to be complete is worse than no report.
  */
@@ -38,7 +38,7 @@
 /*                                                                    */
 /*  Sites are an enum, not `__FILE__ ":" __LINE__`. A per-call-site     */
 /*  format string puts one literal per counted site into the shipped    */
-/*  object — five in a default flux build — which contradicts the       */
+/*  object — five in a default gfx build — which contradicts the       */
 /*  promise that a non-attribution build carries no site machinery.    */
 /*  The switch below emits exactly the labels that are referenced.     */
 /* ------------------------------------------------------------------ */
@@ -46,19 +46,19 @@
 const char *optics_gfx_site_label(optics_gfx_site site) {
     switch (site) {
     case OPTICS_GFX_SITE_HOST_ALLOC:
-        return "core/device.c:flux_internal_alloc";
+        return "core/device.c:optics_gfx_internal_alloc";
     case OPTICS_GFX_SITE_VK_MEMORY:
-        return "core/vk_allocator.c:flux_vk_allocate";
+        return "core/vk_allocator.c:optics_gfx_vk_allocate";
     case OPTICS_GFX_SITE_VK_IMAGE:
-        return "canvas/image.c:flux_image_create";
+        return "canvas/image.c:optics_gfx_image_create";
     case OPTICS_GFX_SITE_VK_BUFFER:
-        return "core/buffer.c:flux_buffer_create";
+        return "core/buffer.c:optics_gfx_buffer_create";
     case OPTICS_GFX_SITE_VK_SAMPLER:
-        return "core/sampler.c:flux_sampler_create";
+        return "core/sampler.c:optics_gfx_sampler_create";
     case OPTICS_GFX_SITE_VK_PIPELINE:
-        return "core/graphics_pipeline.c:flux_graphics_pipeline_create";
+        return "core/graphics_pipeline.c:optics_gfx_graphics_pipeline_create";
     case OPTICS_GFX_SITE_VK_TARGET:
-        return "core/target.c:flux_target_create";
+        return "core/target.c:optics_gfx_target_create";
     case OPTICS_GFX_SITE_BINDLESS:
         return "core/device.c:bindless slot";
     case OPTICS_GFX_SITE_COUNT:
@@ -71,7 +71,7 @@ const char *optics_gfx_site_label(optics_gfx_site site) {
 /* ------------------------------------------------------------------ */
 /*  Process-global ledger                                             */
 /*                                                                    */
-/*  FLUX_SCOPE_PROCESS rows cannot belong to a device: a display       */
+/*  OPTICS_GFX_SCOPE_PROCESS rows cannot belong to a device: a display       */
 /*  connection, a wakeup eventfd, or a Wayland proxy is created before */
 /*  any device exists and must stay attributable when device bringup   */
 /*  fails, and after the device is gone.                              */
@@ -110,7 +110,7 @@ static optics_gfx_observe_state *ledger_for(optics_gfx_device *d, optics_gfx_sco
 /* ------------------------------------------------------------------ */
 
 /* FNV-1a over (scope, kind, owner). Content identity, not pointer identity,
- * so rows interned by libflux are readable by a test binary, a host, or a
+ * so rows interned by liboptics_gfx are readable by a test binary, a host, or a
  * binding that passes its own copy of the same literals. */
 static uint64_t row_key_hash(optics_gfx_scope scope, const char *kind, const char *owner) {
     uint64_t h = UINT64_C(0xcbf29ce484222325);
@@ -146,7 +146,7 @@ static optics_gfx_observe_row *row_resolve(optics_gfx_observe_state *s, optics_g
     optics_gfx_platform_mutex_lock(&s->lock);
     const uint32_t nrows = atomic_load_explicit(&s->row_count, memory_order_relaxed);
     optics_gfx_observe_row *row = nullptr;
-    /* Linear scan over at most FLUX_OBSERVE_MAX_ROWS rows. The hash decides
+    /* Linear scan over at most OPTICS_GFX_OBSERVE_MAX_ROWS rows. The hash decides
      * mismatches with one integer compare; strcmp only runs on a hash hit,
      * which happens at most once per kind in the life of a device. */
     for (uint32_t i = 0; i < nrows; ++i) {
@@ -252,7 +252,8 @@ optics_gfx_result optics_gfx_observe_init(optics_gfx_device *d,
         if (opts->type != OPTICS_GFX_TYPE_OBSERVE_OPTS) {
             optics_gfx_platform_mutex_destroy(&s->lock);
             s->lock_initialized = false;
-            OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT, "flux_observe_opts.type mismatch");
+            OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT,
+                            "optics_gfx_observe_opts.type mismatch");
             return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
         }
         s->capabilities |= opts->capabilities;
@@ -544,14 +545,14 @@ void optics_gfx_observe_report_emit_process(void) {
 /* Frame-lifetime enforcement (ADR-0129 decision 4).
  *
  * Always compiled, deliberately. An earlier form wrapped this in
- * `#if defined(FLUX_DEBUG_OBSERVE)` — a macro no build defined, so the check
- * was a `return true` stub and FLUX_LIFETIME_FRAME had no enforcement at all.
+ * a debug-only preprocessor guard that no build defined, so the check
+ * was a `return true` stub and OPTICS_GFX_LIFETIME_FRAME had no enforcement at all.
  * That is exactly the dead-branch hazard this ADR set out to remove (the atlas
  * leak lane spent a release cycle behind a similarly undefined macro), so the
  * branch is gone rather than given a define.
  *
  * Cost at a frame boundary: one compare per ledger row, and only rows declared
- * FLUX_LIFETIME_FRAME are examined. Nothing is formatted unless a violation has
+ * OPTICS_GFX_LIFETIME_FRAME are examined. Nothing is formatted unless a violation has
  * already happened. */
 bool optics_gfx_observe_frame_drain_check(const optics_gfx_device *d) {
     if (!d)

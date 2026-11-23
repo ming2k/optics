@@ -1,16 +1,16 @@
 /*
- * flux/canvas.h — 2D immediate-mode canvas.
+ * gfx/canvas.h — 2D immediate-mode canvas.
  *
  * Design contract:
  *   - One canvas per surface.
- *   - flux_path, flux_paint are value types owned by a flux_arena.
- *   - flux_image is refcounted.
+ *   - optics_gfx_path, optics_gfx_brush are value types owned by a optics_gfx_arena.
+ *   - optics_gfx_image is refcounted.
  *   - Per-frame:
- *       flux_surface_begin_frame  ->
- *       flux_canvas_begin_frame (clear or load) ->
+ *       optics_gfx_surface_begin_frame  ->
+ *       optics_gfx_canvas_begin (clear or load) ->
  *       record draws ->
- *       flux_canvas_end_frame ->
- *       flux_frame_submit / flux_frame_present
+ *       optics_gfx_canvas_end ->
+ *       optics_gfx_frame_submit / optics_gfx_frame_present
  */
 
 #ifndef OPTICS_GFX_CANVAS_H
@@ -26,9 +26,9 @@ extern "C" {
 
 typedef struct optics_gfx_canvas optics_gfx_canvas;
 
-/* flux_sampler lives in <flux/vulkan.h>; forward-declare it so sampled image
+/* optics_gfx_sampler lives in <optics/gfx/vulkan.h>; forward-declare it so sampled image
  * drawing does not pull Vulkan declarations into every Canvas consumer.
- * flux_image is a core resource and is already declared by <flux/core.h>. */
+ * optics_gfx_image is a core resource and is already declared by <optics/gfx/core.h>. */
 typedef struct optics_gfx_sampler optics_gfx_sampler;
 
 /* ------------------------------------------------------------------ */
@@ -95,14 +95,14 @@ OPTICS_GFX_API void optics_gfx_path_add_circle(optics_gfx_path *p, float cx, flo
 /* Number of segments rejected due to arena exhaustion. Non-zero means
  * subsequent mutators silently dropped data. Path mutators are
  * void-returning (Cairo/Skia-style); this accessor lets a caller
- * detect overflow without consulting flux_get_last_error. */
+ * detect overflow without consulting optics_gfx_get_last_error. */
 OPTICS_GFX_API uint32_t optics_gfx_path_dropped_count(const optics_gfx_path *p);
 
 /* ------------------------------------------------------------------ */
 /*  Canvas lifecycle + drawing                                        */
 /* ------------------------------------------------------------------ */
 
-/* Backend selection for flux_canvas_create (Skia SkSurface-style: the factory
+/* Backend selection for optics_gfx_canvas_create (Skia SkSurface-style: the factory
  * binds the backend, then the same drawing API is used regardless). AUTO picks
  * GPU when a surface is provided, otherwise the software (CPU) backend. */
 typedef enum optics_gfx_canvas_backend_kind : uint32_t {
@@ -112,14 +112,14 @@ typedef enum optics_gfx_canvas_backend_kind : uint32_t {
 } optics_gfx_canvas_backend_kind;
 
 typedef struct optics_gfx_canvas_desc {
-    optics_gfx_struct_type type; /* FLUX_TYPE_CANVAS_DESC */
+    optics_gfx_struct_type type; /* OPTICS_GFX_TYPE_CANVAS_DESC */
     const void *next;
     optics_gfx_surface *surface;            /* GPU: required (retained). CPU: ignored. */
     float scale;                            /* content scale (device-pixel ratio); 0 => 1.0.
                                                The canvas draws in logical units scaled onto
                                                the physical surface by this factor; glyph
                                                reads it to rasterise glyphs crisply at HiDPI.
-                                               Change later with flux_canvas_set_scale. */
+                                               Change later with optics_gfx_canvas_set_scale. */
     optics_gfx_canvas_backend_kind backend; /* default AUTO */
     uint32_t width, height;                 /* CPU framebuffer size (physical px), both
                                                required; ignored for the GPU backend. */
@@ -155,15 +155,15 @@ typedef struct optics_gfx_canvas_attachment {
  * the consumer has seen the set destroys the localisation irrecoverably — the
  * union of a top strip and a bottom dock is the whole output — so this type
  * carries the whole list and the backend scissors each rectangle independently
- * rather than collapsing. See `lens_damage_rects` for the producer side.
+ * rather than collapsing. See `optics_ui_damage_rects` for the producer side.
  *
  * Rectangles are expected disjoint but overlap is harmless: a scissored repaint
  * is idempotent. */
-/* `flux_damage` and FLUX_DAMAGE_CAPACITY are core types (flux/core.h): a
+/* `optics_gfx_damage` and OPTICS_GFX_DAMAGE_CAPACITY are core types (gfx/core.h): a
  * damage set is a frame input, not a canvas-private convention. */
 
 typedef struct optics_gfx_canvas_pass_desc {
-    optics_gfx_struct_type type; /* FLUX_TYPE_CANVAS_PASS_DESC */
+    optics_gfx_struct_type type; /* OPTICS_GFX_TYPE_CANVAS_PASS_DESC */
     const void *next;
     optics_gfx_frame *frame; /* GPU recording context; nullptr on CPU. Borrowed until end. */
     optics_gfx_canvas_attachment attachment; /* resources retained until end */
@@ -172,14 +172,14 @@ typedef struct optics_gfx_canvas_pass_desc {
      * destination must already hold a complete frame outside them — a skipped
      * region is not repainted. Empty selects the full destination extent.
      *
-     * The array is read and copied during `flux_canvas_begin`; it does not need
+     * The array is read and copied during `optics_gfx_canvas_begin`; it does not need
      * to outlive that call. Retaining it for the whole pass would be a
      * use-after-free for bindings that build the list in a temporary container.
      *
      * A pass is the right granularity for this because a frame can render into
      * several destinations (a target capture and the window), and each has its
      * own scope. The frame aggregates what its passes actually wrote into
-     * `flux_frame`'s epoch history, which is what a swapchain present uses to
+     * `optics_gfx_frame`'s epoch history, which is what a swapchain present uses to
      * bring every image in the rotation up to date (ADR-0149). */
     optics_gfx_damage damage;
     /* Declare that this pass clears its whole destination. A full-extent pass is
@@ -192,19 +192,19 @@ typedef struct optics_gfx_canvas_pass_desc {
 #define OPTICS_GFX_CANVAS_PASS_DESC_INIT {.type = OPTICS_GFX_TYPE_CANVAS_PASS_DESC}
 
 /* Create a canvas on the selected backend. GPU canvases need desc->surface;
- * CPU canvases need desc->width/height (see flux/canvas_cpu.h for a convenience
- * wrapper and pixel readback). Release with flux_canvas_release. */
+ * CPU canvases need desc->width/height (see gfx/canvas_cpu.h for a convenience
+ * wrapper and pixel readback). Release with optics_gfx_canvas_release. */
 OPTICS_GFX_NODISCARD OPTICS_GFX_API optics_gfx_result
 optics_gfx_canvas_create(const optics_gfx_canvas_desc *desc, optics_gfx_canvas **out);
 OPTICS_GFX_NODISCARD OPTICS_GFX_API optics_gfx_canvas *
 optics_gfx_canvas_retain(optics_gfx_canvas *c);
 OPTICS_GFX_API void optics_gfx_canvas_release(optics_gfx_canvas *c);
 
-/* Content scale (device-pixel ratio). flux_canvas_set_scale makes each
- * flux_canvas_begin_frame start with this as the base transform, so all drawing is
- * in logical units mapped onto the physical surface. flux_canvas_get_scale
+/* Content scale (device-pixel ratio). optics_gfx_canvas_set_scale makes each
+ * optics_gfx_canvas_begin start with this as the base transform, so all drawing is
+ * in logical units mapped onto the physical surface. optics_gfx_canvas_get_scale
  * returns the *effective* scale of the active transform (the base content
- * scale composed with any flux_canvas_scale on the stack); glyph reads it
+ * scale composed with any optics_gfx_canvas_scale on the stack); glyph reads it
  * to rasterise glyphs at the device resolution. Set the content scale once
  * when the surface scale changes. */
 OPTICS_GFX_API void optics_gfx_canvas_set_scale(optics_gfx_canvas *c, float scale);
@@ -225,14 +225,14 @@ OPTICS_GFX_NODISCARD OPTICS_GFX_API optics_gfx_result optics_gfx_canvas_end(opti
 OPTICS_GFX_API const uint8_t *optics_gfx_canvas_read_pixels(optics_gfx_canvas *c, uint32_t *width,
                                                             uint32_t *height, uint32_t *stride);
 
-/* State stack. All draws and state mutators between flux_canvas_begin_frame
- * and flux_canvas_end_frame record into the bound frame; calls outside that
- * window are silent no-ops (consult flux_get_last_error). */
+/* State stack. All draws and state mutators between optics_gfx_canvas_begin
+ * and optics_gfx_canvas_end record into the bound frame; calls outside that
+ * window are silent no-ops (consult optics_gfx_get_last_error). */
 OPTICS_GFX_API void optics_gfx_canvas_save(optics_gfx_canvas *c);
 OPTICS_GFX_API void optics_gfx_canvas_restore(optics_gfx_canvas *c);
 /* Save a compositing layer (ADR-0088 / Opacity Group).
  * Subtree draws are recorded into a tightly scissored transient offscreen buffer
- * and composited back into the parent target with `opacity` on flux_canvas_restore. */
+ * and composited back into the parent target with `opacity` on optics_gfx_canvas_restore. */
 typedef struct optics_gfx_canvas_save_layer_opts {
     const optics_gfx_rect *bounds;
     float opacity;
@@ -401,7 +401,7 @@ typedef struct optics_gfx_encoder_desc {
 OPTICS_GFX_NODISCARD OPTICS_GFX_API optics_gfx_result
 optics_gfx_encoder_create(const optics_gfx_encoder_desc *desc, optics_gfx_encoder **out);
 /* Producers propagate capture failures into the recorder's sticky result.
- * FLUX_OK is a no-op; the first failure cannot be replaced or cleared. */
+ * OPTICS_GFX_OK is a no-op; the first failure cannot be replaced or cleared. */
 OPTICS_GFX_API void optics_gfx_encoder_fail(optics_gfx_encoder *enc, optics_gfx_result error);
 OPTICS_GFX_API optics_gfx_result optics_gfx_encoder_status(const optics_gfx_encoder *enc);
 typedef struct optics_gfx_encoder_draw_geometry_opts {
@@ -474,7 +474,7 @@ typedef struct optics_gfx_display_list_binding {
 } optics_gfx_display_list_binding;
 
 /* Submit an immutable display list to a canvas for batch execution. A list
- * that declares dynamic inputs fails with FLUX_ERROR_INVALID_STATE here; use
+ * that declares dynamic inputs fails with OPTICS_GFX_ERROR_INVALID_STATE here; use
  * the bound form below. */
 typedef struct optics_gfx_canvas_submit_display_list_opts {
     const optics_gfx_display_list *list;
@@ -512,7 +512,7 @@ typedef const void *(*optics_gfx_display_list_resource_resolve_fn)(
     void *user, optics_gfx_display_list_resource_kind kind, uint32_t id);
 
 typedef struct optics_gfx_display_list_serialize_opts {
-    optics_gfx_struct_type type; /* FLUX_TYPE_DISPLAY_LIST_SERIALIZE_OPTS */
+    optics_gfx_struct_type type; /* OPTICS_GFX_TYPE_DISPLAY_LIST_SERIALIZE_OPTS */
     const void *next;
     optics_gfx_display_list_resource_id_fn resource_id;
     void *user;
@@ -521,7 +521,7 @@ typedef struct optics_gfx_display_list_serialize_opts {
 } optics_gfx_display_list_serialize_opts;
 
 typedef struct optics_gfx_display_list_deserialize_opts {
-    optics_gfx_struct_type type; /* FLUX_TYPE_DISPLAY_LIST_DESERIALIZE_OPTS */
+    optics_gfx_struct_type type; /* OPTICS_GFX_TYPE_DISPLAY_LIST_DESERIALIZE_OPTS */
     const void *next;
     const uint8_t *data;
     size_t size;
@@ -536,7 +536,7 @@ typedef struct optics_gfx_display_list_deserialize_opts {
     {.type = OPTICS_GFX_TYPE_DISPLAY_LIST_DESERIALIZE_OPTS}
 
 /* Serialize to a newly allocated byte stream. Release with
- * flux_display_list_serialized_free. A list with resources requires
+ * optics_gfx_display_list_serialized_free. A list with resources requires
  * opts->resource_id. */
 OPTICS_GFX_NODISCARD OPTICS_GFX_API optics_gfx_result optics_gfx_display_list_serialize(
     const optics_gfx_display_list *list, const optics_gfx_display_list_serialize_opts *opts);
@@ -586,7 +586,7 @@ typedef struct optics_gfx_glyph_quad {
 } optics_gfx_glyph_quad;
 
 typedef struct optics_gfx_glyph_run_desc {
-    optics_gfx_struct_type type; /* FLUX_TYPE_GLYPH_RUN_DESC */
+    optics_gfx_struct_type type; /* OPTICS_GFX_TYPE_GLYPH_RUN_DESC */
     const void *next;
     optics_gfx_image *atlas; /* caller-owned; R8 coverage (.r × tint).
                               * NULL on a device-less CPU canvas — set
@@ -594,7 +594,7 @@ typedef struct optics_gfx_glyph_run_desc {
     /* Host-resident R8 coverage atlas, the CPU-backend alternative to
      * `atlas` (ADR-0019): when non-NULL the CPU rasteriser samples
      * coverage straight from this buffer with no GPU image, so a
-     * device-less canvas (flux_canvas_create (CPU backend)) can render glyph runs.
+     * device-less canvas (optics_gfx_canvas_create (CPU backend)) can render glyph runs.
      * Ignored when a device/atlas is present. `host_atlas_w/h` are the
      * buffer's texel extent (0 when unused).
      *
@@ -603,7 +603,7 @@ typedef struct optics_gfx_glyph_run_desc {
      * release such segments (or release the canvas) before the producer
      * frees or reallocates the buffer. A producer that rearranges texels
      * in place (e.g. a full-atlas reclaim) should attach
-     * flux_glyph_run_host_atlas_desc so replay of pre-rearrangement
+     * optics_gfx_glyph_run_host_atlas_desc so replay of pre-rearrangement
      * segments is refused instead of sampling moved texels. */
     const uint8_t *host_coverage;
     uint32_t host_atlas_w;
@@ -616,17 +616,17 @@ typedef struct optics_gfx_glyph_run_desc {
 
 #define OPTICS_GFX_GLYPH_RUN_DESC_INIT {.type = OPTICS_GFX_TYPE_GLYPH_RUN_DESC}
 
-/* Optional flux_glyph_run_desc.next payload: the producer's content
+/* Optional optics_gfx_glyph_run_desc.next payload: the producer's content
  * generation for a host coverage buffer. The canvas records the pair
  * (host_coverage pointer, generation) with each captured glyph batch and
- * remembers the newest generation it has seen per buffer; flux_canvas_cache_replay
+ * remembers the newest generation it has seen per buffer; optics_gfx_canvas_cache_replay
  * then refuses a segment whose recorded generation is stale (the buffer's
  * texels were rearranged since, so the baked UVs would sample the wrong
  * cells), letting the caller re-emit and re-record. Producers that never
  * rearrange in place may omit the extension; their segments replay
  * unchecked. glyph attaches its atlas generation automatically. */
 typedef struct optics_gfx_glyph_run_host_atlas_desc {
-    optics_gfx_struct_type type; /* FLUX_TYPE_GLYPH_RUN_HOST_ATLAS_DESC */
+    optics_gfx_struct_type type; /* OPTICS_GFX_TYPE_GLYPH_RUN_HOST_ATLAS_DESC */
     const void *next;
     uint64_t generation;
 } optics_gfx_glyph_run_host_atlas_desc;
@@ -637,11 +637,11 @@ typedef struct optics_gfx_glyph_run_host_atlas_desc {
 /* Draw a pre-shaped glyph run as a single batched draw call. The
  * library does no shaping, kerning, or atlas management (ADR-0010):
  * quads arrive positioned, the atlas is caller-owned and updated via
- * flux_image_update_region. The atlas's R channel is alpha coverage
+ * optics_gfx_image_update_region. The atlas's R channel is alpha coverage
  * multiplied by each quad's premultiplied tint, blended SRC_OVER —
  * the same R8-coverage × tint contract, without per-glyph draw calls.
  *
- * On a device-less CPU canvas (flux_canvas_create (CPU backend)) there is no
+ * On a device-less CPU canvas (optics_gfx_canvas_create (CPU backend)) there is no
  * GPU image to bind, so `atlas` is ignored and `host_coverage` is used
  * instead: a host-resident R8 coverage buffer of host_atlas_w×host_atlas_h
  * texels (ADR-0019). The CPU rasteriser samples coverage directly from it. */
@@ -650,7 +650,7 @@ OPTICS_GFX_API void optics_gfx_canvas_draw_glyph_run(optics_gfx_canvas *c,
 
 /* Cumulative count of draw calls dropped due to transient ring exhaustion
  * since canvas creation. Non-zero means the per-frame transient ring is too
- * small for the workload; check flux_frame_alloc_transient or increase the
+ * small for the workload; check optics_gfx_frame_alloc_transient or increase the
  * ring size. */
 OPTICS_GFX_API uint64_t optics_gfx_canvas_dropped_draws(const optics_gfx_canvas *c);
 
@@ -678,7 +678,7 @@ typedef struct optics_gfx_canvas_cache_entry {
 #define OPTICS_GFX_CANVAS_CACHE_ENTRY_INIT {.slot = nullptr, .generation = 0}
 
 /* Start capturing every draw submitted between here and the matching
- * flux_canvas_cache_end into a new segment. Recording is passive: draws
+ * optics_gfx_canvas_cache_end into a new segment. Recording is passive: draws
  * are still submitted live, so a recorded frame renders exactly as an
  * unrecorded one. Recordings nest (e.g. a re-recording parent subtree
  * around a recording child); every active recording captures every draw.
@@ -690,7 +690,7 @@ OPTICS_GFX_API bool optics_gfx_canvas_cache_begin(optics_gfx_canvas *c);
 /* Close the innermost recording and return its handle (null on budget
  * overflow or allocation failure — the live draws still happened, only
  * the recording is lost). The segment stays valid until
- * flux_canvas_cache_release, LRU eviction under the canvas-wide byte
+ * optics_gfx_canvas_cache_release, LRU eviction under the canvas-wide byte
  * budget, or canvas destruction. */
 OPTICS_GFX_API optics_gfx_canvas_cache_entry optics_gfx_canvas_cache_end(optics_gfx_canvas *c);
 
@@ -705,7 +705,7 @@ OPTICS_GFX_API optics_gfx_canvas_cache_entry optics_gfx_canvas_cache_end(optics_
  * Images and custom samplers referenced by the segment are retained by
  * the canvas for the segment's lifetime. A recorded host-coverage glyph
  * batch additionally refuses to replay once its producer reports a newer
- * atlas generation (flux_glyph_run_host_atlas_desc): the baked UVs would
+ * atlas generation (optics_gfx_glyph_run_host_atlas_desc): the baked UVs would
  * sample rearranged texels. */
 OPTICS_GFX_API bool optics_gfx_canvas_cache_replay(optics_gfx_canvas *c,
                                                    optics_gfx_canvas_cache_entry rec);
@@ -726,4 +726,4 @@ OPTICS_GFX_API uint64_t optics_gfx_canvas_cache_entries_replayed(const optics_gf
 }
 #endif
 
-#endif /* FLUX_CANVAS_H */
+#endif /* OPTICS_GFX_CANVAS_H */

@@ -7,7 +7,7 @@
  * exists: before ADR-0147 a blur computed unconditionally, so "the output
  * was never sampled" was indistinguishable from "the output was sampled" by
  * every externally visible measure except GPU time. The plan now makes the
- * difference observable through flux_canvas_get_plan_stats, and this test
+ * difference observable through optics_gfx_canvas_get_plan_stats, and this test
  * pins it.
  */
 #include "gfx_test.h"
@@ -297,7 +297,7 @@ int main(void) {
          * regressed. A conditional form would pass forever while observing
          * nothing.
          *
-         * Exactly one: flux_vk_cmd_begin_label increments the counter and
+         * Exactly one: optics_gfx_vk_cmd_begin_label increments the counter and
          * end_label does not, matching the one-label-per-pass rule
          * test_pass_labels asserts for eager passes. Measured, not assumed —
          * asserting `> labels_before` alone would have accepted a pass emitting
@@ -305,7 +305,7 @@ int main(void) {
         OT_EXPECT(optics_gfx_device_labels_emitted(d) == labels_before + 1u);
     }
 
-    /* ---- 6. A Prism material's dispatches are prunable too (ADR-0147) ----
+    /* ---- 6. A material's dispatches are prunable too (ADR-0147) ----
      *
      * This is the assertion that Phase 2 exists for. Before it, every material
      * recorded eagerly: an apply that nothing sampled still cost its full
@@ -376,7 +376,7 @@ int main(void) {
 
     /* ---- 7. The raw recording path cannot read a pending output ----
      *
-     * `flux_effect_blur` records straight into the caller's command buffer: it
+     * `optics_gfx_effect_blur` records straight into the caller's command buffer: it
      * does not register a pass, cannot be pruned, and has no frame to consult, so
      * before this guard it happily sampled a deferred output whose producer had
      * never run — silently reading last frame's pixels under this frame's handle.
@@ -415,7 +415,8 @@ int main(void) {
         OT_EXPECT(optics_gfx_frame_present(frame) == OPTICS_GFX_OK);
     }
 
-    /* ---- 8. Boundary capacity saturation: registering up to FLUX_DEFERRED_MAX_PASSES (64) ---- */
+    /* ---- 8. Boundary capacity saturation: registering up to OPTICS_GFX_PLAN_MAX_PASSES (64) ----
+     */
     {
         optics_gfx_frame *frame = nullptr;
         OT_EXPECT(optics_gfx_surface_begin_frame(s, nullptr, &frame) == OPTICS_GFX_OK);
@@ -458,7 +459,7 @@ int main(void) {
             OT_EXPECT(optics_gfx_frame_register_pass(frame, &desc, nullptr) == OPTICS_GFX_OK);
         }
 
-        /* The 65th pass must fail with FLUX_ERROR_OUT_OF_RANGE */
+        /* The 65th pass must fail with OPTICS_GFX_ERROR_OUT_OF_RANGE */
         optics_gfx_deferred_pass_desc overflow = OPTICS_GFX_DEFERRED_PASS_DESC_INIT;
         overflow.record = dummy_pass_record;
         overflow.output_count = 1u;

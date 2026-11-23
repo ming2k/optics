@@ -1,17 +1,17 @@
-# Headless C tests for libiris.
+# Headless C tests for liboptics_window.
 #
 # Every test here runs without a Wayland compositor or GPU surface:
-#   - test_version       iris_version_string / version macros
-#   - test_app_api       iris_app_run / iris_pick_file argument validation
+#   - test_version       optics_window_version_string / version macros
+#   - test_app_api       optics_window_run / optics_window_pick_file argument validation
 #   - test_theme         colour-scheme query (GTK_THEME branch; gsettings shadowed)
 #   - test_uri           file:// URI → path decoding for dialog results
 #   - test_a11y_util     AT-SPI role/state maps, value parser, tree diff
 #   - test_platform_text UTF-8 boundary-aware truncation helpers
 #   - test_platform_input pointer button mapping + scroll-channel policy
 #
-# The windowed path (iris_app_run) is exercised by the examples, not here — it
+# The windowed path (optics_window_run) is exercised by the examples, not here — it
 # owns an event loop and needs a live session. Nothing in this directory links
-# lens: iris depends on flux only, and these tests are what keep it that way.
+# ui: window depends on gfx only, and these tests are what keep it that way.
 
 src_inc = include_directories('../../libs/window/src')
 
@@ -27,7 +27,7 @@ endforeach
 
 # test_a11y_util compiles a11y_util.c (+ its platform_text.c dependency)
 # directly (the helpers are internal / hidden-visibility, so they are not
-# exported from libiris.so).
+# exported from liboptics_window.so).
 exe_a11y = executable('test_a11y_util',
   ['test_a11y_util.c', '../../libs/window/src/a11y_util.c', '../../libs/window/src/platform_text.c'],
   include_directories : [window_inc, src_inc],
@@ -44,7 +44,7 @@ if host_machine.system() == 'linux'
   test('test_theme', exe_theme, suite : 'unit')
 endif
 
-# test_a11y_prefs: the public preference API against libiris (query always
+# test_a11y_prefs: the public preference API against liboptics_window (query always
 # links; watch may be the stub on libsystemd-less builds — both paths are
 # contract-valid, the test pins both).
 exe_prefs = executable('test_a11y_prefs',
@@ -54,7 +54,7 @@ exe_prefs = executable('test_a11y_prefs',
 )
 test('test_a11y_prefs', exe_prefs, suite : 'unit')
 
-# test_platform_text also pins the iris_input buffer sizes the backends
+# test_platform_text also pins the optics_window_input buffer sizes the backends
 # stage into (text_utf8/preedit_utf8).
 exe_ptext = executable('test_platform_text',
   ['test_platform_text.c', '../../libs/window/src/platform_text.c'],

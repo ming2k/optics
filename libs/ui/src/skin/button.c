@@ -4,11 +4,11 @@
 #include "../internal.h"
 #include <math.h>
 
-static float lensi_channel_luminance(float c) {
+static float optics_ui__channel_luminance(float c) {
     return c <= 0.04045f ? c / 12.92f : powf((c + 0.055f) / 1.055f, 2.4f);
 }
 
-static float lensi_color_luminance(optics_gfx_color col) {
+static float optics_ui__color_luminance(optics_gfx_color col) {
     uint8_t r, g, b, a;
     optics_gfx_color_unpack(col, &r, &g, &b, &a);
     if (a == 0)
@@ -17,11 +17,11 @@ static float lensi_color_luminance(optics_gfx_color col) {
     float fr = (float)r / 255.0f / fa;
     float fg = (float)g / 255.0f / fa;
     float fb = (float)b / 255.0f / fa;
-    return 0.2126f * lensi_channel_luminance(fr) + 0.7152f * lensi_channel_luminance(fg) +
-           0.0722f * lensi_channel_luminance(fb);
+    return 0.2126f * optics_ui__channel_luminance(fr) + 0.7152f * optics_ui__channel_luminance(fg) +
+           0.0722f * optics_ui__channel_luminance(fb);
 }
 
-void lensi_skin_button(optics_ui *ui, optics_ui_node *n, const optics_ui_widget_record *rec) {
+void optics_ui__skin_button(optics_ui *ui, optics_ui_node *n, const optics_ui_widget_record *rec) {
     const optics_ui_style_resolved *rs = &rec->style;
     bool disabled = (rec->state & OPTICS_UI_STATE_DISABLED) != 0;
     bool active = (rec->state & OPTICS_UI_STATE_ACTIVE) != 0;
@@ -36,17 +36,17 @@ void lensi_skin_button(optics_ui *ui, optics_ui_node *n, const optics_ui_widget_
             disabled ? rs->disabled : (rec->hover_t > 0.001f ? rs->accent : rs->fg);
 
         if (rec->content.label && rec->content.label[0]) {
-            lensi_drawlist_push(ui, n,
-                                (optics_ui_draw_cmd){
-                                    .kind = OPTICS_UI_DRAW_TEXT,
-                                    .rel = {rs->padding, text_y, 0, 0},
-                                    .color = fg,
-                                    .text = rec->content.label,
-                                    .text_size = rs->font_size,
-                                });
+            optics_ui__drawlist_push(ui, n,
+                                     (optics_ui_draw_cmd){
+                                         .kind = OPTICS_UI_DRAW_TEXT,
+                                         .rel = {rs->padding, text_y, 0, 0},
+                                         .color = fg,
+                                         .text = rec->content.label,
+                                         .text_size = rs->font_size,
+                                     });
             if (rec->hover_t > 0.001f && !disabled) {
-                optics_gfx_color line_col = lensi_lerp_color(0, rs->accent, rec->hover_t);
-                lensi_drawlist_push(
+                optics_gfx_color line_col = optics_ui__lerp_color(0, rs->accent, rec->hover_t);
+                optics_ui__drawlist_push(
                     ui, n,
                     (optics_ui_draw_cmd){
                         .kind = OPTICS_UI_DRAW_RECT,
@@ -64,14 +64,14 @@ void lensi_skin_button(optics_ui *ui, optics_ui_node *n, const optics_ui_widget_
     if (disabled) {
         bg = rs->disabled;
     } else if (rec->content.variant == OPTICS_UI_BUTTON_PRIMARY) {
-        bg = active
-                 ? rs->bg_pressed
-                 : (rec->hover_t > 0.001f ? lensi_lerp_color(rs->accent, rs->bg_hover, rec->hover_t)
-                                          : rs->accent);
+        bg = active ? rs->bg_pressed
+                    : (rec->hover_t > 0.001f
+                           ? optics_ui__lerp_color(rs->accent, rs->bg_hover, rec->hover_t)
+                           : rs->accent);
     } else if (rec->content.variant == OPTICS_UI_BUTTON_SUBTLE) {
-        bg = active ? rs->bg_pressed : lensi_lerp_color(0, rs->bg_hover, rec->hover_t);
+        bg = active ? rs->bg_pressed : optics_ui__lerp_color(0, rs->bg_hover, rec->hover_t);
     } else {
-        bg = active ? rs->bg_pressed : lensi_lerp_color(rs->bg, rs->bg_hover, rec->hover_t);
+        bg = active ? rs->bg_pressed : optics_ui__lerp_color(rs->bg, rs->bg_hover, rec->hover_t);
     }
 
     /* Background and border */
@@ -85,25 +85,25 @@ void lensi_skin_button(optics_ui *ui, optics_ui_node *n, const optics_ui_widget_
     }
 
     if ((bg & 0xFF000000u) != 0) {
-        lensi_drawlist_push(ui, n,
-                            (optics_ui_draw_cmd){
-                                .kind = OPTICS_UI_DRAW_RECT,
-                                .rel = {0, 0, w, h},
-                                .color = bg,
-                                .radius = btn_radius,
-                            });
+        optics_ui__drawlist_push(ui, n,
+                                 (optics_ui_draw_cmd){
+                                     .kind = OPTICS_UI_DRAW_RECT,
+                                     .rel = {0, 0, w, h},
+                                     .color = bg,
+                                     .radius = btn_radius,
+                                 });
     }
 
     if (rs->border_width > 0.0f && (rs->border & 0xFF000000u) != 0 &&
         rec->content.variant != OPTICS_UI_BUTTON_SUBTLE) {
-        lensi_drawlist_push(ui, n,
-                            (optics_ui_draw_cmd){
-                                .kind = OPTICS_UI_DRAW_BORDER,
-                                .rel = {0, 0, w, h},
-                                .color = rs->border,
-                                .width = rs->border_width,
-                                .radius = btn_radius,
-                            });
+        optics_ui__drawlist_push(ui, n,
+                                 (optics_ui_draw_cmd){
+                                     .kind = OPTICS_UI_DRAW_BORDER,
+                                     .rel = {0, 0, w, h},
+                                     .color = rs->border,
+                                     .width = rs->border_width,
+                                     .radius = btn_radius,
+                                 });
     }
 
     /* Content layout & drawing */
@@ -116,7 +116,7 @@ void lensi_skin_button(optics_ui *ui, optics_ui_node *n, const optics_ui_widget_
     if (disabled) {
         text_col = rs->disabled;
     } else if (rec->content.variant == OPTICS_UI_BUTTON_PRIMARY) {
-        float lum = lensi_color_luminance(bg);
+        float lum = optics_ui__color_luminance(bg);
         text_col = lum > 0.5f ? optics_gfx_color_rgba_premul(0, 0, 0, 255)
                               : optics_gfx_color_rgba_premul(255, 255, 255, 255);
     } else {
@@ -127,50 +127,50 @@ void lensi_skin_button(optics_ui *ui, optics_ui_node *n, const optics_ui_widget_
         float is = fminf(glyph_s, fminf(w, h) - 2.0f * rs->padding);
         float ix = (w - is) * 0.5f;
         float iy = (h - is) * 0.5f;
-        lensi_drawlist_push(ui, n,
-                            (optics_ui_draw_cmd){
-                                .kind = OPTICS_UI_DRAW_IMAGE,
-                                .rel = {ix, iy, is, is},
-                                .color = optics_gfx_color_rgba_premul(255, 255, 255, 255),
-                                .image = rec->content.image,
-                            });
+        optics_ui__drawlist_push(ui, n,
+                                 (optics_ui_draw_cmd){
+                                     .kind = OPTICS_UI_DRAW_IMAGE,
+                                     .rel = {ix, iy, is, is},
+                                     .color = optics_gfx_color_rgba_premul(255, 255, 255, 255),
+                                     .image = rec->content.image,
+                                 });
     } else if (has_icon && !has_label) {
         float ix = (w - glyph_s) * 0.5f;
         float iy = (h - glyph_s) * 0.5f;
-        lensi_drawlist_push(ui, n,
-                            (optics_ui_draw_cmd){
-                                .kind = OPTICS_UI_DRAW_ICON,
-                                .rel = {ix, iy, glyph_s, glyph_s},
-                                .color = text_col,
-                                .width = 2.0f * (glyph_s / 24.0f),
-                                .icon_id = rec->content.icon,
-                            });
+        optics_ui__drawlist_push(ui, n,
+                                 (optics_ui_draw_cmd){
+                                     .kind = OPTICS_UI_DRAW_ICON,
+                                     .rel = {ix, iy, glyph_s, glyph_s},
+                                     .color = text_col,
+                                     .width = 2.0f * (glyph_s / 24.0f),
+                                     .icon_id = rec->content.icon,
+                                 });
     } else if (has_label) {
         float text_y = fmaxf((h - rec->content.text.height) * 0.5f - 1.0f, 0.0f);
         float text_x = rs->padding;
         if (has_icon) {
             float ix = rs->padding;
             float iy = (h - glyph_s) * 0.5f;
-            lensi_drawlist_push(ui, n,
-                                (optics_ui_draw_cmd){
-                                    .kind = OPTICS_UI_DRAW_ICON,
-                                    .rel = {ix, iy, glyph_s, glyph_s},
-                                    .color = text_col,
-                                    .width = 2.0f * (glyph_s / 24.0f),
-                                    .icon_id = rec->content.icon,
-                                });
+            optics_ui__drawlist_push(ui, n,
+                                     (optics_ui_draw_cmd){
+                                         .kind = OPTICS_UI_DRAW_ICON,
+                                         .rel = {ix, iy, glyph_s, glyph_s},
+                                         .color = text_col,
+                                         .width = 2.0f * (glyph_s / 24.0f),
+                                         .icon_id = rec->content.icon,
+                                     });
             text_x += glyph_s + 6.0f;
         } else {
             text_x = fmaxf((w - rec->content.text.width) * 0.5f, rs->padding);
         }
 
-        lensi_drawlist_push(ui, n,
-                            (optics_ui_draw_cmd){
-                                .kind = OPTICS_UI_DRAW_TEXT,
-                                .rel = {text_x, text_y, 0, 0},
-                                .color = text_col,
-                                .text = rec->content.label,
-                                .text_size = rs->font_size,
-                            });
+        optics_ui__drawlist_push(ui, n,
+                                 (optics_ui_draw_cmd){
+                                     .kind = OPTICS_UI_DRAW_TEXT,
+                                     .rel = {text_x, text_y, 0, 0},
+                                     .color = text_col,
+                                     .text = rec->content.label,
+                                     .text_size = rs->font_size,
+                                 });
     }
 }

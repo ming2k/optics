@@ -175,7 +175,7 @@ static void test_report_shape(optics_gfx_device *d) {
             OT_EXPECT(all[i].bytes_live == 64);
             OT_EXPECT(all[i].lifetime == OPTICS_GFX_LIFETIME_CONTEXT);
             OT_EXPECT(all[i].scope == OPTICS_GFX_SCOPE_CONTEXT);
-            /* FLUX_SITE_NONE resolves to nullptr by design: an unclaimed
+            /* OPTICS_GFX_SITE_NONE resolves to nullptr by design: an unclaimed
              * site slot leaves no literal at all, which is what keeps a
              * non-attribution build free of site machinery. A kind that does
              * have a site slot must carry it. */
@@ -185,7 +185,7 @@ static void test_report_shape(optics_gfx_device *d) {
                                                               .kind = kind,
                                                               .owner = owner,
                                                               .out = &probe}) == OPTICS_GFX_OK);
-            OT_EXPECT(all[i].site == nullptr); /* probe uses FLUX_SITE_NONE */
+            OT_EXPECT(all[i].site == nullptr); /* probe uses OPTICS_GFX_SITE_NONE */
         }
     }
     OT_EXPECT(saw_probe);
@@ -253,7 +253,7 @@ static void test_interning_bound_is_visible(optics_gfx_device *d) {
                                    "tests/observe/bound", 0);
 }
 
-/* The site vocabulary must actually resolve. FLUX_SITE_NONE maps to nullptr
+/* The site vocabulary must actually resolve. OPTICS_GFX_SITE_NONE maps to nullptr
  * (no literal), and a claimed slot must map to a real label — otherwise the
  * enum would be decorative and the report's site column permanently empty. */
 static void test_site_vocabulary(void) {
@@ -261,7 +261,7 @@ static void test_site_vocabulary(void) {
     OT_EXPECT(optics_gfx_site_label(OPTICS_GFX_SITE_COUNT) == nullptr);
     const char *host = optics_gfx_site_label(OPTICS_GFX_SITE_HOST_ALLOC);
     OT_EXPECT(host != nullptr);
-    OT_EXPECT(host && strstr(host, "flux_internal_alloc") != nullptr);
+    OT_EXPECT(host && strstr(host, "optics_gfx_internal_alloc") != nullptr);
     OT_EXPECT(optics_gfx_site_label(OPTICS_GFX_SITE_VK_MEMORY) != nullptr);
     OT_EXPECT(optics_gfx_site_label(OPTICS_GFX_SITE_VK_IMAGE) != nullptr);
     OT_EXPECT(optics_gfx_site_label(OPTICS_GFX_SITE_VK_BUFFER) != nullptr);

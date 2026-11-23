@@ -1,5 +1,5 @@
 /*
- * iris/theme.h — system colour-scheme query + live watching.
+ * window/theme.h — system colour-scheme query + live watching.
  *
  * Reads the user's colour-scheme preference at startup, and (when the
  * platform supports it) watches for live changes.
@@ -7,12 +7,12 @@
  * Startup query is always available. Live watching is callback-based: the
  * platform watches the OS setting on its own (on Linux, a dedicated thread
  * pumps the org.freedesktop.portal.Settings D-Bus signal SettingChanged)
- * and delivers changes on the iris main thread — the thread running
- * iris_app_run — via the backend's wakeup seam. No fd, poll mask, or pump
+ * and delivers changes on the window main thread — the thread running
+ * optics_window_run — via the backend's wakeup seam. No fd, poll mask, or pump
  * call is exposed here; each backend wires delivery into its own event
  * loop (Wayland: poll; Win32: thread messages; Cocoa: CFRunLoop).
  *
- * When live watching is unavailable, iris_color_scheme_watch returns
+ * When live watching is unavailable, optics_window_color_scheme_watch returns
  * non-zero and callers fall back to the startup-only behaviour (no live
  * updates; restart the app to pick up a change).
  */
@@ -33,7 +33,7 @@ typedef enum optics_window_color_scheme : uint32_t {
 } optics_window_color_scheme;
 
 /* Query the system colour scheme once at call time. Returns
- * IRIS_COLOR_SCHEME_PREFER_DARK when no preference is discoverable
+ * OPTICS_WINDOW_COLOR_SCHEME_PREFER_DARK when no preference is discoverable
  * (safe default for a UI library). */
 OPTICS_WINDOW_API optics_window_color_scheme optics_window_query_system_color_scheme(void);
 
@@ -46,10 +46,10 @@ OPTICS_WINDOW_API bool optics_window_system_prefers_dark(void);
 
 /* Callback invoked whenever the system colour scheme changes.
  *
- * Threading guarantee: `cb` always runs on the iris main thread (the
- * thread executing iris_app_run), serialized with the event loop — it is
- * safe to touch lens or any other main-thread-affine state from it.
- * Delivery requires a running iris_app_run loop: changes detected while
+ * Threading guarantee: `cb` always runs on the window main thread (the
+ * thread executing optics_window_run), serialized with the event loop — it is
+ * safe to touch ui or any other main-thread-affine state from it.
+ * Delivery requires a running optics_window_run loop: changes detected while
  * no loop is active are dropped. */
 typedef void (*optics_window_color_scheme_changed_fn)(optics_window_color_scheme new_scheme,
                                                       void *user);
@@ -61,15 +61,15 @@ typedef void (*optics_window_color_scheme_changed_fn)(optics_window_color_scheme
  *       query.
  *
  * `cb` is invoked on the first detected change after this call. The current
- * value is NOT reported at startup — call iris_query_system_color_scheme
+ * value is NOT reported at startup — call optics_window_query_system_color_scheme
  * to seed it.
  *
  * One watcher per process: calling this again while watching replaces the
- * callback and user pointer (and returns 0). Must be called from the iris
+ * callback and user pointer (and returns 0). Must be called from the window
  * main thread.
  *
  * This slot belongs to the HOST. The platform backend keeps its own
- * internal registration (to re-apply the lens theme live) through a
+ * internal registration (to re-apply the ui theme live) through a
  * separate reserved slot, so a host watch/unwatch never disturbs the
  * backend's, and backend teardown never cancels the host's. */
 OPTICS_WINDOW_API int optics_window_color_scheme_watch(optics_window_color_scheme_changed_fn cb,
@@ -78,11 +78,11 @@ OPTICS_WINDOW_API int optics_window_color_scheme_watch(optics_window_color_schem
 /* Stop watching and release platform resources. Blocks until the
  * platform's watcher thread (if any) has exited; `cb` is guaranteed not
  * to run after this returns. Safe to call when not watching. Must be
- * called from the iris main thread. */
+ * called from the window main thread. */
 OPTICS_WINDOW_API void optics_window_color_scheme_unwatch(void);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* IRIS_THEME_H */
+#endif /* OPTICS_WINDOW_THEME_H */

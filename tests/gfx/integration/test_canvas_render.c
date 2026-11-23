@@ -470,7 +470,7 @@ int main(void) {
         optics_gfx_path *p = nullptr;
         OT_EXPECT(optics_gfx_path_create(&p, &arena) == OPTICS_GFX_OK);
         optics_gfx_path_add_circle(p, cx, cy, r_out);
-        /* Inner contour wound opposite to flux_path_add_circle's
+        /* Inner contour wound opposite to optics_gfx_path_add_circle's
          * direction → a hole per ADR-0011. */
         optics_gfx_path_move_to(p, cx + r_in, cy);
         for (int i = 1; i < 32; ++i) {

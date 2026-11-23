@@ -3,7 +3,7 @@ id: ADR-0130
 title: "Leak coverage is a mechanical gate: no resource kind ships without a drain assertion"
 status: accepted
 date: 2026-11-02
-scope: [tools, tests, flux, glyph, lens, vista, prism, iris, bindings]
+scope: [tools, tests, gfx, text, ui, scene, material, window, bindings]
 superseded_by: null
 negative_knowledge: true
 ---

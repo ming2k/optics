@@ -3,8 +3,8 @@
  *
  * This binary deliberately links *only* the shared library — it must never
  * compile icon_runtime.c / icon_mask.c. A runtime SVG registered
- * here is stored in liblens's own icon registry, and lens's replay (also inside
- * liblens) resolves it from that same registry. Building a local copy of the
+ * here is stored in liboptics_ui's own icon registry, and ui's replay (also inside
+ * liboptics_ui) resolves it from that same registry. Building a local copy of the
  * registry would give the test two registries: the registration would land in the
  * local one while replay read the library's, and every icon would silently render
  * blank. That failure mode is invisible in a pixel assertion — it looks exactly
@@ -19,8 +19,8 @@
  *     degrades but content never does;
  *   - a built-in icon still follows the theme colour (collapsed single run).
  */
-#include "lens_test.h"
 #include "optics_test.h"
+#include "ui_test.h"
 #include <optics/gfx/canvas.h>
 #include <optics/gfx/canvas_cpu.h>
 #include <optics/ui.h>

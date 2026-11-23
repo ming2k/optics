@@ -1,14 +1,14 @@
 /* test_abi_guards.c — the documented size guards are actually implemented.
  *
- * ADR-0032 promised that lens copies caller structs "clamped to
- * min(caller, library)"; before this test existed, lens_theme was copied
- * raw (full-struct) while lens_input was clamped, and lens_desc had no
+ * ADR-0032 promised that ui copies caller structs "clamped to
+ * min(caller, library)"; before this test existed, optics_ui_theme was copied
+ * raw (full-struct) while optics_ui_input was clamped, and optics_ui_desc had no
  * guard at all. These tests pin the clamp semantics for all three so a
  * future regression cannot silently reintroduce an over-read/over-write.
  */
 
-#include "lens_test.h"
 #include "optics_test.h"
+#include "ui_test.h"
 
 #include <optics/ui.h>
 
@@ -61,7 +61,7 @@ static void test_theme_newer_caller_clamped(void) {
     optics_ui_release(ui);
 }
 
-/* lens_desc guard: size 0 (every existing caller today) still works and
+/* optics_ui_desc guard: size 0 (every existing caller today) still works and
  * takes the legacy full-struct path; an explicit sizeof() also works. */
 static void test_desc_guard_both_spellings(void) {
     optics_ui *a = nullptr, *b = nullptr;

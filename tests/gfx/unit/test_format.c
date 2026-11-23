@@ -1,12 +1,12 @@
 /*
- * flux_format ↔ VkFormat round-trip and edge cases.
+ * optics_gfx_format ↔ VkFormat round-trip and edge cases.
  */
 #include "optics_test.h"
 #include <optics/gfx.h>
 #include <optics/gfx/vulkan.h>
 
 int main(void) {
-    /* Every defined flux_format must round-trip through to_vk → from_vk. */
+    /* Every defined optics_gfx_format must round-trip through to_vk → from_vk. */
     static const optics_gfx_format all[] = {
         OPTICS_GFX_FORMAT_UNDEFINED,     OPTICS_GFX_FORMAT_R8_UNORM,
         OPTICS_GFX_FORMAT_RGBA8_UNORM,   OPTICS_GFX_FORMAT_BGRA8_UNORM,
@@ -27,10 +27,10 @@ int main(void) {
     }
 
     /* Unknown VkFormat → UNDEFINED. R32_UINT is valid Vulkan but
-     * deliberately not exposed by flux_format. */
+     * deliberately not exposed by optics_gfx_format. */
     OT_EXPECT(optics_gfx_format_from_vk(VK_FORMAT_R32_UINT) == OPTICS_GFX_FORMAT_UNDEFINED);
 
-    /* Out-of-range flux_format value → UNDEFINED on to_vk. */
+    /* Out-of-range optics_gfx_format value → UNDEFINED on to_vk. */
     OT_EXPECT(optics_gfx_format_to_vk((optics_gfx_format)999) == VK_FORMAT_UNDEFINED);
 
     return OT_REPORT();

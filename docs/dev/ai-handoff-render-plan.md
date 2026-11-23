@@ -1,14 +1,18 @@
 # AI Handoff — RenderPlan migration and production hardening
 
-Status: **in progress, uncommitted worktree**. Read this before touching Flux.
-Last verified checkpoint: 1B-2B, all 256 tests green.
+Status: **in progress**. Read this before touching gfx's RenderPlan.
+Last landed checkpoint: 1B-2B (committed in `c60bd31b`). The next cut, 1B-3A,
+has not started: as of 2026-11-23 `libs/gfx/src/core/render_plan.h` has no
+freeze state and `optics_gfx_frame_submit` does not validate the plan. The
+current test count is whatever `meson test -C build` reports; do not copy a
+number into this file.
 
 ## Mission
 
 Converge Optics on ADR-0089/0092: one target-specific RenderPlan compiler and
 one Submission owner. No second execution path, no second liveness table, no
-legacy fallback. This worktree also contains the completed ADR-0090 ownership/
-serialization work; do not revert it.
+legacy fallback. The completed ADR-0090 ownership/serialization work is part
+of the same program; see "Already landed".
 
 ## Already landed
 
@@ -17,45 +21,35 @@ serialization work; do not revert it.
   ICC/LUT shared color state, snapshot/update serialization, OOM lanes.
 - **ADR-0157**: versioned DisplayList wire protocol, serializer/deserializer,
   resource ID callbacks, fuzz harness + corpus, ci-fuzz matrix entry.
-- **ADR-0089 1A**: `flux_render_plan` IR, target contract, pure validator
+- **ADR-0089 1A**: `optics_gfx_render_plan` IR, target contract, pure validator
   (`libs/gfx/src/core/render_plan.{h,c}`, `tests/gfx/unit/test_render_plan.c`).
-- **ADR-0089 1B-1**: `flux_canvas_begin` compiles its pass into the frame's
+- **ADR-0089 1B-1**: `optics_gfx_canvas_begin` compiles its pass into the frame's
   RenderPlan (target contract, write access, damage region, sequential pass
   dependency) and validates before opening the backend pass.
 - **ADR-0089 1B-2A**: deferred effects are `EFFECT` nodes in the same plan;
-  `flux_plan` is execution state only (arena, tokens, pool, counters). The
-  former `flux_plan_pass` liveness table is deleted.
+  `optics_gfx_plan` is execution state only (arena, tokens, pool, counters). The
+  former per-pass liveness table is deleted.
 - **ADR-0089 1B-2B**: managed image uploads that run while a frame records are
   `UPLOAD` nodes (staging READ, destination WRITE, last-writer dependency);
   the content → acquired presentation copy is an `OUTPUT` node; Canvas draws
   append sampled-image READs with producer dependencies. Validation runs
-  before each new node's command is emitted. See
-  `docs/dev/render-plan-1b2b.md`.
+  before each new node's command is emitted.
 
 ## Key files
 
-- `libs/gfx/src/core/render_plan.h/.c` — IR, validator, last-writer lookup,
+- `libs/gfx/src/core/render_plan.{h,c}` — IR, validator, last-writer lookup,
   node access/dependency append.
-- `libs/gfx/src/core/plan.h/.c` — deferred-effect execution over RenderPlan,
-  `flux_frame_plan_upload`.
+- `libs/gfx/src/core/plan.{h,c}` — deferred-effect execution over RenderPlan,
+  `optics_gfx_frame_plan_upload`.
 - `libs/gfx/src/core/frame.c` — frame begin/current-frame stack, presentation
   `OUTPUT` node, submit.
 - `libs/gfx/src/core/surface.c` — resize/release leave the current-frame stack.
 - `libs/gfx/src/core/oneshot.c` — upload records its node before the copy.
 - `libs/gfx/src/canvas/canvas.c` — Canvas pass compile gate, sampled-image
   reads, per-pass node lifetime.
-- `libs/gfx/src/effect/effect.c` — `flux_frame_register_pass` consumers.
-- `libs/gfx/src/core/internal.h` — `flux_frame` owns `render_plan` and `plan`.
-- `docs/dev/render-plan-1b2a.md` — 1B-2A design/deletion gate.
-- `docs/dev/render-plan-1b2b.md` — 1B-2B design/deletion gate.
+- `libs/gfx/src/effect/effect.c` — `optics_gfx_frame_register_pass` consumers.
+- `libs/gfx/src/core/internal.h` — `optics_gfx_frame` owns `render_plan` and `plan`.
 - `docs/dev/architecture-implementation-status.md` — ADR status matrix.
-
-## Worktree warning
-
-This is an **uncommitted linked worktree** with many intentional changes across
-ADR-0090, ADR-0157 and RenderPlan. Do not `git reset`, `git checkout -- .`, or
-revert files you did not inspect. `Cargo.lock`/local Optics mode may be
-worktree-local; follow the repository hook, do not bypass it.
 
 ## Next atomic step: 1B-3A
 
@@ -65,7 +59,7 @@ submission authoritative.
 Required work:
 
 1. **Validate at submit**
-   - run `flux_render_plan_validate` at `flux_frame_submit` before
+   - run `optics_gfx_render_plan_validate` at `optics_gfx_frame_submit` before
      `vkEndCommandBuffer`, after the presentation `OUTPUT` node exists;
    - a failed plan must abort the submission with no partial publication.
 2. **Freeze order**
@@ -105,7 +99,7 @@ Acceptance:
 
 ## Non-negotiable invariants
 
-- **One liveness graph**: `flux_render_plan`. `flux_plan` is execution state
+- **One liveness graph**: `optics_gfx_render_plan`. `optics_gfx_plan` is execution state
   only; never add a second pass/provider/requires table.
 - **No dual execution**: do not add a “new path” beside the direct Canvas path
   without deleting the old one in the same completion stage.
@@ -140,10 +134,10 @@ that is an environment issue, not a code failure. CI installs it.
 - Effect provider resolution must scan **all** RenderPlan write accesses, not
   only effect outputs: an effect may sample a Canvas target written by an
   earlier Canvas node.
-- `flux_plan.pass_count` counts **EFFECT nodes**, but token indexes are
+- `optics_gfx_plan.pass_count` counts **EFFECT nodes**, but token indexes are
   **RenderPlan node indexes** (Canvas/upload/output nodes interspersed). Never
   use `pass_count` to bound a node index.
-- `flux_plan_reset` runs before `flux_render_plan_init` in frame begin; it must
+- `optics_gfx_plan_reset` runs before `optics_gfx_render_plan_init` in frame begin; it must
   clear old effect output pending flags from the previous plan.
 - Canvas pass target contract uses the surface target; an image attachment is
   the WRITE resource but not a different target contract in 1B-1.
@@ -161,9 +155,9 @@ that is an environment issue, not a code failure. CI installs it.
   is submitted *before* the frame command buffer, so a later upload adds
   ordering edges from every existing reader to itself. A Canvas pass that
   writes the upload destination is a real conflict and must fail.
-- An upload node is added only when `flux_frame_current()` names a recording
+- An upload node is added only when `optics_gfx_frame_current()` names a recording
   frame. Uploads outside a frame are already ordered by the batch flush in
-  `flux_surface_begin_frame`; do not invent a device-level current frame.
+  `optics_gfx_surface_begin_frame`; do not invent a device-level current frame.
 
 ## Suggested next prompt
 

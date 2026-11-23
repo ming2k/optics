@@ -3,6 +3,9 @@ id: ADR-0080
 title: "Explicit offscreen composition graph above flux"
 status: accepted
 date: 2026-08-25
+scope: gfx-composition-graph
+superseded_by: null
+negative_knowledge: true
 ---
 
 # ADR-0080: Explicit offscreen composition graph above flux
@@ -116,4 +119,4 @@ second graph model.
 - [ADR-0017: Canvas render-target capture](0017-canvas-render-target-capture.md)
 - [ADR-0074: Effect intake path](0074-effect-intake-path.md)
 - [ADR-0079: Layered backdrop material](0079-layered-backdrop-material.md)
-- [Composition Graph Reference](../reference/composition-graph.md)
+- Composition Graph Reference: `docs/reference/composition-graph.md`, removed with the retired crate (ADR-0173; see git history)

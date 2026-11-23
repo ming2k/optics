@@ -3,6 +3,9 @@ id: ADR-0046
 title: "Liquid glass as a convex-lens material"
 status: accepted
 date: 2026-08-01
+scope: ui
+superseded_by: null
+negative_knowledge: true
 ---
 
 # ADR-0046: Liquid glass as a convex-lens material

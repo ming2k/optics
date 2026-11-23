@@ -1,5 +1,5 @@
 /*
- * flux/curve.h — analytic curve kernel (ADR-0115).
+ * gfx/curve.h — analytic curve kernel (ADR-0115).
  *
  * The single authority for curve geometry semantics. It reduces Bézier
  * input to line/quadratic segments with a *bounded* deviation, offsets them
@@ -7,7 +7,7 @@
  * winding) a rasterizer needs to compute per-pixel coverage. It never emits
  * triangles and never names a backend.
  *
- * Leaf module: depends only on <flux/math.h> and the core error surface. It
+ * Leaf module: depends only on <optics/gfx/math.h> and the core error surface. It
  * does not include canvas, scene, or compute (ADR-0016, INV-CRV-02).
  *
  * Determinism: for identical input the kernel produces identical output on
@@ -41,9 +41,9 @@ typedef enum optics_gfx_curve_op : uint32_t {
  * to a rasterizer, so a backend can never reinterpret raw control points
  * (INV-CRV-01). */
 typedef struct optics_gfx_curve_seg {
-    uint32_t op; /* flux_curve_op */
+    uint32_t op; /* optics_gfx_curve_op */
     optics_gfx_point p0;
-    optics_gfx_point p1; /* control point; for FLUX_CURVE_LINE it is (p0+p2)/2 */
+    optics_gfx_point p1; /* control point; for OPTICS_GFX_CURVE_LINE it is (p0+p2)/2 */
     optics_gfx_point p2;
 } optics_gfx_curve_seg;
 
@@ -54,13 +54,13 @@ typedef struct optics_gfx_segment {
     float x1, y1;
 } optics_gfx_segment;
 
-/* Construct a reduced segment. `p1` is ignored for FLUX_CURVE_LINE. */
+/* Construct a reduced segment. `p1` is ignored for OPTICS_GFX_CURVE_LINE. */
 OPTICS_GFX_API optics_gfx_curve_seg optics_gfx_curve_seg_make(optics_gfx_curve_op op,
                                                               optics_gfx_point p0,
                                                               optics_gfx_point p1,
                                                               optics_gfx_point p2);
 
-/* Fill rule for containment. Mirrors flux_fill_rule (canvas) but is
+/* Fill rule for containment. Mirrors optics_gfx_fill_rule (canvas) but is
  * declared here so the kernel stays a leaf module. The caller maps one to
  * the other; they are the same two values. */
 typedef enum optics_gfx_curve_fill : uint32_t {
@@ -134,10 +134,10 @@ OPTICS_GFX_API uint32_t optics_gfx_curve_wang_quad(optics_gfx_point p0, optics_g
 /* Reduce a cubic to line/quadratic segments whose maximum deviation from
  * the cubic is <= tol. The cubic is first split at its inflections and cusp
  * (a quadratic cannot represent an S-curve or a cusp), then each monotone
- * piece is reduced with the exact FLUX_CURVE_QUAD_REDUCTION_ERROR bound,
+ * piece is reduced with the exact OPTICS_GFX_CURVE_QUAD_REDUCTION_ERROR bound,
  * subdividing at t = 1/2 while the bound is exceeded.
  *
- * Writes at most `cap` segments to `out`. Returns FLUX_OK and the produced
+ * Writes at most `cap` segments to `out`. Returns OPTICS_GFX_OK and the produced
  * count on success. On any failure (tol <= 0, non-finite input, unsatisfiable
  * within `cap`, or exhaustion of the subdivision budget) it writes nothing,
  * sets `*out_count` to 0, and returns an explicit error — never a partial or
@@ -157,7 +157,7 @@ OPTICS_GFX_NODISCARD OPTICS_GFX_API optics_gfx_result optics_gfx_curve_cubic_red
  *
  * The offset is undefined where the segment's tangent vanishes (a cusp
  * endpoint), so this is fallible: on a degenerate normal it writes nothing
- * and returns FLUX_ERROR_INVALID_STATE rather than emitting a NaN or an
+ * and returns OPTICS_GFX_ERROR_INVALID_STATE rather than emitting a NaN or an
  * un-offset segment (INV-CRV-04). */
 OPTICS_GFX_NODISCARD OPTICS_GFX_API optics_gfx_result
 optics_gfx_curve_seg_offset(optics_gfx_curve_seg s, float dist, optics_gfx_curve_seg *out);
@@ -214,7 +214,7 @@ OPTICS_GFX_API bool optics_gfx_curve_cover_contains(optics_gfx_curve_cover cover
  * *reference* evaluator, not the analytic area the coverage backends of
  * ADR-0116 must produce. Its purpose is cross-validation — it computes
  * coverage from the winding of curve strips, an entirely different route from
- * the closed-form distance fields in <flux/sdf.h>, so agreement between the two
+ * the closed-form distance fields in <optics/gfx/sdf.h>, so agreement between the two
  * on the same shape is independent evidence that both are right (see
  * test_curve's circle test). `n` is clamped to [1, 64].
  *
@@ -236,4 +236,4 @@ OPTICS_GFX_API bool optics_gfx_curve_seg_is_finite(optics_gfx_curve_seg s);
 }
 #endif
 
-#endif /* FLUX_CURVE_H */
+#endif /* OPTICS_GFX_CURVE_H */

@@ -13,8 +13,8 @@
  *
  *     B(t) − Q(t) = (E/6) · 3t(1−t)(1−2t),   E = P3 − 3·P2 + 3·P1 − P0,
  *
- * so |B − Q| ≤ |E| · FLUX_CURVE_QUAD_REDUCTION_ERROR with
- * FLUX_CURVE_QUAD_REDUCTION_ERROR = 1/(6·2√3).
+ * so |B − Q| ≤ |E| · OPTICS_GFX_CURVE_QUAD_REDUCTION_ERROR with
+ * OPTICS_GFX_CURVE_QUAD_REDUCTION_ERROR = 1/(6·2√3).
  */
 
 #include <optics/gfx/curve.h>
@@ -24,12 +24,12 @@
 /* ------------------------------------------------------------------ */
 /*  Core error surface                                                 */
 /*                                                                    */
-/*  flux_set_last_error is declared by src/core/internal.h. It is       */
+/*  optics_gfx_set_last_error is declared by src/core/internal.h. It is       */
 /*  re-declared here, verbatim and deliberately, so this translation    */
 /*  unit does not drag core's Vulkan-bearing internal header into a     */
 /*  pure-curve compilation (INV-CRV-02: the kernel has no device or     */
 /*  backend dependency). The symbol lives in core/result.c and is       */
-/*  always linked into libflux.                                         */
+/*  always linked into liboptics_gfx.                                         */
 /* ------------------------------------------------------------------ */
 void optics_gfx_set_last_error(optics_gfx_result code, const char *function, const char *file,
                                int line, const char *message, int32_t backend_code);
@@ -361,18 +361,19 @@ optics_gfx_result optics_gfx_curve_cubic_reduce(optics_gfx_point p0, optics_gfx_
     if (out_count)
         *out_count = 0;
     if (!out || cap == 0) {
-        CURVE_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT, "flux_curve_cubic_reduce: no output storage");
+        CURVE_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT,
+                   "optics_gfx_curve_cubic_reduce: no output storage");
         return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
     }
     if (!(tol > 0.0f) || !isfinite(tol)) {
         CURVE_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT,
-                   "flux_curve_cubic_reduce: tol must be finite > 0");
+                   "optics_gfx_curve_cubic_reduce: tol must be finite > 0");
         return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
     }
     if (!optics_gfx_curve_point_is_finite(p0) || !optics_gfx_curve_point_is_finite(p1) ||
         !optics_gfx_curve_point_is_finite(p2) || !optics_gfx_curve_point_is_finite(p3)) {
         CURVE_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT,
-                   "flux_curve_cubic_reduce: non-finite control point");
+                   "optics_gfx_curve_cubic_reduce: non-finite control point");
         return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
     }
 
@@ -424,7 +425,7 @@ optics_gfx_result optics_gfx_curve_cubic_reduce(optics_gfx_point p0, optics_gfx_
             if (out_count)
                 *out_count = 0;
             CURVE_FAIL(OPTICS_GFX_ERROR_OUT_OF_RANGE,
-                       "flux_curve_cubic_reduce: tolerance not met within cap/budget");
+                       "optics_gfx_curve_cubic_reduce: tolerance not met within cap/budget");
             return OPTICS_GFX_ERROR_OUT_OF_RANGE;
         }
     }
@@ -441,14 +442,14 @@ optics_gfx_result optics_gfx_curve_seg_offset(optics_gfx_curve_seg s, float dist
                                               optics_gfx_curve_seg *out) {
     if (!out || !optics_gfx_curve_seg_is_finite(s) || !isfinite(dist)) {
         CURVE_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT,
-                   "flux_curve_seg_offset: bad segment or distance");
+                   "optics_gfx_curve_seg_offset: bad segment or distance");
         return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
     }
     optics_gfx_point n0 = optics_gfx_curve_quad_normal(s, 0.0f);
     optics_gfx_point n2 = optics_gfx_curve_quad_normal(s, 1.0f);
     if ((n0.x == 0.0f && n0.y == 0.0f) || (n2.x == 0.0f && n2.y == 0.0f)) {
         CURVE_FAIL(OPTICS_GFX_ERROR_INVALID_STATE,
-                   "flux_curve_seg_offset: tangent vanishes at an endpoint (cusp)");
+                   "optics_gfx_curve_seg_offset: tangent vanishes at an endpoint (cusp)");
         return OPTICS_GFX_ERROR_INVALID_STATE;
     }
 
@@ -463,7 +464,7 @@ optics_gfx_result optics_gfx_curve_seg_offset(optics_gfx_curve_seg s, float dist
     optics_gfx_point nm = optics_gfx_curve_quad_normal(s, 0.5f);
     if (nm.x == 0.0f && nm.y == 0.0f) {
         CURVE_FAIL(OPTICS_GFX_ERROR_INVALID_STATE,
-                   "flux_curve_seg_offset: tangent vanishes at the midpoint");
+                   "optics_gfx_curve_seg_offset: tangent vanishes at the midpoint");
         return OPTICS_GFX_ERROR_INVALID_STATE;
     }
     optics_gfx_point mid = optics_gfx_curve_quad_eval(s, 0.5f);
@@ -480,12 +481,12 @@ optics_gfx_result optics_gfx_curve_seg_offset_retrograde(optics_gfx_curve_seg s,
                                                          float *t0, float *t1, bool *has) {
     if (!t0 || !t1 || !has) {
         CURVE_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT,
-                   "flux_curve_seg_offset_retrograde: null out-parameter");
+                   "optics_gfx_curve_seg_offset_retrograde: null out-parameter");
         return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
     }
     if (!optics_gfx_curve_seg_is_finite(s) || !isfinite(dist)) {
         CURVE_FAIL(OPTICS_GFX_ERROR_INVALID_ARGUMENT,
-                   "flux_curve_seg_offset_retrograde: non-finite segment or distance");
+                   "optics_gfx_curve_seg_offset_retrograde: non-finite segment or distance");
         return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
     }
     *t0 = 0.0f;

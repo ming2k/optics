@@ -1,6 +1,6 @@
-# Headless tests for aperture, the lens ↔ iris application shell.
+# Headless tests for app, the ui ↔ window application shell.
 #
-# aperture.c is compiled directly so the test can reach the host binding
+# app.c is compiled directly so the test can reach the host binding
 # (hidden visibility) and drive it the way a platform backend does, without a
 # compositor.
 exe_binding = executable('test_host_binding',

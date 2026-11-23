@@ -3,6 +3,9 @@ id: ADR-0093
 title: "C state contracts and Rust execution sessions"
 status: accepted
 date: 2026-09-14
+scope: C API lifecycle, errors, and Rust bindings
+superseded_by: null
+negative_knowledge: true
 ---
 
 # ADR-0093: C state contracts and Rust execution sessions

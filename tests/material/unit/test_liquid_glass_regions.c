@@ -4,12 +4,12 @@
 
 #include <string.h>
 
-static bool same_region(liquid_glass_region a, liquid_glass_region b) {
+static bool same_region(optics_material__rect a, optics_material__rect b) {
     return a.x == b.x && a.y == b.y && a.width == b.width && a.height == b.height;
 }
 
-static bool contains_region(const liquid_glass_region *regions, uint32_t count,
-                            liquid_glass_region expected) {
+static bool contains_region(const optics_material__rect *regions, uint32_t count,
+                            optics_material__rect expected) {
     for (uint32_t i = 0; i < count; ++i) {
         if (same_region(regions[i], expected))
             return true;
@@ -55,15 +55,15 @@ int main(void) {
     group.shapes = group_shapes;
     group.shape_count = 1u;
     group.blend_radius = 4.0f;
-    liquid_glass_region bounds;
+    optics_material__rect bounds;
     OT_EXPECT(liquid_glass_group_dispatch_bounds(&group, 0.0f, 100u, 80u, &bounds));
-    OT_EXPECT(same_region(bounds, (liquid_glass_region){4u, 14u, 43u, 23u}));
+    OT_EXPECT(same_region(bounds, (optics_material__rect){4u, 14u, 43u, 23u}));
 
     group.shape_count = 2u;
     group_shapes[0].bounds = (optics_gfx_rect){-5.0f, 2.0f, 10.0f, 8.0f};
     group_shapes[1].bounds = (optics_gfx_rect){90.0f, 70.0f, 20.0f, 20.0f};
     OT_EXPECT(liquid_glass_group_dispatch_bounds(&group, 12.0f, 100u, 80u, &bounds));
-    OT_EXPECT(same_region(bounds, (liquid_glass_region){0u, 0u, 100u, 80u}));
+    OT_EXPECT(same_region(bounds, (optics_material__rect){0u, 0u, 100u, 80u}));
     group.shape_count = 1u;
     group_shapes[0].bounds = (optics_gfx_rect){200.0f, 10.0f, 8.0f, 8.0f};
     OT_EXPECT(!liquid_glass_group_dispatch_bounds(&group, 0.0f, 100u, 80u, &bounds));
@@ -121,27 +121,27 @@ int main(void) {
 
     /* Stats bounds: primary shape clipped to the image, rounded outward;
      * off-screen or zero-area bodies reduce an empty region. */
-    liquid_glass_region stats = liquid_glass_group_stats_bounds(&group, 100u, 80u);
+    optics_material__rect stats = liquid_glass_group_stats_bounds(&group, 100u, 80u);
     OT_EXPECT(stats.width == 0u && stats.height == 0u); /* group sits at x=200 */
     group_shapes[0].bounds = (optics_gfx_rect){-4.25f, 10.5f, 20.0f, 30.0f};
     stats = liquid_glass_group_stats_bounds(&group, 100u, 80u);
-    OT_EXPECT(same_region(stats, (liquid_glass_region){0u, 10u, 16u, 31u}));
+    OT_EXPECT(same_region(stats, (optics_material__rect){0u, 10u, 16u, 31u}));
     group_shapes[0].bounds = (optics_gfx_rect){90.0f, 60.0f, 40.0f, 40.0f};
     stats = liquid_glass_group_stats_bounds(&group, 100u, 80u);
-    OT_EXPECT(same_region(stats, (liquid_glass_region){90u, 60u, 10u, 20u}));
+    OT_EXPECT(same_region(stats, (optics_material__rect){90u, 60u, 10u, 20u}));
 
-    liquid_glass_region previous[LIQUID_GLASS_MAX_GROUPS] = {};
-    liquid_glass_region current[LIQUID_GLASS_MAX_GROUPS] = {};
-    liquid_glass_region clear[LIQUID_GLASS_MAX_CLEAR_REGIONS] = {};
+    optics_material__rect previous[LIQUID_GLASS_MAX_GROUPS] = {};
+    optics_material__rect current[LIQUID_GLASS_MAX_GROUPS] = {};
+    optics_material__rect clear[LIQUID_GLASS_MAX_CLEAR_REGIONS] = {};
     uint32_t clear_count = 0u;
 
     /* A new slot ignores stale bookkeeping and clears its full image once. */
-    previous[0] = (liquid_glass_region){4u, 4u, 10u, 10u};
-    current[0] = (liquid_glass_region){60u, 4u, 10u, 10u};
+    previous[0] = (optics_material__rect){4u, 4u, 10u, 10u};
+    current[0] = (optics_material__rect){60u, 4u, 10u, 10u};
     OT_EXPECT(liquid_glass_build_clear_regions(false, 100u, 80u, previous, 1u, current, 1u, clear,
                                                LIQUID_GLASS_MAX_CLEAR_REGIONS, &clear_count));
     OT_EXPECT(clear_count == 1u);
-    OT_EXPECT(same_region(clear[0], (liquid_glass_region){0u, 0u, 100u, 80u}));
+    OT_EXPECT(same_region(clear[0], (optics_material__rect){0u, 0u, 100u, 80u}));
 
     /* A moved body clears both old and new footprints without joining the
      * disjoint regions into a full-width bounding box. */
@@ -153,30 +153,30 @@ int main(void) {
 
     /* Shrink and transitive overlaps merge conservatively; touching-only
      * regions remain independently dispatchable. */
-    previous[0] = (liquid_glass_region){10u, 10u, 30u, 30u};
-    current[0] = (liquid_glass_region){15u, 15u, 5u, 5u};
+    previous[0] = (optics_material__rect){10u, 10u, 30u, 30u};
+    current[0] = (optics_material__rect){15u, 15u, 5u, 5u};
     OT_EXPECT(liquid_glass_build_clear_regions(true, 100u, 80u, previous, 1u, current, 1u, clear,
                                                LIQUID_GLASS_MAX_CLEAR_REGIONS, &clear_count));
     OT_EXPECT(clear_count == 1u);
     OT_EXPECT(same_region(clear[0], previous[0]));
 
-    previous[0] = (liquid_glass_region){0u, 0u, 10u, 10u};
-    current[0] = (liquid_glass_region){8u, 0u, 10u, 10u};
-    current[1] = (liquid_glass_region){16u, 0u, 10u, 10u};
+    previous[0] = (optics_material__rect){0u, 0u, 10u, 10u};
+    current[0] = (optics_material__rect){8u, 0u, 10u, 10u};
+    current[1] = (optics_material__rect){16u, 0u, 10u, 10u};
     OT_EXPECT(liquid_glass_build_clear_regions(true, 100u, 80u, previous, 1u, current, 2u, clear,
                                                LIQUID_GLASS_MAX_CLEAR_REGIONS, &clear_count));
     OT_EXPECT(clear_count == 1u);
-    OT_EXPECT(same_region(clear[0], (liquid_glass_region){0u, 0u, 26u, 10u}));
+    OT_EXPECT(same_region(clear[0], (optics_material__rect){0u, 0u, 26u, 10u}));
 
-    previous[0] = (liquid_glass_region){0u, 0u, 10u, 10u};
-    current[0] = (liquid_glass_region){10u, 0u, 10u, 10u};
+    previous[0] = (optics_material__rect){0u, 0u, 10u, 10u};
+    current[0] = (optics_material__rect){10u, 0u, 10u, 10u};
     OT_EXPECT(liquid_glass_build_clear_regions(true, 100u, 80u, previous, 1u, current, 1u, clear,
                                                LIQUID_GLASS_MAX_CLEAR_REGIONS, &clear_count));
     OT_EXPECT(clear_count == 2u);
 
     /* Empty current state removes every previous footprint. */
-    previous[0] = (liquid_glass_region){2u, 2u, 4u, 4u};
-    previous[1] = (liquid_glass_region){20u, 20u, 4u, 4u};
+    previous[0] = (optics_material__rect){2u, 2u, 4u, 4u};
+    previous[1] = (optics_material__rect){20u, 20u, 4u, 4u};
     OT_EXPECT(liquid_glass_build_clear_regions(true, 100u, 80u, previous, 2u, nullptr, 0u, clear,
                                                LIQUID_GLASS_MAX_CLEAR_REGIONS, &clear_count));
     OT_EXPECT(clear_count == 2u);
@@ -185,8 +185,8 @@ int main(void) {
 
     /* Worst case is exactly 64 previous + 64 current disjoint regions. */
     for (uint32_t i = 0; i < LIQUID_GLASS_MAX_GROUPS; ++i) {
-        previous[i] = (liquid_glass_region){i * 4u, 0u, 1u, 1u};
-        current[i] = (liquid_glass_region){i * 4u + 2u, 0u, 1u, 1u};
+        previous[i] = (optics_material__rect){i * 4u, 0u, 1u, 1u};
+        current[i] = (optics_material__rect){i * 4u + 2u, 0u, 1u, 1u};
     }
     memset(clear, 0, sizeof(clear));
     OT_EXPECT(liquid_glass_build_clear_regions(true, 300u, 2u, previous, LIQUID_GLASS_MAX_GROUPS,
@@ -225,7 +225,7 @@ int main(void) {
      * geometry, not a capacity shortfall, and silently clipping them would
      * hide a caller bug in the dispatch bounds. */
     {
-        liquid_glass_region bad[1] = {{(uint32_t)300, 0u, 4u, 1u}};
+        optics_material__rect bad[1] = {{(uint32_t)300, 0u, 4u, 1u}};
         OT_EXPECT(!liquid_glass_build_clear_regions(true, 300u, 2u, bad, 1u, nullptr, 0u, clear,
                                                     LIQUID_GLASS_MAX_CLEAR_REGIONS, &clear_count));
     }
@@ -242,11 +242,11 @@ int main(void) {
      * hardware happens to serialize away, so no pixel test can catch a
      * regression here. These cases are exact on purpose. */
     {
-        const liquid_glass_region a = {10u, 10u, 20u, 20u}; /* x 10..30, y 10..30 */
+        const optics_material__rect a = {10u, 10u, 20u, 20u}; /* x 10..30, y 10..30 */
 
         /* Disjoint on every side, and by exactly one pixel. */
-        liquid_glass_region left[1] = {{0u, 0u, 10u, 40u}};  /* right edge == a.x */
-        liquid_glass_region above[1] = {{0u, 0u, 40u, 10u}}; /* bottom edge == a.y */
+        optics_material__rect left[1] = {{0u, 0u, 10u, 40u}};  /* right edge == a.x */
+        optics_material__rect above[1] = {{0u, 0u, 40u, 10u}}; /* bottom edge == a.y */
         OT_EXPECT(!liquid_glass_region_overlaps_any(a, left, 1u));
         OT_EXPECT(!liquid_glass_region_overlaps_any(a, above, 1u));
         /* Symmetry: adjacency is not overlap in either direction. */
@@ -254,23 +254,23 @@ int main(void) {
         OT_EXPECT(!liquid_glass_regions_overlap(a, left[0]));
 
         /* A single shared pixel is overlap. */
-        liquid_glass_region touching[1] = {{29u, 29u, 5u, 5u}}; /* overlaps at (29,29) */
+        optics_material__rect touching[1] = {{29u, 29u, 5u, 5u}}; /* overlaps at (29,29) */
         OT_EXPECT(liquid_glass_region_overlaps_any(a, touching, 1u));
 
         /* Containment in both directions. */
-        liquid_glass_region inside[1] = {{15u, 15u, 2u, 2u}};
-        liquid_glass_region around[1] = {{0u, 0u, 64u, 64u}};
+        optics_material__rect inside[1] = {{15u, 15u, 2u, 2u}};
+        optics_material__rect around[1] = {{0u, 0u, 64u, 64u}};
         OT_EXPECT(liquid_glass_region_overlaps_any(a, inside, 1u));
         OT_EXPECT(liquid_glass_region_overlaps_any(a, around, 1u));
         OT_EXPECT(liquid_glass_region_overlaps_any(inside[0], &a, 1u));
 
         /* Identical rectangles (the stacked-card case) overlap. */
-        liquid_glass_region same[1] = {a};
+        optics_material__rect same[1] = {a};
         OT_EXPECT(liquid_glass_region_overlaps_any(a, same, 1u));
 
         /* One match anywhere in the list is enough; an empty list never
          * matches (the first dispatch of a frame needs no barrier). */
-        liquid_glass_region many[4] = {
+        optics_material__rect many[4] = {
             {0u, 0u, 4u, 4u}, {100u, 100u, 4u, 4u}, {12u, 12u, 1u, 1u}, {200u, 200u, 4u, 4u}};
         OT_EXPECT(liquid_glass_region_overlaps_any(a, many, 4u));
         OT_EXPECT(liquid_glass_region_overlaps_any(a, many, 3u));
@@ -279,9 +279,9 @@ int main(void) {
 
         /* A row of disjoint bodies — the toolbar layout the optimisation
          * exists for — must never report an overlap. */
-        liquid_glass_region row[8];
+        optics_material__rect row[8];
         for (uint32_t i = 0; i < 8u; ++i)
-            row[i] = (liquid_glass_region){i * 32u, 0u, 30u, 40u};
+            row[i] = (optics_material__rect){i * 32u, 0u, 30u, 40u};
         for (uint32_t i = 0; i < 8u; ++i)
             OT_EXPECT(!liquid_glass_region_overlaps_any(row[i], row, i));
     }

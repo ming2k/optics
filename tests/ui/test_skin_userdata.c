@@ -1,7 +1,7 @@
 /* test_skin_userdata.c — the closure-slot skin registration. */
 
-#include "lens_test.h"
 #include "optics_test.h"
+#include "ui_test.h"
 
 #include <optics/ui.h>
 

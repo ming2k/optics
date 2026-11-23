@@ -3,16 +3,16 @@
  *
  * The test executable defines its own vkAllocateMemory, which ELF
  * symbol resolution prefers over libvulkan's for every library in the
- * process (libflux included). A countdown arms the next N calls to
+ * process (liboptics_gfx included). A countdown arms the next N calls to
  * fail with an injected VkResult, letting us drive the GPU-OOM paths
  * on demand without any production-code hooks.
  *
  * Covers:
- *   A. pool-block allocation failure -> FLUX_ERROR_OUT_OF_MEMORY,
+ *   A. pool-block allocation failure -> OPTICS_GFX_ERROR_OUT_OF_MEMORY,
  *      structured error info, no leaked accounting, device still healthy
  *   B. reclaim-and-retry: an empty pooled block is handed back to the
  *      driver so a retry after one injected failure SUCCEEDS
- *   C. dedicated-path failure (>= 16 MiB) -> FLUX_ERROR_OUT_OF_MEMORY
+ *   C. dedicated-path failure (>= 16 MiB) -> OPTICS_GFX_ERROR_OUT_OF_MEMORY
  *      after both the attempt and the reclaim-retry are failed
  */
 #include "gfx_test.h"
@@ -58,7 +58,7 @@ int main(void) {
     }
 
     /* --- A: pool-block vkAllocateMemory failure is reported as
-     *     FLUX_ERROR_OUT_OF_MEMORY with the VkResult preserved, leaves
+     *     OPTICS_GFX_ERROR_OUT_OF_MEMORY with the VkResult preserved, leaves
      *     the allocator accounting untouched, and the device recovers
      *     for the very next request. --- */
     {
@@ -136,7 +136,7 @@ int main(void) {
 
     /* --- C: dedicated-path failure. A >= 16 MiB buffer bypasses the
      *     pool; failing both the first attempt and the reclaim-retry
-     *     must surface FLUX_ERROR_OUT_OF_MEMORY with clean accounting. --- */
+     *     must surface OPTICS_GFX_ERROR_OUT_OF_MEMORY with clean accounting. --- */
     {
         optics_gfx_memory_stats before;
         optics_gfx_device_memory_stats(d, &before);

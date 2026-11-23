@@ -1,5 +1,5 @@
 /*
- * test_store_spike.c — lens store GC across a population spike.
+ * test_store_spike.c — ui store GC across a population spike.
  *
  * Regression test for the live-list reap rework, which introduced (and
  * this test caught) two bug classes:
@@ -7,7 +7,7 @@
  *  1. Iteration invalidation: a reaped node's probe-cluster clear can
  *     unhook the entry the reap iterator is about to visit. The walk
  *     must re-anchor at the head and never dereference a cleared slot —
- *     the broken version crashed inside lensi_store_reap on the frame
+ *     the broken version crashed inside optics_ui__store_reap on the frame
  *     after the grace window expired, for spike sizes as small as 70.
  *
  *  2. Link loss: unhooking displaced cluster entries one at a time and
@@ -18,13 +18,13 @@
  *
  * Also exercises the dwell between spike and shrink-hysteresis, where
  * the table sits at spike capacity with a tiny live population. CPU
- * only; headless lens (no device).
+ * only; headless ui (no device).
  */
-#include "lens_test.h"
 #include "optics_test.h"
+#include "ui_test.h"
 #include <optics/ui.h>
 
-#define GRACE_FRAMES 8 /* LENSI_LEAVE_GRACE_FRAMES (internal.h); see also below */
+#define GRACE_FRAMES 8 /* OPTICS_UI_LEAVE_GRACE_FRAMES (internal.h); see also below */
 
 static bool g_seen_button;
 static void saw_button(const optics_ui_semantics *s, optics_gfx_rect b, optics_ui_id id,
@@ -84,7 +84,7 @@ int main(void) {
     /* 4. Ordinary frames still work after all the GC: build a button
      *    and verify the retained node carries the button role (the
      *    persistent-widget contract the store exists to provide).
-     *    lens_button returns "clicked", which is false without input —
+     *    optics_ui_button returns "clicked", which is false without input —
      *    node presence is the surviving-state assertion here. */
     optics_ui_begin(ui, &(optics_ui_input){.size = sizeof(optics_ui_input)});
     optics_ui_row_begin(ui, nullptr);

@@ -1,15 +1,15 @@
-/* app_wayland.c — native Wayland window + Vulkan (via flux) + iris_input.
+/* app_wayland.c — native Wayland window + Vulkan (via gfx) + optics_window_input.
  *
  * Replaces the GLFW glue the examples used to share. Pure Wayland:
  * xdg-shell for the toplevel, xdg-decoration for a server-side title bar
  * when available, xkbcommon for the keymap, and VK_KHR_wayland_surface to
- * hand flux core a VkSurfaceKHR. Pointer and keyboard events are folded
- * into one iris_input per frame (ADR-0029).
+ * hand gfx core a VkSurfaceKHR. Pointer and keyboard events are folded
+ * into one optics_window_input per frame (ADR-0029).
  */
 
 #include "wayland_internal.h"
 
-/* Theme watcher callback: invoked on the iris main thread (delivered
+/* Theme watcher callback: invoked on the window main thread (delivered
  * through the wakeup seam) when the portal emits a SettingChanged for
  * org.freedesktop.appearance.color-scheme. */
 static void wp_on_color_scheme_changed(optics_window_color_scheme scheme, void *user) {
@@ -21,8 +21,8 @@ static void wp_on_color_scheme_changed(optics_window_color_scheme scheme, void *
 
 /* Accessibility-preference watcher callback (ADR-0075): same delivery path
  * as the theme watcher. Applies the three OS accessibility preferences to
- * lens directly — this is the "last mile" that lens cannot own: lens is
- * headless and policy-free, iris is the layer that can see the OS. */
+ * ui directly — this is the "last mile" that ui cannot own: ui is
+ * headless and policy-free, window is the layer that can see the OS. */
 static void wp_on_a11y_prefs(const optics_window_a11y_prefs *prefs, void *user) {
     wp_platform *pl = user;
     if (!pl || !pl->ui)
@@ -56,8 +56,8 @@ static const struct xdg_wm_base_listener wm_base_listener = {.ping = wm_base_pin
 /*  Pointer                                                            */
 /* ------------------------------------------------------------------ */
 
-/* evdev button code (linux/input-event-codes.h) → lens mouse index, via
- * the shared iris_pointer_button layer (platform_input.h) so the
+/* evdev button code (linux/input-event-codes.h) → ui mouse index, via
+ * the shared optics_window_pointer_button layer (platform_input.h) so the
  * Linux-only header never leaks past this file. Unknown buttons (side /
  * extra) return -1 and are ignored. */
 static int mouse_index(uint32_t button) {
@@ -87,7 +87,7 @@ static void cursor_apply(wp_platform *pl);
 /* ------------------------------------------------------------------ */
 /*  Pre-fold event seam helpers (ADR-0107)                            */
 /*                                                                    */
-/*  Every lens-facing input mutation goes through one of these: they   */
+/*  Every ui-facing input mutation goes through one of these: they   */
 /*  reify the native event, run the host seam (event_internal.h), and  */
 /*  apply the surviving — possibly host-rewritten — event to the       */
 /*  accumulator. Platform bookkeeping (serials, cursor shape, DnD      */
@@ -133,11 +133,11 @@ static bool wp_emit_button(wp_platform *pl, double x, double y, int optics_ui_bu
 static bool wp_emit_scroll(wp_platform *pl, uint32_t axis, double platform_delta, bool continuous) {
     optics_window_event ev = {.type = OPTICS_WINDOW_EVENT_SCROLL,
                               .scroll = {.continuous = continuous}};
-    double lens = optics_window_scroll_delta(platform_delta);
+    double ui = optics_window_scroll_delta(platform_delta);
     if (axis == 0)
-        ev.scroll.dy = (float)lens;
+        ev.scroll.dy = (float)ui;
     else
-        ev.scroll.dx = (float)lens;
+        ev.scroll.dx = (float)ui;
     if (!optics_window__event_seam_emit(&ev))
         return false;
     /* The host may move the delta between axes or flip `continuous`. */
@@ -224,7 +224,7 @@ static bool wp_emit_ime_delete(wp_platform *pl, uint32_t before, uint32_t after)
 }
 
 /* Drag-and-drop position. The dropped payload itself is delivered through
- * the async paste path (lens_deliver_drop), not folded into iris_input;
+ * the async paste path (optics_ui_deliver_drop), not folded into optics_window_input;
  * this event carries the cursor position and DnD activity so the host can
  * observe/intercept it like any other pointer motion. */
 bool wp_emit_dnd(wp_platform *pl, double x, double y, bool active) {
@@ -237,7 +237,7 @@ bool wp_emit_dnd(wp_platform *pl, double x, double y, bool active) {
     return true;
 }
 
-/* Lifecycle events are observe-only: iris already applied the platform
+/* Lifecycle events are observe-only: window already applied the platform
  * state, so the host may read them but the payload is not folded back. */
 static void wp_emit_resize(uint32_t w, uint32_t h) {
     optics_window_event ev = {.type = OPTICS_WINDOW_EVENT_RESIZE,
@@ -313,15 +313,15 @@ static void ptr_button(void *data, struct wl_pointer *p, uint32_t serial, uint32
  * not a property of the event type: a two-finger touchpad scroll arrives
  * as plain wl_pointer.axis / value120 deltas, exactly like a notched
  * wheel — only axis_source (FINGER/CONTINUOUS vs. WHEEL) distinguishes
- * them. iris_scroll_source_is_continuous() is the shared policy. The
+ * them. optics_window_scroll_source_is_continuous() is the shared policy. The
  * source is delivered at the head of each frame group (see ptr_frame). */
-/* Scroll deltas funnel through iris_scroll_accum (platform_input.h):
- * the platform-sign -> lens-sign inversion and the step/pixel channel
+/* Scroll deltas funnel through optics_window_scroll_accum (platform_input.h):
+ * the platform-sign -> ui-sign inversion and the step/pixel channel
  * split live in exactly one place, shared with the win32/cocoa backends
  * and pinned by test_platform_input.c. A two-finger touchpad scroll
  * arrives as plain wl_pointer.axis / value120 deltas, exactly like a
  * notched wheel — only axis_source (FINGER/CONTINUOUS vs. WHEEL)
- * distinguishes them; iris_scroll_source_is_continuous() is the shared
+ * distinguishes them; optics_window_scroll_source_is_continuous() is the shared
  * policy. The source is delivered at the head of each frame group (see
  * ptr_frame). */
 static void wp_axis_accum(wp_platform *pl, uint32_t axis, double delta, bool continuous) {
@@ -334,7 +334,7 @@ static void ptr_axis(void *data, struct wl_pointer *p, uint32_t t, uint32_t axis
     (void)t;
     wp_platform *pl = data;
     /* Legacy wl_pointer.axis: wheel notches are ~10 units each, positive
-     * is a physical wheel-down gesture. Lens uses the conventional UI
+     * is a physical wheel-down gesture. ui uses the conventional UI
      * delta contract in which wheel-down is negative (content offset
      * increases), so invert at this platform boundary. A touchpad in
      * two-finger-scroll mode delivers the *same* event shape with pixel
@@ -382,7 +382,7 @@ static void ptr_axis_discrete(void *d, struct wl_pointer *p, uint32_t a, int32_t
 }
 /* Modern compositors (GNOME, KDE, wlroots ≥ 2022) deliver wheel events
  * here instead of the deprecated `axis` event. value120 is 120 per notch;
- * same Wayland sign convention as `axis`; invert it for Lens. Many
+ * same Wayland sign convention as `axis`; invert it for ui. Many
  * compositors send BOTH this and `axis` for back-compat — accumulating
  * both would double the scroll, so we ONLY honour value120 when it fires
  * and zero the legacy accumulator contribution. The simplest way: handle
@@ -397,7 +397,7 @@ static void ptr_axis_value120(void *d, struct wl_pointer *p, uint32_t a, int32_t
      * regardless: a compositor that reports a continuous source here would
      * otherwise deliver sub-notch wheel-sized deltas as whole notches. The
      * 40 px/notch equivalence keeps the two channels commensurable for
-     * consumers that fold them together (IRIS_SCROLL_PIXELS_PER_NOTCH). */
+     * consumers that fold them together (OPTICS_WINDOW_SCROLL_PIXELS_PER_NOTCH). */
     bool continuous = optics_window_scroll_source_is_continuous(pl->acc.axis_source);
     wp_axis_accum(pl, a, continuous ? norm * OPTICS_WINDOW_SCROLL_PIXELS_PER_NOTCH : norm,
                   continuous);
@@ -413,10 +413,10 @@ static void ptr_axis_relative_direction(void *d, struct wl_pointer *p, uint32_t 
 /*  Cursor (wayland-cursor)                                            */
 /* ------------------------------------------------------------------ */
 
-/* iris_set_cursor is a public, context-free API; it reaches the active
+/* optics_window_set_cursor is a public, context-free API; it reaches the active
  * app's platform through this single static pointer. Set at the top of
- * iris_app_run_wayland, cleared at exit. Documented as thread-affine:
- * callers must drive it from the same thread that runs iris_app_run. */
+ * optics_window_run_wayland, cleared at exit. Documented as thread-affine:
+ * callers must drive it from the same thread that runs optics_window_run. */
 wp_platform *g_active_pl = nullptr;
 
 void optics_window_request_animation_frame_wayland(void) {
@@ -473,26 +473,34 @@ static void cursor_ensure_device(wp_platform *pl) {
         wp_cursor_shape_manager_v1_get_pointer(pl->cursor_shape_mgr, pl->pointer);
 }
 
-/* Tell the compositor to render `pl->effective_cursor` for the next pointer
- * frame. No-op if cursor-shape isn't supported (the compositor's default
- * arrow stays) or the pointer is outside our surface. The serial is from
- * the pointer enter; cursor-shape-v1 requires it to attribute the shape
- * change to a legitimate input event the client received. */
+/* Show `pl->effective_cursor` for the pointer (when it is inside our
+ * surface) and for the tablet tool in proximity. No-op without cursor-shape
+ * support: the compositor's default cursor stays. Each set_shape carries the
+ * enter / proximity_in serial that cursor-shape-v1 requires. */
 static void cursor_apply(wp_platform *pl) {
-    if (!pl->cursor_inside || !pl->cursor_serial)
-        return;
-    cursor_ensure_device(pl);
-    if (!pl->cursor_shape_device)
-        return;
-    wp_cursor_shape_device_v1_set_shape(pl->cursor_shape_device, pl->cursor_serial,
-                                        cursor_shape_for(pl->effective_cursor));
+    uint32_t shape = cursor_shape_for(pl->effective_cursor);
+    if (pl->cursor_inside && pl->cursor_serial) {
+        cursor_ensure_device(pl);
+        if (pl->cursor_shape_device)
+            wp_cursor_shape_device_v1_set_shape(pl->cursor_shape_device, pl->cursor_serial, shape);
+    }
+    if (pl->tablet_cursor_device && pl->tablet_cursor_serial)
+        wp_cursor_shape_device_v1_set_shape(pl->tablet_cursor_device, pl->tablet_cursor_serial,
+                                            shape);
 }
 
-/* Effective cursor: an explicit host iris_set_cursor wins; while it is
- * DEFAULT, follow the semantic hint of the lens widget under the pointer
+static void tablet_cursor_release(wp_platform *pl) {
+    if (pl->tablet_cursor_device)
+        wp_cursor_shape_device_v1_destroy(pl->tablet_cursor_device);
+    pl->tablet_cursor_device = nullptr;
+    pl->tablet_cursor_serial = 0;
+}
+
+/* Effective cursor: an explicit host optics_window_set_cursor wins; while it is
+ * DEFAULT, follow the semantic hint of the ui widget under the pointer
  * (I-beam over text fields, hand over clickable elements, …). Same policy
  * as the Win32/Cocoa backends, evaluated once per frame from the run loop
- * and after every iris_set_cursor. Returns true when the effective cursor
+ * and after every optics_window_set_cursor. Returns true when the effective cursor
  * changed. */
 static bool cursor_follow_hint(wp_platform *pl) {
     optics_window_cursor eff = pl->host_cursor;
@@ -504,9 +512,9 @@ static bool cursor_follow_hint(wp_platform *pl) {
     return true;
 }
 
-/* Public API. Pins a host cursor until reset to IRIS_CURSOR_DEFAULT, which
- * hands control back to the per-frame lens widget hint. No-op when iris was
- * built without cursor-shape protocol support, or before iris_app_run
+/* Public API. Pins a host cursor until reset to OPTICS_WINDOW_CURSOR_DEFAULT, which
+ * hands control back to the per-frame ui widget hint. No-op when window was
+ * built without cursor-shape protocol support, or before optics_window_run
  * starts. */
 OPTICS_WINDOW_API void optics_window_set_cursor(optics_window_cursor cursor) {
     wp_platform *pl = g_active_pl;
@@ -522,12 +530,12 @@ OPTICS_WINDOW_API void optics_window_set_cursor(optics_window_cursor cursor) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Window state (iris/window.h)                                       */
+/*  Window state (window/window.h)                                       */
 /* ------------------------------------------------------------------ */
 
-/* All iris_window_* APIs operate on g_active_pl — the platform the active
- * iris_app_run call owns. They are documented as thread-affine to
- * iris_app_run and a no-op when no app is active. Each maps directly to the
+/* All optics_window_* APIs operate on g_active_pl — the platform the active
+ * optics_window_run call owns. They are documented as thread-affine to
+ * optics_window_run and a no-op when no app is active. Each maps directly to the
  * matching xdg_toplevel request; compositors honour them according to
  * their own policy (tiling WMs may ignore maximise / minimise requests). */
 
@@ -715,10 +723,10 @@ static const struct wl_pointer_listener pointer_listener = {
 };
 
 /* ------------------------------------------------------------------ */
-/*  Touch (wl_touch) — single-touch mapped to mouse + IRIS_BUTTON_LEFT  */
+/*  Touch (wl_touch) — single-touch mapped to mouse + OPTICS_WINDOW_BUTTON_LEFT  */
 /* ------------------------------------------------------------------ */
 
-/* Multi-touch is intentionally collapsed to a single pointer; lens's input
+/* Multi-touch is intentionally collapsed to a single pointer; ui's input
  * model is mouse + IME, and a proper multi-touch widget API is a follow-on.
  * The first finger down drives the cursor and button state; subsequent
  * fingers without an explicit ID up are tracked but ignored. */
@@ -809,7 +817,7 @@ static const struct wl_touch_listener touch_listener = {
  * the user's preference (wl_keyboard.repeat_info: rate in chars/sec, delay
  * in ms). We implement repeat ourselves: while a key is held, a timerfd in
  * pump_events' poll set fires after `delay` ms and then every 1000/rate ms,
- * and each expiry re-emits the key as iris_key_event{pressed=true,
+ * and each expiry re-emits the key as optics_window_key_event{pressed=true,
  * repeat=true} plus its UTF-8 text (composed sequences are a per-press
  * affair, so repeats bypass compose and emit the key's own utf8). The
  * repeat follows the newest pressed key and is cancelled by its release,
@@ -852,7 +860,7 @@ static void wp_repeat_arm(wp_platform *pl) {
 static void kb_emit_text(wp_platform *pl, xkb_keycode_t code) {
     char buf[8];
     int n = xkb_state_key_get_utf8(pl->xkb_state, code, buf, sizeof buf);
-    /* iris_cp_is_text, not a bare >= 0x20: the Delete keysym's xkb UTF-8
+    /* optics_window_cp_is_text, not a bare >= 0x20: the Delete keysym's xkb UTF-8
      * mapping is exactly U+007F, so the plain test let every Delete press
      * leak "\x7f" into text_utf8 alongside the (correct) key event. */
     if (n > 0 && optics_window_cp_is_text((unsigned char)buf[0]))
@@ -863,15 +871,15 @@ static void kb_emit_text(wp_platform *pl, xkb_keycode_t code) {
  * deliberately bypass the compose state — a composed sequence completes on
  * the original press; the held key repeats its own character. */
 static void repeat_emit_one(wp_platform *pl) {
-    if (pl->rep_lens_key)
-        (void)wp_emit_key(pl, pl->rep_lens_key, true, true, pl->acc.mods);
+    if (pl->rep_ui_key)
+        (void)wp_emit_key(pl, pl->rep_ui_key, true, true, pl->acc.mods);
     kb_emit_text(pl, pl->rep_key + 8); /* evdev -> xkb */
 }
 
 /* -- IM session state ----------------------------------------------
  * The text-input-v3 object is enabled exactly while the window has
- * keyboard focus AND a lens text widget is focused, re-evaluated once per
- * frame after lens_end (im_frame_update). kb_enter/kb_leave only track the
+ * keyboard focus AND a ui text widget is focused, re-evaluated once per
+ * frame after optics_ui_end (im_frame_update). kb_enter/kb_leave only track the
  * window-level focus; the per-frame evaluation owns enable/disable. */
 
 /* Drop every piece of pending composition state: the double-buffered IME
@@ -953,7 +961,7 @@ static void kb_keymap(void *data, struct wl_keyboard *k, uint32_t format, int32_
 }
 /* Window-level keyboard focus. kb_enter deliberately does NOT enable the
  * text input: the wl_keyboard enter arrives before any frame has rendered,
- * so which lens text widget (if any) holds focus is unknowable here —
+ * so which ui text widget (if any) holds focus is unknowable here —
  * im_frame_update's per-frame evaluation is the single owner of
  * enable/disable and picks the state up on the next frame. kb_leave ends
  * the IM session immediately (and cancels key repeat) rather than waiting
@@ -1007,10 +1015,10 @@ static void ti_preedit(void *data, struct zwp_text_input_v3 *ti, const char *tex
     wp_platform *pl = data;
     (void)ti;
     /* boundary-aware copy: a raw byte cap could split a multi-byte sequence
-     * at the buffer edge and hand lens invalid UTF-8. */
+     * at the buffer edge and hand ui invalid UTF-8. */
     optics_window_utf8_copy(pl->ime.preedit, sizeof pl->ime.preedit, text);
     pl->ime.preedit_cursor_begin = cursor_begin;
-    pl->ime.preedit_cursor_end = cursor_end; /* active clause (lens underline) */
+    pl->ime.preedit_cursor_end = cursor_end; /* active clause (ui underline) */
     pl->ime.has_preedit = true;
 }
 
@@ -1040,8 +1048,8 @@ static void ti_done(void *data, struct zwp_text_input_v3 *ti, uint32_t serial) {
      * 2. Insert commit string
      * 3. Set preedit string
      *
-     * The actual deletion is performed by lens when it sees the
-     * ime_delete_before / ime_delete_after fields in iris_input — we just
+     * The actual deletion is performed by ui when it sees the
+     * ime_delete_before / ime_delete_after fields in optics_window_input — we just
      * forward the request through drain_input. */
     if (pl->ime.has_delete)
         (void)wp_emit_ime_delete(pl, pl->ime.delete_before, pl->ime.delete_after);
@@ -1061,9 +1069,9 @@ static void ti_done(void *data, struct zwp_text_input_v3 *ti, uint32_t serial) {
     pl->ime.has_commit = false;
     pl->ime.has_preedit = false;
     /* NOTE: delete_before/delete_after are NOT cleared here — drain_input
-     * consumes them when it assembles iris_input, then clears. This is so
+     * consumes them when it assembles optics_window_input, then clears. This is so
      * a ti_done arriving between frames still delivers the delete request
-     * to lens on the next frame. */
+     * to ui on the next frame. */
 }
 
 /* The interface is bound at v1, so the v2-only events below never arrive
@@ -1118,7 +1126,7 @@ static void kb_key(void *data, struct wl_keyboard *k, uint32_t serial, uint32_t 
     /* Keyboard contract (platform_internal.h): both edges are reported, and
      * letters/digits are normalised to the UNSHIFTED key ('a', not 'A';
      * '1', not '!') so Ctrl/Shift chords line up across platforms — shift
-     * state travels in iris_input.mods only. Deriving the key id from the
+     * state travels in optics_window_input.mods only. Deriving the key id from the
      * level-0 keysym of the key's active layout gives exactly that, and —
      * just as important — press and release always agree on the id even if
      * the modifier state changed in between. */
@@ -1161,7 +1169,7 @@ static void kb_key(void *data, struct wl_keyboard *k, uint32_t serial, uint32_t 
         if (fk) {
             /* Physical press/release edges carry repeat=false; repeats are
              * synthesised by the timerfd path (repeat_emit_one) and carry
-             * repeat=true. Lens treats a repeat like any other press. */
+             * repeat=true. ui treats a repeat like any other press. */
             (void)wp_emit_key(pl, fk, pressed, false, pl->acc.mods);
         }
     }
@@ -1171,7 +1179,7 @@ static void kb_key(void *data, struct wl_keyboard *k, uint32_t serial, uint32_t 
      * their text (e.g. a non-ASCII printable). */
     if (pressed) {
         pl->rep_key = key;
-        pl->rep_lens_key = fk;
+        pl->rep_ui_key = fk;
         wp_repeat_arm(pl);
     } else if (pl->rep_active && pl->rep_key == key) {
         wp_repeat_cancel(pl);
@@ -1333,8 +1341,19 @@ static void tablet_serial(void *user, uint32_t serial) {
     wp_platform *pl = user;
     pl->last_serial = serial;
 }
+static void tablet_tool_proximity(void *user, struct zwp_tablet_tool_v2 *tool, uint32_t serial,
+                                  bool in) {
+    wp_platform *pl = user;
+    tablet_cursor_release(pl);
+    if (!in || !pl->cursor_shape_mgr)
+        return;
+    pl->tablet_cursor_device =
+        wp_cursor_shape_manager_v1_get_tablet_tool_v2(pl->cursor_shape_mgr, tool);
+    pl->tablet_cursor_serial = serial;
+    cursor_apply(pl);
+}
 static optics_window_tablet_host tablet_host_bridge = {
-    /* The platform is a stack object inside iris_app_run_wayland; the
+    /* The platform is a stack object inside optics_window_run_wayland; the
      * registry (and thus tablet globals) can only arrive during that
      * call, where this pointer is set before dispatch starts. Writable
      * on purpose: the vtable is copied (g_host = *host) at bind time,
@@ -1345,6 +1364,7 @@ static optics_window_tablet_host tablet_host_bridge = {
     .motion = tablet_motion,
     .button = tablet_button,
     .serial = tablet_serial,
+    .tool_proximity = tablet_tool_proximity,
 };
 
 static void seat_caps(void *data, struct wl_seat *seat, uint32_t caps) {
@@ -1603,8 +1623,8 @@ static void frac_scale_preferred(void *data, struct wp_fractional_scale_v1 *frac
     wp_platform *pl = data;
     /* scale is in 1/120 steps (so 120 = 1.0, 180 = 1.5, …). Round to the
      * nearest integer buffer scale so the existing integer-scale pipeline
-     * keeps working — lens is told the integer buffer scale only, and true
-     * fractional content scaling (1.25x etc. into lens) is a follow-on. */
+     * keeps working — ui is told the integer buffer scale only, and true
+     * fractional content scaling (1.25x etc. into ui) is a follow-on. */
     float f = (float)scale / 120.0f;
     int b = (int)(f + 0.5f);
     if (b < 1)
@@ -1675,7 +1695,7 @@ static void reg_global(void *data, struct wl_registry *reg, uint32_t name, const
          * compositor renders the cursor with its own configured theme,
          * so we never load a cursor theme ourselves — the cursor always
          * matches the user's desktop. Optional: compositors that don't
-         * expose this global leave iris_set_cursor as a no-op. */
+         * expose this global leave optics_window_set_cursor as a no-op. */
         pl->cursor_shape_mgr =
             wl_registry_bind(reg, name, &wp_cursor_shape_manager_v1_interface, 1);
     } else if (strcmp(iface, wp_fractional_scale_manager_v1_interface.name) == 0) {
@@ -1814,7 +1834,7 @@ const char *optics_window_wayland__foreign_handle(void) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Build one iris_input from the accumulated state                      */
+/*  Build one optics_window_input from the accumulated state                      */
 /* ------------------------------------------------------------------ */
 
 static void drain_input(wp_platform *pl, optics_window_input *in, float dt) {
@@ -1841,7 +1861,7 @@ static void drain_input(wp_platform *pl, optics_window_input *in, float dt) {
     for (uint32_t i = 0; i < pl->acc.key_count; i++)
         in->keys[i] = pl->acc.keys[i];
 
-    /* Forward IME delete_surrounding (text-input-v3). Lens consumes it
+    /* Forward IME delete_surrounding (text-input-v3). ui consumes it
      * in textfield/textarea to honour compositor corrections (e.g. when
      * an IME replaces "teh" -> "the", it asks us to delete "teh" first). */
     if (pl->ime.delete_before || pl->ime.delete_after) {
@@ -1866,7 +1886,7 @@ static void drain_input(wp_platform *pl, optics_window_input *in, float dt) {
 }
 
 /* Diagnostics go to stderr, never stdout: a consumer's stdout may be an
- * IPC wire (see flux_console_logger). */
+ * IPC wire (see optics_gfx_console_logger). */
 static void log_raw(const optics_window_input *in) {
     static const char *names[OPTICS_WINDOW_BUTTON_COUNT] = {"left", "right", "middle"};
     for (int b = 0; b < OPTICS_WINDOW_BUTTON_COUNT; b++) {
@@ -1912,7 +1932,7 @@ static bool pump_events(wp_platform *pl, int timeout_ms) {
      * sleeps, so we block here for up to a frame's worth of time. poll()
      * returns the instant input (or a wakeup / a11y event) arrives —
      * keeping latency low — and otherwise wakes on the deadline so
-     * time-based UI (caret blink, lens animations) keeps ticking even with
+     * time-based UI (caret blink, ui animations) keeps ticking even with
      * no input. Passing 0 keeps the old non-blocking behaviour. Returns
      * true when any fd was signalled (as opposed to a timeout), so the
      * frame loop can tell an event wake from a deadline expiry. */
@@ -2093,7 +2113,7 @@ static bool acc_has_user_input(wp_platform *pl, double *pcx, double *pcy) {
 /*  System theme detection (best-effort, no extra deps)               */
 /* ------------------------------------------------------------------ */
 
-/* System colour-scheme query is provided by iris (src/theme_linux.c).
+/* System colour-scheme query is provided by window (src/theme_linux.c).
  * Drop the local copy so we have one source of truth and so future live
  * updates / portal queries plug in here. */
 
@@ -2136,15 +2156,15 @@ static void wp_update_opaque_region(wp_platform *pl) {
 /*  Per-frame IM evaluation (text-input-v3)                              */
 /* ------------------------------------------------------------------ */
 
-/* Once per frame after lens_end: keep the text input enabled exactly while
- * the window has keyboard focus AND a lens text widget is focused, report
+/* Once per frame after optics_ui_end: keep the text input enabled exactly while
+ * the window has keyboard focus AND a ui text widget is focused, report
  * the widget's surrounding text when it changes, and position the IME
  * candidate window at the caret.
  *
  * Why per-frame: the wl_keyboard enter arrives before any frame has
  * rendered, so at enter time we cannot know whether a text widget holds
- * lens focus; and lens-side focus changes (Tab traversal, click) never
- * produce Wayland events at all. lens_text_context_get() is the one
+ * ui focus; and ui-side focus changes (Tab traversal, click) never
+ * produce Wayland events at all. optics_ui_text_context_get() is the one
  * authoritative signal, refreshed by the focused text widget every frame,
  * so this evaluation owns enable/disable outright — kb_enter/kb_leave only
  * track the window-level focus that gates it. Transitions alone issue
@@ -2206,7 +2226,7 @@ static void *wp_presenter_thread_main(void *arg) {
 
 #if defined(__linux__)
     /* Name thread for diagnostic observability */
-    (void)pthread_setname_np(pthread_self(), "iris-presenter");
+    (void)pthread_setname_np(pthread_self(), "window-presenter");
     /* Elevate presentation worker to realtime or high priority so display pacing
      * is not starved by background compilation or user-space compute tasks. */
     struct sched_param sp = {.sched_priority = 10};
@@ -2359,7 +2379,7 @@ int optics_window_run_wayland(const optics_window_opts *cfg) {
     };
 
     /* Publish `pl` as the active app instance so the context-free
-     * iris_set_cursor() can reach it. Cleared on the way out (success
+     * optics_window_set_cursor() can reach it. Cleared on the way out (success
      * or fail). */
     g_active_pl = &pl;
     /* Tablet bridge needs the (stack) platform for its host callbacks; the
@@ -2374,7 +2394,7 @@ int optics_window_run_wayland(const optics_window_opts *cfg) {
     if (!pl.display) {
         fprintf(stderr, "no Wayland display (is a compositor running?)\n");
         /* Unpublish before the stack frame dies: the globals must never
-         * outlive `pl` (an iris_set_cursor after a failed start would
+         * outlive `pl` (an optics_window_set_cursor after a failed start would
          * otherwise read freed stack). Same invariant as the fail path. */
         g_active_pl = nullptr;
         tablet_host_bridge.user = nullptr;
@@ -2431,7 +2451,7 @@ int optics_window_run_wayland(const optics_window_opts *cfg) {
         goto fail;
     }
 
-    /* --- Vulkan instance via flux (Wayland WSI extensions) ------- */
+    /* --- Vulkan instance via gfx (Wayland WSI extensions) ------- */
     const char *inst_exts[] = {
         VK_KHR_SURFACE_EXTENSION_NAME,
         VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME,
@@ -2448,7 +2468,7 @@ int optics_window_run_wayland(const optics_window_opts *cfg) {
         .frames_in_flight = 2,
     };
     if (optics_gfx_device_create(&ddesc, &device) != OPTICS_GFX_OK) {
-        fprintf(stderr, "flux_device_create failed\n");
+        fprintf(stderr, "optics_gfx_device_create failed\n");
         goto fail;
     }
 
@@ -2460,8 +2480,8 @@ int optics_window_run_wayland(const optics_window_opts *cfg) {
     xdg_surface_add_listener(pl.xdg_surface, &xdg_surface_listener, &pl);
     pl.toplevel = xdg_surface_get_toplevel(pl.xdg_surface);
     xdg_toplevel_add_listener(pl.toplevel, &toplevel_listener, &pl);
-    xdg_toplevel_set_title(pl.toplevel, cfg->title ? cfg->title : "iris");
-    xdg_toplevel_set_app_id(pl.toplevel, cfg->app_id ? cfg->app_id : "ai.opencode.iris");
+    xdg_toplevel_set_title(pl.toplevel, cfg->title ? cfg->title : "window");
+    xdg_toplevel_set_app_id(pl.toplevel, cfg->app_id ? cfg->app_id : "ai.opencode.window");
 
     /* Bind a fractional-scale object if the compositor exposes the global;
      * it carries the precise 1/120-step scale used on HiDPI mixed-DPI
@@ -2502,7 +2522,7 @@ int optics_window_run_wayland(const optics_window_opts *cfg) {
         wp_emit_scale((float)pl.buffer_scale);
     }
 
-    /* --- Vulkan surface + flux surface/canvas ------------------- */
+    /* --- Vulkan surface + gfx surface/canvas ------------------- */
     vk_surface = wp_create_vk_surface(device, pl.display, pl.surface);
     if (!vk_surface) {
         fprintf(stderr, "vkCreateWaylandSurfaceKHR failed\n");
@@ -2510,7 +2530,7 @@ int optics_window_run_wayland(const optics_window_opts *cfg) {
     }
 
     /* Swapchain is sized in *device* pixels — logical × buffer_scale —
-     * while layout and iris_input stay in logical units. */
+     * while layout and optics_window_input stay in logical units. */
     wl_surface_set_buffer_scale(pl.surface, pl.buffer_scale);
     wp_update_opaque_region(&pl);
     wl_surface_commit(pl.surface);
@@ -2521,21 +2541,21 @@ int optics_window_run_wayland(const optics_window_opts *cfg) {
         .width = (uint32_t)(pl.width * pl.buffer_scale),
         .height = (uint32_t)(pl.height * pl.buffer_scale),
         /* Non-blocking present (MAILBOX, or IMMEDIATE as fallback — see
-         * pick_present_mode in flux). A FIFO/vsync present blocks the main
+         * pick_present_mode in gfx). A FIFO/vsync present blocks the main
          * thread in vkAcquireNextImageKHR until the compositor releases an
          * image, freezing input handling and time-based UI between frames;
          * the frame loop paces itself instead (see below). */
         .vsync = false,
     };
     if (optics_gfx_surface_create(device, &sdesc, &surface) != OPTICS_GFX_OK) {
-        fprintf(stderr, "flux_surface_create failed\n");
+        fprintf(stderr, "optics_gfx_surface_create failed\n");
         goto fail;
     }
 
     if (optics_gfx_canvas_create(
             &(optics_gfx_canvas_desc){.type = OPTICS_GFX_TYPE_CANVAS_DESC, .surface = surface},
             &canvas) != OPTICS_GFX_OK) {
-        fprintf(stderr, "flux_canvas_create failed\n");
+        fprintf(stderr, "optics_gfx_canvas_create failed\n");
         goto fail;
     }
 
@@ -2549,14 +2569,14 @@ int optics_window_run_wayland(const optics_window_opts *cfg) {
                                                   .start_drag = wp_start_drag,
                                                   .user = &pl},
                                  })) {
-        fprintf(stderr, "iris UI host start failed\n");
+        fprintf(stderr, "window UI host start failed\n");
         goto fail;
     }
     ui = cfg->ui;
     ui_started = true;
 
     if (cfg->start && !cfg->start(device, cfg->user)) {
-        fprintf(stderr, "iris host start callback failed\n");
+        fprintf(stderr, "window host start callback failed\n");
         goto fail;
     }
     host_started = true;
@@ -2584,7 +2604,7 @@ int optics_window_run_wayland(const optics_window_opts *cfg) {
     /* --- Frame loop --------------------------------------------------
      * Presentation is paced by the display, not by this loop (ADR-0122).
      *
-     * The surface still presents non-blocking (Mailbox, see flux_surface_desc
+     * The surface still presents non-blocking (Mailbox, see optics_gfx_surface_desc
      * above) so that acquiring an image can never freeze input handling — but
      * the loop no longer *times* anything itself. It subscribes to the
      * compositor's frame grant (wl_surface.frame, armed in wp_request_pulse
@@ -2593,18 +2613,18 @@ int optics_window_run_wayland(const optics_window_opts *cfg) {
      * clamped to an assumed 60 Hz, and the client clock can no longer beat
      * against the compositor's latch (the old micro-stutter).
      *
-     * iris_pacer (display_pacer.h) is the single authority for the cadence and
+     * optics_window_pacer (display_pacer.h) is the single authority for the cadence and
      * owns the whole decision: paint, skip, or quiesce — plus the poll budget.
      * Two properties are structural, not incidental:
      *
-     *   - A zero-render skip (iris_request_frame_skip_render) advances the
+     *   - A zero-render skip (optics_window_request_frame_skip_render) advances the
      *     cadence exactly like a paint. The pulse train, not an arithmetic
      *     deadline derived from the last *paint*, is the schedule, so the
      *     deadline can never land in the past and spin a core.
      *   - Animations are evaluated against the compositor's pulse timestamp
      *     (`sim_ns`), not against the wall clock when the frame was built.
      *
-     * A lens-only host reaches full quiescence (no pending frame at all, the
+     * A ui-only host reaches full quiescence (no pending frame at all, the
      * loop blocking in poll()); a host with cfg->record keeps at least the low
      * idle tick so its cfg->build can observe state it owns. */
     optics_window_pacer pacer;
@@ -2615,7 +2635,7 @@ int optics_window_run_wayland(const optics_window_opts *cfg) {
      * whether it moved, so they never reach full quiescence (the pacer keeps
      * at least the low idle tick running cfg->build). Constant for the run. */
     const bool has_host_content = (cfg->prepare != nullptr || cfg->record != nullptr);
-    /* Sticky until a frame containing the latest lens build is actually
+    /* Sticky until a frame containing the latest ui build is actually
      * presented. Layout/draw hashes compare consecutive builds; without this
      * host-side latch an acquire timeout could let the next identical build
      * look clean and permanently skip content that never reached screen. */
@@ -2624,7 +2644,7 @@ int optics_window_run_wayland(const optics_window_opts *cfg) {
      * Seeded false so the first iteration always runs the build. */
     bool quiesced = false;
     /* Poll budget for the next iteration (ns). 0 = "no deadline, use the cap".
-     * iris_pacer_tick guarantees this is `>= 1` whenever it is not quiescing,
+     * optics_window_pacer_tick guarantees this is `>= 1` whenever it is not quiescing,
      * which is what makes a 0 ms poll — and the 100% CPU spin it caused —
      * unreachable. */
     long long wait_ns = 0;
@@ -2635,13 +2655,13 @@ int optics_window_run_wayland(const optics_window_opts *cfg) {
 
     /* Live colour-scheme watching: only when not forcing dark. The watcher
      * pumps the portal on its own thread and posts through the wakeup seam;
-     * the callback runs on this thread (via iris_platform_wakeup_drain in
-     * pump_events) and updates the lens theme in place — the next frame
+     * the callback runs on this thread (via optics_window_platform_wakeup_drain in
+     * pump_events) and updates the ui theme in place — the next frame
      * renders with the new palette. -1 means the feature is unavailable
      * (no libsystemd at build time, or portal unreachable) — silently
      * degrade to the startup-only query. The backend uses its reserved
      * internal slot (theme_watch_internal.h), never the host's public
-     * iris_color_scheme_watch registration. */
+     * optics_window_color_scheme_watch registration. */
     pl.theme_watching = false;
     pl.a11y_prefs_watching = false;
     pl.a11y_fd = -1;
@@ -2650,7 +2670,7 @@ int optics_window_run_wayland(const optics_window_opts *cfg) {
             (optics_window_theme__watch_backend(wp_on_color_scheme_changed, &pl) == 0);
 
     /* Accessibility preferences (ADR-0075): apply the OS's
-     * reduced-motion / high-contrast / text-scale preferences to lens at
+     * reduced-motion / high-contrast / text-scale preferences to ui at
      * startup, then watch for live changes through the same shared portal
      * pump as the theme (backend slot, a11y_prefs_internal.h). Applied
      * unconditionally — accessibility is not opt-in. */
@@ -2724,7 +2744,7 @@ int optics_window_run_wayland(const optics_window_opts *cfg) {
         /* --- 3. Anything to do this iteration? -------------------------
          * Fully quiesced with no wake reason: no build, no GPU, straight back
          * to poll(). A non-input event (theme change, a11y, configure/scale)
-         * runs one build so lens/host see the new state. */
+         * runs one build so ui/host see the new state. */
         if (quiesced && !input_active && !pulse_fired && !woke_on_event) {
             optics_window_pace_inputs idle_in = {
                 .now_ns = now,
@@ -2747,7 +2767,7 @@ int optics_window_run_wayland(const optics_window_opts *cfg) {
 
         /* Scale change (e.g. surface dragged to a HiDPI output): apply
          * the new buffer scale, resize the swapchain in device pixels,
-         * and tell lens so its replay transform matches. The first frame
+         * and tell ui so its replay transform matches. The first frame
          * after a resize/scale must always paint (the swapchain contents
          * were discarded), so remember it for the skip decision below. */
         bool resized_this_frame = false;
@@ -2812,8 +2832,8 @@ int optics_window_run_wayland(const optics_window_opts *cfg) {
         if (pl.a11y_running && ui)
             (void)optics_window_a11y_update(ui);
 
-        /* Cursor: an explicit host iris_set_cursor pins the cursor; while
-         * it is DEFAULT, follow the semantic hint of the lens widget under
+        /* Cursor: an explicit host optics_window_set_cursor pins the cursor; while
+         * it is DEFAULT, follow the semantic hint of the ui widget under
          * the pointer (I-beam over text fields, hand over clickable
          * elements, …) — same policy as the Win32/Cocoa backends. */
         if (cursor_follow_hint(&pl))
@@ -2827,13 +2847,13 @@ int optics_window_run_wayland(const optics_window_opts *cfg) {
         /* --- 6. Pace ---------------------------------------------------
          * The pacer decides paint / skip / quiesce and the next budget. The
          * paint/skip precedence is unchanged from the previous loop; only the
-         * schedule moved into the pacer. Note that iris_request_frame_skip_render
+         * schedule moved into the pacer. Note that optics_window_request_frame_skip_render
          * is the more specific promise and outranks a stale animation request,
          * while chrome damage, a resize, and the not-yet-presented latch still
          * force a real paint because they change what is on screen. */
         bool chrome_damaged = pl.ui_frame.damaged;
         bool surface_forced = resized_this_frame || surface_needs_paint;
-        /* A caret asks for a frame only when its phase flipped, and lens is
+        /* A caret asks for a frame only when its phase flipped, and ui is
          * the single authority for that comparison (ADR-0151): it is the only
          * component that knows which phase reached the display. The host
          * never models a blink. */
@@ -2885,7 +2905,7 @@ int optics_window_run_wayland(const optics_window_opts *cfg) {
                         pkt->snapshot = snapshot;
                         pkt->host_list = host_list;
                         /* Resolve the frame's damage set on the UI thread: the
-                         * presentation thread must not re-query lens, and the set
+                         * presentation thread must not re-query ui, and the set
                          * has to travel with the snapshot it describes. */
                         pkt->damage_count = optics_window__ui_damage_rects(
                             ui, pkt->damage, OPTICS_WINDOW_DAMAGE_RECTS_CAPACITY);
@@ -2924,7 +2944,7 @@ int optics_window_run_wayland(const optics_window_opts *cfg) {
                 continue;
             }
 
-            /* Unified Single Surface Pass: all content (custom canvas & Lens UI) rendered
+            /* Unified Single Surface Pass: all content (custom canvas & UI) rendered
              * atomically */
 
             /* Single Surface Pass (for pure UI applications or fallback) */
@@ -2954,9 +2974,9 @@ int optics_window_run_wayland(const optics_window_opts *cfg) {
             /* Clear to the current theme's body background so empty areas
              * (e.g. short content in a tall window) don't show a hard-coded
              * dark color in light mode. Recorded host content draws *under*
-             * lens's chrome: the display list is submitted before snapshot
+             * ui's chrome: the display list is submitted before snapshot
              * publication so the host's document surface lands first and
-             * lens's widget layer composites on top. */
+             * ui's widget layer composites on top. */
             optics_gfx_color clear = pl.ui_frame.clear_color;
             optics_gfx_color *pass_clear = cfg->no_clear ? nullptr : &clear;
             bool drew = false;
@@ -2968,7 +2988,7 @@ int optics_window_run_wayland(const optics_window_opts *cfg) {
              * the pass and to the compositor: the canvas scissors each rectangle
              * and the commit damages exactly those rectangles. A host with opaque
              * canvas content (or a forced repaint) asks for the full extent
-             * instead, because its own content is not something lens can localise. */
+             * instead, because its own content is not something ui can localise. */
             optics_window_frame_damage dmg = {};
             const bool localize = !surface_forced && !has_host_content;
             if (localize) {
@@ -3020,7 +3040,7 @@ int optics_window_run_wayland(const optics_window_opts *cfg) {
             }
             /* Arm the grant before the commit it is meant to pace: the
              * compositor only answers wl_surface.frame once the surface has
-             * been committed, and flux commits inside flux_frame_present.
+             * been committed, and gfx commits inside optics_gfx_frame_present.
              * By this point every abort path above is behind us, so a
              * subscription can never be stranded without its commit. */
             if (d.request_pulse)
@@ -3086,16 +3106,16 @@ int optics_window_run_wayland(const optics_window_opts *cfg) {
 
     /* --- Cleanup (shared by the success path and every `goto fail`) --- */
 fail:
-    /* Let the host release every resource created from iris's borrowed
-     * device before that device, the lens context, or the canvas disappears.
+    /* Let the host release every resource created from window's borrowed
+     * device before that device, the ui context, or the canvas disappears.
      * Keep the active platform published during the callback so thread-affine
-     * iris helpers remain valid through the host's teardown. */
+     * window helpers remain valid through the host's teardown. */
     if (host_started && cfg->stop)
         cfg->stop(device, cfg->user);
     if (ui_started)
         optics_window__ui_stop(cfg->ui);
 
-    /* Stop publishing this wp_platform to iris_set_cursor() — any host
+    /* Stop publishing this wp_platform to optics_window_set_cursor() — any host
      * call after this returns is a no-op rather than a use-after-free.
      * The tablet bridge borrows `pl` too; clearing both here (instead
      * of relying on the success path alone) keeps the stack address
@@ -3114,13 +3134,13 @@ fail:
     }
 
     /* GPU side first: let in-flight work finish before tearing down objects.
-     * flux/lens calls are guarded so an early failure (before a resource
+     * gfx/ui calls are guarded so an early failure (before a resource
      * existed) doesn't dereference NULL. */
     if (device)
         optics_gfx_device_wait_idle(device);
     if (ui_started)
         optics_window__ui_destroy(cfg->ui);
-    pl.ui = nullptr; /* after this, queued main-thread callbacks must not touch lens */
+    pl.ui = nullptr; /* after this, queued main-thread callbacks must not touch ui */
     if (pl.theme_watching)
         optics_window_theme__unwatch_backend();
     if (pl.a11y_prefs_watching)
@@ -3156,7 +3176,8 @@ fail:
     if (device)
         optics_gfx_device_release(device);
 
-    /* Cursor: cursor-shape-v1 device + manager. */
+    /* Cursor: cursor-shape-v1 devices + manager. */
+    tablet_cursor_release(&pl);
     if (pl.cursor_shape_device)
         wp_cursor_shape_device_v1_destroy(pl.cursor_shape_device);
     if (pl.cursor_shape_mgr)

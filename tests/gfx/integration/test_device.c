@@ -7,8 +7,8 @@
  *     release across thread-safe boundary, exhaustion handling
  *   - Compute pipeline create + dispatch into a one-shot command
  *     buffer (mirrors compute_fill but as a unit assertion)
- *   - Capability queries: flux_device_get_limits and
- *     flux_device_supports_image_usage agree with what creation accepts
+ *   - Capability queries: optics_gfx_device_get_limits and
+ *     optics_gfx_device_supports_image_usage agree with what creation accepts
  *
  * Runs on a Vulkan host; skips with Meson exit code 77 when the device
  * cannot be created so CI without a driver is honest about the gap.

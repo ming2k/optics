@@ -7,7 +7,7 @@
 #include <stdlib.h>
 #include <time.h>
 
-/* A headless flux device, or NULL when no Vulkan device is available (dev
+/* A headless gfx device, or NULL when no Vulkan device is available (dev
  * sandboxes without a driver, sanitizer runs, CI). Benchmarks that need a
  * device skip cleanly on NULL rather than aborting the suite. */
 static inline optics_gfx_device *bench_headless_device(void) {

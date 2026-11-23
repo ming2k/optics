@@ -5,12 +5,12 @@
  * thread blocks in poll(2) on the bus fd (plus a stop pipe) and pumps the
  * bus; when a signal arrives it does NOT call the user callback directly
  * (wrong thread — the callback contract is main-thread delivery). Instead
- * it posts the change through iris_platform_wakeup_post, and the backend's
- * event loop runs the delivery shim on the iris main thread.
+ * it posts the change through optics_window_platform_wakeup_post, and the backend's
+ * event loop runs the delivery shim on the window main thread.
  *
  * This is the ONE portal-settings watcher for the whole library: both the
  * colour-scheme keys (org.freedesktop.appearance / color-scheme, uint32
- * 0/1/2 mapping onto iris_color_scheme) and the accessibility-preference
+ * 0/1/2 mapping onto optics_window_color_scheme) and the accessibility-preference
  * keys (a11y_prefs_internal.h; contrast flag under
  * org.freedesktop.appearance, GNOME's text-scaling-factor /
  * enable-animations under org.gnome.desktop.interface — the portal proxies
@@ -24,7 +24,7 @@
  * topics can be added without touching the pump.
  *
  * Build gate: this translation unit is only compiled when libsystemd is
- * available (meson defines IRIS_HAVE_PORTAL_WATCH). When absent, the
+ * available (meson defines OPTICS_WINDOW_HAVE_PORTAL_WATCH). When absent, the
  * stubs in theme_watch_stub.c take over and report the feature as
  * unavailable.
  */
@@ -34,7 +34,7 @@
 #ifdef OPTICS_WINDOW_HAVE_PORTAL_WATCH
 
 /* _GNU_SOURCE is provided by the build system (add_project_arguments). */
-#include "iris_fd_observe.h"
+#include "fd_observe.h"
 #include "platform_wakeup.h"
 
 #include "a11y_prefs_internal.h"
@@ -55,9 +55,9 @@ static bool g_thread_running = false;
 static int g_stop_pipe[2] = {-1, -1}; /* written by unwatch, polled by g_thread */
 
 /* Two registrations share the one watcher thread: the host's public slot
- * (iris_color_scheme_watch) and the platform backend's internal slot
- * (iris_theme__watch_backend) — see theme_watch_internal.h for why they
- * must not overwrite each other. Both are touched on the iris main thread
+ * (optics_window_color_scheme_watch) and the platform backend's internal slot
+ * (optics_window_theme__watch_backend) — see theme_watch_internal.h for why they
+ * must not overwrite each other. Both are touched on the window main thread
  * only (watch/unwatch/delivery shim), per the public threading contract. */
 static optics_window_color_scheme_changed_fn g_cb = nullptr;
 static void *g_user = nullptr;
@@ -77,7 +77,7 @@ static void *g_a11y_user = nullptr;
 static optics_window_a11y_prefs_changed_fn g_a11y_backend_cb = nullptr;
 static void *g_a11y_backend_user = nullptr;
 
-/* Runs on the iris main thread (via iris_platform_wakeup_drain). */
+/* Runs on the window main thread (via optics_window_platform_wakeup_drain). */
 static void deliver_change(void *user) {
     theme_change *change = user;
     optics_window_color_scheme scheme = change->scheme;
@@ -143,7 +143,7 @@ static int on_setting_changed(sd_bus_message *m, void *userdata, sd_bus_error *r
     change->scheme = (optics_window_color_scheme)value;
     /* Hands the change to the backend's event loop, which delivers it on
      * the main thread. -1 (no loop running, e.g. watch used without
-     * iris_app_run, or the window already closed) means drop. */
+     * optics_window_run, or the window already closed) means drop. */
     if (optics_window_platform_wakeup_post(deliver_change, change) != 0)
         free(change);
     return 0;
@@ -210,7 +210,7 @@ static int watch_start(void) {
     }
     /* Process-scope descriptors (ADR-0129). This watcher's stop pipe is
      * created and destroyed on its own lifecycle, independent of any
-     * flux_device, so it belongs in the process ledger — which is also the
+     * optics_gfx_device, so it belongs in the process ledger — which is also the
      * only ledger that outlives every device. */
     optics_window_fd_open_record(g_stop_pipe[0], "fd_watch_pipe");
     optics_window_fd_open_record(g_stop_pipe[1], "fd_watch_pipe");
@@ -325,4 +325,4 @@ void optics_window_a11y_prefs__unwatch_backend(void) {
         watch_stop();
 }
 
-#endif /* IRIS_HAVE_PORTAL_WATCH */
+#endif /* OPTICS_WINDOW_HAVE_PORTAL_WATCH */

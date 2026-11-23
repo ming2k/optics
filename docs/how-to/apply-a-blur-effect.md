@@ -1,90 +1,90 @@
 # How to apply a blur effect
 
-Blur a `flux_image` with an exact separable Gaussian and either consume
+Blur a `optics_gfx_image` with an exact separable Gaussian and either consume
 the result for one frame or promote it to a long-lived image.
 
 For a live backdrop that changes every frame, prefer a reusable
-`flux_blur_filter`. It uses a fixed-cost two-level Dual-Kawase pyramid,
+`optics_gfx_blur_filter`. It uses a fixed-cost two-level Dual-Kawase pyramid,
 isolates storage per frame-in-flight slot, and avoids transient-pool
 growth, device-wide waits, and sigma-dependent shader loops.
 
 ## Prerequisites
 
-You have a `flux_device *d`, a `flux_image *input` in
-`FLUX_FORMAT_RGBA8_UNORM` or `FLUX_FORMAT_BGRA8_UNORM`, and a
+You have a `optics_gfx_device *d`, a `optics_gfx_image *input` in
+`OPTICS_GFX_FORMAT_RGBA8_UNORM` or `OPTICS_GFX_FORMAT_BGRA8_UNORM`, and a
 `VkCommandBuffer cmd` you are recording into (typically pulled from
-`flux_frame_vk_command_buffer(frame)` inside a frame).
+`optics_gfx_frame_vk_command_buffer(frame)` inside a frame).
 
 ## The minimum call
 
     #include <optics/gfx/effect.h>
 
-    flux_effect_blur_desc bd = FLUX_EFFECT_BLUR_DESC_INIT;
+    optics_gfx_effect_blur_desc bd = OPTICS_GFX_EFFECT_BLUR_DESC_INIT;
     bd.input = input;
     bd.sigma = 6.0f;
 
-    flux_image *blurred = nullptr;
-    if (flux_effect_blur(cmd, &bd, &blurred) != FLUX_OK) {
-        /* see flux_get_last_error */
+    optics_gfx_image *blurred = nullptr;
+    if (optics_gfx_effect_blur(cmd, &bd, &blurred) != OPTICS_GFX_OK) {
+        /* see optics_gfx_get_last_error */
         return;
     }
 
     /* Use `blurred` for the rest of this frame's recording: */
-    flux_canvas_draw_image(canvas, blurred,
-        (flux_rect){ 0, 0, (float)w, (float)h }, nullptr);
+    optics_gfx_canvas_draw_image(canvas, blurred,
+        (optics_gfx_rect){ 0, 0, (float)w, (float)h }, nullptr);
 
 ## Live compositor path
 
-Create the filter once, then apply it with the recording `flux_frame`:
+Create the filter once, then apply it with the recording `optics_gfx_frame`:
 
-    flux_blur_filter *filter = NULL;
-    flux_blur_filter_create(d, &filter);
+    optics_gfx_blur_filter *filter = NULL;
+    optics_gfx_blur_filter_create(d, &filter);
 
     /* Per frame, outside a render pass: */
-    flux_image *blurred = NULL; /* borrowed from filter */
-    flux_blur_filter_apply(filter, frame, &bd, &blurred);
-    flux_canvas_draw_image(canvas, blurred,
-        (flux_rect){ 0, 0, (float)w, (float)h }, NULL);
+    optics_gfx_image *blurred = NULL; /* borrowed from filter */
+    optics_gfx_blur_filter_apply(filter, frame, &bd, &blurred);
+    optics_gfx_canvas_draw_image(canvas, blurred,
+        (optics_gfx_rect){ 0, 0, (float)w, (float)h }, NULL);
 
 Keep one filter per surface/frame stream. Release it after the last referencing
 frame has completed. The output keeps the input dimensions and uses
-`FLUX_FORMAT_RGBA8_UNORM`. For
+`OPTICS_GFX_FORMAT_RGBA8_UNORM`. For
 backdrop blur, render the scene into a quarter-resolution
-`flux_image_create (FLUX_IMAGE_USAGE_RENDER_TARGET)` and scale `sigma` by the same factor.
+`optics_gfx_image_create (OPTICS_GFX_IMAGE_USAGE_RENDER_TARGET)` and scale `sigma` by the same factor.
 The filter always records two downsample and two upsample passes; `sigma`
 changes sample offsets without changing the sample count.
 
 ## Exact Gaussian output lifetime
 
-The image returned by `flux_effect_blur` comes from the effect module's
+The image returned by `optics_gfx_effect_blur` comes from the effect module's
 per-device transient pool. It is exclusively leased and valid until
-`flux_effect_reset(d)` is called. The live filter output instead follows the
+`optics_gfx_effect_reset(d)` is called. The live filter output instead follows the
 frame-slot lifetime described above.
 
 | Need                                                          | Do this                                                         |
 |---------------------------------------------------------------|-----------------------------------------------------------------|
-| Consume immediately and discard                               | Submit, wait for every referencing command buffer, then call `flux_effect_reset(d)`. |
-| Keep across frames (cache a blurred background, prepared art) | Submit + wait, then `flux_effect_promote(blurred, &owned)`. Release with `flux_image_release(owned)`. |
+| Consume immediately and discard                               | Submit, wait for every referencing command buffer, then call `optics_gfx_effect_reset(d)`. |
+| Keep across frames (cache a blurred background, prepared art) | Submit + wait, then `optics_gfx_effect_promote(blurred, &owned)`. Release with `optics_gfx_image_release(owned)`. |
 
 The promote helper records its own one-shot graphics-queue submission
 and blocks until the copy completes:
 
-    /* After flux_frame_submit + the frame's fence wait */
-    flux_image *owned = nullptr;
-    if (flux_effect_promote(blurred, &owned) == FLUX_OK) {
-        /* `owned` has its own bindless slot, refcount 1, regular flux_image lifecycle */
+    /* After optics_gfx_frame_submit + the frame's fence wait */
+    optics_gfx_image *owned = nullptr;
+    if (optics_gfx_effect_promote(blurred, &owned) == OPTICS_GFX_OK) {
+        /* `owned` has its own bindless slot, refcount 1, regular optics_gfx_image lifecycle */
     }
 
 ## Exact Gaussian sigma → kernel radius
 
-This table applies to `flux_effect_blur`. The reusable live filter clamps the
+This table applies to `optics_gfx_effect_blur`. The reusable live filter clamps the
 same input range but maps positive sigma values to bounded pyramid offsets.
 
 | `sigma`                      | Behaviour                                                  |
 |------------------------------|------------------------------------------------------------|
 | `0.0`                        | Output is a bit-exact copy of the input (no kernel work).  |
 | `> 0`                        | Kernel radius = `ceil(3 * sigma)`, capped at 64 texels.    |
-| NaN, negative, or `> 64.0`   | Silently clamped to `[0, FLUX_EFFECT_BLUR_SIGMA_MAX]`.     |
+| NaN, negative, or `> 64.0`   | Silently clamped to `[0, OPTICS_GFX_EFFECT_BLUR_SIGMA_MAX]`.     |
 
 ## What the call records into `cmd`
 
@@ -99,14 +99,14 @@ same input range but maps positive sigma values to bounded pyramid offsets.
 
 The input image is **not** transitioned — it must already be in
 `SHADER_READ_ONLY_OPTIMAL` or `GENERAL` with prior writes visible to
-compute reads. Images created via `flux_image_create` are in
+compute reads. Images created via `optics_gfx_image_create` are in
 `SHADER_READ_ONLY_OPTIMAL` once create returns, so the typical path
 is fine.
 
 ## End-of-frame housekeeping
 
 After all command buffers that reference this epoch's images have completed,
-call `flux_effect_reset(d)` to return their leases to the pool. A CPU frame
+call `optics_gfx_effect_reset(d)` to return their leases to the pool. A CPU frame
 boundary alone is not sufficient when multiple frames are in flight; waiting
 the device idle is the simplest conservative choice. The pool grows only to
 the high-water mark of simultaneously leased keyed images.

@@ -2,7 +2,7 @@
  * Coverage acceptance harness (ADR-0119, S0). See coverage_harness.h for the
  * design contract and for what this reference is scoped to prove.
  *
- * Contours: flux_curve_cover is a FLAT segment run with no contour delimiter, so
+ * Contours: optics_gfx_curve_cover is a FLAT segment run with no contour delimiter, so
  * this harness splits it the only way the representation allows — a break in the
  * chain, where segment i's end differs from segment i+1's start. Each contour is
  * flattened and clipped independently, and the per-pixel areas are summed. That
@@ -23,7 +23,7 @@
 /* Fixed capacity: a reference must fail loudly rather than silently truncate. */
 #define COV_MAX_PTS 16384u
 
-/* The harness reports through its return value only. libflux keeps its error
+/* The harness reports through its return value only. liboptics_gfx keeps its error
  * sink hidden, and a test utility has no business reaching into it: every
  * caller here is a test that asserts on the returned code. */
 

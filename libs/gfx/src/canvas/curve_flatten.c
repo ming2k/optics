@@ -1,8 +1,8 @@
 /*
  * Path → polyline contour bridge (ADR-0115).
  *
- * Curve geometry semantics live in the flux_curve kernel; this file only
- * walks a flux_path and turns its curve verbs into contour point runs for the
+ * Curve geometry semantics live in the curve kernel (<optics/gfx/curve.h>); this file only
+ * walks a optics_gfx_path and turns its curve verbs into contour point runs for the
  * rasterizer. There is no recursive subdivision and no depth cap and no
  * flatness search here: each curve is sampled at the segment count the
  * kernel's Wang's formula returns, a closed form with a provable deviation
@@ -60,7 +60,7 @@ static bool ensure_points_room(flatten_state *st) {
     }
     if (!st->grow) {
         OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_OUT_OF_RANGE,
-                        "canvas path scratch exhausted (FLUX_CANVAS_PATH_SCRATCH_CAP); "
+                        "canvas path scratch exhausted (OPTICS_GFX_CANVAS_PATH_SCRATCH_CAP); "
                         "flattened points dropped");
     }
     st->done = true;

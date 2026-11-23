@@ -3,6 +3,9 @@ id: ADR-0081
 title: "Lens unified fluent flex containers and component orthogonality"
 status: accepted
 date: 2026-08-26
+scope: ui (C core library), ui-rs (Rust binding layer)
+superseded_by: null
+negative_knowledge: false
 ---
 
 # ADR-0081: Lens unified fluent flex containers and component orthogonality

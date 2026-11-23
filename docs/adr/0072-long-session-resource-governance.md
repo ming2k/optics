@@ -3,6 +3,9 @@ id: ADR-0072
 title: "Long-session resource governance — bounded queues, O(1) eviction, live-list GC"
 status: accepted
 date: 2026-08-21
+scope: gfx core (retire queue), gfx-text (text cache, itemizer
+superseded_by: null
+negative_knowledge: false
 ---
 
 # ADR-0072: Long-session resource governance — bounded queues, O(1) eviction, live-list GC

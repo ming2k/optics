@@ -108,7 +108,7 @@ impl Color {
     }
 }
 
-/// Widget-kind tags for skin replacement ([`crate::Frame::set_skin`],
+/// Widget-kind tags for skin replacement ([`crate::default_skin`],
 /// ADR-0059). Re-exported from the raw bindings.
 pub use sys::optics_ui_widget_kind as WidgetKind;
 
@@ -118,7 +118,7 @@ pub use sys::optics_ui_widget_content as WidgetContent;
 /// One wrapped/visible text line in a LABEL or TEXTEDIT record payload.
 pub use sys::optics_ui_text_line as TextLine;
 
-/// The semantic cursor hint returned by [`Ui::cursor_hint`].
+/// The semantic cursor hint returned by [`crate::Ui::cursor_hint`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[repr(u32)]
 pub enum CursorHint {
@@ -156,7 +156,7 @@ pub use sys::optics_ui_style_resolved as StyleResolved;
 pub use sys::optics_ui_widget_record as WidgetRecord;
 pub use sys::optics_ui_widget_state as WidgetState;
 
-/// Named vector glyphs bundled with the lens runtime.
+/// Named vector glyphs bundled with the ui runtime.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Icon {
     Activity,

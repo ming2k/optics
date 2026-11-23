@@ -1,5 +1,5 @@
 /*
- * flux_image retire queue: an image released right after a frame that
+ * optics_gfx_image retire queue: an image released right after a frame that
  * sampled it must survive until the GPU provably passes that batch.
  * The pre-fix behaviour destroyed view/image/memory inline, which an
  * in-flight batch could still reference (i915: GPU hang -> context
@@ -113,14 +113,14 @@ int main(void) {
     OT_EXPECT(optics_gfx_observe_read_counters(
                   d, &(optics_gfx_observe_read_counters_opts){.scope = OPTICS_GFX_SCOPE_DEVICE,
                                                               .kind = "vk_image",
-                                                              .owner = "flux/core",
+                                                              .owner = "gfx/core",
                                                               .out = &c}) == OPTICS_GFX_OK);
     /* At this point only the surface's swapchain/offscreen images remain live. */
     uint64_t baseline_live = c.live;
 
     /* Regression test: recording_frames counter integrity across aborted frames.
      *
-     * Case A: flux_surface_resize during recording must decrement recording_frames
+     * Case A: optics_gfx_surface_resize during recording must decrement recording_frames
      * so wait_idle remains a functional reclamation point. */
     {
         optics_gfx_frame *rec_frame = nullptr;
@@ -139,7 +139,7 @@ int main(void) {
         OT_EXPECT(optics_gfx_observe_read_counters(
                       d, &(optics_gfx_observe_read_counters_opts){.scope = OPTICS_GFX_SCOPE_DEVICE,
                                                                   .kind = "vk_image",
-                                                                  .owner = "flux/core",
+                                                                  .owner = "gfx/core",
                                                                   .out = &c}) == OPTICS_GFX_OK);
         OT_EXPECT(c.live == baseline_live);
     }
@@ -168,7 +168,7 @@ int main(void) {
         OT_EXPECT(optics_gfx_observe_read_counters(
                       d, &(optics_gfx_observe_read_counters_opts){.scope = OPTICS_GFX_SCOPE_DEVICE,
                                                                   .kind = "vk_image",
-                                                                  .owner = "flux/core",
+                                                                  .owner = "gfx/core",
                                                                   .out = &c}) == OPTICS_GFX_OK);
         OT_EXPECT(c.live == baseline_live);
     }

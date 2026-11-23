@@ -29,7 +29,7 @@
  *
  *  - `family_name` is a UTF-8 string. face.c passes either a generic name
  *    ("sans-serif" / "serif" / "monospace") or a concrete family name
- *    (e.g. from the FLUX_TEXT_FONT env override). Backends must map the
+ *    (e.g. from the OPTICS_TEXT_FONT env override). Backends must map the
  *    generic names to a sensible platform default family.
  *  - `weight` is on the CSS 1..1000 scale (400 = regular, 700 = bold);
  *    values <= 0 are treated as 400. Each backend converts to its own
@@ -108,18 +108,6 @@ bool txtp_charset_has_char(const txtp_charset *cs, uint32_t cp);
 
 /* Release a coverage set. NULL-safe. */
 void txtp_charset_free(txtp_charset *cs);
-
-/* Small shared helper for the backends (face.c has its own txt_strdup).
- * strdup is POSIX, not ISO C, so MSVC does not provide it. */
-static inline char *txtp_strdup(const char *s) {
-    if (!s)
-        return nullptr;
-    size_t n = strlen(s) + 1;
-    char *p = (char *)malloc(n);
-    if (p)
-        memcpy(p, s, n);
-    return p;
-}
 
 #ifdef __cplusplus
 }

@@ -186,7 +186,7 @@ optics_gfx_result optics_gfx_transient_ring_init(optics_gfx_transient_ring *r, o
         .buffer = r->buffer,
     };
     r->device_address = vkGetBufferDeviceAddress(d->device, &bdai);
-    optics_gfx_vk_set_name(d, VK_OBJECT_TYPE_BUFFER, (uint64_t)r->buffer, "flux transient ring");
+    optics_gfx_vk_set_name(d, VK_OBJECT_TYPE_BUFFER, (uint64_t)r->buffer, "gfx transient ring");
     return OPTICS_GFX_OK;
 }
 

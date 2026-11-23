@@ -1,14 +1,14 @@
 /* file_dialog_cocoa.m — file picker via NSOpenPanel / NSSavePanel.
  *
- * Implements iris/file_dialog.h on macOS. runModal blocks until the user
+ * Implements window/file_dialog.h on macOS. runModal blocks until the user
  * confirms or cancels, matching the portal backend's blocking contract.
  * Results are panel URLs' absoluteString — already file:// URIs, which is
- * exactly the iris_pick_* output format.
+ * exactly the optics_window_pick_* output format.
  *
- * Compiled with ARC (see the darwin branch in libs/iris/meson.build).
+ * Compiled with ARC (see the darwin branch in libs/window/meson.build).
  *
  * UNVERIFIED ASSUMPTIONS (no Apple SDK on the authoring machine):
- *  1. Filters: iris glob patterns ("*.txt;*.md") are lowered to plain
+ *  1. Filters: window glob patterns ("*.txt;*.md") are lowered to plain
  *     extensions for NSOpenPanel.allowedFileTypes. allowedFileTypes is
  *     deprecated since macOS 12 (in favour of UTType content types) but
  *     still functional and far simpler for extension-only filters; a
@@ -16,7 +16,7 @@
  *     so a filters array with no usable extension means "any file".
  *  2. The filter array is NULL-terminated on `name`, matching how
  *     file_dialog_portal.c iterates it.
- *  3. runModal from inside iris_app_run's hand-rolled loop stalls frame
+ *  3. runModal from inside optics_window_run's hand-rolled loop stalls frame
  *     pacing for the duration of the dialog (same as the portal backend's
  *     modal loop). Wakeup/paste ApplicationDefined events queued meanwhile
  *     are drained after the dialog closes.
@@ -32,7 +32,7 @@
 /*  Options → panel                                                    */
 /* ------------------------------------------------------------------ */
 
-/* Lower the NULL-terminated iris_file_filter array to a flat extension
+/* Lower the NULL-terminated optics_window_file_filter array to a flat extension
  * list. Returns nil when there is nothing usable (meaning "any file"). */
 static NSArray<NSString *> *allowed_types_from_filters(const optics_window_file_filter *filters) {
     if (!filters)
@@ -87,7 +87,7 @@ static void apply_opts(NSSavePanel *panel, const optics_window_file_dialog_opts 
 /*  Result copying                                                     */
 /* ------------------------------------------------------------------ */
 
-/* 0 = copied, IRIS_PICK_TRUNCATED = buffer too small. */
+/* 0 = copied, OPTICS_WINDOW_PICK_TRUNCATED = buffer too small. */
 static int copy_uri(NSURL *url, char *out_path, size_t out_cap) {
     if (!out_path || out_cap == 0)
         return OPTICS_WINDOW_PICK_UNAVAILABLE;

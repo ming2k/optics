@@ -6,16 +6,16 @@
 
 #include "damage_history.h"
 #include <optics/gfx/core.h>
-#include <optics/gfx/math.h>    /* flux_mat4 (flux_frame scene caches) */
-#include <optics/gfx/observe.h> /* flux_scope, flux_observe_opts (ADR-0129) */
+#include <optics/gfx/math.h>    /* optics_gfx_mat4 (optics_gfx_frame scene caches) */
+#include <optics/gfx/observe.h> /* optics_gfx_scope, optics_gfx_observe_opts (ADR-0129) */
 #include <optics/gfx/profile.h> /* profiler telemetry facade (ADR-0138) */
-#include <optics/gfx/vulkan.h>  /* flux_bindless_handle */
+#include <optics/gfx/vulkan.h>  /* optics_gfx_bindless_handle */
 #include <stdatomic.h>
 #include <vulkan/vulkan.h>
 
-#include "plan.h"        /* flux_plan: deferred passes (ADR-0147) */
-#include "platform.h"    /* flux_platform_mutex + friends (OS shims) */
-#include "render_plan.h" /* flux_render_plan: target contract IR (ADR-0089) */
+#include "plan.h"        /* optics_gfx_plan: deferred passes (ADR-0147) */
+#include "platform.h"    /* optics_gfx_platform_mutex + friends (OS shims) */
+#include "render_plan.h" /* optics_gfx_render_plan: target contract IR (ADR-0089) */
 
 /* Set the structured error info for this thread. Pass __func__ /
  * __FILE__ / __LINE__ at the call site. message and backend_code may
@@ -23,10 +23,10 @@
  *
  * The message pointer is *borrowed* for the lifetime of the thread-local
  * slot: it must be a string literal or otherwise outlive the next failure.
- * Anything formatted must go through FLUX_FAILF, which renders into the
+ * Anything formatted must go through OPTICS_GFX_FAILF, which renders into the
  * slot's own buffer instead of a caller stack frame — a `char buf[192]`
- * handed to flux_set_last_error dangles the moment the function returns,
- * and the slot is exactly what flux_get_last_error is read from later.
+ * handed to optics_gfx_set_last_error dangles the moment the function returns,
+ * and the slot is exactly what optics_gfx_get_last_error is read from later.
  *
  * Defined in src/core/result.c. */
 void optics_gfx_set_last_error(optics_gfx_result code, const char *function, const char *file,
@@ -50,7 +50,7 @@ void optics_gfx_set_last_errorf(optics_gfx_result code, const char *function, co
         optics_gfx_set_last_error((code), __func__, __FILE__, __LINE__, (msg), (int32_t)(vk));     \
     } while (0)
 
-/* FLUX_FAIL for a composed message. Use whenever the diagnostic needs
+/* OPTICS_GFX_FAIL for a composed message. Use whenever the diagnostic needs
  * values spliced in; the text is copied into the error slot, not borrowed. */
 #define OPTICS_GFX_FAILF(code, ...)                                                                \
     do {                                                                                           \
@@ -89,7 +89,7 @@ typedef struct optics_gfx_observe_row {
     uint64_t key_hash;
     const char *site; /* first acquire; literal or NULL */
     optics_gfx_scope scope;
-    optics_gfx_observe_lifetime lifetime; /* drain point (FLUX_LIFETIME_*) */
+    optics_gfx_observe_lifetime lifetime; /* drain point (OPTICS_GFX_LIFETIME_*) */
     /* Live named instances for this kind (ADR-0132), oldest first. Each slot
      * owns its name buffer, so the pointer handed to the driver for instance N
      * is not overwritten by instance N+1: with a single shared buffer, two
@@ -98,7 +98,7 @@ typedef struct optics_gfx_observe_row {
      * assumption this design refuses to make.
      *
      * Bounded, with the overflow counted rather than hidden: past
-     * FLUX_OBSERVE_NAME_RING live instances, the oldest name is recycled and
+     * OPTICS_GFX_OBSERVE_NAME_RING live instances, the oldest name is recycled and
      * `name_overflow` says how often. */
     struct {
         uint32_t id;
@@ -125,7 +125,7 @@ typedef struct optics_gfx_observe_state {
     atomic_uint row_count;
     atomic_uint_fast64_t overflowed_kinds;
     atomic_uint_fast64_t unmatched_releases;
-    uint32_t capabilities; /* OR of flux_observe_capability */
+    uint32_t capabilities; /* OR of optics_gfx_observe_capability */
     /* Per-device instance ids (ADR-0132). Monotonic; never reused, so a name
      * never refers to two different objects in one capture. */
     atomic_uint next_instance;
@@ -147,11 +147,11 @@ void optics_gfx_observe_destroy(optics_gfx_device *d);
  *   - the pointer cannot dangle: the row outlives every object of its kind and
  *     the ledger is torn down after the device;
  *   - the name is unique per live instance, which is the only thing a capture
- *     can use ("flux_image#7", not the seventh "flux_image 512x512").
+ *     can use ("optics_gfx_image#7", not the seventh "optics_gfx_image 512x512").
  *
  * Returns the name that was set, or nullptr when naming is compiled out or the
  * capability is off. Callers do not branch on it: handing the result back to
- * flux_vk_set_name would defeat the storage guarantee, so this calls the
+ * optics_gfx_vk_set_name would defeat the storage guarantee, so this calls the
  * driver itself. */
 const char *optics_gfx_observe_name_object(optics_gfx_device *d, optics_gfx_scope scope,
                                            const char *kind, const char *owner);
@@ -179,12 +179,12 @@ uint32_t optics_gfx_observe_instance_of(optics_gfx_device *d, optics_gfx_scope s
 /*  the granularity check.                                            */
 /*                                                                    */
 /*  Safety: every dealloc is validated against the owning block's     */
-/*  live byte counter; a double-free (or stale flux_vk_alloc copy)    */
+/*  live byte counter; a double-free (or stale optics_gfx_vk_alloc copy)    */
 /*  is rejected loudly instead of corrupting the free-list.           */
 /*                                                                    */
 /*  Reclaim: a block whose live count drops to zero is returned to    */
 /*  the driver immediately if a same-key peer exists, and on every    */
-/*  flux_vk_allocator_reclaim() otherwise. Lost ranges (free-list     */
+/*  optics_gfx_vk_allocator_reclaim() otherwise. Lost ranges (free-list     */
 /*  node OOM during dealloc) are accounted per-block so the reclaim   */
 /*  path still recognises them as empty.                              */
 /* ------------------------------------------------------------------ */
@@ -259,12 +259,12 @@ uint32_t optics_gfx_vk_allocator_reclaim(optics_gfx_device *d);
 /* Account for a VkDeviceMemory living outside the slab (dma-buf import
  * or export): note_external counts it up, unnote_external counts it
  * back down. Keeps bytes_in_use / live_allocations honest so the
- * teardown leak warning and flux_device_memory_stats see external
+ * teardown leak warning and optics_gfx_device_memory_stats see external
  * memory too. Thread-safe. */
 void optics_gfx_vk_allocator_note_external(optics_gfx_device *d, VkDeviceSize bytes);
 void optics_gfx_vk_allocator_unnote_external(optics_gfx_device *d, VkDeviceSize bytes);
 
-/* Driver dedication hint for flux_vk_allocate, sourced from
+/* Driver dedication hint for optics_gfx_vk_allocate, sourced from
  * VkMemoryDedicatedRequirements chained on the resource's
  * vkGet*MemoryRequirements2. When the driver requires or prefers a
  * dedicated allocation for the resource, the request bypasses the slab
@@ -295,7 +295,7 @@ void optics_gfx_vk_deallocate(optics_gfx_device *d, optics_gfx_vk_alloc *alloc);
 #define OPTICS_GFX_BINDLESS_BIND_STORAGE_BUFFER 3
 
 /* Largest push-constant range the library imposes on a device.
- * Currently driven by flux_canvas_push (canvas pipelines). Every
+ * Currently driven by optics_gfx_canvas_push (canvas pipelines). Every
  * module's push struct is static_assert'd not to exceed this in
  * its own translation unit.
  *
@@ -342,20 +342,19 @@ typedef struct optics_gfx_retire_zombie {
     VkImage image;
     VkBuffer buffer;
     VkSampler sampler;
-    VkPipeline pipeline; /* destroy-inline resources (pipelines) parked by
-                          * flux_pipeline_release_deferred */
+    VkPipeline pipeline; /* a released pipeline parked by optics_gfx_vk_retire_pipeline */
     optics_gfx_vk_alloc alloc;
     VkDeviceMemory imported_memory;
     VkDeviceSize imported_size; /* bytes to uncount from allocator stats
                                  * when imported_memory is freed; 0 when
                                  * imported_memory is VK_NULL_HANDLE */
-    uint32_t bindless;          /* FLUX_BINDLESS_INVALID when unset */
-    uint32_t bindless_storage;  /* FLUX_BINDLESS_INVALID when unset */
+    uint32_t bindless;          /* OPTICS_GFX_BINDLESS_INVALID when unset */
+    uint32_t bindless_storage;  /* OPTICS_GFX_BINDLESS_INVALID when unset */
     uint64_t retire_after;      /* destroy once completed_serial >= this */
     struct optics_gfx_retire_zombie *next;
 } optics_gfx_retire_zombie;
 
-/* Backpressure bound for the retire FIFO (see flux_device and
+/* Backpressure bound for the retire FIFO (see optics_gfx_device and
  * zombie_park in device.c). Sized so normal operation — a few frames
  * in flight times the per-frame release churn of pools and atlases —
  * never reaches it; only a frozen watermark (host stops submitting
@@ -363,7 +362,7 @@ typedef struct optics_gfx_retire_zombie {
  * forced full drain is the intended behaviour. */
 #define OPTICS_GFX_RETIRE_MAX_PENDING 4096u
 
-/* One idle staging buffer in the device cache (see flux_device).
+/* One idle staging buffer in the device cache (see optics_gfx_device).
  * Buffer + allocation stay alive and mapped while cached. */
 typedef struct optics_gfx_staging_buf {
     VkBuffer buffer;
@@ -374,8 +373,8 @@ typedef struct optics_gfx_staging_buf {
 } optics_gfx_staging_buf;
 
 /* One idle transient command pool in the device cache (see
- * flux_device). The pool is parked already reset, ready for
- * flux_vk_new_transient_cmd to hand out again. */
+ * optics_gfx_device). The pool is parked already reset, ready for
+ * optics_gfx_vk_new_transient_cmd to hand out again. */
 typedef struct optics_gfx_transient_pool {
     VkCommandPool pool;
     uint32_t family; /* queue family the pool was created for */
@@ -397,12 +396,12 @@ typedef struct optics_gfx_transient_cmdbufs {
 } optics_gfx_transient_cmdbufs;
 
 /* One submitted-but-not-yet-retired upload batch. Upload submissions are
- * deferred: the one-shot helpers and flux_uploads_flush hand the graphics
+ * deferred: the one-shot helpers and optics_gfx_uploads_flush hand the graphics
  * (or transfer) queue their copy commands and return without a fence wait,
  * parking everything the batch references here. The fence signals when the
  * GPU has retired the batch; entries are then recycled lazily by the
  * non-blocking sweep at the next upload call, or forcibly by
- * flux_vk_upload_pending_drain (diagnostics + device teardown). Recycling
+ * optics_gfx_vk_upload_pending_drain (diagnostics + device teardown). Recycling
  * any earlier is a use-after-submit: the staging buffers are still being
  * read and the command pools still executing. */
 typedef struct optics_gfx_upload_pending {
@@ -414,7 +413,7 @@ typedef struct optics_gfx_upload_pending {
                                        * unknown (destroy instead of caching) */
     uint32_t pool2_family;            /* same for pool2 */
     VkCommandBuffer pool_cmd;         /* command buffer allocated from `pool`;
-                                       * freed on recycle (see flux_transient_cmdbufs) */
+                                       * freed on recycle (see optics_gfx_transient_cmdbufs) */
     VkCommandBuffer pool2_cmd;        /* same for `pool2` */
     VkSemaphore sem;                  /* QFOT handoff semaphore; usually NULL */
     optics_gfx_staging_buf *stagings; /* returned to the staging cache on recycle */
@@ -499,12 +498,12 @@ struct optics_gfx_device {
     /* Vulkan requires VkQueue access to be externally synchronised.
      * The frame path serialises submits per-surface implicitly, but
      * one-shot upload helpers (image_create, mesh_create, anything
-     * calling flux_vk_upload_to_*) can be called from worker threads
+     * calling optics_gfx_vk_upload_to_*) can be called from worker threads
      * during asset loading. This mutex guards every vkQueueSubmit2
      * issued by those helpers; the frame path acquires it too.
      * vkDeviceWaitIdle / vkQueueWaitIdle also count as host access to
      * the queues (observed as an ANV double-free when a wait raced a
-     * concurrent submit), so they must go through flux_vk_wait_idle,
+     * concurrent submit), so they must go through optics_gfx_vk_wait_idle,
      * which funnels them through this same lock. */
     optics_gfx_platform_mutex queue_lock;
     bool queue_lock_initialized;
@@ -537,22 +536,22 @@ struct optics_gfx_device {
      * A resource released while a frame records may still be referenced by
      * commands already recorded into that frame's command buffer, so its retire
      * tag has to cover that frame's submission. With no recording frame nothing
-     * can still reference it and the tag can be the current serial — which lets
-     * flux_device_reclaim_retired make released GPU memory reclaimable the moment
-     * the queue is idle, instead of after a subsequent submission. */
+     * can still reference it and the tag can be the current serial — which makes
+     * released GPU memory reclaimable the moment the queue is idle
+     * (optics_gfx_device_wait_idle), instead of after a subsequent submission. */
     atomic_uint recording_frames;
     optics_gfx_platform_mutex retire_lock;
     bool retire_lock_initialized;
     optics_gfx_retire_zombie *retire_head; /* FIFO; tags are non-decreasing */
     optics_gfx_retire_zombie **retire_tail;
     /* Live entries on the FIFO. Backpressure bound: parking more than
-     * FLUX_RETIRE_MAX_PENDING forces a full drain (see zombie_park), so
+     * OPTICS_GFX_RETIRE_MAX_PENDING forces a full drain (see zombie_park), so
      * a host that releases resources while submitting no frames cannot
      * grow GPU memory without bound. Frames-in-flight operation stays
      * orders of magnitude below it. */
     uint32_t retire_pending;
 
-    /* Batched uploads (public flux_uploads_begin/flush). While a batch
+    /* Batched uploads (public optics_gfx_uploads_begin/flush). While a batch
      * is open, the one-shot upload helpers record their copies into
      * batch_cmd instead of submitting individually; flush submits once.
      * Staging buffers are checked out of the staging cache per upload
@@ -563,7 +562,7 @@ struct optics_gfx_device {
     optics_gfx_platform_mutex upload_lock;
     bool upload_lock_initialized;
     bool upload_batch_open;
-    /* Nesting depth of flux_uploads_begin without a matching flush. A
+    /* Nesting depth of optics_gfx_uploads_begin without a matching flush. A
      * host that opens several upload scopes per frame (a compositor
      * batching per draw pass) reuses the single open batch instead of
      * submitting and later recycling one command pool per scope: each
@@ -575,10 +574,10 @@ struct optics_gfx_device {
     optics_gfx_staging_buf *upload_batch_stagings; /* checked-out list, `next` chained */
 
     /* Deferred upload retirement. Every one-shot upload submission parks
-     * a flux_upload_pending here instead of blocking the caller on a
+     * a optics_gfx_upload_pending here instead of blocking the caller on a
      * fence. Guarded by its own lock; recycled by sweep (non-blocking,
      * called from the upload entry points) or drain (waits, called from
-     * flux_device_memory_stats and device teardown). */
+     * optics_gfx_device_memory_stats and device teardown). */
     optics_gfx_platform_mutex upload_pending_lock;
     bool upload_pending_lock_initialized;
     optics_gfx_upload_pending *upload_pending_head;
@@ -590,7 +589,7 @@ struct optics_gfx_device {
      * avoids a vkCreateBuffer + vkAllocateMemory pair per upload without
      * ever handing a buffer back while the GPU still reads it.
      * Idle entries are matched by usage and smallest-fit capacity, and
-     * the cache is capped (see FLUX_VK_STAGING_CACHE_CAP in oneshot.c).
+     * the cache is capped (see OPTICS_GFX_VK_STAGING_CACHE_CAP in oneshot.c).
      * Checked-out entries are owned by the caller; the idle list is
      * drained at device teardown, after the device is known idle. */
     optics_gfx_platform_mutex staging_lock;
@@ -598,7 +597,7 @@ struct optics_gfx_device {
     optics_gfx_staging_buf *staging_idle;
     uint64_t staging_idle_bytes;
 
-    /* Open one-shot recordings started by the public flux_oneshot_begin
+    /* Open one-shot recordings started by the public optics_gfx_oneshot_begin
      * (oneshot.c). Maps the handed-out VkCommandBuffer back to its
      * transient pool so submit_and_end can recycle it. Guarded by
      * staging_lock (a leaf lock, same as the pool cache below). */
@@ -615,7 +614,7 @@ struct optics_gfx_device {
      * not destroyed — once the GPU provably retired every batch
      * recorded from them (the pending-upload fence), and handed out by
      * queue family. Shares staging_lock (a leaf lock, same recycle
-     * paths); drained at device teardown by flux_vk_staging_pool_destroy
+     * paths); drained at device teardown by optics_gfx_vk_staging_pool_destroy
      * once the device is idle. */
     optics_gfx_transient_pool *transient_pool_idle;
     uint32_t transient_pool_idle_count;
@@ -634,7 +633,7 @@ struct optics_gfx_device {
     VkPipelineCache pipeline_cache;
 
     /* Consumer-supplied pipeline-cache persistence hooks (Skia
-     * PersistentCache model). Copied from flux_device_desc at create
+     * PersistentCache model). Copied from optics_gfx_device_desc at create
      * time so release can flush without the desc. NULL = no
      * persistence; the in-memory VkPipelineCache is discarded at
      * release. */
@@ -643,7 +642,7 @@ struct optics_gfx_device {
     void *pipeline_cache_userdata;
 
     /* GPU memory allocator — backs every VkDeviceMemory we hand out.
-     * Init'd eagerly in flux_device_create after the logical device,
+     * Init'd eagerly in optics_gfx_device_create after the logical device,
      * destroyed before vkDestroyDevice. Named mem_allocator to avoid
      * a clash with the caller-supplied CPU allocator above. */
     optics_gfx_vk_allocator mem_allocator;
@@ -653,7 +652,7 @@ struct optics_gfx_device {
     /* Default sampler (linear filtering, clamp-to-edge). Lazily
      * created on first image registration. Registered into the
      * bindless heap at SAMPLER binding slot 0; that handle is
-     * accessible via flux_device_default_sampler_handle.
+     * accessible via optics_gfx_device_default_sampler_handle.
      * `default_sampler_handle` is read on every glyph-run / image draw
      * (the hot text path), so it is stored as an atomic: readers load
      * acquire and skip the bindless lock entirely once populated; the
@@ -683,7 +682,7 @@ uint32_t optics_gfx_vk_find_memory_type(optics_gfx_device *d, uint32_t type_filt
 
 /* Allocate a buffer backed by the GPU allocator. Caller destroys the
  * VkBuffer with vkDestroyBuffer and frees the backing memory with
- * flux_vk_deallocate. `wants_device_address` must be true iff the
+ * optics_gfx_vk_deallocate. `wants_device_address` must be true iff the
  * buffer was created with SHADER_DEVICE_ADDRESS_BIT usage. */
 optics_gfx_result optics_gfx_vk_alloc_buffer(optics_gfx_device *d, VkDeviceSize size,
                                              VkBufferUsageFlags usage, VkMemoryPropertyFlags props,
@@ -691,7 +690,7 @@ optics_gfx_result optics_gfx_vk_alloc_buffer(optics_gfx_device *d, VkDeviceSize 
                                              optics_gfx_vk_alloc *out_alloc);
 
 /* Same shape for an image. Caller destroys the VkImage and calls
- * flux_vk_deallocate on the backing memory. */
+ * optics_gfx_vk_deallocate on the backing memory. */
 optics_gfx_result optics_gfx_vk_alloc_image(optics_gfx_device *d, const VkImageCreateInfo *ici,
                                             VkMemoryPropertyFlags props, VkImage *out_image,
                                             optics_gfx_vk_alloc *out_alloc);
@@ -713,7 +712,7 @@ void optics_gfx_vk_staging_pool_destroy(optics_gfx_device *d);
 
 /* Deferred upload retirement (bodies in oneshot.c). drain waits on every
  * parked upload fence and recycles all entries — used by
- * flux_device_memory_stats (deterministic numbers) and by device
+ * optics_gfx_device_memory_stats (deterministic numbers) and by device
  * teardown once the device is idle. The upload entry points run the
  * non-blocking sweep internally. */
 void optics_gfx_vk_upload_pending_drain(optics_gfx_device *d);
@@ -737,7 +736,7 @@ VkResult optics_gfx_vk_submit_upload(optics_gfx_device *d, VkQueue queue, VkComm
  * (VK_NULL_HANDLE when none); the recycle path frees them before the
  * pools return to the cache, because a reset pool keeps its allocated
  * command buffers alive and re-allocation then grows driver memory
- * without bound on some drivers (see flux_transient_cmdbufs). */
+ * without bound on some drivers (see optics_gfx_transient_cmdbufs). */
 void optics_gfx_vk_upload_pending_park_families(optics_gfx_device *d, VkFence fence,
                                                 VkCommandPool pool, uint32_t pool_family,
                                                 VkCommandBuffer pool_cmd, VkCommandPool pool2,
@@ -745,15 +744,15 @@ void optics_gfx_vk_upload_pending_park_families(optics_gfx_device *d, VkFence fe
                                                 VkSemaphore sem, optics_gfx_staging_buf *stagings,
                                                 uint64_t serial);
 
-/* Upload batch internals (public entry points are flux_uploads_begin /
- * flux_uploads_flush). Upload helpers record into the batch while
+/* Upload batch internals (public entry points are optics_gfx_uploads_begin /
+ * optics_gfx_uploads_flush). Upload helpers record into the batch while
  * d->upload_batch_open (guarded by upload_lock). */
 void optics_gfx_vk_upload_batch_attach_staging(optics_gfx_device *d, optics_gfx_staging_buf *sb);
 
 /* One-shot host -> device upload via a graphics-queue command buffer
  * (uses the graphics queue rather than transfer to avoid queue-family
  * ownership transfer plumbing in this simple path). Copies through a
- * cached host-visible staging buffer (flux_vk_staging_acquire), records
+ * cached host-visible staging buffer (optics_gfx_vk_staging_acquire), records
  * vkCmdCopyBuffer to dst, and submits deferred — the caller returns
  * immediately and the staging buffer is recycled once the copy's parked
  * fence signals. */
@@ -768,7 +767,7 @@ optics_gfx_result optics_gfx_vk_upload_to_buffer(optics_gfx_device *d, VkBuffer 
  * first-time upload, SHADER_READ_ONLY_OPTIMAL for a region update)
  * through TRANSFER_DST_OPTIMAL and back to SHADER_READ_ONLY_OPTIMAL.
  *
- * `plan_destination` is the flux_image the upload writes (NULL for an internal
+ * `plan_destination` is the optics_gfx_image the upload writes (NULL for an internal
  * image with no plan identity, such as a baked LUT). When a frame is recording
  * on this thread, the upload records an UPLOAD node in that frame's RenderPlan
  * before the copy is emitted (ADR-0089 1B-2B). */
@@ -786,7 +785,7 @@ optics_gfx_result optics_gfx_vk_transition_image_layout(optics_gfx_device *d, Vk
                                                         VkImageLayout new_layout);
 
 /* One-shot submit infrastructure (bodies in oneshot.c). Shared with
- * flux_surface_read_pixels in surface.c; declared here rather than
+ * optics_gfx_surface_read_pixels in surface.c; declared here rather than
  * static so both oneshot.c and surface.c reach the same code. */
 bool optics_gfx_vk_prefer_transfer_queue(const optics_gfx_device *d);
 VkResult optics_gfx_vk_new_transient_cmd(optics_gfx_device *d, uint32_t family,
@@ -812,16 +811,16 @@ void optics_gfx_vk_note_graphics_completed(optics_gfx_device *d, uint64_t serial
 /* Park a released image's Vulkan pieces for deferred destruction. Takes
  * ownership of view/image/alloc/imported_memory; the bindless slots are
  * freed when the zombie is destroyed. imported_size is the byte count
- * previously noted via flux_vk_allocator_note_external for
+ * previously noted via optics_gfx_vk_allocator_note_external for
  * imported_memory (0 when VK_NULL_HANDLE). Thread-safe. */
 void optics_gfx_device_retire_image(optics_gfx_device *d, VkImageView view, VkImage image,
                                     const optics_gfx_vk_alloc *alloc,
                                     VkDeviceMemory imported_memory, VkDeviceSize imported_size,
                                     uint32_t bindless, uint32_t bindless_storage);
 
-/* Park a VkPipeline for deferred destruction (flux_pipeline_release_deferred
- * and flux_graphics_pipeline_release_deferred). Destroys it once every
- * submitted graphics batch has completed. Thread-safe. */
+/* Park a VkPipeline for deferred destruction (the compute and graphics
+ * pipeline release paths). Destroys it once every submitted graphics batch
+ * has completed. Thread-safe. */
 void optics_gfx_vk_retire_pipeline(optics_gfx_device *d, VkPipeline pipeline);
 /* Park a released buffer's Vulkan pieces for deferred destruction. Takes
  * ownership of buffer/alloc. Thread-safe. */
@@ -837,7 +836,7 @@ void optics_gfx_device_retire_sampler(optics_gfx_device *d, VkSampler sampler, u
 
 /* vkDeviceWaitIdle serialised against concurrent queue submissions via
  * queue_lock. Every wait-idle in the library must go through this helper
- * (see the queue_lock comment in flux_device). */
+ * (see the queue_lock comment in optics_gfx_device). */
 void optics_gfx_vk_wait_idle(optics_gfx_device *d);
 
 /* Best-effort debug name for a Vulkan object (VK_EXT_debug_utils).
@@ -847,7 +846,7 @@ void optics_gfx_vk_set_name(optics_gfx_device *d, VkObjectType type, uint64_t ha
                             const char *name);
 
 /* Command-buffer section labels (ADR-0133). No-ops unless
- * FLUX_OBSERVE_PASS_LABELS is both requested and compiled in, and always
+ * OPTICS_GFX_OBSERVE_PASS_LABELS is both requested and compiled in, and always
  * no-ops when VK_EXT_debug_utils is unavailable. Never used on a CPU backend
  * that has no command buffer. */
 void optics_gfx_vk_cmd_begin_label(optics_gfx_device *d, VkCommandBuffer cmd, const char *label);
@@ -866,12 +865,12 @@ void optics_gfx_device_sweep_retire(optics_gfx_device *d);
 void optics_gfx_device_drain_retire(optics_gfx_device *d);
 
 /* Allocator helpers — routed through device->allocator if set, else
- * libc. flux_internal_alloc always returns zeroed memory regardless
+ * libc. optics_gfx_internal_alloc always returns zeroed memory regardless
  * of allocator origin. */
 void *optics_gfx_internal_alloc(optics_gfx_device *d, size_t bytes);
 void optics_gfx_internal_free(optics_gfx_device *d, void *ptr);
 
-#include <string.h> /* memset for flux_internal_alloc zeroing */
+#include <string.h> /* memset for optics_gfx_internal_alloc zeroing */
 
 /* ------------------------------------------------------------------ */
 /*  Surface + per-frame state                                         */
@@ -971,8 +970,8 @@ struct optics_gfx_target {
 /* Bounded damage-rect contract shared by every layer of the damage pipeline.
  * One frame can name at most this many disjoint device-pixel rectangles; a frame
  * that needs more degrades to one rectangle covering the whole extent, never to a
- * truncated list (ADR-0149 decision 3). Sized to the producer (lens reports at
- * most LENS_DAMAGE_RECTS_CAPACITY = 64 regions). */
+ * truncated list (ADR-0149 decision 3). Sized to the producer (ui reports at
+ * most OPTICS_UI_DAMAGE_RECTS_CAPACITY = 64 regions). */
 #define OPTICS_GFX_FRAME_DAMAGE_CAPACITY 64u
 
 /* Write-history depth and the never-synchronised sentinel live with the policy
@@ -1040,7 +1039,7 @@ struct optics_gfx_frame {
      * passes bind their own pipelines on this command buffer (the
      * canvas end_pass output blit always does), and bindings persist
      * across passes — so the mirror is only valid within one pass and
-     * flux_frame_begin_pass resets it, forcing the first scene draw of
+     * optics_gfx_frame_begin_pass resets it, forcing the first scene draw of
      * each pass to rebind.
      *
      * scene_view_* cache inverse(camera.view): one memcmp per draw
@@ -1055,7 +1054,7 @@ struct optics_gfx_frame {
 
 /* Recorders call this before sampling an image. The first use in a frame
  * retains resource until the frame slot's fence retires. `foreign_owned` is
- * NULL for ordinary images; for imported dma-bufs, flux_frame_submit prepends
+ * NULL for ordinary images; for imported dma-bufs, optics_gfx_frame_submit prepends
  * a FOREIGN -> graphics acquire when necessary and records the matching
  * graphics -> FOREIGN release after all sampling. */
 bool optics_gfx_frame_track_foreign_image(optics_gfx_frame *frame, VkImage image, void *resource,
@@ -1074,7 +1073,7 @@ bool optics_gfx_frame_set_foreign_image_acquire(optics_gfx_frame *frame, void *r
  * tolerates a host that records several surfaces on one thread. Upload path
  * recording (ADR-0089 1B-2B) uses it to attach an UPLOAD node to the frame the
  * upload belongs to; uploads outside a frame stay frame-independent, which is
- * exactly what flux_surface_begin_frame's batch flush already guarantees. */
+ * exactly what optics_gfx_surface_begin_frame's batch flush already guarantees. */
 optics_gfx_frame *optics_gfx_frame_current(void);
 
 /* Transition a recording frame out of RECORDING: clears this thread's
@@ -1100,10 +1099,10 @@ void optics_gfx_frame_foreign_images_destroy(optics_gfx_surface *surface,
                                              optics_gfx_per_frame *per_frame);
 
 /* Cross-TU bodies shared between the canvas-level
- * flux_canvas_wait_dmabuf_acquire (src/canvas/dmabuf_acquire.c) and the
+ * optics_gfx_canvas_wait_dmabuf_acquire (src/canvas/dmabuf_acquire.c) and the
  * platform pair src/core/dmabuf.c / dmabuf_stub.c. import_acquire_semaphore
  * imports `fd` as a temporary SYNC_FD payload on a pooled semaphore
- * (FLUX_ERROR_UNSUPPORTED from the stub); close_fd releases the caller's
+ * (OPTICS_GFX_ERROR_UNSUPPORTED from the stub); close_fd releases the caller's
  * sync_file fd after a successful import (no-op off Linux). Keeping the
  * platform fork here leaves the canvas call site free of #ifdef. */
 optics_gfx_result optics_gfx_dmabuf_import_acquire_semaphore(optics_gfx_device *d, int fd,
@@ -1118,7 +1117,7 @@ const float *optics_gfx_icc_profile_lut(const optics_gfx_icc_profile *p, uint32_
  * with the surface's content image, so the next frame that acquires it must
  * copy the whole extent rather than a write-area union.
  *
- * Defined once, above, in terms of `FLUX_DAMAGE_EPOCH_NONE`. A second literal
+ * Defined once, above, in terms of `OPTICS_GFX_DAMAGE_EPOCH_NONE`. A second literal
  * definition here used to shadow it: same value, so nothing broke, but two
  * independent places to change a sentinel that the epoch comparison, the
  * history array sizing and the "never synchronised" test all depend on agreeing
@@ -1144,7 +1143,7 @@ struct optics_gfx_surface {
     VkImageView *image_views;
     VkImageLayout *image_layouts;
     /* Bindless sampled-image handle per surface image (ADR-0069 canvas
-     * LOAD seed); FLUX_BINDLESS_INVALID until registered. */
+     * LOAD seed); OPTICS_GFX_BINDLESS_INVALID until registered. */
     optics_gfx_bindless_handle *image_bindless;
     /* Exportable offscreen images are released to FOREIGN on export. The host
      * must not let a frame slot be reused until its external consumer has
@@ -1154,7 +1153,7 @@ struct optics_gfx_surface {
      * slot while this is non-zero; release drops the count back to zero. */
     uint32_t *image_export_leases;
     /* Content epoch the presented pixels of image `i` are up to date with
-     * (ADR-0149). `FLUX_CONTENT_EPOCH_NONE` means "never synchronised": the
+     * (ADR-0149). `OPTICS_GFX_CONTENT_EPOCH_NONE` means "never synchronised": the
      * image holds nothing this surface's content image would reproduce, so the
      * next frame that acquires it copies the whole extent. */
     uint64_t *image_epoch;
@@ -1173,7 +1172,7 @@ struct optics_gfx_surface {
      * build a matching zwp_linux_buffer_params. exportable == false for
      * windowed surfaces and when the device lacks the needed extensions. */
     bool offscreen_exportable;
-    /* Surface creation was pinned to CPU readback (flux_surface_readback_desc):
+    /* Surface creation was pinned to CPU readback (optics_gfx_surface_readback_desc):
      * never make its offscreen images dma-buf exportable, so read_pixels
      * always works even on a dma-buf-capable device. */
     bool offscreen_require_readback;
@@ -1193,21 +1192,21 @@ struct optics_gfx_surface {
     uint64_t *offscreen_allowed_modifiers;
     uint32_t offscreen_allowed_modifier_count;
     /* Optional offscreen container constraint copied from
-     * flux_surface_offscreen_format_desc; NULL/0 = transfer-derived
+     * optics_gfx_surface_offscreen_format_desc; NULL/0 = transfer-derived
      * defaults. Retained so resize re-negotiates the same contract. */
     optics_gfx_format *offscreen_formats;
     uint32_t offscreen_format_count;
     bool hdr_actual;
 
     /* ADR-0069: the color space the surface presents in, and the
-     * caller's preference list (copied from flux_surface_color_space_desc;
+     * caller's preference list (copied from optics_gfx_surface_color_space_desc;
      * NULL/0 = legacy hdr_preferred mapping). Retained so resize
      * re-negotiates the same contract. */
     optics_gfx_color_space output_color_space;
     optics_gfx_color_space *requested_spaces;
     uint32_t requested_space_count;
 
-    /* What pixels are WRITTEN in (flux_surface_output_color_desc): the
+    /* What pixels are WRITTEN in (optics_gfx_surface_output_color_desc): the
      * display's actual space on legacy platforms; equals
      * output_color_space when no override was given. The canvas output
      * transform targets this space and the LOAD seed decodes from it. */
@@ -1215,7 +1214,7 @@ struct optics_gfx_surface {
     optics_gfx_color_space output_override; /* valid when has_output_override */
     bool has_output_override;
 
-    /* ADR-0069 HDR presentation (from flux_surface_hdr_desc).
+    /* ADR-0069 HDR presentation (from optics_gfx_surface_hdr_desc).
      * sdr_white_nits == 0 selects the 203 cd/m² default at use sites.
      * hdr_metadata is applied to every (re)created swapchain when
      * hdr_metadata_present and the device has VK_EXT_hdr_metadata. */
@@ -1224,7 +1223,7 @@ struct optics_gfx_surface {
     VkHdrMetadataEXT hdr_metadata;
 
     /* Offscreen: slot of the most recently submitted frame, or
-     * UINT32_MAX before the first submit. flux_surface_read_pixels
+     * UINT32_MAX before the first submit. optics_gfx_surface_read_pixels
      * waits on this slot's fence. */
     uint32_t last_submitted_slot;
     /* Slot whose submission most recently copied into readback_staging, or
@@ -1236,7 +1235,7 @@ struct optics_gfx_surface {
     uint32_t current_frame; /* 0..frames_in_flight-1 */
     uint32_t current_image; /* swapchain image index */
 
-    /* Embedded frame slot returned by flux_surface_begin_frame so the
+    /* Embedded frame slot returned by optics_gfx_surface_begin_frame so the
      * caller gets a stable pointer without a separate allocation.
      * Surface-owned (not thread-local) so a single thread driving
      * multiple surfaces stays correct. Vulkan permits one in-flight
@@ -1295,13 +1294,13 @@ void optics_gfx_surface_destroy_swapchain(optics_gfx_surface *s);
  * A windowed surface never renders into a swapchain image. It renders into one
  * persistent *content image*, which is a single buffer and therefore
  * accumulates damage-scoped passes exactly like a caller-owned target does;
- * `flux_surface_sync_content` then copies from it into the acquired image,
+ * `optics_gfx_surface_sync_content` then copies from it into the acquired image,
  * restricted to the union of write areas committed since that image was last
- * synchronised. Both halves of that are recorded by flux itself, from the write
+ * synchronised. Both halves of that are recorded by gfx itself, from the write
  * area of every pass that targets the render image, so a caller cannot
  * under-declare the set by passing a narrow damage scope.
  *
- * `flux_surface_sync_content` runs from `flux_frame_submit`, after the last pass
+ * `optics_gfx_surface_sync_content` runs from `optics_gfx_frame_submit`, after the last pass
  * and before the command buffer closes: that is the first point at which the
  * frame's full write set is known, and recording the copy there keeps it in the
  * frame's own submission — no second submit, no extra synchronisation object.
@@ -1322,4 +1321,4 @@ VkImageLayout *optics_gfx_surface_render_layout_slot(optics_gfx_surface *s);
 struct optics_gfx_sampler;
 optics_gfx_device *optics_gfx_sampler_owner(const struct optics_gfx_sampler *sampler);
 
-#endif /* FLUX_CORE_INTERNAL_H */
+#endif /* OPTICS_GFX_CORE_INTERNAL_H */

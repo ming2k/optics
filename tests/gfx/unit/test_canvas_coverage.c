@@ -1,14 +1,14 @@
 /*
  * Coverage-plane contracts (ADR-0112, ADR-0119).
  *
- * The mask cache in lens depends on two flux guarantees on the software
+ * The mask cache in ui depends on two gfx guarantees on the software
  * rasteriser:
  *
  *   1. The 1x analytic coverage plane carries rich continuous coverage (>16
  *      levels), beating any hardware MSAA sample budget with no supersample
  *      multiplier needed.
- *   2. flux_canvas_cpu_coverage returns a width x height plane that agrees
- *      bit-for-bit with the alpha channel of flux_canvas_cpu_pixels. Masks are
+ *   2. optics_gfx_canvas_cpu_coverage returns a width x height plane that agrees
+ *      bit-for-bit with the alpha channel of optics_gfx_canvas_cpu_pixels. Masks are
  *      baked from the former and composited through the latter; if the two
  *      drifted apart, baked coverage would not match live draws.
  */

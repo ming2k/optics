@@ -30,7 +30,9 @@ optics = { git = "https://github.com/ming2k/optics", default-features = false, f
 ```
 
 The Git form works because the Cargo workspace manifest is at the repository
-root. A registry version will be documented once the publication gate below is
+root. [Use Optics from a Rust Project](../how-to/use-optics-from-rust.md) walks
+through the full setup: building the C libraries, pointing the build at them,
+and running the result. A registry version will be documented once the publication gate below is
 met; do not assume a crates.io release exists because a version number appears
 in the workspace manifest.
 
@@ -57,8 +59,10 @@ and mirrors the one-way dependency graph of `libs/`:
 
 - `optics`: The top-level canonical facade crate.
 - `optics-build`: Internal build-script library shared by all `optics-*-sys`
-  and wrapper crates (Meson probing, static-preferred linking, rpath relay,
-  Windows DLL staging, and `bindgen` defaults).
+  and wrapper crates (Meson probing, shared linking by default or static linking
+  with the `static` feature, `OPTICS_STATIC` / `OPTICS_DYNAMIC` overrides, rpath
+  relay, Windows DLL staging, and `bindgen` defaults). See
+  [Choose a Static or Shared Link](../how-to/choose-a-static-or-shared-link.md).
 - `optics-gfx-sys` / `optics-gfx`: Vulkan 1.3 RHI, 2D vector canvas, CPU fallback.
 - `optics-text-sys` / `optics-text`: HarfBuzz text layout and glyph atlas.
 - `optics-ui-sys` / `optics-ui`: Declarative immediate-mode UI, Flex/Grid layout, retained state machine.
@@ -71,7 +75,7 @@ and mirrors the one-way dependency graph of `libs/`:
 
 ## Version Lockstep
 
-All crates share the workspace version (`0.0.82`) declared in the root
+All crates share the workspace version (`0.0.83`) declared in the root
 `Cargo.toml` and inherit internal versions through `[workspace.dependencies]`.
 `tools/check_versions.py` compares that version with `meson.build`, the umbrella
 header, and every library header; version drift or nested workspace layouts are

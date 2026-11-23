@@ -1,7 +1,7 @@
 # glyph — HarfBuzz shaping and dynamic glyph atlas runtime (ADR-0016, ADR-0106).
 #
-# A separate shared library that links libflux and feeds the
-# flux_canvas_draw_glyph_run primitive. It owns FreeType + HarfBuzz +
+# A separate shared library that links liboptics_gfx and feeds the
+# optics_gfx_canvas_draw_glyph_run primitive. It owns FreeType + HarfBuzz +
 # Fontconfig + FriBidi, the glyph atlas, BiDi itemisation, and caret/selection
 # mapping.
 
@@ -72,7 +72,7 @@ pkg.generate(
   libraries    : text_lib,
   name         : 'optics-text',
   filebase     : 'optics-text',
-  description  : 'HarfBuzz shaping and dynamic glyph atlas runtime over flux',
+  description  : 'HarfBuzz shaping and dynamic glyph atlas runtime over gfx',
   version      : meson.project_version(),
   requires     : ['optics-gfx >= ' + meson.project_version()],
   extra_cflags : text_public_defines,

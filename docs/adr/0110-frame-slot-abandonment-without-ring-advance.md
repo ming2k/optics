@@ -3,7 +3,7 @@ id: ADR-0110
 title: "Frame-Slot Abandonment Without Ring Advance and Region-Clamped Backdrop Sampling"
 status: accepted
 date: 2026-10-15
-scope: libs/flux, bindings/flux-rs, docs/reference
+scope: libs/gfx, bindings/flux-rs, docs/reference
 superseded_by: null
 negative_knowledge: true
 ---

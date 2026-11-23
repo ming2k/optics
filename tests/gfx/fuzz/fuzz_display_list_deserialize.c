@@ -8,7 +8,7 @@
  * device dependency, so it runs in the sanitizer lane without a Vulkan ICD.
  *
  * Contract checked on every input: every failure publishes no list, and a
- * successful publication is a real flux_display_list that releases cleanly.
+ * successful publication is a real optics_gfx_display_list that releases cleanly.
  * ASan/UBSan cover the rest (overreads, overflows, use-after-free).
  */
 #include <optics/gfx/canvas.h>

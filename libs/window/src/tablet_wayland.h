@@ -1,5 +1,5 @@
 /* tablet_wayland.h — pen/tablet bridge between app_wayland.c and
- * tablet_wayland.c (both libiris-internal; hidden visibility).
+ * tablet_wayland.c (both liboptics_window-internal; hidden visibility).
  *
  * app_wayland.c owns the registry, the platform, and the input
  * accumulator; the tablet state machine stays out of the already-largest
@@ -18,12 +18,19 @@
 #include <wayland-client.h>
 
 /* How the bridge writes pointer-shaped state into the host accumulator.
- * `user` is the platform. Button indices are IRIS_BUTTON_*. */
+ * `user` is the platform. Button indices are OPTICS_WINDOW_BUTTON_*. */
+struct zwp_tablet_tool_v2;
+
 typedef struct optics_window_tablet_host {
     void *user;
     void (*motion)(void *user, double x, double y);
     void (*button)(void *user, int button, bool down);
     void (*serial)(void *user, uint32_t serial);
+    /* The tool driving pointer semantics entered (`in`, with its
+     * proximity_in serial) or left the surface. The host owns any per-tool
+     * objects it creates here (the cursor-shape device) and drops them on
+     * leave; the tool proxy stays valid until after the leave call. */
+    void (*tool_proximity)(void *user, struct zwp_tablet_tool_v2 *tool, uint32_t serial, bool in);
 } optics_window_tablet_host;
 
 /* Registry saw zwp_tablet_manager_v2. `host` must outlive the backend. */
@@ -47,5 +54,5 @@ void optics_window_wayland__tablet_reset(void);
 /* Whether a tool is currently in proximity (diagnostics/hover policy). */
 bool optics_window_wayland__tablet_in_proximity(void);
 
-#endif /* IRIS_BACKEND_WAYLAND */
-#endif /* IRIS_TABLET_WAYLAND_H */
+#endif /* OPTICS_WINDOW_BACKEND_WAYLAND */
+#endif /* OPTICS_WINDOW_TABLET_WAYLAND_H */

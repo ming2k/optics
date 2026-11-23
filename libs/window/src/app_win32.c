@@ -1,12 +1,12 @@
-/* app_win32.c — native Win32 window + Vulkan (via flux) + iris_input.
+/* app_win32.c — native Win32 window + Vulkan (via gfx) + optics_window_input.
  *
- * The Windows backend for iris, mirroring app_wayland.c's structure and
+ * The Windows backend for window, mirroring app_wayland.c's structure and
  * behaviour: one overlapped window, a MsgWaitForMultipleObjectsEx + PeekMessage
  * pump that carries the same frame-pacing state machine (active ~60 Hz after
  * input, ~4 Hz idle while a caret blinks, fully event-driven when static),
  * IMM32 for IME, CF_UNICODETEXT for the clipboard, and
- * VK_KHR_win32_surface to hand flux core a VkSurfaceKHR. Pointer and
- * keyboard events are folded into one iris_input per frame (ADR-0029).
+ * VK_KHR_win32_surface to hand gfx core a VkSurfaceKHR. Pointer and
+ * keyboard events are folded into one optics_window_input per frame (ADR-0029).
  *
  * NOT YET VERIFIED ON A REAL WINDOWS MACHINE. Everything in this file is
  * compile-checked for x86_64-windows-gnu via tools/ci/zig-win32-check.sh only.
@@ -38,7 +38,7 @@
 #define _UNICODE
 #endif
 
-/* meson supplies -DIRIS_BUILDING=1 (iris_c_args) so IRIS_API spells
+/* meson supplies -DOPTICS_WINDOW_BUILDING=1 (window_c_args) so OPTICS_WINDOW_API spells
  * dllexport; define it here as well so single-file compile checks
  * (tools/ci/zig-win32-check.sh) don't see dllimport on definitions. */
 #ifndef OPTICS_WINDOW_BUILDING
@@ -103,21 +103,21 @@ void optics_window_theme_win32__notify_setting_change(void);
  * forward declaration keeps the WndProc's call site self-describing. */
 void optics_window_a11y_prefs_win32__notify_setting_change(void);
 
-/* Backend-reserved thread/window messages (WM_APP band). WM_IRIS_WAKEUP is
- * the wakeup-seam kick (PostThreadMessage; hwnd == NULL). WM_IRIS_PASTE_DELIVER
+/* Backend-reserved thread/window messages (WM_APP band). WM_WINDOW_WAKEUP is
+ * the wakeup-seam kick (PostThreadMessage; hwnd == NULL). WM_WINDOW_PASTE_DELIVER
  * carries an asynchronous clipboard payload (PostMessage to the window). */
-#define WM_IRIS_WAKEUP (WM_APP + 0x100)
-#define WM_IRIS_PASTE_DELIVER (WM_APP + 0x101)
+#define WM_WINDOW_WAKEUP (WM_APP + 0x100)
+#define WM_WINDOW_PASTE_DELIVER (WM_APP + 0x101)
 
-#define OPTICS_WINDOW_WNDCLASS_NAME L"iris_window"
+#define OPTICS_WINDOW_WNDCLASS_NAME L"optics_window_window"
 
-/* Smooth-wheel deltas below one notch are reported on lens's pixel channel
- * at this many logical pixels per notch. 40 matches the lens-side consumer
+/* Smooth-wheel deltas below one notch are reported on ui's pixel channel
+ * at this many logical pixels per notch. 40 matches the ui-side consumer
  * convention (slider.c divides scroll_pixels_y by 40). */
 #define W32_WHEEL_PIXELS_PER_NOTCH 40.0
 
 /* ------------------------------------------------------------------ */
-/*  Accumulated input, drained into one iris_input per frame             */
+/*  Accumulated input, drained into one optics_window_input per frame             */
 /* ------------------------------------------------------------------ */
 
 typedef struct w32_accum {
@@ -129,7 +129,7 @@ typedef struct w32_accum {
     double scroll_px_x, scroll_px_y;         /* smooth pixel deltas this frame */
     uint32_t mods;                           /* level state (persists)         */
     char text[256];                          /* committed text this frame; must match
-                                               iris_input.text_utf8 (static_assert below) */
+                                               optics_window_input.text_utf8 (static_assert below) */
     char preedit[OPTICS_WINDOW_PREEDIT_MAX]; /* IME preedit string             */
     uint32_t preedit_cursor;                 /* caret byte offset in preedit   */
     uint32_t preedit_sel_lo;                 /* active clause, byte range      */
@@ -138,14 +138,14 @@ typedef struct w32_accum {
     uint32_t key_count;
 } w32_accum;
 
-/* The staging buffers feed iris_input by whole-buffer memcpy in
- * drain_input; pin the sizes so a lens-side change fails at compile time
+/* The staging buffers feed optics_window_input by whole-buffer memcpy in
+ * drain_input; pin the sizes so a ui-side change fails at compile time
  * instead of over-reading the accumulator (the wayland backend carries
  * the same guards). */
 static_assert(sizeof((w32_accum *)0)->text == sizeof((optics_window_input *)0)->text_utf8,
-              "w32_accum.text must match iris_input.text_utf8");
+              "w32_accum.text must match optics_window_input.text_utf8");
 static_assert(sizeof((w32_accum *)0)->preedit == sizeof((optics_window_input *)0)->preedit_utf8,
-              "w32_accum.preedit must match iris_input.preedit_utf8");
+              "w32_accum.preedit must match optics_window_input.preedit_utf8");
 
 /* ------------------------------------------------------------------ */
 /*  Platform state                                                     */
@@ -176,7 +176,7 @@ typedef struct w32_platform {
     const optics_window_ui_host *ui; /* live UI host; null before start / after teardown */
     optics_window_ui_frame ui_frame; /* report of the most recent UI frame */
 
-    optics_window_cursor host_cursor;      /* last iris_set_cursor value (explicit) */
+    optics_window_cursor host_cursor;      /* last optics_window_set_cursor value (explicit) */
     optics_window_cursor effective_cursor; /* what WM_SETCURSOR currently applies   */
     bool cursor_inside;                    /* pointer currently over the client area */
     bool tracking_leave;                   /* TrackMouseEvent(TME_LEAVE) armed       */
@@ -209,10 +209,10 @@ typedef struct w32_platform {
 
 static int64_t w32_query_refresh_ns(HWND hwnd);
 
-/* iris_set_cursor / iris_window_* are public, context-free APIs; they reach
+/* optics_window_set_cursor / optics_window_* are public, context-free APIs; they reach
  * the active app's platform through this single static pointer. Set at the
- * top of iris_app_run_win32, cleared before teardown. Documented as
- * thread-affine: callers must drive them from the iris_app_run thread. */
+ * top of optics_window_run_win32, cleared before teardown. Documented as
+ * thread-affine: callers must drive them from the optics_window_run thread. */
 static w32_platform *g_active_pl = nullptr;
 
 /* Internal seam for file_dialog_win32.c: the common file dialogs take an
@@ -239,7 +239,7 @@ void optics_window_request_frame_skip_render_win32(void) {
         pl->frame_skip_render = true;
 }
 
-/* Theme watcher callback: invoked on the iris main thread (from the WndProc
+/* Theme watcher callback: invoked on the window main thread (from the WndProc
  * via theme_win32.c's notify hook) when the system colour scheme flips. */
 static void w32_on_color_scheme_changed(optics_window_color_scheme scheme, void *user) {
     w32_platform *pl = user;
@@ -250,8 +250,8 @@ static void w32_on_color_scheme_changed(optics_window_color_scheme scheme, void 
 
 /* Accessibility-preference watcher callback (ADR-0075): delivered from the
  * WndProc's WM_SETTINGCHANGE via a11y_prefs_win32.c's notify hook — already
- * on the iris main thread. Applies the OS accessibility preferences to
- * lens directly (lens is headless and cannot see them itself). */
+ * on the window main thread. Applies the OS accessibility preferences to
+ * ui directly (ui is headless and cannot see them itself). */
 static void w32_on_a11y_prefs(const optics_window_a11y_prefs *prefs, void *user) {
     w32_platform *pl = user;
     if (!pl || !pl->ui)
@@ -294,7 +294,7 @@ static int utf8_encode(uint32_t cp, char out[4]) {
 /* ------------------------------------------------------------------ */
 /*  Pre-fold event seam helpers (ADR-0107)                            */
 /* ------------------------------------------------------------------ */
-/* Every lens-facing input mutation goes through one of these: reify,
+/* Every ui-facing input mutation goes through one of these: reify,
  * run the host seam (event_internal.h), apply the surviving — possibly
  * host-rewritten — event to the accumulator. Platform bookkeeping
  * (capture, cursor, IME state) stays outside the seam. */
@@ -403,7 +403,7 @@ static bool w32_emit_preedit(w32_platform *pl, const char *utf8, uint32_t cursor
     return true;
 }
 
-/* Lifecycle events are observe-only (undroppable): iris already applied
+/* Lifecycle events are observe-only (undroppable): window already applied
  * the platform state; the host may read them but the payload is not folded
  * back. */
 static void w32_emit_resize(uint32_t w, uint32_t h) {
@@ -431,7 +431,7 @@ static void w32_emit_close(void) {
 }
 
 /* Append UTF-8 text to the per-frame commit accumulator (cap 255 + NUL,
- * matching iris_input.text_utf8; enforced by the static_assert at the
+ * matching optics_window_input.text_utf8; enforced by the static_assert at the
  * w32_accum definition), truncating on a code-point boundary (shared
  * helper, platform_text.h). Same cap as app_wayland.c. */
 static void accum_text_append(w32_platform *pl, const char *utf8, size_t n) {
@@ -440,7 +440,7 @@ static void accum_text_append(w32_platform *pl, const char *utf8, size_t n) {
 
 static void accum_text_cp(w32_platform *pl, uint32_t cp) {
     /* Control characters (Tab / Return / Backspace) travel on the key path,
-     * matching the other backends. iris_cp_is_text also rejects 0x7f:
+     * matching the other backends. optics_window_cp_is_text also rejects 0x7f:
      * TranslateMessage delivers WM_CHAR 0x7f for Ctrl+Backspace, and the
      * plain < 0x20 test let it through as "text". */
     if (!optics_window_cp_is_text(cp))
@@ -467,7 +467,7 @@ static WCHAR *w32_wide_from_utf8(const char *utf8) {
 /*  Input mapping (platform_input.h contract)                         */
 /* ------------------------------------------------------------------ */
 
-/* Win32 button message → lens mouse index, via the shared iris_pointer_button
+/* Win32 button message → ui mouse index, via the shared optics_window_pointer_button
  * layer (platform_input.h) so the Win32-only codes stay inside this file.
  * X1/X2 (WM_XBUTTON*) and anything unknown return -1 and are ignored. */
 static int mouse_index(UINT msg) {
@@ -492,11 +492,11 @@ static int mouse_index(UINT msg) {
     return optics_window_pointer_button_index(b);
 }
 
-/* Virtual-key code → lens key: IRIS_KEY_* sentinels for the navigation set,
+/* Virtual-key code → ui key: OPTICS_WINDOW_KEY_* sentinels for the navigation set,
  * lowercase ASCII for letters/digits/space (matching the Wayland backend's
  * unshifted xkb keysyms so Ctrl+C/V/X/A shortcuts line up), raw VK codes
  * (< 256, below the sentinel band) for everything else. Pure modifiers and
- * IME process keys return 0 = not recorded (they live in iris_input.mods). */
+ * IME process keys return 0 = not recorded (they live in optics_window_input.mods). */
 static int vk_to_key(WPARAM vk) {
     switch (vk) {
     case VK_ESCAPE:
@@ -644,12 +644,12 @@ static void on_mouse_button(w32_platform *pl, UINT msg, bool down_edge) {
 }
 
 /* Wheel: WM_MOUSEWHEEL positive = wheel up (away from the user), which is
- * lens's positive scroll_y direction, so vertical deltas pass straight
+ * ui's positive scroll_y direction, so vertical deltas pass straight
  * through; WM_MOUSEHWHEEL positive = tilt right, which the Wayland backend
  * reports as negative scroll_x, so horizontal is inverted. Deltas that are
  * an exact multiple of WHEEL_DELTA go to the step channel (scroll_x/y);
  * smaller high-resolution deltas go to the pixel channel (scroll_pixels_*).
- * lens consumes both channels additively (slider.c, textarea.c), so a delta
+ * ui consumes both channels additively (slider.c, textarea.c), so a delta
  * must land in exactly one — splitting by magnitude avoids double-counting
  * while keeping smooth wheels smooth. */
 static void on_mouse_wheel(w32_platform *pl, WPARAM wParam, bool horizontal) {
@@ -659,15 +659,15 @@ static void on_mouse_wheel(w32_platform *pl, WPARAM wParam, bool horizontal) {
     if (horizontal)
         notch = -notch;
     bool continuous = (delta % WHEEL_DELTA != 0);
-    double lens = continuous ? notch * W32_WHEEL_PIXELS_PER_NOTCH : notch;
-    (void)w32_emit_scroll(pl, horizontal, lens, continuous);
+    double ui = continuous ? notch * W32_WHEEL_PIXELS_PER_NOTCH : notch;
+    (void)w32_emit_scroll(pl, horizontal, ui, continuous);
 }
 
 /* ------------------------------------------------------------------ */
 /*  IME (IMM32)                                                        */
 /* ------------------------------------------------------------------ */
 
-/* Point the IME's composition/candidate windows at the lens caret. The caret
+/* Point the IME's composition/candidate windows at the ui caret. The caret
  * rect is in logical UI space; IMM32 wants physical client coordinates. */
 static void ime_update_position(w32_platform *pl) {
     if (!pl->ui)
@@ -690,7 +690,7 @@ static void ime_update_position(w32_platform *pl) {
 /* WM_IME_COMPOSITION: pull the composition/result strings out of the input
  * context into the accumulator. Composition strings are read as UTF-16 and
  * transcoded; cursor/clause offsets are WCHAR indices, converted to UTF-8
- * byte offsets (lens's preedit contract) by re-encoding the prefix. */
+ * byte offsets (ui's preedit contract) by re-encoding the prefix. */
 static void ime_read_composition(w32_platform *pl, LPARAM flags) {
     HIMC himc = ImmGetContext(pl->hwnd);
     if (!himc)
@@ -766,10 +766,10 @@ static void ime_read_composition(w32_platform *pl, LPARAM flags) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Clipboard (CF_UNICODETEXT) — bridges lens_clipboard to Win32        */
+/*  Clipboard (CF_UNICODETEXT) — bridges optics_ui_clipboard to Win32        */
 /* ------------------------------------------------------------------ */
 
-/* lens_clipboard.set_text — publish `utf8` as the system clipboard text. */
+/* optics_ui_clipboard.set_text — publish `utf8` as the system clipboard text. */
 static void clip_set_text(const char *utf8, size_t len, void *user) {
     w32_platform *pl = user;
     int wlen = MultiByteToWideChar(CP_UTF8, 0, utf8, (int)len, nullptr, 0);
@@ -798,12 +798,12 @@ static void clip_set_text(const char *utf8, size_t len, void *user) {
     CloseClipboard();
 }
 
-/* lens_clipboard.request_text — the lens contract is asynchronous: the
- * answer must arrive later via lens_paste, not synchronously inside the
+/* optics_ui_clipboard.request_text — the ui contract is asynchronous: the
+ * answer must arrive later via optics_ui_paste, not synchronously inside the
  * request (Wayland's offer/read round-trip has the same shape). We read the
  * clipboard eagerly, then PostMessage the payload to ourselves; the pump
- * delivers it through lens_paste on the next loop iteration, outside any
- * lens_begin/end pair. */
+ * delivers it through optics_ui_paste on the next loop iteration, outside any
+ * optics_ui_begin/end pair. */
 static void clip_request_text(void *user) {
     w32_platform *pl = user;
     char *utf8 = nullptr;
@@ -823,7 +823,7 @@ static void clip_request_text(void *user) {
         }
         CloseClipboard();
     }
-    if (utf8 && !PostMessageW(pl->hwnd, WM_IRIS_PASTE_DELIVER, 0, (LPARAM)utf8))
+    if (utf8 && !PostMessageW(pl->hwnd, WM_WINDOW_PASTE_DELIVER, 0, (LPARAM)utf8))
         free(utf8);
 }
 
@@ -831,7 +831,7 @@ static void clip_request_text(void *user) {
 /*  Cursor                                                             */
 /* ------------------------------------------------------------------ */
 
-/* iris_cursor → system cursor handle. LoadCursor(NULL, …) returns shared
+/* optics_window_cursor → system cursor handle. LoadCursor(NULL, …) returns shared
  * system cursors that must not be destroyed, so this is cheap to call
  * per frame. */
 static HCURSOR w32_cursor_handle(optics_window_cursor c) {
@@ -857,7 +857,7 @@ static HCURSOR w32_cursor_handle(optics_window_cursor c) {
 }
 
 /* Public API. The host's explicit choice wins; when it is DEFAULT the
- * per-frame lens cursor hint drives the cursor instead (see the frame loop).
+ * per-frame ui cursor hint drives the cursor instead (see the frame loop).
  * No-op when no app is active. */
 OPTICS_WINDOW_API void optics_window_set_cursor(optics_window_cursor cursor) {
     w32_platform *pl = g_active_pl;
@@ -876,12 +876,12 @@ OPTICS_WINDOW_API void optics_window_set_cursor(optics_window_cursor cursor) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Window state (iris/window.h)                                       */
+/*  Window state (window/window.h)                                       */
 /* ------------------------------------------------------------------ */
 
-/* All iris_window_* APIs operate on g_active_pl — the platform the active
- * iris_app_run call owns. They are documented as thread-affine to
- * iris_app_run and a no-op when no app is active. */
+/* All optics_window_* APIs operate on g_active_pl — the platform the active
+ * optics_window_run call owns. They are documented as thread-affine to
+ * optics_window_run and a no-op when no app is active. */
 
 OPTICS_WINDOW_API void optics_window_minimize(void) {
     w32_platform *pl = g_active_pl;
@@ -1425,7 +1425,7 @@ static LRESULT CALLBACK w32_wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
          * must be validated or Windows keeps sending WM_PAINT and DWM marks
          * the window unresponsive. Flag a real frame: after a restore or
          * composition change the swapchain contents may be stale even when
-         * lens reports no damage. */
+         * ui reports no damage. */
         PAINTSTRUCT ps;
         BeginPaint(hwnd, &ps);
         EndPaint(hwnd, &ps);
@@ -1434,7 +1434,7 @@ static LRESULT CALLBACK w32_wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
         return 0;
     }
     case WM_ERASEBKGND:
-        return 1; /* everything is repainted by flux */
+        return 1; /* everything is repainted by gfx */
 
     case WM_SIZE: {
         if (!pl)
@@ -1570,7 +1570,7 @@ static LRESULT CALLBACK w32_wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
         return 0;
     case WM_XBUTTONDOWN:
     case WM_XBUTTONUP:
-        /* X1/X2 have no lens slot (platform_input.h): dropped by mouse_index;
+        /* X1/X2 have no ui slot (platform_input.h): dropped by mouse_index;
          * returning TRUE for XBUTTON is the documented convention. */
         return TRUE;
 
@@ -1604,7 +1604,7 @@ static LRESULT CALLBACK w32_wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
             pl->ime_composing = true;
             ime_update_position(pl);
         }
-        /* lens renders the preedit itself; suppress the IME's default
+        /* ui renders the preedit itself; suppress the IME's default
          * composition string window (the candidate list still shows). */
         return 0;
     case WM_IME_COMPOSITION:
@@ -1630,7 +1630,7 @@ static LRESULT CALLBACK w32_wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
         optics_window_a11y_prefs_win32__notify_setting_change();
         break;
 
-    case WM_IRIS_PASTE_DELIVER: {
+    case WM_WINDOW_PASTE_DELIVER: {
         /* Asynchronous clipboard delivery (clip_request_text contract). */
         char *utf8 = (char *)lParam;
         if (pl && pl->ui && utf8)
@@ -1646,7 +1646,7 @@ static LRESULT CALLBACK w32_wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
 }
 
 /* ------------------------------------------------------------------ */
-/*  Build one iris_input from the accumulated state                      */
+/*  Build one optics_window_input from the accumulated state                      */
 /* ------------------------------------------------------------------ */
 
 static void drain_input(w32_platform *pl, optics_window_input *in, float dt) {
@@ -1686,7 +1686,7 @@ static void drain_input(w32_platform *pl, optics_window_input *in, float dt) {
 }
 
 /* Diagnostics go to stderr, never stdout: a consumer's stdout may be an
- * IPC wire (see flux_console_logger). */
+ * IPC wire (see optics_gfx_console_logger). */
 static void log_raw(const optics_window_input *in) {
     static const char *names[OPTICS_WINDOW_BUTTON_COUNT] = {"left", "right", "middle"};
     for (int b = 0; b < OPTICS_WINDOW_BUTTON_COUNT; b++) {
@@ -1715,7 +1715,7 @@ static void log_raw(const optics_window_input *in) {
  * fine because the drain empties the whole callback queue. */
 static void w32_wakeup_kick(void *user) {
     w32_platform *pl = user;
-    PostThreadMessageW(pl->loop_thread_id, WM_IRIS_WAKEUP, 0, 0);
+    PostThreadMessageW(pl->loop_thread_id, WM_WINDOW_WAKEUP, 0, 0);
 }
 
 /* Block (up to timeout_ms) for thread/window messages, then drain the queue.
@@ -1736,7 +1736,7 @@ static bool pump_events(w32_platform *pl, DWORD timeout_ms) {
         /* Cross-thread wakeup: a subsystem posted a callback from its own
          * thread. Thread messages have no HWND and must not go through
          * DispatchMessage — drain the queue here, on the loop thread. */
-        if (msg.message == WM_IRIS_WAKEUP && msg.hwnd == nullptr) {
+        if (msg.message == WM_WINDOW_WAKEUP && msg.hwnd == nullptr) {
             optics_window_platform_wakeup_drain();
             continue;
         }
@@ -1892,7 +1892,7 @@ static DWORD WINAPI win32_presenter_thread_main(LPVOID arg) {
                 /* The packet's damage set travels to the pass unchanged
                  * (ADR-0149). DWM composites from a fresh flip-chain buffer per
                  * frame, so the whole buffer must reach the DWM even for a
-                 * scoped frame; flux's present-time content copy does exactly
+                 * scoped frame; gfx's present-time content copy does exactly
                  * that, restricted to what this frame wrote. */
                 optics_window_frame_damage dmg = optics_window_frame_packet_damage(pkt);
 
@@ -1964,7 +1964,7 @@ int optics_window_run_win32(const optics_window_opts *cfg) {
     };
 
     /* Publish `pl` as the active app instance so the context-free
-     * iris_set_cursor() / iris_window_*() can reach it. Cleared on the way
+     * optics_window_set_cursor() / optics_window_*() can reach it. Cleared on the way
      * out (success or fail). */
     g_active_pl = &pl;
 
@@ -1977,7 +1977,7 @@ int optics_window_run_win32(const optics_window_opts *cfg) {
     };
 
     /* Per-monitor DPI awareness must be opted into before any window exists
-     * (a process manifest would be stronger still, but iris is a library and
+     * (a process manifest would be stronger still, but window is a library and
      * cannot ship one for the host). Failure on pre-1607 Windows is ignored:
      * the app simply stays system-DPI-scaled by DWM. */
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
@@ -1985,7 +1985,7 @@ int optics_window_run_win32(const optics_window_opts *cfg) {
     pl.hinstance = GetModuleHandleW(nullptr);
     pl.loop_thread_id = GetCurrentThreadId();
 
-    /* Cross-thread wakeup seam: the kick posts WM_IRIS_WAKEUP to this
+    /* Cross-thread wakeup seam: the kick posts WM_WINDOW_WAKEUP to this
      * thread's message queue; pump_events drains the callback queue when it
      * retrieves one. Registered before any subsystem can post. */
     optics_window_platform_wakeup_set_kick(w32_wakeup_kick, &pl);
@@ -2015,8 +2015,8 @@ int optics_window_run_win32(const optics_window_opts *cfg) {
                  (LONG)lroundf((float)pl.height * pl.scale)};
     AdjustWindowRectExForDpi(&want, style, FALSE, exstyle, sys_dpi);
 
-    WCHAR *title_w = w32_wide_from_utf8(cfg->title ? cfg->title : "iris");
-    pl.hwnd = CreateWindowExW(exstyle, OPTICS_WINDOW_WNDCLASS_NAME, title_w ? title_w : L"iris",
+    WCHAR *title_w = w32_wide_from_utf8(cfg->title ? cfg->title : "window");
+    pl.hwnd = CreateWindowExW(exstyle, OPTICS_WINDOW_WNDCLASS_NAME, title_w ? title_w : L"window",
                               style, CW_USEDEFAULT, CW_USEDEFAULT, want.right - want.left,
                               want.bottom - want.top, nullptr, nullptr, pl.hinstance, &pl);
     free(title_w);
@@ -2042,7 +2042,7 @@ int optics_window_run_win32(const optics_window_opts *cfg) {
                      SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
     }
 
-    /* --- Vulkan instance via flux (Win32 WSI extensions) ------------ */
+    /* --- Vulkan instance via gfx (Win32 WSI extensions) ------------ */
     const char *inst_exts[] = {
         VK_KHR_SURFACE_EXTENSION_NAME,
         VK_KHR_WIN32_SURFACE_EXTENSION_NAME,
@@ -2059,11 +2059,11 @@ int optics_window_run_win32(const optics_window_opts *cfg) {
         .frames_in_flight = 2,
     };
     if (optics_gfx_device_create(&ddesc, &device) != OPTICS_GFX_OK) {
-        fprintf(stderr, "flux_device_create failed\n");
+        fprintf(stderr, "optics_gfx_device_create failed\n");
         goto fail;
     }
 
-    /* --- Vulkan surface + flux surface/canvas ----------------------- */
+    /* --- Vulkan surface + gfx surface/canvas ----------------------- */
     vk_surface = w32_create_vk_surface(device, pl.hinstance, pl.hwnd);
     if (!vk_surface) {
         fprintf(stderr, "vkCreateWin32SurfaceKHR failed\n");
@@ -2071,28 +2071,28 @@ int optics_window_run_win32(const optics_window_opts *cfg) {
     }
 
     /* Swapchain is sized in *device* pixels — logical × scale — while
-     * layout and iris_input stay in logical units. */
+     * layout and optics_window_input stay in logical units. */
     optics_gfx_surface_desc sdesc = {
         .type = OPTICS_GFX_TYPE_SURFACE_DESC,
         .vk_surface_khr = vk_surface,
         .width = (uint32_t)lroundf((float)pl.width * pl.scale),
         .height = (uint32_t)lroundf((float)pl.height * pl.scale),
         /* Non-blocking present (MAILBOX, or IMMEDIATE as fallback — see
-         * pick_present_mode in flux). A FIFO/vsync present blocks the main
+         * pick_present_mode in gfx). A FIFO/vsync present blocks the main
          * thread in vkAcquireNextImageKHR, freezing input handling and
          * time-based UI between frames; the frame loop paces itself
          * instead (see below). */
         .vsync = false,
     };
     if (optics_gfx_surface_create(device, &sdesc, &surface) != OPTICS_GFX_OK) {
-        fprintf(stderr, "flux_surface_create failed\n");
+        fprintf(stderr, "optics_gfx_surface_create failed\n");
         goto fail;
     }
 
     if (optics_gfx_canvas_create(
             &(optics_gfx_canvas_desc){.type = OPTICS_GFX_TYPE_CANVAS_DESC, .surface = surface},
             &canvas) != OPTICS_GFX_OK) {
-        fprintf(stderr, "flux_canvas_create failed\n");
+        fprintf(stderr, "optics_gfx_canvas_create failed\n");
         goto fail;
     }
 
@@ -2106,14 +2106,14 @@ int optics_window_run_win32(const optics_window_opts *cfg) {
                                                   .start_drag = w32_start_drag,
                                                   .user = &pl},
                                  })) {
-        fprintf(stderr, "iris UI host start failed\n");
+        fprintf(stderr, "window UI host start failed\n");
         goto fail;
     }
     ui = cfg->ui;
     ui_started = true;
 
     if (cfg->start && !cfg->start(device, cfg->user)) {
-        fprintf(stderr, "iris host start callback failed\n");
+        fprintf(stderr, "window host start callback failed\n");
         goto fail;
     }
     host_started = true;
@@ -2156,19 +2156,19 @@ int optics_window_run_win32(const optics_window_opts *cfg) {
      *
      * The surface presents non-blocking (Mailbox / Immediate) so acquiring an
      * image never freezes input handling. The cadence state machine
-     * (iris_pacer) owns the whole decision: paint, skip, or quiesce — plus
+     * (optics_window_pacer) owns the whole decision: paint, skip, or quiesce — plus
      * the poll budget:
      *
      *   - The display refresh rate is queried dynamically from Windows GDI /
      *     EnumDisplaySettings (w32_query_refresh_ns), unlocking 120/144/240 Hz
      *     displays rather than clamping to 60 Hz (INV-PACE-02).
-     *   - Zero-render skips (iris_request_frame_skip_render) advance the
+     *   - Zero-render skips (optics_window_request_frame_skip_render) advance the
      *     scheduling baseline cleanly, eliminating the 100% CPU spin bug
      *     (INV-PACE-03).
      *   - Time-based UI advances on the simulation clock rather than render
      *     timestamps (INV-PACE-04).
      *
-     * A lens-only host reaches full quiescence (quiesced = true, blocking in
+     * A ui-only host reaches full quiescence (quiesced = true, blocking in
      * pump_events with INFINITE); a host with cfg->record keeps the low idle
      * tick alive so its cfg->build can observe state changes. */
     optics_window_pacer pacer;
@@ -2177,7 +2177,7 @@ int optics_window_run_win32(const optics_window_opts *cfg) {
     optics_window_pacer_set_refresh(&pacer, pl.refresh_ns);
 
     int frame_no = 0;
-    /* Sticky until a frame containing the latest lens build is actually
+    /* Sticky until a frame containing the latest ui build is actually
      * presented (see app_wayland.c for the acquire-timeout rationale). */
     bool surface_needs_paint = true;
     bool quiesced = false;
@@ -2191,7 +2191,7 @@ int optics_window_run_win32(const optics_window_opts *cfg) {
     /* Live colour-scheme watching: only when not forcing dark. On Win32 the
      * change signal (WM_SETTINGCHANGE) already arrives on this thread, so
      * the watcher is registration-only (theme_win32.c); the callback flips
-     * the lens theme in place and the next frame renders the new palette.
+     * the ui theme in place and the next frame renders the new palette.
      * The backend registers on its reserved internal slot
      * (theme_watch_internal.h), never the host's public watch slot. */
     pl.theme_watching = false;
@@ -2200,7 +2200,7 @@ int optics_window_run_win32(const optics_window_opts *cfg) {
             (optics_window_theme__watch_backend(w32_on_color_scheme_changed, &pl) == 0);
 
     /* Accessibility preferences (ADR-0075): apply the OS's reduced-motion /
-     * high-contrast / text-scale preferences to lens at startup, then watch
+     * high-contrast / text-scale preferences to ui at startup, then watch
      * via WM_SETTINGCHANGE (backend slot, a11y_prefs_internal.h). Applied
      * unconditionally — accessibility is not opt-in. */
     {
@@ -2210,7 +2210,7 @@ int optics_window_run_win32(const optics_window_opts *cfg) {
     pl.a11y_prefs_watching = (optics_window_a11y_prefs__watch_backend(w32_on_a11y_prefs, &pl) == 0);
 
     /* Accessibility: the Win32 build links a11y_stub.c today, so all three
-     * calls are inert no-ops (iris_a11y_init reports the bridge unavailable
+     * calls are inert no-ops (optics_window_a11y_init reports the bridge unavailable
      * and a11y_running stays false). The call sites deliberately mirror
      * app_cocoa.m so a future UI Automation bridge plugs in behind the same
      * public seam without backend changes. */
@@ -2227,7 +2227,7 @@ int optics_window_run_win32(const optics_window_opts *cfg) {
 
         /* Sleep (inside MsgWaitForMultipleObjectsEx) until the next frame
          * deadline, or wake immediately on incoming messages. The poll budget
-         * is governed by iris_pacer (ADR-0122) and is `>= 1 ns` whenever
+         * is governed by optics_window_pacer (ADR-0122) and is `>= 1 ns` whenever
          * active, preventing busy polling. */
         const DWORD POLL_CAP_MS = 200;
         DWORD timeout_ms;
@@ -2267,7 +2267,7 @@ int optics_window_run_win32(const optics_window_opts *cfg) {
         pl.animation_frame_requested = false;
 
         /* DPI change (window dragged to a mixed-DPI monitor): apply the new
-         * scale, resize the swapchain in device pixels, and tell lens so its
+         * scale, resize the swapchain in device pixels, and tell ui so its
          * replay transform matches. The first frame after a resize/scale must
          * always paint (the swapchain contents were discarded). */
         bool resized_this_frame = false;
@@ -2317,8 +2317,8 @@ int optics_window_run_win32(const optics_window_opts *cfg) {
         if (pl.ime_composing)
             ime_update_position(&pl);
 
-        /* Cursor: an explicit host iris_set_cursor wins; while it is DEFAULT,
-         * follow the semantic hint of the lens widget under the pointer
+        /* Cursor: an explicit host optics_window_set_cursor wins; while it is DEFAULT,
+         * follow the semantic hint of the ui widget under the pointer
          * (I-beam over text fields, hand over clickable elements, …). */
         optics_window_cursor eff = pl.host_cursor;
         if (eff == OPTICS_WINDOW_CURSOR_DEFAULT)
@@ -2330,14 +2330,14 @@ int optics_window_run_win32(const optics_window_opts *cfg) {
         }
 
         /* A WM_PAINT since the last frame (restore, DWM composition change):
-         * the swapchain contents may be stale even when lens sees no damage,
+         * the swapchain contents may be stale even when ui sees no damage,
          * so latch a repaint like a resize would. */
         if (pl.force_paint) {
             pl.force_paint = false;
             surface_needs_paint = true;
         }
 
-        /* Cadence evaluation via iris_pacer (ADR-0122). */
+        /* Cadence evaluation via optics_window_pacer (ADR-0122). */
         bool chrome_damaged = pl.ui_frame.damaged;
         bool surface_forced = resized_this_frame || surface_needs_paint;
 
@@ -2380,7 +2380,7 @@ int optics_window_run_win32(const optics_window_opts *cfg) {
                         pkt->snapshot = snapshot;
                         pkt->host_list = host_list;
                         /* Resolve the frame's damage set on the UI thread: the
-                         * presentation thread must not re-query lens, and the set
+                         * presentation thread must not re-query ui, and the set
                          * has to travel with the snapshot it describes. */
                         pkt->damage_count = optics_window__ui_damage_rects(
                             ui, pkt->damage, OPTICS_WINDOW_DAMAGE_RECTS_CAPACITY);
@@ -2439,7 +2439,7 @@ int optics_window_run_win32(const optics_window_opts *cfg) {
                 cfg->prepare(frame, canvas, device, pl.scale, cfg->user);
 
             /* Clear to the current theme's body background; recorded host
-             * content draws *under* lens's chrome. */
+             * content draws *under* ui's chrome. */
             optics_gfx_color clear = pl.ui_frame.clear_color;
             optics_gfx_color *pass_clear = cfg->no_clear ? nullptr : &clear;
             bool drew = false;
@@ -2449,7 +2449,7 @@ int optics_window_run_win32(const optics_window_opts *cfg) {
             /* Damage scope for this surface (ADR-0149): the set travels intact to
              * the pass. A host with opaque canvas content (or a forced repaint)
              * asks for the full extent instead — its own content is not something
-             * lens can localise. */
+             * ui can localise. */
             optics_window_frame_damage dmg = {};
             const bool localize = !surface_forced && !has_host_content;
             if (localize) {
@@ -2532,10 +2532,10 @@ int optics_window_run_win32(const optics_window_opts *cfg) {
 
     /* --- Cleanup (shared by the success path and every `goto fail`) --- */
 fail:
-    /* Let the host release every resource created from iris's borrowed
-     * device before that device, the lens context, or the canvas disappears.
+    /* Let the host release every resource created from window's borrowed
+     * device before that device, the ui context, or the canvas disappears.
      * Keep the active platform published during the callback so thread-affine
-     * iris helpers remain valid through the host's teardown. */
+     * window helpers remain valid through the host's teardown. */
     if (host_started && cfg->stop)
         cfg->stop(device, cfg->user);
     if (ui_started)
@@ -2561,7 +2561,7 @@ fail:
         optics_gfx_device_wait_idle(device);
     if (ui_started)
         optics_window__ui_destroy(cfg->ui);
-    pl.ui = nullptr; /* after this, queued main-thread callbacks must not touch lens */
+    pl.ui = nullptr; /* after this, queued main-thread callbacks must not touch ui */
     /* The Win32 theme watcher holds no thread or handle; unwatch just drops
      * the backend's internal registration (the host's public watch, if any,
      * is untouched). */

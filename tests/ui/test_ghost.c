@@ -1,7 +1,7 @@
 /* test_ghost.c — leave-animation ghost replay (ADR-0078). */
 
-#include "lens_test.h"
 #include "optics_test.h"
+#include "ui_test.h"
 #include <math.h>
 #include <optics/gfx/canvas_cpu.h>
 #include <optics/ui.h>

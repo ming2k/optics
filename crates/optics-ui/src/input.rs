@@ -1,6 +1,6 @@
 //! Per-frame input snapshot and a small builder over the C `optics_ui_input`.
 //!
-//! A host (your event loop, or `lens-shell-wayland`) fills one of these each frame
+//! A host (your event loop, or `ui-shell-wayland`) fills one of these each frame
 //! from platform events and hands it to [`crate::Ui::frame`]. The C side reads
 //! it read-only for the duration of the frame.
 
@@ -172,7 +172,7 @@ impl Input {
     ///
     /// `Input` is a transparent wrapper over `optics_ui_input`, so a `&optics_ui_input`
     /// and a `&Input` have identical layout and lifetime. This is the
-    /// borrowed-input constructor a host (e.g. iris's per-frame build
+    /// borrowed-input constructor a host (e.g. window's per-frame build
     /// callback) uses to surface the platform-assembled input snapshot to
     /// application code without copying.
     ///

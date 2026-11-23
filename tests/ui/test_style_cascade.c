@@ -7,17 +7,17 @@
  *     next frame.
  *   - precedence: box.style beats the scope, the scope beats the theme.
  *   - the outline atoms reaching a widget's draw commands.
- *   - lens_skin_scratch: zeroed on first touch, persistent across frames,
+ *   - optics_ui_skin_scratch: zeroed on first touch, persistent across frames,
  *     reclaimed with the node by the store GC.
  *
  * style.c is compiled into the test binary directly (same pattern as
- * test_state_style): the cascade helpers are hidden in liblens. internal.h
+ * test_state_style): the cascade helpers are hidden in liboptics_ui. internal.h
  * is included for the node draw-list walk.
  */
 
 #include "../../libs/ui/src/internal.h"
-#include "lens_test.h"
 #include "optics_test.h"
+#include "ui_test.h"
 #include <optics/ui.h>
 
 static const optics_ui_input IN0 = {.display_size = {400, 200}, .dt_seconds = 0.016f};
@@ -54,7 +54,7 @@ static void test_merge_is_per_field(void) {
     over.fg = 0xFF445566u;
     over.font_size = 22.0f;
 
-    optics_ui_style m = lensi_style_merge(&base, &over);
+    optics_ui_style m = optics_ui__style_merge(&base, &over);
     OT_EXPECT(m.fg == 0xFF445566u); /* over wins where set        */
     OT_EXPECT_NEAR(m.font_size, 22.0f, 0.0f);
     OT_EXPECT_NEAR(m.padding, 9.0f, 0.0f); /* base fills the rest        */
@@ -146,7 +146,7 @@ static optics_ui_style bg_only(optics_gfx_color c) {
 }
 
 /* The button body rect colour at rest (no hover/press): the skin paints
- * the resolved bg verbatim when LENS_STYLE_BG came from the cascade. */
+ * the resolved bg verbatim when OPTICS_UI_STYLE_BG came from the cascade. */
 static optics_gfx_color first_rect_color(const optics_ui_node *n) {
     if (!n)
         return 0;
@@ -243,7 +243,7 @@ static void test_skin_scratch_lifecycle(void) {
     OT_EXPECT_NEAR(scratch[3], -4.25f, 0.0f);
 
     /* Reclaimed with the node: stop declaring the widget past the reap
-     * grace (LENSI_LEAVE_GRACE_FRAMES) and the slot — scratch included —
+     * grace (OPTICS_UI_LEAVE_GRACE_FRAMES) and the slot — scratch included —
      * is gone. */
     for (int f = 0; f < 12; f++) {
         optics_ui_begin(ui, &IN0);
@@ -267,7 +267,7 @@ static void test_material_theme_and_cascade_resolution(void) {
     OT_EXPECT_NEAR(dark.materials.command.plate_polarity, 0.0f, 0.0f);
     OT_EXPECT_NEAR(light.materials.floating.plate_polarity, 1.0f, 0.0f);
     OT_EXPECT_NEAR(dark.materials.floating.plate_polarity, 0.0f, 0.0f);
-    /* Lens body is a pure dielectric medium: zero opaque plate, governed by Contact AO */
+    /* ui body is a pure dielectric medium: zero opaque plate, governed by Contact AO */
     OT_EXPECT_NEAR(light.materials.optics_ui_body.plate_opacity, 0.0f, 0.0f);
     OT_EXPECT_NEAR(dark.materials.optics_ui_body.plate_opacity, 0.0f, 0.0f);
     OT_EXPECT(light.materials.optics_ui_body.contact_ao > 0.0f);
@@ -285,21 +285,21 @@ static void test_material_theme_and_cascade_resolution(void) {
     s_acrylic.fields = OPTICS_UI_STYLE_MATERIAL;
     s_acrylic.material = OPTICS_UI_MATERIAL_ACRYLIC;
 
-    optics_ui_style_resolved r_light = lensi_style_resolve(ui, &s_acrylic, &light, 0);
+    optics_ui_style_resolved r_light = optics_ui__style_resolve(ui, &s_acrylic, &light, 0);
     OT_EXPECT(r_light.material == OPTICS_UI_MATERIAL_ACRYLIC);
     OT_EXPECT_NEAR(r_light.material_recipe.plate_polarity, 1.0f, 0.0f);
     OT_EXPECT_NEAR(r_light.material_recipe.plate_opacity, light.materials.floating.plate_opacity,
                    0.0f);
 
-    optics_ui_style_resolved r_dark = lensi_style_resolve(ui, &s_acrylic, &dark, 0);
+    optics_ui_style_resolved r_dark = optics_ui__style_resolve(ui, &s_acrylic, &dark, 0);
     OT_EXPECT(r_dark.material == OPTICS_UI_MATERIAL_ACRYLIC);
     OT_EXPECT_NEAR(r_dark.material_recipe.plate_polarity, 0.0f, 0.0f);
     OT_EXPECT_NEAR(r_dark.material_recipe.plate_opacity, dark.materials.floating.plate_opacity,
                    0.0f);
 
-    /* Unset material resolves to LENS_MATERIAL_NONE and zeroed recipe */
+    /* Unset material resolves to OPTICS_UI_MATERIAL_NONE and zeroed recipe */
     optics_ui_style s_empty = optics_ui_style_init();
-    optics_ui_style_resolved r_none = lensi_style_resolve(ui, &s_empty, &light, 0);
+    optics_ui_style_resolved r_none = optics_ui__style_resolve(ui, &s_empty, &light, 0);
     OT_EXPECT(r_none.material == OPTICS_UI_MATERIAL_NONE);
     OT_EXPECT_NEAR(r_none.material_recipe.plate_opacity, 0.0f, 0.0f);
 

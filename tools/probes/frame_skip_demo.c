@@ -1,4 +1,4 @@
-/* frame_skip_demo.c — integration check for iris_request_frame_skip_render.
+/* frame_skip_demo.c — integration check for optics_window_request_frame_skip_render.
  *
  * This is the runtime acceptance test for the ADR-0122 regression: a host
  * that streams media-cadence content by declaring zero-render skips on the
@@ -19,7 +19,7 @@
  * Measure CPU alongside it:
  *   /usr/bin/time -v ./frame_skip_demo     (or: top -p $(pgrep frame_skip_demo))
  *
- * Build & run from the optics worktree, or via `meson compile -C build`.
+ * Built with -Dexamples=true (tools/probes/meson.build): ./build/tools/probes/frame_skip_demo
  */
 
 #include <optics/app.h>
@@ -54,7 +54,7 @@ static void build(optics_ui *ui, const optics_ui_input *in, void *user) {
     (void)in;
     double tb = now_s() - d->start;
 
-    /* iris brackets this callback with lens_begin/lens_end: a build only
+    /* window brackets this callback with optics_ui_begin/optics_ui_end: a build only
      * emits widgets. */
     optics_ui_column_begin(ui, nullptr);
     optics_ui_label(ui, &(optics_ui_label_opts){.text = "frame_skip demo: watch stderr counters"});
@@ -106,7 +106,7 @@ int main(void) {
     d.last_report = 0.0;
 
     return optics_app_run(&(optics_app_opts){
-        .title = "iris frame_skip demo",
+        .title = "window frame_skip demo",
         .app_id = "optics.frame_skip_demo",
         .width = 560,
         .height = 180,

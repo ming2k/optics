@@ -17,7 +17,8 @@ typedef struct optics_gfx_tile_segment {
     float x0, y0;
     float x1, y1;
 } optics_gfx_tile_segment;
-static_assert(sizeof(optics_gfx_tile_segment) == 16, "flux_tile_segment must match GPU GpuSegment");
+static_assert(sizeof(optics_gfx_tile_segment) == 16,
+              "optics_gfx_tile_segment must match GPU GpuSegment");
 
 /* Header for GPU Segment SSBO upload (align to 16 bytes for BDA). */
 typedef struct optics_gfx_tile_segment_header {
@@ -35,7 +36,8 @@ typedef struct optics_gfx_tile_desc {
     uint32_t cursor;
     uint32_t pad;
 } optics_gfx_tile_desc;
-static_assert(sizeof(optics_gfx_tile_desc) == 16, "flux_tile_desc must match GPU GpuTileHeader");
+static_assert(sizeof(optics_gfx_tile_desc) == 16,
+              "optics_gfx_tile_desc must match GPU GpuTileHeader");
 
 /* Per-draw GPU tile dispatch block read by compute bin/scan and vector fragment shaders. */
 typedef struct optics_gfx_gpu_tile_dispatch {
@@ -53,7 +55,7 @@ typedef struct optics_gfx_gpu_tile_dispatch {
     uint32_t _pad0;
 } optics_gfx_gpu_tile_dispatch;
 static_assert(sizeof(optics_gfx_gpu_tile_dispatch) == 64,
-              "flux_gpu_tile_dispatch must match GPU GpuTileDispatch");
+              "optics_gfx_gpu_tile_dispatch must match GPU GpuTileDispatch");
 
 /* Compute tile grid dimensions for a given pixel width and height. */
 static inline void canvas_tile_grid_dims(uint32_t w, uint32_t h, uint32_t *out_tx,
@@ -93,8 +95,9 @@ optics_gfx_result canvas_tile_bin_segments(const optics_gfx_tile_segment *segs, 
                                            optics_gfx_tile_desc *out_tiles, uint32_t *out_indices,
                                            uint32_t indices_cap, uint32_t *out_total_indices);
 
-/* Compute exact fixed-point (FLUX_TILE_BD_SCALE) per-pixel-row right-side backdrop
- * for every pixel row of every tile (`tiles_x * tiles_y * FLUX_TILE_SIZE` int32_t entries). */
+/* Compute exact fixed-point (OPTICS_GFX_TILE_BD_SCALE) per-pixel-row right-side backdrop
+ * for every pixel row of every tile (`tiles_x * tiles_y * OPTICS_GFX_TILE_SIZE` int32_t entries).
+ */
 optics_gfx_result canvas_tile_compute_backdrop(const optics_gfx_tile_segment *segs,
                                                uint32_t seg_count, uint32_t width, uint32_t height,
                                                int32_t *out_row_backdrops);
@@ -104,4 +107,4 @@ optics_gfx_result canvas_tile_rasterize(const optics_gfx_tile_segment *segs, uin
                                         optics_gfx_fill_rule rule, float ox, float oy, uint32_t w,
                                         uint32_t h, float *out_cov);
 
-#endif /* FLUX_CANVAS_TILE_H */
+#endif /* OPTICS_GFX_CANVAS_TILE_H */

@@ -1,7 +1,7 @@
-/* test_capability.c — iris_supports() is the feature-discovery contract.
+/* test_capability.c — optics_window_supports() is the feature-discovery contract.
  *
  * Pins three properties:
- *   1. The answer is backend-consistent: what iris_supports() reports
+ *   1. The answer is backend-consistent: what optics_window_supports() reports
  *      matches the backend this test runs on (wayland on CI).
  *   2. Unknown/newer capability values return false instead of reading
  *      out of the table's bounds (forward compatibility).
@@ -38,7 +38,7 @@ int main(void) {
     OT_EXPECT(optics_window_supports(OPTICS_WINDOW_CAP_DROP_TARGET) == has_backend);
     OT_EXPECT(optics_window_supports(OPTICS_WINDOW_CAP_DRAG_SOURCE) == has_backend);
 
-    /* Forward compatibility: values a newer libiris might define must not
+    /* Forward compatibility: values a newer liboptics_window might define must not
      * index past the table. Exercise well beyond the current range. */
     for (int v = 100; v < 200; v++)
         OT_EXPECT(optics_window_supports((optics_window_capability)v) == 0);

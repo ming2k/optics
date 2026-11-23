@@ -18,15 +18,15 @@
 
 int main(void) {
     static_assert(OPTICS_VERSION_MAJOR == OPTICS_GFX_VERSION_MAJOR,
-                  "umbrella and flux major versions diverge");
+                  "umbrella and gfx major versions diverge");
     static_assert(OPTICS_VERSION_MINOR == OPTICS_GFX_VERSION_MINOR,
-                  "umbrella and flux minor versions diverge");
+                  "umbrella and gfx minor versions diverge");
     static_assert(OPTICS_VERSION_PATCH == OPTICS_GFX_VERSION_PATCH,
-                  "umbrella and flux patch versions diverge");
+                  "umbrella and gfx patch versions diverge");
     static_assert(OPTICS_VERSION_PATCH == OPTICS_UI_VERSION_PATCH,
-                  "umbrella and lens patch versions diverge");
+                  "umbrella and ui patch versions diverge");
     static_assert(OPTICS_VERSION_PATCH == OPTICS_WINDOW_VERSION_PATCH,
-                  "umbrella and iris patch versions diverge");
+                  "umbrella and window patch versions diverge");
 
     OT_EXPECT(optics_gfx_version_number() == OPTICS_GFX_VERSION_NUMBER);
     OT_EXPECT(optics_ui_version_number() == OPTICS_UI_VERSION_NUMBER);
@@ -55,7 +55,7 @@ int main(void) {
     OT_REQUIRE(optics_ui_snapshot_activate(ui, snapshot) == OPTICS_GFX_OK);
 
     optics_gfx_canvas_desc desc = OPTICS_GFX_INIT(
-        CANVAS_DESC, .backend = OPTICS_GFX_CANVAS_BACKEND_CPU, .width = 160, .height = 80);
+        canvas_desc, .backend = OPTICS_GFX_CANVAS_BACKEND_CPU, .width = 160, .height = 80);
     optics_gfx_canvas *canvas = nullptr;
     OT_REQUIRE(optics_gfx_canvas_create(&desc, &canvas) == OPTICS_GFX_OK);
     optics_gfx_color clear = optics_gfx_color_rgba_premul(0, 0, 0, 255);

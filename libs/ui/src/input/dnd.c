@@ -1,4 +1,4 @@
-/* dnd.c — Immediate-mode Drag-and-Drop support for lens. (ADR-0086) */
+/* dnd.c — Immediate-mode Drag-and-Drop support for ui. (ADR-0086) */
 
 #include "../internal.h"
 #include <string.h>
@@ -61,13 +61,13 @@ bool optics_ui_dnd_drop_target(optics_ui *ui, const optics_ui_dnd_drop_target_op
 
     optics_gfx_rect b = n->prev_rect;
     optics_gfx_point p = ui->input.cursor;
-    bool in_bounds = lensi_point_in(p, b);
+    bool in_bounds = optics_ui__point_in(p, b);
 
     /* Check if a platform drop occurred inside this node's bounds */
     bool dropped_here = false;
     if (ui->dnd_drop.dropped && (ui->frame <= ui->dnd_drop.drop_frame + 1)) {
         optics_gfx_point dp = ui->dnd_drop.drop_pos;
-        if (lensi_point_in(dp, b)) {
+        if (optics_ui__point_in(dp, b)) {
             dropped_here = true;
             in_bounds = true;
             p = dp;

@@ -1,6 +1,6 @@
-//! Safe Rust bindings to **prism** — the material library of the optics
-//! stack, built on flux's public effect runtime. flux owns rendering
-//! mechanism, prism owns material identity, and the caller owns policy.
+//! Safe Rust bindings to **material** — the material library of the optics
+//! stack, built on gfx's public effect runtime. gfx owns rendering
+//! mechanism, material owns material identity, and the caller owns policy.
 //!
 //! Materials:
 //! - [`LiquidGlassFilter`]: analytic convex-lens liquid glass compositor.
@@ -13,14 +13,14 @@
 
 use std::marker::PhantomData;
 
-/// Raw-bindings escape hatch (see the `flux` crate's note). Kept `pub`
+/// Raw-bindings escape hatch (see the `gfx` crate's note). Kept `pub`
 /// deliberately as the one documented unsafe escape hatch.
-/// Raw-bindings escape hatch (see the `flux` crate's note). Kept `pub`
+/// Raw-bindings escape hatch (see the `gfx` crate's note). Kept `pub`
 /// deliberately as the one documented unsafe escape hatch.
 pub use optics_material_sys as sys;
 
-/// A prism failure, surfaced through flux's result codes: every fallible
-/// prism call returns `optics_gfx_result`, so the error type is flux's own.
+/// A material failure, surfaced through gfx's result codes: every fallible
+/// material call returns `optics_gfx_result`, so the error type is gfx's own.
 pub use optics_gfx::Error;
 
 /// Library version string ("0.0.30" at the time of writing), derived from
@@ -651,7 +651,7 @@ impl Drop for BackdropLayerFilter {
 /// frost + glass stack, transparent outside every frost rect and glass
 /// silhouette. Draw it over the sharp desktop to complete the composite.
 /// Borrowed output of a [`BackdropLayerFilter`] application: the complete
-/// frost + glass stack. Like every prism material output it is a slab sized to
+/// frost + glass stack. Like every material output it is a slab sized to
 /// the layer's footprints; [`draw`](Self::draw) places it correctly.
 pub struct BackdropLayerImage<'filter> {
     raw: *mut sys::optics_gfx_image,
