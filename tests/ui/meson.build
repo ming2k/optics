@@ -162,3 +162,8 @@ test('ui_store_fault', store_fault_test, suite : 'unit')
 
 snapshot_test = executable('test_snapshot', 'test_snapshot.c', dependencies : [ui_dep, m_dep, optics_test_dep])
 test('ui_snapshot', snapshot_test, suite : 'integration')
+
+ui_gpu_render_test = executable('test_ui_gpu_render', 'test_ui_gpu_render.c',
+  dependencies : [optics_gfx_test_support_dep, ui_dep],
+)
+test('ui_gpu_render', ui_gpu_render_test, suite : 'integration')

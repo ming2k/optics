@@ -45,7 +45,9 @@ feature. `static` only adds a requirement.
 `OPTICS_STATIC` and `OPTICS_DYNAMIC` are for whoever runs the build, such as a
 packager or CI, and they take precedence over the feature in both directions.
 `OPTICS_DYNAMIC=1` forces a shared link even when some dependency enabled
-`static`.
+`static`. Setting a switch to `0`, `false`, or an empty value disables it so a
+shell invocation can cancel a worktree `.cargo/config.toml` `[env]` entry (for
+example `OPTICS_DYNAMIC=0 cargo build` to test the default `static` feature).
 
 `PKG_CONFIG_ALL_STATIC` / `PKG_CONFIG_ALL_DYNAMIC` are accepted as aliases, so a
 `pkg-config`-wide setting cannot silently disagree with the emitted directives.

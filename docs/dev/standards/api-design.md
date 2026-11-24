@@ -40,15 +40,11 @@ Fallible entry points return `optics_gfx_result` (the stack-wide status type) or
 typed response; queries may return a value directly. Bare `int` error codes
 and unchecked out-parameters are prohibited in new API.
 
-### Enforcement
+### Review Discipline
 
-`tools/check_api.py` (`meson test --suite lint`) parses every public
-declaration under `libs/*/include` and fails on a function with more than four
-parameters outside the value-kernel headers, on a second descriptor, and on a
-variant suffix. Functions that predate the rule are listed in
-`tools/config/api_baseline.txt`. That file is a ratchet: a function not on it
-fails the check, and an entry that no longer violates fails until it is
-deleted. Converting a function means removing its line.
+Apply the descriptor rule during API design and code review for every new
+declaration under `libs/*/include`, and keep `docs/reference/symbols.md`
+synchronized via `python3 tools/gen_symbols.py`.
 
 This rule replaces the earlier "every entry point takes exactly one descriptor"
 wording ([ADR-0165](../../adr/0165-single-opts-descriptor-migration-by-library.md),

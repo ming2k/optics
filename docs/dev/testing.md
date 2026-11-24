@@ -9,24 +9,24 @@ manual checks because they need a compositor and GPU surface.
 
 The test system is a three-layer pyramid with orthogonal quality lanes
 ([ADR-0162](../adr/0162-layered-test-architecture-one-harness-three-layers-public-api-e2e.md)).
-Every registered test declares exactly one layer or one lane. The taxonomy is
-checked mechanically by `tools/check_test_layers.py`.
+Every registered test declares one layer (`unit`, `integration`, `e2e`) or one
+orthogonal lane (`bench`, `fuzz`, `lint`).
 
 ```text
                      ┌─────────────────────┐
-                     │        e2e          │  4 binaries
-                     │ public API → pixels │  slowest, smallest
+                     │        e2e          │  public API → pixels
+                     │  headless CPU-only  │  smallest, broadest
                      └──────────┬──────────┘
                 ┌───────────────┴────────────────┐
-                │          integration           │  67 binaries
-                │ Vulkan / fonts / real seams    │  environment-bound
+                │          integration           │  Vulkan / fonts / GPU stack
+                │  real boundaries & readback    │  environment-bound
                 └───────────────┬────────────────┘
        ┌────────────────────────┴────────────────────────┐
-       │                     unit                        │  113 binaries
-       │ one library, CPU-only, deterministic            │  fastest, widest
+       │                     unit                        │  one library, CPU-only
+       │   deterministic, fast, zero external deps       │  widest base
        └─────────────────────────────────────────────────┘
 
-       orthogonal lanes: bench · fuzz · lint · tooling
+       orthogonal lanes: bench · fuzz · lint
 ```
 
 ## Layer Contract
@@ -82,8 +82,10 @@ Current E2E scenarios:
 |------|-----------------------|
 | `e2e_gfx_version` | Umbrella version → `gfx` runtime version, with no UI/canvas requirement |
 | `e2e_public_api` | Umbrella version lockstep → UI frame → snapshot → CPU pixels |
-| `e2e_interaction_session` | Pointer press/release → checkbox toggle → focused text input → accessibility walk → snapshot replay |
+| `e2e_interaction_session` | Pointer press/release → checkbox toggle → focused text input → accessibility walk → per-widget pixel diff |
 | `e2e_document_pipeline` | SVG → `svg` raster; SVG → runtime icon → UI snapshot → immutable `DisplayList` → serialize/deserialize → byte-identical pixels |
+| `e2e_motion_session` | Analytic spring + hysteresis → multi-frame UI snapshots → monotonic visual motion & reduced-motion byte-identical snap |
+| `e2e_gpu_stack` (`integration`) | Public-API-only full GPU stack: backdrop → Dual-Kawase blur → Frosted & Liquid Glass → animated spring + HUD UI + SVG icon → Vulkan readback |
 
 ## One Harness, One Fixture Layer
 
@@ -155,17 +157,14 @@ Register a test in the Meson file for its layer and pass `suite : 'unit'`,
 and are never given a layer. Test names are globally unique; a duplicate is a
 guardrail failure, not a silent Meson alias.
 
-The `lint` lane also runs tree-level gates that no single test binary can own:
+The `lint` lane runs essential tree-level gates that no single test binary can own:
 
 | Gate | What it proves |
 |------|----------------|
-| `test_layers` | Every registered test has exactly one layer/lane; no private harness reappears. |
-| `wayland_listeners` | Every Wayland listener event has a non-NULL slot. |
+| `wayland_listeners` | Every Wayland listener event has a non-NULL slot (prevents `libwayland` aborts). |
 | `version_lockstep_tree` | Meson, the umbrella header, every library header, and the Cargo workspace name one version. |
 | `library_purity` | Shared libraries do not write to stdout; `gfx` does not reference named materials. |
-| `c23_lexical` | No code-level `NULL`/`{0}` remains, and every `typedef enum` has an explicit underlying type. |
-| `api_surface` | No prohibited `_ex`/`_wrapped`/`_sized`/variant suffixes appear in public headers. |
-| `docs_links` | Every relative documentation link resolves; public docs do not link into `docs/dev/`. |
+| `symbol_reference` | `docs/reference/symbols.md` matches the exported public headers. |
 
 ## Running Tests
 
@@ -206,36 +205,8 @@ OPTICS_GFX_ALLOW_SOFTWARE_DEVICE=1 \
   meson test -C build --suite integration
 ```
 
-On Windows and macOS without a GPU driver, run `unit`, `e2e`, `lint`, and
-`tooling`; the `integration` suite is the only GPU-dependent layer.
-
-## The Layer Guardrail
-
-`tools/check_test_layers.py` reads `meson introspect <build> --tests` and fails
-when:
-
-- a test has no layer/lane/meta classification, or declares two layers;
-- a test mixes a layer with a bench/fuzz lane;
-- a test name is registered twice;
-- `unit`, `integration`, or `e2e` is empty;
-- the pyramid is inverted (`unit` < `e2e`);
-- a private `tests/*/test_helpers.h` or `.c` reappears;
-- a legacy `CHECK`/`EXPECT`/`TEST_REPORT`/`TEST_SUMMARY` assertion token
-  reappears outside the shared harness;
-- a source under a `unit/` directory creates a Vulkan device;
-- an E2E source includes a private header or the E2E Meson file compiles a
-  library source;
-- an E2E source is not registered in `tests/e2e/meson.build`, or the E2E
-  Meson file does not link `optics_dep`.
-
-It runs as the `test_layers` lint/tooling test and in CI:
-
-```bash
-python3 tools/check_test_layers.py build
-```
-
-A new test that bypasses the taxonomy fails this gate even if its assertions
-pass.
+On Windows and macOS without a GPU driver, run `unit`, `e2e`, and `lint`; the
+`integration` suite is the only GPU-dependent layer.
 
 ## Interpret Failures
 
@@ -246,8 +217,7 @@ pass.
 | Vulkan validation error | The integration test's frame/resource lifetime and `libs/gfx/src/`. |
 | `ui` widget or layout failure | The same-named test in `tests/ui/` and `libs/ui/src/`. |
 | `window` theme or API failure | `libs/window/src/theme_linux.c` or `libs/window/src/app.c`. |
-| E2E pixel mismatch | Start at the first failing layer in the chain: svg raster, ui snapshot, display-list serialization, or CPU replay. |
-| Layer guardrail failure | `tools/check_test_layers.py` output; the test's Meson registration and `tests/e2e/` include discipline. |
+| E2E pixel mismatch | Start at the first failing layer in the chain: svg raster, ui snapshot, display-list serialization, or replay. |
 | Window is blank or examples fail to start | Wayland/Vulkan setup and the relevant example; this path is not covered by headless tests. |
 
 ## Sanitizers

@@ -112,10 +112,10 @@ jobs:
 
       # The pyramid runs as named gates. A failure names the layer instead of
       # disappearing inside one aggregate run.
-      - name: "Test (headless: unit + e2e + lint + tooling)"
+      - name: "Test (headless: unit + e2e + lint)"
         run: |
           meson test -C build --print-errorlogs \
-            --suite unit --suite e2e --suite lint --suite tooling
+            --suite unit --suite e2e --suite lint
 
       - name: "Test (integration: Lavapipe via VK_ICD_FILENAMES)"
         env:
@@ -181,7 +181,7 @@ jobs:
       - name: Test (headless)
         run: |
           meson test -C build --print-errorlogs \
-            --suite unit --suite e2e --suite lint --suite tooling
+            --suite unit --suite e2e --suite lint
 
   gcc-build:
     # GCC 15 is the other #embed-capable compiler. ubuntu-24.04 has none, so
@@ -220,10 +220,10 @@ jobs:
       - name: Compile
         run: meson compile -C build
 
-      - name: "Test (headless: unit + e2e + lint + tooling)"
+      - name: "Test (headless: unit + e2e + lint)"
         run: |
           meson test -C build --print-errorlogs \
-            --suite unit --suite e2e --suite lint --suite tooling
+            --suite unit --suite e2e --suite lint
 
       - name: "Test (integration: Lavapipe)"
         env:

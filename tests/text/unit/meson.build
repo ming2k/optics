@@ -15,3 +15,10 @@ test_text_lifecycle = executable('test_text_lifecycle',
   dependencies : [text_test_dep],
 )
 test('text_lifecycle', test_text_lifecycle, suite : 'unit')
+
+# Layout/stats/malformed-UTF8/style-variation/display-list-record contracts.
+test_text_layout_contracts = executable('test_text_layout_contracts',
+  'test_text_layout_contracts.c',
+  dependencies : [text_test_dep],
+)
+test('text_layout_contracts', test_text_layout_contracts, suite : 'unit')

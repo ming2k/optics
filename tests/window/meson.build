@@ -105,3 +105,26 @@ exe_mailbox = executable('test_frame_mailbox',
   dependencies        : [gfx_dep, m_dep, optics_test_dep],
 )
 test('test_frame_mailbox', exe_mailbox, suite : 'unit')
+
+# test_platform_wakeup pins the cross-thread wakeup FIFO seam behind
+# optics_window_post_to_main_thread: FIFO order, re-entrant posting, and
+# multi-producer thread safety.
+exe_wakeup = executable('test_platform_wakeup',
+  ['test_platform_wakeup.c', '../../libs/window/src/platform_wakeup.c'],
+  include_directories : [window_inc, src_inc],
+  dependencies        : [gfx_dep, m_dep, optics_test_dep],
+)
+test('test_platform_wakeup', exe_wakeup, suite : 'unit')
+
+# test_frame_pipeline_seam drives event + display_pacer + frame_mailbox +
+# platform_wakeup together in a headless dual-thread frame loop simulation.
+exe_pipeline_seam = executable('test_frame_pipeline_seam',
+  ['test_frame_pipeline_seam.c',
+   '../../libs/window/src/event.c',
+   '../../libs/window/src/display_pacer.c',
+   '../../libs/window/src/frame_mailbox.c',
+   '../../libs/window/src/platform_wakeup.c'],
+  include_directories : [window_inc, src_inc],
+  dependencies        : [gfx_dep, m_dep, optics_test_dep],
+)
+test('test_frame_pipeline_seam', exe_pipeline_seam, suite : 'unit')

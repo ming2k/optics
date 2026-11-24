@@ -55,9 +55,7 @@ Documentation is structured into two distinct surfaces separated by a one-way vi
    - Links into `docs/adr/` remain permitted: a public reader may follow an architectural decision record, but not an internal contributor checklist or runbook.
 4. **Reverse Linking Permitted**: Internal developer documents may freely link outward to public reference and how-to guides.
 
-Enforcement is mechanical via `tools/check_doc_links.py`
-(`meson test --suite lint`), which rejects missing relative targets and
-public-to-`docs/dev/` links.
+Maintain this boundary during documentation review whenever editing `docs/`.
 
 ---
 

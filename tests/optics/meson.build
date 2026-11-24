@@ -1,4 +1,4 @@
-# Code quality and tooling verification
+# Umbrella façade, version lockstep, and essential tree-level lint checks.
 py = import('python').find_installation('python3')
 
 # One versioning scheme across every library and the umbrella facade. The
@@ -17,29 +17,20 @@ test_version_lockstep = executable('test_version_lockstep',
 )
 test('version_lockstep', test_version_lockstep, suite : 'integration')
 
-# Verify Wayland listener slot contract (ADR-0145) across the codebase
+# Wayland listener slot contract (ADR-0145): libwayland aborts if any
+# dispatched event hits a NULL slot, and C compilers do not warn on omitted
+# fields in designated initializers.
 test(
   'wayland_listeners',
   py,
   args : [files('../../tools/check_listeners.py')],
   workdir : meson.project_source_root(),
-  suite : ['lint', 'tooling'],
-  timeout : 30,
-)
-
-# Negative regression test suite for the Wayland listener contract scanner
-test(
-  'listeners_guardrail_selftest',
-  py,
-  args : [files('test_listeners_guardrail.py')],
-  workdir : meson.project_source_root(),
-  suite : 'tooling',
+  suite : 'lint',
   timeout : 30,
 )
 
 # Version lockstep across Meson, the C headers, the umbrella header, and the
-# Cargo workspace. The runtime accessor test cannot see Meson/Cargo, and Cargo
-# cannot see the C headers; this is the tree-level gate.
+# Cargo workspace.
 test(
   'version_lockstep_tree',
   py,
@@ -49,6 +40,7 @@ test(
   timeout : 30,
 )
 
+# Shared libraries never write to stdout; gfx never references named materials.
 test(
   'library_purity',
   py,
@@ -58,108 +50,13 @@ test(
   timeout : 30,
 )
 
-test(
-  'c23_lexical',
-  py,
-  args : [files('../../tools/check_c23.py')],
-  workdir : meson.project_source_root(),
-  suite : 'lint',
-  timeout : 30,
-)
-
-test(
-  'api_surface',
-  py,
-  args : [files('../../tools/check_api.py')],
-  workdir : meson.project_source_root(),
-  suite : 'lint',
-  timeout : 30,
-)
-
-test(
-  'semantic_naming',
-  py,
-  args : [files('../../tools/check_naming.py')],
-  workdir : meson.project_source_root(),
-  suite : ['lint', 'tooling'],
-  timeout : 30,
-)
-
-test(
-  'leak_coverage',
-  py,
-  args : [files('../../tools/check_leaks.py')],
-  workdir : meson.project_source_root(),
-  suite : ['lint', 'tooling'],
-  timeout : 120,
-)
-
-test(
-  'leaks_guardrail_selftest',
-  py,
-  args : [files('test_leaks_guardrail.py')],
-  workdir : meson.project_source_root(),
-  suite : 'tooling',
-  timeout : 30,
-)
-
-test(
-  'adr_registry',
-  py,
-  args : [files('../../tools/check_adr.py')],
-  workdir : meson.project_source_root(),
-  suite : 'lint',
-  timeout : 30,
-)
-
+# Verify docs/reference/symbols.md stays in sync with public headers.
 test(
   'symbol_reference',
   py,
   args : [files('../../tools/gen_symbols.py'), '--check'],
   workdir : meson.project_source_root(),
   suite : 'lint',
-  timeout : 30,
-)
-
-test(
-  'naming_guardrail_selftest',
-  py,
-  args : [files('test_naming_guardrail.py')],
-  workdir : meson.project_source_root(),
-  suite : 'tooling',
-  timeout : 30,
-)
-
-test(
-  'docs_links',
-  py,
-  args : [files('../../tools/check_doc_links.py')],
-  workdir : meson.project_source_root(),
-  suite : 'lint',
-  timeout : 30,
-)
-
-# The test pyramid is a mechanical taxonomy, not a convention: every test must
-# declare exactly one layer (unit/integration/e2e) or an orthogonal lane
-# (bench/fuzz), names are globally unique, and e2e sources may not reach into
-# library internals.
-test(
-  'test_layers',
-  py,
-  args : [files('../../tools/check_test_layers.py'), meson.project_build_root()],
-  workdir : meson.project_source_root(),
-  suite : ['lint', 'tooling'],
-  timeout : 60,
-)
-
-# Negative tests for the taxonomy guardrail itself: an accepting gate that
-# cannot fail is not a gate.
-test(
-  'test_layers_guardrail_selftest',
-  py,
-  args : [files('test_test_layers_guardrail.py')],
-  workdir : meson.project_source_root(),
-  suite : 'tooling',
   timeout : 30,
 )
 

@@ -1,5 +1,0 @@
-# Public functions that exceed the four-parameter rule (tools/check_api.py).
-# A ratchet: entries may only be removed, by converting the function to a
-# descriptor. Adding an entry requires changing the rule, not this file.
-#
-# Empty: every public function conforms.

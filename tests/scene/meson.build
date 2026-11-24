@@ -6,6 +6,12 @@ if opt_scene
   )
   test('glb_parse', test_glb_parse, suite : 'unit')
 
+  test_scene_contracts = executable('test_scene_contracts',
+    'test_scene_contracts.c',
+    dependencies : [scene_dep, optics_test_dep, m_dep],
+  )
+  test('scene_contracts', test_scene_contracts, suite : 'unit')
+
   bench_sg_worlds = executable('bench_sg_worlds',
     'bench_sg_worlds.c',
     include_directories : include_directories('../gfx/bench'),

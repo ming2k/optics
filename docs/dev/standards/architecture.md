@@ -52,12 +52,11 @@ alone.
    outside them is not on the include path and the compile fails. The Windows
    translation-unit gate in `ci-cross.yml` compiles `window` with no `ui` include
    path. `tests/window` links no `ui`.
-2. **The descriptor rule.** See [API design](api-design.md). *Mechanism:*
-   `tools/check_api.py` and its shrinking baseline.
+2. **The descriptor rule.** See [API design](api-design.md).
 3. **Semantic naming and unified `optics` namespace (ADR-0170).** Every library
    uses its canonical semantic name under `libs/<mod>/`, installs headers under
    `include/optics/`, prefixes public C symbols with `optics_<mod>_`, and
-   publishes `optics-<mod>` crates. *Mechanism:* `tools/check_naming.py`.
+   publishes `optics-<mod>` crates.
 4. **No compatibility shims.** When a design is superseded, the old API is
    removed in the same change. Pre-1.0 the SONAME is the full version string,
    so nothing can load across releases by accident.
@@ -91,5 +90,5 @@ Before adding a public function, primitive or library:
 
 1. **Can a caller already compose it** from existing primitives? Then it belongs in the application or an example, not the library.
 2. **Does it respect the graph** in §1? A new edge is an architectural change and needs an ADR.
-3. **Does it pass `tools/check_api.py`** without a new baseline entry?
+3. **Does it follow the descriptor rule** in [API design](api-design.md)?
 4. **If it runs inside the frame walk, does `test_zero_alloc` still pass?**

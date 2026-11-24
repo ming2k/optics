@@ -7,6 +7,14 @@ test_text_caret = executable('test_text_caret',
 )
 test('text_caret', test_text_caret, suite : 'integration')
 
+# Real GPU + system font stack text rendering, atlas upload/flush, outline, and
+# CJK autospace / BiDi multi-span integration test.
+test_text_render_pipeline = executable('test_text_render_pipeline',
+  'test_text_render_pipeline.c',
+  dependencies : [optics_gfx_test_support_dep, text_dep],
+)
+test('text_render_pipeline', test_text_render_pipeline, suite : 'integration')
+
 # Long-session text soak: drives the glyph cache past its live ceiling and
 # replays resident working sets, asserting the diagnostic counters (evictions,
 # hits vs misses, atlas pages/clears) stay in their documented steady states.

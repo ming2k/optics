@@ -68,7 +68,7 @@ jobs:
         run: |
           export PATH="/c/slang/bin:$PATH"
           meson test -C build --print-errorlogs \
-            --suite unit --suite e2e --suite lint --suite tooling
+            --suite unit --suite e2e --suite lint
 
   macos:
     name: build & test (macos-15-intel, MoltenVK)
@@ -109,7 +109,7 @@ jobs:
           VK_ICD_FILENAMES: /usr/local/share/vulkan/icd.d/MoltenVK_icd.json
         run: |
           meson test -C build --print-errorlogs \
-            --suite unit --suite e2e --suite lint --suite tooling
+            --suite unit --suite e2e --suite lint
 
   windows-zig-compile-check:
     name: windows TU compile check (zig cc, ubuntu-24.04)

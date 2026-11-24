@@ -1,6 +1,7 @@
 # tests/e2e — the top of the pyramid.
 #
-# Rules for this directory (enforced by tools/check_test_layers.py):
+# Rules for this directory (enforced by Meson dependency isolation — no private
+# include_directories are passed here):
 #   - public headers only: no libs/*/src include, no internal.h, no compiling
 #     a library source file into the test binary;
 #   - one process-level scenario per binary, linked through the umbrella
@@ -39,5 +40,24 @@ if opt_ui
       dependencies : e2e_common_deps,
     )
     test('e2e_document_pipeline', test_e2e_document_pipeline, suite : 'e2e')
+  endif
+
+  if opt_motion
+    test_e2e_motion_session = executable('test_e2e_motion_session',
+      'test_e2e_motion_session.c',
+      dependencies : e2e_common_deps,
+    )
+    test('e2e_motion_session', test_e2e_motion_session, suite : 'e2e')
+  endif
+
+  if opt_svg and opt_material and opt_motion
+    # Full-stack public-API GPU composition scenario (gfx + material + svg +
+    # ui + text + motion). Uses public headers only, registered under
+    # `integration` so GPU-less hosts skip it while Lavapipe CI runs it.
+    test_e2e_gpu_stack = executable('test_e2e_gpu_stack',
+      'test_e2e_gpu_stack.c',
+      dependencies : [optics_dep, optics_gfx_test_support_dep, m_dep],
+    )
+    test('e2e_gpu_stack', test_e2e_gpu_stack, suite : 'integration')
   endif
 endif

@@ -18,10 +18,14 @@
 #include <optics/gfx/canvas_cpu.h>
 #include <optics/ui.h>
 
+#include <stdlib.h>
 #include <string.h>
 
 #define DISPLAY_W 420.0f
 #define DISPLAY_H 220.0f
+#define FRAME_W 420u
+#define FRAME_H 220u
+#define FRAME_BYTES (FRAME_W * FRAME_H * 4u)
 
 typedef struct app_state {
     int clicks;
@@ -126,16 +130,81 @@ static void visit(const optics_ui_semantics *semantics, optics_gfx_rect bounds, 
         saw_text = true;
 }
 
+static void capture_cpu_frame(optics_ui *ui, uint8_t *out_pixels) {
+    optics_ui_scene_snapshot *snapshot = nullptr;
+    OT_REQUIRE(optics_ui_snapshot_create(ui, &snapshot) == OPTICS_GFX_OK);
+
+    optics_gfx_canvas *canvas = nullptr;
+    OT_REQUIRE(
+        optics_gfx_canvas_create(&(optics_gfx_canvas_desc){.type = OPTICS_GFX_TYPE_CANVAS_DESC,
+                                                           .backend = OPTICS_GFX_CANVAS_BACKEND_CPU,
+                                                           .scale = 1.0f,
+                                                           .width = FRAME_W,
+                                                           .height = FRAME_H},
+                                 &canvas) == OPTICS_GFX_OK);
+    optics_gfx_color clear = optics_gfx_color_rgba_premul(0, 0, 0, 255);
+    OT_REQUIRE(optics_gfx_canvas_begin(
+                   canvas, &(optics_gfx_canvas_pass_desc){.type = OPTICS_GFX_TYPE_CANVAS_PASS_DESC,
+                                                          .clear_color = &clear}) == OPTICS_GFX_OK);
+    OT_EXPECT(optics_ui_snapshot_submit(snapshot, canvas) == OPTICS_GFX_OK);
+    OT_REQUIRE(optics_gfx_canvas_end(canvas) == OPTICS_GFX_OK);
+
+    uint32_t width = 0, height = 0, stride = 0;
+    const uint8_t *pixels = optics_gfx_canvas_read_pixels(canvas, &width, &height, &stride);
+    OT_REQUIRE(pixels != nullptr && width == FRAME_W && height == FRAME_H);
+    for (uint32_t y = 0; y < FRAME_H; ++y)
+        memcpy(out_pixels + (size_t)y * FRAME_W * 4u, pixels + (size_t)y * stride, FRAME_W * 4u);
+
+    optics_gfx_canvas_release(canvas);
+    optics_ui_snapshot_release(snapshot);
+}
+
+static size_t diff_pixels_in_rect(const uint8_t *a, const uint8_t *b, optics_gfx_rect rect) {
+    int x0 = (int)rect.x;
+    int y0 = (int)rect.y;
+    int x1 = (int)(rect.x + rect.w + 0.999f);
+    int y1 = (int)(rect.y + rect.h + 0.999f);
+    if (x0 < 0)
+        x0 = 0;
+    if (y0 < 0)
+        y0 = 0;
+    if (x1 > (int)FRAME_W)
+        x1 = (int)FRAME_W;
+    if (y1 > (int)FRAME_H)
+        y1 = (int)FRAME_H;
+
+    size_t diff = 0;
+    for (int y = y0; y < y1; ++y) {
+        for (int x = x0; x < x1; ++x) {
+            size_t off = ((size_t)y * FRAME_W + (size_t)x) * 4u;
+            if (abs((int)a[off + 0] - (int)b[off + 0]) + abs((int)a[off + 1] - (int)b[off + 1]) +
+                    abs((int)a[off + 2] - (int)b[off + 2]) >
+                16)
+                diff++;
+        }
+    }
+    return diff;
+}
+
 int main(void) {
     session s = {};
     OT_REQUIRE(optics_ui_create(&(optics_ui_desc){.theme = optics_ui_theme_dark()}, &s.ui) ==
                OPTICS_GFX_OK);
 
+    uint8_t *before_px = malloc(FRAME_BYTES);
+    uint8_t *after_px = malloc(FRAME_BYTES);
+    OT_REQUIRE(before_px != nullptr && after_px != nullptr);
+
     /* Frame 0: first layout. Nothing has been clicked. */
     frame(&s, (optics_ui_input){});
     optics_gfx_rect button_rect = optics_ui_node_bounds(optics_ui_find(s.ui, s.button.id));
+    optics_gfx_rect checkbox_rect = optics_ui_node_bounds(optics_ui_find(s.ui, s.checkbox.id));
+    optics_gfx_rect text_rect = optics_ui_node_bounds(optics_ui_find(s.ui, s.name_field.id));
     OT_EXPECT(button_rect.w > 0.0f && button_rect.h > 0.0f);
+    OT_EXPECT(checkbox_rect.w > 0.0f && checkbox_rect.h > 0.0f);
+    OT_EXPECT(text_rect.w > 0.0f && text_rect.h > 0.0f);
     OT_EXPECT(s.state.clicks == 0);
+    capture_cpu_frame(s.ui, before_px);
 
     click(&s);
     OT_EXPECT(s.state.clicks == 1);
@@ -166,37 +235,23 @@ int main(void) {
     OT_EXPECT(saw_button);
     OT_EXPECT(saw_text);
 
-    optics_gfx_canvas *canvas = nullptr;
-    OT_REQUIRE(
-        optics_gfx_canvas_create(&(optics_gfx_canvas_desc){.type = OPTICS_GFX_TYPE_CANVAS_DESC,
-                                                           .backend = OPTICS_GFX_CANVAS_BACKEND_CPU,
-                                                           .scale = 1.0f,
-                                                           .width = (uint32_t)DISPLAY_W,
-                                                           .height = (uint32_t)DISPLAY_H},
-                                 &canvas) == OPTICS_GFX_OK);
-    optics_gfx_color clear = optics_gfx_color_rgba_premul(0, 0, 0, 255);
-    OT_REQUIRE(optics_gfx_canvas_begin(
-                   canvas, &(optics_gfx_canvas_pass_desc){.type = OPTICS_GFX_TYPE_CANVAS_PASS_DESC,
-                                                          .clear_color = &clear}) == OPTICS_GFX_OK);
-    OT_EXPECT(optics_ui_snapshot_submit(snapshot, canvas) == OPTICS_GFX_OK);
-    OT_REQUIRE(optics_gfx_canvas_end(canvas) == OPTICS_GFX_OK);
-
-    uint32_t width = 0, height = 0, stride = 0;
-    const uint8_t *pixels = optics_gfx_canvas_read_pixels(canvas, &width, &height, &stride);
-    OT_REQUIRE(pixels != nullptr);
-    OT_EXPECT(width == (uint32_t)DISPLAY_W && height == (uint32_t)DISPLAY_H);
+    capture_cpu_frame(s.ui, after_px);
 
     size_t lit = 0;
-    for (uint32_t y = 0; y < height; ++y) {
-        for (uint32_t x = 0; x < width; ++x) {
-            const uint8_t *p = pixels + (size_t)y * stride + (size_t)x * 4u;
-            if (p[0] + p[1] + p[2] > 30)
-                lit++;
-        }
+    for (uint32_t i = 0; i < FRAME_W * FRAME_H; ++i) {
+        const uint8_t *p = after_px + (size_t)i * 4u;
+        if (p[0] + p[1] + p[2] > 30)
+            lit++;
     }
     OT_EXPECT(lit > 1000);
 
-    optics_gfx_canvas_release(canvas);
+    /* Visual mutations must land specifically inside the checkbox and textedit
+     * bounds — proving the visual replay reflects interactive state changes. */
+    OT_EXPECT(diff_pixels_in_rect(before_px, after_px, checkbox_rect) > 10);
+    OT_EXPECT(diff_pixels_in_rect(before_px, after_px, text_rect) > 10);
+
+    free(before_px);
+    free(after_px);
     optics_ui_snapshot_release(snapshot);
     optics_ui_release(s.ui);
     return OT_REPORT();

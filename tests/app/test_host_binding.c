@@ -9,6 +9,8 @@
 #include "host_binding.h"
 #include "optics_test.h"
 
+#include <optics/gfx/canvas_cpu.h>
+
 #include <string.h>
 
 typedef struct fixture {
@@ -255,6 +257,120 @@ static void test_runtime_controls_outside_active_loop(void) {
     OT_EXPECT(!optics_app_get_geometry(&w, &h));
 }
 
+typedef struct text_fixture {
+    char buf[64];
+    optics_ui_response field;
+    char clipboard[64];
+    int paste_requests;
+} text_fixture;
+
+static void text_clip_set(const char *utf8, size_t len, void *user) {
+    text_fixture *fx = user;
+    if (len >= sizeof(fx->clipboard))
+        len = sizeof(fx->clipboard) - 1;
+    memcpy(fx->clipboard, utf8, len);
+    fx->clipboard[len] = '\0';
+}
+
+static void text_clip_req(void *user) {
+    ((text_fixture *)user)->paste_requests++;
+}
+
+static void text_build(optics_ui *ui, const optics_ui_input *in, void *user) {
+    text_fixture *fx = user;
+    (void)in;
+    fx->field = optics_ui_textedit(
+        ui, &(optics_ui_textedit_opts){.box = {.id = "editor", .width = 200, .height = 36},
+                                       .buf = fx->buf,
+                                       .cap = sizeof(fx->buf)});
+}
+
+static void test_scale_paste_quiesce_and_cpu_submit(void) {
+    text_fixture fx = {};
+    ap_app app;
+    const optics_app_opts opts = {.build = text_build, .user = &fx};
+    const optics_window_ui_host host = optics_app__bind(&app, &opts);
+
+    OT_REQUIRE(host.start(host.user, &(optics_window_ui_start_info){
+                                         .scale = 1.0f,
+                                         .dark = true,
+                                         .services = {.clipboard_set_text = text_clip_set,
+                                                      .clipboard_request_text = text_clip_req,
+                                                      .user = &fx},
+                                     }));
+
+    /* Scale propagation across the seam. */
+    host.set_scale(host.user, 2.0f);
+    OT_EXPECT_NEAR(optics_ui_scale(app.ui), 2.0f, 1e-5);
+    host.set_scale(host.user, 1.0f);
+
+    /* Initial layout + focus + text input + asynchronous paste delivery. */
+    optics_window_input in = input_at(-100, -100);
+    (void)run_frame(&host, &in);
+    optics_ui_set_focus(app.ui, fx.field.id);
+
+    in = input_at(-100, -100);
+    strncpy(in.text_utf8, "hello ", sizeof(in.text_utf8) - 1);
+    optics_window_ui_frame rep = run_frame(&host, &in);
+    OT_EXPECT_STR_EQ(fx.buf, "hello ");
+    OT_EXPECT(rep.text.utf8 != nullptr && rep.text.len == 6u);
+
+    /* Deliver async paste and verify it reaches the focused textedit. */
+    host.paste(host.user, "world", 5);
+    in = input_at(-100, -100);
+    (void)run_frame(&host, &in);
+    OT_EXPECT_STR_EQ(fx.buf, "hello world");
+
+    /* Drop delivery and quiesce must succeed cleanly without crashing. */
+    host.drop(host.user, "dropped", 7, (optics_gfx_point){20.0f, 20.0f});
+    host.quiesce(host.user);
+
+    /* Submit snapshot through the host function table to a real CPU canvas and
+     * verify rendered pixels. */
+    optics_window_ui_snapshot *snap = nullptr;
+    OT_REQUIRE(host.snapshot_create(host.user, &snap) == OPTICS_GFX_OK);
+    optics_gfx_canvas *canvas = nullptr;
+    optics_gfx_canvas_desc cd = OPTICS_GFX_INIT(
+        canvas_desc, .backend = OPTICS_GFX_CANVAS_BACKEND_CPU, .width = 400, .height = 240);
+    OT_REQUIRE(optics_gfx_canvas_create(&cd, &canvas) == OPTICS_GFX_OK);
+    optics_gfx_color clear = optics_gfx_color_rgba_premul(0, 0, 0, 255);
+    OT_REQUIRE(optics_gfx_canvas_begin(
+                   canvas, &(optics_gfx_canvas_pass_desc){.type = OPTICS_GFX_TYPE_CANVAS_PASS_DESC,
+                                                          .clear_color = &clear}) == OPTICS_GFX_OK);
+    OT_EXPECT(host.snapshot_submit(snap, canvas) == OPTICS_GFX_OK);
+    OT_REQUIRE(optics_gfx_canvas_end(canvas) == OPTICS_GFX_OK);
+
+    uint32_t rw = 0, rh = 0, stride = 0;
+    const uint8_t *px = optics_gfx_canvas_read_pixels(canvas, &rw, &rh, &stride);
+    OT_REQUIRE(px != nullptr);
+    size_t lit = 0;
+    for (uint32_t y = 0; y < rh; ++y) {
+        for (uint32_t x = 0; x < rw; ++x) {
+            const uint8_t *p = px + (size_t)y * stride + (size_t)x * 4u;
+            if (p[0] + p[1] + p[2] > 24)
+                lit++;
+        }
+    }
+    OT_EXPECT(lit > 200);
+
+    optics_gfx_canvas_release(canvas);
+    host.snapshot_release(snap);
+    host.stop(host.user);
+    host.destroy(host.user);
+}
+
+static void test_empty_callbacks_config(void) {
+    ap_app app;
+    const optics_app_opts opts = {};
+    const optics_window_ui_host host = optics_app__bind(&app, &opts);
+    OT_REQUIRE(host.start(host.user, &(optics_window_ui_start_info){.scale = 1.0f, .dark = false}));
+    optics_window_input in = input_at(0, 0);
+    (void)run_frame(&host, &in);
+    host.stop(host.user);
+    host.destroy(host.user);
+    OT_EXPECT(app.ui == nullptr);
+}
+
 int main(void) {
     OT_EXPECT(optics_app_run(nullptr) != 0);
     test_runtime_controls_outside_active_loop();
@@ -262,5 +378,7 @@ int main(void) {
     test_theme_policy();
     test_forced_dark_ignores_system_scheme();
     test_failed_start_never_calls_stop();
+    test_scale_paste_quiesce_and_cpu_submit();
+    test_empty_callbacks_config();
     return OT_REPORT();
 }

@@ -6,6 +6,7 @@
 //! declarative and free of duplicated plumbing.
 
 use std::env;
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
 pub use bindgen;
@@ -512,9 +513,28 @@ struct LinkRequest {
 /// and the `OPTICS_*` spelling is the one named in diagnostics; one variable of
 /// each direction (including a mixed pair such as `OPTICS_STATIC` +
 /// `PKG_CONFIG_ALL_DYNAMIC`) is a hard error instead of an arbitrary winner.
+/// Whether an environment switch is enabled.
+///
+/// Unset, empty, `"0"`, and ASCII case-insensitive `"false"` disable the
+/// switch so a caller can cancel a `[env]` entry from `.cargo/config.toml`
+/// (for example `OPTICS_DYNAMIC=0 cargo build` in a local dev worktree).
+fn is_env_enabled(value: Option<&OsStr>) -> bool {
+    let Some(value) = value else {
+        return false;
+    };
+    if value.is_empty() || value == "0" {
+        return false;
+    }
+    !value
+        .to_str()
+        .is_some_and(|text| text.eq_ignore_ascii_case("false"))
+}
+
 fn requested_link_mode() -> LinkRequest {
     fn first_set<'a>(vars: &[&'a str]) -> Option<&'a str> {
-        vars.iter().find(|var| env::var_os(var).is_some()).copied()
+        vars.iter()
+            .find(|var| is_env_enabled(env::var_os(var).as_deref()))
+            .copied()
     }
     select_link_mode(
         first_set(&["OPTICS_STATIC", "PKG_CONFIG_ALL_STATIC"]),
@@ -1005,6 +1025,18 @@ mod tests {
         // A packager can force a shared link over a dependent's `static` feature.
         assert_eq!(mode(None, Some("OPTICS_DYNAMIC"), true), LinkMode::Dynamic);
         assert_eq!(mode(Some("OPTICS_STATIC"), None, true), LinkMode::Static);
+    }
+
+    #[test]
+    fn env_flag_treats_unset_empty_zero_and_false_as_disabled() {
+        assert!(!is_env_enabled(None));
+        assert!(!is_env_enabled(Some(OsStr::new(""))));
+        assert!(!is_env_enabled(Some(OsStr::new("0"))));
+        assert!(!is_env_enabled(Some(OsStr::new("false"))));
+        assert!(!is_env_enabled(Some(OsStr::new("FALSE"))));
+        assert!(is_env_enabled(Some(OsStr::new("1"))));
+        assert!(is_env_enabled(Some(OsStr::new("true"))));
+        assert!(is_env_enabled(Some(OsStr::new("yes"))));
     }
 
     #[test]
