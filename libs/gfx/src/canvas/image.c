@@ -400,6 +400,8 @@ static optics_gfx_image_shared *image_shared_create(optics_gfx_image *im) {
     if (!sh)
         return nullptr;
     atomic_init(&sh->refs, 1u);
+    atomic_init(&sh->canonical, (const void *)im);
+    atomic_init(&sh->deferred_pending, im->deferred_pending);
     sh->image = im->image;
     sh->alloc = im->alloc;
     sh->imported_memory = im->imported_memory;
@@ -585,6 +587,8 @@ static optics_gfx_result image_copy_owned(optics_gfx_image *im, VkImage *out_ima
     *out_view = view;
     *out_bindless = bindless;
     *out_storage = storage;
+    OPTICS_GFX_OBSERVE_ACQUIRE(im->device, OPTICS_GFX_SCOPE_DEVICE, OPTICS_GFX_LIFETIME_CONTEXT,
+                               "vk_image", "gfx/core", 0, OPTICS_GFX_SITE_VK_IMAGE);
     return OPTICS_GFX_OK;
 }
 
@@ -603,7 +607,9 @@ static optics_gfx_result image_cow(optics_gfx_image *im) {
         return r;
 
     optics_gfx_image_shared *old = im->shared;
+    atomic_store_explicit(&old->canonical, nullptr, memory_order_release);
     im->shared = nullptr;
+    im->deferred_pending = false;
     im->image = image;
     im->alloc = alloc;
     im->view = view;
@@ -808,13 +814,17 @@ void optics_gfx_image_release(optics_gfx_image *im) {
     bool retire = true;
     optics_gfx_image_shared *shared = im->shared;
     if (shared) {
+        const void *expected = (const void *)im;
+        (void)atomic_compare_exchange_strong_explicit(&shared->canonical, &expected, nullptr,
+                                                      memory_order_acq_rel, memory_order_relaxed);
         if (atomic_fetch_sub_explicit(&shared->refs, 1u, memory_order_acq_rel) != 1u)
             retire = false;
     }
-    if (retire)
+    if (retire) {
         image_retire_resources(d, im);
+        OPTICS_GFX_OBSERVE_RELEASE(d, OPTICS_GFX_SCOPE_DEVICE, "vk_image", "gfx/core", 0);
+    }
     optics_gfx_image_release_color(d, im->color);
-    OPTICS_GFX_OBSERVE_RELEASE(d, OPTICS_GFX_SCOPE_DEVICE, "vk_image", "gfx/core", 0);
     bool weak = im->device_weak;
     if (shared && retire)
         optics_gfx_internal_free(d, shared);

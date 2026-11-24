@@ -9,8 +9,8 @@ canvas) and the per-frame call sequence.
 
 Open `examples/getting_started/canvas_window.c` on a disposable branch. We will trim the
 known-good example instead of starting from a blank file. The full version
-draws gradients, paths, strokes, and images; you will strip those out, then
-add them back.
+records animated 2D vector geometry through the `window` layer; you will strip
+it down, then add drawing back.
 
 ## Step 2 — minimum viable frame
 
@@ -65,7 +65,7 @@ is reused. The light/heavy split is one of the foundations in
 
 Before drawing the circle:
 
-    double t = glfwGetTime();
+    double t = monotonic_seconds();  /* host clock */
     optics_gfx_canvas_save(canvas);
     optics_gfx_canvas_translate(canvas, 400, 300);
     optics_gfx_canvas_rotate(canvas, (float)t);
@@ -84,8 +84,8 @@ The frame loop in `examples/getting_started/canvas_window.c` already shows the p
     optics_gfx_frame *frame = nullptr;
     optics_gfx_result r = optics_gfx_surface_begin_frame(surface, nullptr, &frame);
     if (r == OPTICS_GFX_ERROR_SURFACE_LOST) {
-        int w, h;
-        glfwGetFramebufferSize(win, &w, &h);
+        int32_t w, h;
+        optics_window_get_geometry(&w, &h);
         if (w > 0 && h > 0)
             (void)optics_gfx_surface_resize(surface, (uint32_t)w, (uint32_t)h);
         continue;

@@ -17,7 +17,7 @@ void optics_gfx_plan_reset(optics_gfx_plan *p, struct optics_gfx_render_plan *re
                 continue;
             for (uint32_t j = 0; j < n->effect_output_count; ++j)
                 if (n->effect_outputs[j])
-                    n->effect_outputs[j]->deferred_pending = false;
+                    optics_gfx_image_set_deferred_pending(n->effect_outputs[j], false);
         }
     }
     p->epoch++;
@@ -44,7 +44,7 @@ void optics_gfx_plan_destroy(optics_gfx_plan *p) {
                 continue;
             for (uint32_t j = 0; j < n->effect_output_count; ++j)
                 if (n->effect_outputs[j])
-                    n->effect_outputs[j]->deferred_pending = false;
+                    optics_gfx_image_set_deferred_pending(n->effect_outputs[j], false);
         }
     }
     memset(p, 0, sizeof(*p));
@@ -87,6 +87,7 @@ optics_gfx_result optics_gfx_frame_plan_upload(optics_gfx_frame *f,
         region.count = 1;
         region.rects[0] = (optics_gfx_rect){(float)x, (float)y, (float)width, (float)height};
     }
+    const void *dest_handle = optics_gfx_image_plan_handle(destination);
     optics_gfx_render_access accesses[2] = {
         {
             .resource = {OPTICS_GFX_RENDER_RESOURCE_BUFFER, staging, 0},
@@ -94,7 +95,7 @@ optics_gfx_result optics_gfx_frame_plan_upload(optics_gfx_frame *f,
             .region = {.full = true},
         },
         {
-            .resource = {OPTICS_GFX_RENDER_RESOURCE_IMAGE, destination, 0},
+            .resource = {OPTICS_GFX_RENDER_RESOURCE_IMAGE, dest_handle, 0},
             .mode = OPTICS_GFX_RENDER_ACCESS_WRITE,
             .region = region,
         },
@@ -128,7 +129,7 @@ optics_gfx_result optics_gfx_frame_plan_upload(optics_gfx_frame *f,
             if ((access->mode == OPTICS_GFX_RENDER_ACCESS_WRITE ||
                  access->mode == OPTICS_GFX_RENDER_ACCESS_READ_WRITE) &&
                 access->resource.kind == OPTICS_GFX_RENDER_RESOURCE_IMAGE &&
-                access->resource.handle == (const void *)destination) {
+                access->resource.handle == dest_handle) {
                 upload_dependency = i;
                 break;
             }
@@ -151,7 +152,7 @@ optics_gfx_result optics_gfx_frame_plan_upload(optics_gfx_frame *f,
                 access->mode != OPTICS_GFX_RENDER_ACCESS_READ_WRITE)
                 continue;
             if (access->resource.kind != OPTICS_GFX_RENDER_RESOURCE_IMAGE ||
-                access->resource.handle != (const void *)destination)
+                access->resource.handle != dest_handle)
                 continue;
             if (n->dependency_count >= OPTICS_GFX_RENDER_PLAN_MAX_DEPENDENCIES)
                 return OPTICS_GFX_ERROR_OUT_OF_RANGE;
@@ -181,7 +182,7 @@ optics_gfx_result optics_gfx_frame_plan_upload(optics_gfx_frame *f,
             if ((access->mode == OPTICS_GFX_RENDER_ACCESS_READ ||
                  access->mode == OPTICS_GFX_RENDER_ACCESS_READ_WRITE) &&
                 access->resource.kind == OPTICS_GFX_RENDER_RESOURCE_IMAGE &&
-                access->resource.handle == (const void *)destination) {
+                access->resource.handle == dest_handle) {
                 reads = true;
                 break;
             }
@@ -290,7 +291,7 @@ static bool plan_build_pass(optics_gfx_plan *p, uint32_t index) {
     pass->effect_built = true;
     for (uint32_t i = 0; i < pass->effect_output_count; ++i)
         if (pass->effect_outputs[i])
-            pass->effect_outputs[i]->deferred_pending = false;
+            optics_gfx_image_set_deferred_pending(pass->effect_outputs[i], false);
     return true;
 }
 
@@ -310,6 +311,7 @@ uint32_t optics_gfx_plan_register(optics_gfx_plan *p, const optics_gfx_plan_pass
         if (desc->input_tokens[i]) {
             dep = optics_gfx_plan_token_index(p, desc->input_tokens[i]);
         } else if (desc->inputs[i]) {
+            const void *in_handle = optics_gfx_image_plan_handle(desc->inputs[i]);
             /* Find the node that produced this image. Canvas target writes are
              * providers too, not only deferred-effect outputs; an effect that
              * samples a Canvas target must depend on that pass. */
@@ -321,7 +323,7 @@ uint32_t optics_gfx_plan_register(optics_gfx_plan *p, const optics_gfx_plan_pass
                         access->mode != OPTICS_GFX_RENDER_ACCESS_READ_WRITE)
                         continue;
                     if (access->resource.kind == OPTICS_GFX_RENDER_RESOURCE_IMAGE &&
-                        access->resource.handle == desc->inputs[i]) {
+                        access->resource.handle == in_handle) {
                         dep = k;
                         break;
                     }
@@ -344,14 +346,16 @@ uint32_t optics_gfx_plan_register(optics_gfx_plan *p, const optics_gfx_plan_pass
         if (!desc->inputs[i])
             continue;
         accesses[access_count++] = (optics_gfx_render_access){
-            .resource = {OPTICS_GFX_RENDER_RESOURCE_IMAGE, desc->inputs[i], 0},
+            .resource = {OPTICS_GFX_RENDER_RESOURCE_IMAGE,
+                         optics_gfx_image_plan_handle(desc->inputs[i]), 0},
             .mode = OPTICS_GFX_RENDER_ACCESS_READ,
             .region = {.full = true},
         };
     }
     for (uint32_t i = 0; i < desc->output_count; ++i) {
         accesses[access_count++] = (optics_gfx_render_access){
-            .resource = {OPTICS_GFX_RENDER_RESOURCE_IMAGE, desc->outputs[i], 0},
+            .resource = {OPTICS_GFX_RENDER_RESOURCE_IMAGE,
+                         optics_gfx_image_plan_handle(desc->outputs[i]), 0},
             .mode = OPTICS_GFX_RENDER_ACCESS_WRITE,
             .region = {.full = true},
         };
@@ -375,7 +379,7 @@ uint32_t optics_gfx_plan_register(optics_gfx_plan *p, const optics_gfx_plan_pass
     if (optics_gfx_render_plan_add_node(p->render_plan, &node, &index) != OPTICS_GFX_OK)
         return UINT32_MAX;
     for (uint32_t i = 0; i < desc->output_count; ++i)
-        p->render_plan->nodes[index].effect_outputs[i]->deferred_pending = true;
+        optics_gfx_image_set_deferred_pending(p->render_plan->nodes[index].effect_outputs[i], true);
     p->pass_count++;
     return index;
 }
@@ -390,12 +394,13 @@ void optics_gfx_plan_require_index(optics_gfx_plan *p, uint32_t index) {
 bool optics_gfx_plan_require_image(optics_gfx_plan *p, struct optics_gfx_image *image) {
     if (!p || !p->render_plan || !image)
         return true;
+    const void *target = optics_gfx_image_plan_handle(image);
     for (uint32_t i = 0; i < p->render_plan->node_count; ++i) {
         optics_gfx_render_node *n = &p->render_plan->nodes[i];
         if (n->kind != OPTICS_GFX_RENDER_NODE_EFFECT)
             continue;
         for (uint32_t j = 0; j < n->effect_output_count; ++j)
-            if (n->effect_outputs[j] == image) {
+            if (optics_gfx_image_plan_handle(n->effect_outputs[j]) == target) {
                 n->effect_required = true;
                 return true;
             }
@@ -405,7 +410,7 @@ bool optics_gfx_plan_require_image(optics_gfx_plan *p, struct optics_gfx_image *
 
 bool optics_gfx_plan_image_pending(const optics_gfx_plan *p, const struct optics_gfx_image *image) {
     (void)p;
-    return image ? image->deferred_pending : false;
+    return optics_gfx_image_is_deferred_pending(image);
 }
 
 void optics_gfx_plan_flush(optics_gfx_plan *p, VkCommandBuffer cmd) {
@@ -440,7 +445,7 @@ uint32_t optics_gfx_plan_finalize(optics_gfx_plan *p, VkCommandBuffer cmd) {
         pruned++;
         for (uint32_t j = 0; j < n->effect_output_count; ++j)
             if (n->effect_outputs[j])
-                n->effect_outputs[j]->deferred_pending = false;
+                optics_gfx_image_set_deferred_pending(n->effect_outputs[j], false);
     }
     return pruned;
 }

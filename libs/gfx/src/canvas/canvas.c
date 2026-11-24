@@ -452,7 +452,8 @@ optics_gfx_result optics_gfx_canvas_begin(optics_gfx_canvas *c,
     if (desc->frame && desc->frame->surface) {
         optics_gfx_render_plan *plan = &desc->frame->render_plan;
         plan->target.scale = c->content_scale;
-        const void *resource = image ? (const void *)image : (const void *)desc->frame->surface;
+        const void *resource =
+            image ? optics_gfx_image_plan_handle(image) : (const void *)desc->frame->surface;
         optics_gfx_render_region region = {.full = true};
         if (!desc->clear_extent && desc->damage.count > 0 &&
             desc->damage.count <= OPTICS_GFX_RENDER_PLAN_MAX_REGION_RECTS) {
@@ -947,17 +948,18 @@ static bool canvas_plan_note_read(optics_gfx_canvas *c, optics_gfx_image *img) {
     optics_gfx_render_plan *plan = &c->frame->render_plan;
     if (c->plan_node >= plan->node_count)
         return true;
-    uint32_t producer = optics_gfx_render_plan_last_writer(plan, (const void *)img);
+    const void *handle = optics_gfx_image_plan_handle(img);
+    uint32_t producer = optics_gfx_render_plan_last_writer(plan, handle);
     if (producer == UINT32_MAX)
         return true;
     optics_gfx_render_node *node = &plan->nodes[c->plan_node];
     for (uint32_t i = 0; i < node->access_count; ++i) {
         if (node->accesses[i].resource.kind == OPTICS_GFX_RENDER_RESOURCE_IMAGE &&
-            node->accesses[i].resource.handle == (const void *)img)
+            node->accesses[i].resource.handle == handle)
             return true;
     }
     const optics_gfx_render_access access = {
-        .resource = {OPTICS_GFX_RENDER_RESOURCE_IMAGE, (const void *)img, 0},
+        .resource = {OPTICS_GFX_RENDER_RESOURCE_IMAGE, handle, 0},
         .mode = OPTICS_GFX_RENDER_ACCESS_READ,
         .region = {.full = true},
     };

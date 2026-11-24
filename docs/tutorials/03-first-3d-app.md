@@ -5,15 +5,18 @@ You will draw a cube. By the end you will understand `optics_gfx_camera`,
 
 ## Step 1 — Start from `examples/showcase/scene_studio/main.c`
 
-The example is the smallest 3D program possible. Copy it; we will
-narrate what each part does instead of writing from scratch.
+The example is a compact 3D program. It loads a glTF asset into an
+`optics_scene`, sets up a camera and directional light, and records a
+depth-tested pass. Copy it; we will narrate what each part does instead of
+writing from scratch.
 
 ## Step 2 — read the vertex array
 
-Look at `cube_verts`. Eight corners, indexed for 12 triangles (CCW from
-outside). Each vertex is `optics_gfx_vertex`: position (vec3), normal (vec3),
-uv (vec2). The indexed draw uses 36 indices (6 faces × 2 triangles ×
-3 verts).
+When the bundled asset is unavailable, `build_cube_glb` generates a cube in
+memory. Its geometry is six faces of four vertices each (24 positions and 24
+normals) with 36 indices (six faces × two triangles × three vertices). The
+default `Duck.glb` path produces the same kind of indexed mesh through the glTF
+loader.
 
 You can substitute your own geometry by providing different
 `vertices` / `indices` to `optics_gfx_mesh_create`.
@@ -38,7 +41,7 @@ underlying `optics_gfx_mat4_*` functions directly if you want a custom matrix.
 
 ## Step 4 — read the per-frame loop
 
-    float t = (float)glfwGetTime();
+    float t = (float)monotonic_seconds();  /* host clock */
     optics_gfx_quat q = optics_gfx_quat_axis_angle(
         optics_gfx_vec3_normalize((optics_gfx_vec3){ 0.3f, 1.0f, 0.2f }),
         t * 0.8f);

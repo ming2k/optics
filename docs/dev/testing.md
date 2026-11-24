@@ -18,11 +18,11 @@ checked mechanically by `tools/check_test_layers.py`.
                      │ public API → pixels │  slowest, smallest
                      └──────────┬──────────┘
                 ┌───────────────┴────────────────┐
-                │          integration           │  66 binaries
+                │          integration           │  67 binaries
                 │ Vulkan / fonts / real seams    │  environment-bound
                 └───────────────┬────────────────┘
        ┌────────────────────────┴────────────────────────┐
-       │                     unit                        │  112 binaries
+       │                     unit                        │  113 binaries
        │ one library, CPU-only, deterministic            │  fastest, widest
        └─────────────────────────────────────────────────┘
 
@@ -248,7 +248,7 @@ pass.
 | `window` theme or API failure | `libs/window/src/theme_linux.c` or `libs/window/src/app.c`. |
 | E2E pixel mismatch | Start at the first failing layer in the chain: svg raster, ui snapshot, display-list serialization, or CPU replay. |
 | Layer guardrail failure | `tools/check_test_layers.py` output; the test's Meson registration and `tests/e2e/` include discipline. |
-| Window is blank or examples fail to start | Wayland/GLFW setup and the relevant example; this path is not covered by headless tests. |
+| Window is blank or examples fail to start | Wayland/Vulkan setup and the relevant example; this path is not covered by headless tests. |
 
 ## Sanitizers
 
@@ -358,7 +358,7 @@ Build examples with `-Dexamples=true`, then run the smallest relevant program:
 
 ```bash
 ./build/examples/getting_started/canvas_window
-./build/examples/showcase/headless_demo
+./build/examples/getting_started/headless_canvas /tmp/out.ppm
 ./build/examples/getting_started/hello_app
 ```
 

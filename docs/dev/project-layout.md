@@ -64,7 +64,9 @@ development commands.
   `tests/e2e/` for public-API scenarios. Every test must declare exactly one
   of `unit`, `integration`, or `e2e` (or a `bench`/`fuzz` lane); see
   [Testing](testing.md) and [ADR-0162](../adr/0162-layered-test-architecture-one-harness-three-layers-public-api-e2e.md).
-- Add runnable demonstrations under `examples/<library>/`.
+- Add runnable demonstrations under `examples/getting_started/` for a
+  single-concept starter, or `examples/showcase/` for a multi-layer flagship
+  application ([ADR-0171](../adr/0171-curated-examples-taxonomy-and-showcase-design-system.md)).
 - Add FFI declarations and safe wrappers to the corresponding `optics-*` crate
   under `crates/` in the same change as a public C API update. Cargo workspace
   membership lives in the repository-root `Cargo.toml`.

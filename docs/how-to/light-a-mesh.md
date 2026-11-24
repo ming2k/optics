@@ -62,8 +62,11 @@ Run the cube example with lighting enabled and confirm the faces shade
 with the light direction instead of rendering flat:
 
 ```bash
-./build/examples/showcase/scene_studio --phong
+./build/examples/showcase/scene_studio
 ```
+
+Use the **Ambient** slider in the scene inspector to vary the light level and
+confirm the faces shade with the directional light instead of rendering flat.
 
 ## Pitfalls
 

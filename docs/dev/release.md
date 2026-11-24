@@ -82,7 +82,7 @@ consumer's build host.
 - The tag resolves to the tested commit.
 - A fresh checkout of the tag passes the release build.
 - The source archive checksum matches the published artifact.
-- `pkg-config --modversion gfx ui window` reports the intended installed
-  metadata after installing into a temporary prefix.
+- `pkg-config --modversion optics-gfx optics-ui optics-window` reports the intended
+  installed metadata after installing into a temporary prefix.
 - Runtime C version helpers and published Rust crate versions match the release
   notes.

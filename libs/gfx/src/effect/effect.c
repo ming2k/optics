@@ -833,7 +833,7 @@ optics_gfx_result optics_gfx_effect_blur(const optics_gfx_effect_blur_opts *opts
      * under this frame's handle (ADR-0147). Checked here — after every descriptor
      * field has been validated and before the image is dereferenced, so a garbage
      * pointer in a validation test still gets the argument error it expects. */
-    if (in->deferred_pending) {
+    if (optics_gfx_image_is_deferred_pending(in)) {
         OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_STATE,
                         "exact blur input is a deferred pass output that has not executed; "
                         "materialize it or use optics_gfx_blur_filter_apply instead");
@@ -1020,7 +1020,7 @@ optics_gfx_result optics_gfx_effect_shadow(const optics_gfx_effect_shadow_opts *
     optics_gfx_image *in = desc->input;
     /* Same rule as the exact blur, and the same placement: after descriptor
      * validation, before the image is dereferenced. */
-    if (in->deferred_pending) {
+    if (optics_gfx_image_is_deferred_pending(in)) {
         OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_INVALID_STATE,
                         "exact shadow input is a deferred pass output that has not executed; "
                         "materialize it or use optics_gfx_shadow_filter_apply instead");

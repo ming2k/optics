@@ -1,8 +1,8 @@
 # Getting Started
 
 You will build the Optics monorepo, run its correctness tests, and launch the
-smallest `gfx` example. Allow about five minutes after the dependencies are
-installed.
+smallest windowed application. Allow about five minutes after the dependencies
+are installed.
 
 ## Step 1 — Prepare the Environment
 
@@ -16,7 +16,7 @@ sudo apt-get install -y --no-install-recommends \
   build-essential meson ninja-build pkg-config vulkan-tools \
   libvulkan-dev vulkan-validationlayers mesa-vulkan-drivers \
   libfreetype-dev libharfbuzz-dev libfontconfig1-dev libfribidi-dev \
-  libglfw3-dev libwayland-dev wayland-protocols libxkbcommon-dev
+  libwayland-dev wayland-protocols libxkbcommon-dev
 ```
 
 Ubuntu's archive does not ship `slangc`; install the official release from the
@@ -57,19 +57,21 @@ device and skip cleanly when a required capability is absent. Full failure
 output is stored in `build/meson-logs/testlog.txt`; pass `-v` to
 `meson test` for live verbose output.
 
-## Step 4 — Run the Smallest Windowed Example
+## Step 4 — Run the Smallest Windowed Application
 
 ```bash
-./build/examples/getting_started/hello_triangle
+./build/examples/getting_started/hello_app
 ```
 
-A window opens with a coloured triangle. This program uses `gfx-core`
-directly: it creates a device and surface, records a dynamic-rendering pass,
-submits the frame, and presents it. Close the window to exit.
+A window opens with a button, a click counter, and a dark/light theme toggle.
+This is the smallest complete application: `optics_app` runs an `optics_ui`
+frame loop inside a native `optics_window`. Press `Esc` or close the window to
+exit.
 
-If the binary was not built, install the GLFW development package and
-reconfigure the build. If no display is available, run the headless compute
-example instead:
+If the binary was not built, confirm that the UI stack is enabled (`text` and
+`svg` are both `true`) and that the Wayland and Vulkan development packages are
+installed, then reconfigure the build. If no display is available, run the
+headless compute example instead:
 
 ```bash
 ./build/examples/getting_started/compute_pass
@@ -80,13 +82,14 @@ example instead:
 ```bash
 ./build/examples/getting_started/canvas_window
 ./build/examples/showcase/scene_studio
-./build/examples/showcase/headless_demo
 ./build/examples/showcase/widget_gallery
+./build/examples/showcase/material_gallery
 ```
 
-The `gfx` examples show direct rendering, the `ui` example exercises the
-headless UI engine, and the `window` example supplies the Wayland window and
-event loop for a complete UI application.
+`canvas_window` draws animated 2D vector geometry through `window` + `gfx`
+without a UI engine. `scene_studio` renders a glTF asset in 3D, `widget_gallery`
+exercises the multi-page UI shell, and `material_gallery` compares the four
+surface materials side by side.
 
 ## What's Next
 

@@ -27,6 +27,8 @@ typedef struct optics_gfx_image_color {
 
 typedef struct optics_gfx_image_shared {
     atomic_uint refs;
+    _Atomic(const void *) canonical;
+    atomic_bool deferred_pending;
     VkImage image;
     optics_gfx_vk_alloc alloc;
     VkDeviceMemory imported_memory;
@@ -78,5 +80,41 @@ struct optics_gfx_image {
 optics_gfx_result optics_gfx_image_init_color(optics_gfx_device *d, optics_gfx_image *im,
                                               const void *next_chain);
 void optics_gfx_image_release_color(optics_gfx_device *d, optics_gfx_image_color *color);
+
+/* Set or query ADR-0147 deferred-pass pending state across an image and any
+ * immutable snapshots sharing its current pixel version (`im->shared`). An
+ * encoder display list recorded before `optics_gfx_canvas_begin` flushes the
+ * frame plan holds a snapshot handle; updating `im->shared` ensures the flush
+ * clears the pending state observed when the display list is replayed. */
+static inline void optics_gfx_image_set_deferred_pending(optics_gfx_image *im, bool pending) {
+    if (!im)
+        return;
+    im->deferred_pending = pending;
+    if (im->shared)
+        atomic_store_explicit(&im->shared->deferred_pending, pending, memory_order_release);
+}
+
+static inline bool optics_gfx_image_is_deferred_pending(const optics_gfx_image *im) {
+    if (!im)
+        return false;
+    if (im->shared)
+        return atomic_load_explicit(&im->shared->deferred_pending, memory_order_acquire);
+    return im->deferred_pending;
+}
+
+/* Canonical RenderPlan resource handle for an image version. While an immutable
+ * snapshot shares its original handle's pixel version (no copy-on-write split),
+ * both resolve to the original `optics_gfx_image *` so plan producer/consumer
+ * edges match across DisplayList capture and replay. */
+static inline const void *optics_gfx_image_plan_handle(const optics_gfx_image *im) {
+    if (!im)
+        return nullptr;
+    if (im->shared) {
+        const void *canonical = atomic_load_explicit(&im->shared->canonical, memory_order_acquire);
+        if (canonical)
+            return canonical;
+    }
+    return (const void *)im;
+}
 
 #endif /* OPTICS_GFX_IMAGE_INTERNAL_H */

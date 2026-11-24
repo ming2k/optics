@@ -18,10 +18,10 @@ Headers: `<optics/material.h>`
 
 | Flag       | Default | Effect                                                              |
 |------------|---------|---------------------------------------------------------------------|
-| `-Dprism`  | `true`  | Compile the material library.                                  |
+| `-Dmaterial` | `true` | Compile the `material` library. |
 
-The pkg-config file is `material` and declares a requirement on `gfx`, so
-`pkg-config --cflags --libs material` pulls in both.
+The pkg-config file is `optics-material` and declares a requirement on
+`optics-gfx`, so `pkg-config --cflags --libs optics-material` pulls in both.
 
 ## Reusable liquid glass
 

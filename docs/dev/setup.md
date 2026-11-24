@@ -15,10 +15,10 @@ The [root README](../../README.md) contains the shorter build-only path.
 
 **Linux**: the default feature set requires Vulkan headers and loader plus FreeType,
 HarfBuzz, Fontconfig, and FriBidi. `slangc` is provided by recent LunarG Vulkan
-SDKs or the standalone Slang release. GLFW is needed for the windowed `gfx`
-examples. The `window` Wayland backend additionally uses
-`wayland-client`, Wayland protocols, and XKB Common. `libsystemd` is optional;
-without it, live theme watching and AT-SPI use their stub implementations.
+SDKs or the standalone Slang release. The `window` Wayland backend additionally
+uses `wayland-client`, Wayland protocols, and XKB Common. `libsystemd` is
+optional; without it, live theme watching and AT-SPI use their stub
+implementations.
 
 **Windows**: the Vulkan SDK 1.4+ (headers, loader, slangc) plus MinGW-w64
 GCC 15+ (CI uses MSYS2 UCRT64) or Clang 19+. FreeType/HarfBuzz/FriBidi resolve automatically through the
@@ -42,7 +42,7 @@ sudo apt-get install -y --no-install-recommends \
   build-essential meson ninja-build pkg-config vulkan-tools \
   libvulkan-dev vulkan-validationlayers mesa-vulkan-drivers \
   libfreetype-dev libharfbuzz-dev libfontconfig1-dev libfribidi-dev \
-  libglfw3-dev libwayland-dev wayland-protocols libxkbcommon-dev \
+  libwayland-dev wayland-protocols libxkbcommon-dev \
   libsystemd-dev
 ```
 
@@ -103,12 +103,12 @@ Run representative binaries from their module directories:
 
 ```bash
 ./build/examples/showcase/scene_studio
-./build/examples/showcase/headless_demo
 ./build/examples/showcase/widget_gallery
+./build/examples/getting_started/headless_canvas /tmp/out.ppm
 ```
 
-The `window` examples need a Wayland session. The `ui` examples are headless.
-Most `gfx` integration tests can use either a physical Vulkan device or
+The interactive examples need a Wayland session; the headless starters need no
+display. Most `gfx` integration tests can use either a physical Vulkan device or
 Lavapipe. For a complete catalog of visual effect demos and UI examples,
 see [Interactive examples showcase](../how-to/run-and-explore-examples.md).
 
@@ -143,7 +143,6 @@ specific clang-format binary.
 | Compiler rejects `#embed` | Nothing to do — the generated-header fallback builds automatically. To force it (or verify it), add `-DFLUX_SHADER_NO_EMBED=1` to `c_args`. |
 | `slangc` not found | Install Vulkan SDK 1.4+ or the pinned Slang release from the official tarball, then ensure `slangc` is in PATH. |
 | FreeType, HarfBuzz, Fontconfig, or FriBidi missing | Install the text development packages for a UI build. A deliberately gfx-only build passes `-Dtext=false -Dsvg=false`, which also disables `ui` and `app`; `window` needs only `gfx`. |
-| GLFW warning and missing windowed `gfx` examples | Install GLFW development files and reconfigure. |
 | `window` reports that its backend was skipped | Install Wayland, XKB Common, and Vulkan development files, then reconfigure. |
 | Vulkan integration tests skip | Confirm `vulkaninfo --summary` finds a Vulkan 1.3 device or install Lavapipe. |
 

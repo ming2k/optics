@@ -370,6 +370,66 @@ int main(void) {
         OT_EXPECT(optics_gfx_frame_present(frame) == OPTICS_GFX_OK);
         OT_EXPECT(optics_gfx_frame_plan_stats(frame, &stats) == OPTICS_GFX_ERROR_INVALID_STATE);
 
+        /* When a DisplayList records `out.image` before `optics_gfx_canvas_begin`
+         * (the host `on_prepare` -> `on_record` -> `optics_gfx_canvas_begin` ->
+         * `optics_gfx_canvas_submit_display_list` flow), the encoder snapshots
+         * `out.image` while its deferred pass is still pending. `optics_gfx_canvas_begin`
+         * flushes the required pass; replaying the DisplayList must observe the
+         * cleared pending state on the snapshot and composite the material. */
+        OT_EXPECT(optics_gfx_surface_begin_frame(s, nullptr, &frame) == OPTICS_GFX_OK);
+        OT_EXPECT(optics_gfx_blur_filter_apply(
+                      blur, &(optics_gfx_blur_filter_apply_opts){
+                                .frame = frame, .desc = &bd, .out = &blurred}) == OPTICS_GFX_OK);
+        gd.blurred_input = blurred;
+        out = (optics_material_output){};
+        OT_EXPECT(optics_material_liquid_glass_filter_apply(
+                      glass, &(optics_material_liquid_glass_filter_apply_opts){
+                                 .frame = frame, .desc = &gd, .out = &out}) == OPTICS_GFX_OK);
+        OT_EXPECT(out.image != nullptr);
+
+        optics_gfx_encoder *enc = nullptr;
+        OT_EXPECT(optics_gfx_encoder_create(nullptr, &enc) == OPTICS_GFX_OK);
+        optics_gfx_geometry geom = optics_gfx_geom_rect(
+            (optics_gfx_rect){out.origin_x, out.origin_y, (float)out.width, (float)out.height});
+        optics_gfx_brush brush = {
+            .kind = OPTICS_GFX_BRUSH_IMAGE_PATTERN,
+            .blend = OPTICS_GFX_BLEND_SRC_OVER,
+            .opacity = 1.0f,
+            .image = {.image = out.image, .tint = optics_gfx_color_rgba_premul(255, 255, 255, 255)},
+        };
+        optics_gfx_encoder_draw_geometry(
+            enc, &(optics_gfx_encoder_draw_geometry_opts){.geom = &geom, .brush = &brush});
+        optics_gfx_display_list *dl = nullptr;
+        OT_EXPECT(optics_gfx_encoder_finish(enc, &dl) == OPTICS_GFX_OK);
+        optics_gfx_encoder_destroy(enc);
+
+        optics_gfx_color black = optics_gfx_color_rgba(0, 0, 0, 255);
+        OT_EXPECT(optics_gfx_canvas_begin(canvas, &(optics_gfx_canvas_pass_desc){
+                                                      .type = OPTICS_GFX_TYPE_CANVAS_PASS_DESC,
+                                                      .frame = frame,
+                                                      .clear_color = &black}) == OPTICS_GFX_OK);
+        OT_EXPECT(optics_gfx_canvas_submit_display_list(
+                      canvas, &(optics_gfx_canvas_submit_display_list_opts){.list = dl}) ==
+                  OPTICS_GFX_OK);
+        OT_EXPECT(optics_gfx_canvas_end(canvas) == OPTICS_GFX_OK);
+        optics_gfx_display_list_release(dl);
+
+        OT_EXPECT(optics_gfx_frame_plan_stats(frame, &stats) == OPTICS_GFX_OK);
+        OT_EXPECT(stats.executed == 2u);
+        OT_EXPECT(optics_gfx_frame_submit(frame) == OPTICS_GFX_OK);
+        OT_EXPECT(optics_gfx_frame_present(frame) == OPTICS_GFX_OK);
+
+        memset(px, 0, BYTES);
+        OT_EXPECT(optics_gfx_surface_read_pixels(s, px, BYTES) == OPTICS_GFX_OK);
+        bool any_nonblack = false;
+        for (size_t i = 0; i < BYTES; i += 4) {
+            if (px[i] > 0 || px[i + 1] > 0 || px[i + 2] > 0) {
+                any_nonblack = true;
+                break;
+            }
+        }
+        OT_EXPECT(any_nonblack);
+
         optics_gfx_image_release(slab_target);
         optics_material_liquid_glass_filter_release(glass);
     }

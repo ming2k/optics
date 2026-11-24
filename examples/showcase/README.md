@@ -1,16 +1,46 @@
 # Showcase Examples
 
-Flagship composition and material demos built on Optics. Unlike per-library starter examples (`examples/<library>/`), these showcases demonstrate how multiple layers of the stack (gfx rendering + materials + UI + window native windowing) compose together to create modern desktop visuals with native Wayland cursor-shape and fractional HiDPI support.
+Flagship desktop applications built on Optics. Unlike the minimal starters under
+`examples/getting_started/`, these showcases combine multiple layers of the stack
+(gfx rendering + text + svg + materials + UI + native windowing) into complete
+programs with native Wayland cursor-shape and fractional HiDPI support
+([ADR-0171](../../docs/adr/0171-curated-examples-taxonomy-and-showcase-design-system.md)).
 
 ```sh
 meson setup build -Dexamples=true
 meson compile -C build
-./build/examples/showcase/material_gallery
+./build/examples/showcase/widget_gallery
 ```
 
 | Demo | Kind | Description |
 |------|------|-------------|
+| [`widget_gallery`](#widget_gallery) | interactive | Multi-page desktop UI shell: typography, controls, data views, overlays, drag-and-drop, and motion |
 | [`material_gallery`](#material_gallery) | interactive, visual | All 4 materials side-by-side: Liquid Glass, Frosted, Acrylic, Mica |
+| [`scene_studio`](#scene_studio) | interactive, visual | 3D glTF 2.0 viewer with a floating camera and lighting inspector |
+
+---
+
+## widget_gallery
+
+The flagship `optics_ui` composition showcase. A resizable sidebar, dark/light
+theme polarity, 90%/100%/115% text scales, and a reduced-motion toggle frame five
+pages:
+
+1. **Typography** — optical type scale, Sans/Serif/Mono switching, and CJK +
+   Latin + BiDi shaping.
+2. **Controls** — button variants, checkboxes, segmented controls, sliders, and
+   IME-aware text editing.
+3. **Layout & Data** — closable tab strip, responsive 3-column grid cards, tree
+   view, and a sortable/resizable data grid.
+4. **Overlays & DnD** — anchored popup menu, centered modal dialog, and native
+   drag-and-drop source and drop zone.
+5. **Motion** — interactive closed-form spring physics playground
+   (`<optics/motion.h>`).
+
+### Interactive Hotkeys
+
+- `1`–`5`: Switch to the corresponding page
+- `Esc`: Exit
 
 ---
 
@@ -42,4 +72,26 @@ stripes, geometric rings) and overlays all four modern UI materials side-by-side
 - `D`: Toggle Dark / Light mode theme plate polarity (Smoke vs. Pearl)
 - `F`: Toggle Inactive state fallback on Mica
 - `Space`: Pause / Resume backdrop animation (also available via UI Play/Pause button)
+- `Esc` or `Q`: Exit
+
+---
+
+## scene_studio
+
+Combines `liboptics_scene` and the `liboptics_gfx` depth-buffered Phong pass with a
+floating `optics_ui` toolbar and live camera/lighting inspector. By default it
+loads the bundled `assets/Duck.glb`; pass a custom glTF binary with `--file`:
+
+```sh
+./build/examples/showcase/scene_studio --file path/to/model.glb
+```
+
+The inspector exposes orbit speed, pitch, field of view, and ambient light
+sliders. If the bundled asset cannot be read, the viewer falls back to a
+procedurally generated cube.
+
+### Interactive Hotkeys
+
+- `Space`: Pause / resume auto-orbit
+- `I`: Show / hide the camera and lighting inspector
 - `Esc` or `Q`: Exit

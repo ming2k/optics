@@ -99,11 +99,10 @@ Run the core rendering pipelines to verify path tessellation, font shaping, comp
 ```
 
 **Verification Steps:**
-1. Observe immediate and retained vector primitives: solid rectangles, rounded rectangles, stroked circles, and Bézier curves.
-2. Confirm antialiased geometry boundaries are smooth and free of dark fringe halos against contrasting backgrounds.
-3. Verify linear gradient brush interpolation has smooth color transitions without banding.
-4. Resize the window repeatedly: verify canvas viewport adjusts dynamically without stretching or aspect-ratio distortion.
-5. At the default window size, inspect the small icons (14–24 px) in the control row: their diagonal and curved strokes must show a graded edge, not a two-tone staircase. Icon edges come from baked device-resolution coverage masks (ADR-0112), so a staircase here means the bake fell back to the vector path — check the log for a mask allocation failure before assuming a rasteriser regression.
+1. Observe the animated ring of 12 coloured circles and the rounded-rectangle pointer proxy on the dark background.
+2. Confirm antialiased geometry boundaries are smooth and free of dark fringe halos.
+3. Move the pointer: the rounded-rectangle proxy tracks it without visible lag while the circle ring keeps animating.
+4. Resize the window repeatedly: verify the canvas viewport and animation adjust dynamically without stretching or aspect-ratio distortion.
 
 ### 4.2 3D Lighting & Transform Pipeline (`examples/showcase/scene_studio`)
 
@@ -112,20 +111,23 @@ Run the core rendering pipelines to verify path tessellation, font shaping, comp
 ```
 
 **Verification Steps:**
-1. Confirm the 3D cube rotates continuously with correct depth-buffer occlusion (back faces never draw over front faces).
-2. Inspect Phong specular highlights across the cube faces: light reflectance calculates smoothly without vertex-clamping jumps.
-3. Observe transient uniform buffer updates: frame rate remains solid 60/120 FPS without stutter or GPU memory pressure warnings.
+1. Confirm the model auto-orbits continuously with correct depth-buffer occlusion (back faces never draw over front faces).
+2. Inspect Phong specular highlights across the model: light reflectance calculates smoothly without vertex-clamping jumps.
+3. Press `Space` or use the toolbar button to pause/resume orbit, then drag the **Speed** slider in the inspector: motion responds immediately.
+4. Adjust **Pitch**, **FOV**, and **Ambient** in the inspector: the camera and lighting update live without stutter or GPU memory pressure warnings.
 
-### 4.3 3D glTF PBR Asset Viewer (`examples/showcase/scene_studio`)
+### 4.3 glTF Asset Loading (`examples/showcase/scene_studio`)
 
 ```bash
 ./build/examples/showcase/scene_studio
+./build/examples/showcase/scene_studio --file path/to/model.glb
 ```
 
 **Verification Steps:**
 1. Verify the bundled `Duck.glb` asset loads, parses, and displays immediately upon startup.
-2. Click and drag the left mouse button to orbit the camera: geometry rotates smoothly around the center of mass.
-3. Verify PBR surface textures (base color, roughness, ambient occlusion) render accurately without inverted normals or missing mipmaps.
+2. Confirm the asset name appears in the floating toolbar badge.
+3. Load a custom `.glb` with `--file`; an unreadable path must exit with a clear error instead of a blank window.
+4. Rename or hide the bundled asset and relaunch: the viewer falls back to the procedurally generated cube.
 
 ### 4.4 Typography and Text Shaping (`examples/showcase/widget_gallery`)
 
@@ -162,13 +164,14 @@ Verify desktop user interface controls, input handling, window lifecycle, and sy
 
 | Control Under Test | Action to Perform | Expected Observable Outcome |
 | :--- | :--- | :--- |
-| **Push Button** | Hover cursor over button; press left mouse button; release. | Hover state transitions smoothly; click feedback triggers; text remains centered. |
-| **Checkbox & Radio** | Click to toggle checked and unchecked states. | Check mark state flips reliably; hit target covers both label and icon. |
-| **Slider** | Click and drag slider thumb across track. | Numeric value tracks mouse position linearly; thumb does not detach from cursor. |
-| **Progress Bar** | Observe animated progress advancement. | Fill track animates continuously without jumping backwards. |
-| **Segmented Tabs** | Click between distinct tab items. | Active tab highlight switches cleanly; corresponding content pane swaps. |
-| **Split View** | Click and drag the central split divider. | Left and right panes resize smoothly; minimum and maximum pane widths are respected. |
-| **Scroll View** | Use mouse wheel or drag scrollbar inside content area. | Content scrolls smoothly; clipped elements outside the viewport boundary are culled cleanly. |
+| **Push Button** | Hover cursor over a button; press left mouse button; release. | Hover state transitions smoothly; click feedback triggers; text remains centered. |
+| **Checkbox** | Click a checkbox on the **Controls** page. | Check mark state flips reliably; hit target covers both label and icon. |
+| **Segmented Control** | Switch the density option between the three segments. | The selected segment highlights and only one segment stays active. |
+| **Slider** | Drag the **Exposure** or **Contrast** slider thumb across the track. | Numeric value tracks the pointer linearly; thumb does not detach from the cursor. |
+| **Sidebar Split Handle** | Drag the vertical divider between the sidebar and the main area. | Panes resize smoothly and the sidebar respects its minimum width. |
+| **Tab Strip** | On the **Layout & Data** page, switch tabs and close a closable tab. | Active tab highlight switches cleanly; the last remaining tab cannot be closed. |
+| **Tree View** | Expand/collapse a branch and select a leaf. | Disclosure state toggles and exactly one leaf shows the selected highlight. |
+| **Data Grid** | Click a sortable header and drag a column divider. | Rows reorder by the chosen column; the column width follows the pointer. |
 
 ### 5.2 Text Field, Caret, and Clipboard (`examples/showcase/widget_gallery`)
 
@@ -187,11 +190,13 @@ Verify retained text editing (`ADR-0036`, `ADR-0057`, `ADR-0064`):
    - Paste clipboard text into an external text editor (e.g., terminal or VS Code): text matches.
    - Copy text from an external application and press `Ctrl+V`: text pastes into the text field at the caret position.
 
-### 5.3 Overlays, Modals, and Z-Bands (`examples/showcase/overlays`)
+### 5.3 Overlays, Modals, and Z-Bands (`examples/showcase/widget_gallery`)
 
 ```bash
-./build/examples/showcase/widget_gallery/scenario_overlays
+./build/examples/showcase/widget_gallery
 ```
+
+Select the **Overlays & DnD** page (or press `4`) before running these checks.
 
 **Verification Steps:**
 1. Click button to trigger a **Modal Dialog**:
