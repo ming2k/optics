@@ -51,7 +51,7 @@ extern "C" {
 
 #define OPTICS_SVG_VERSION_MAJOR 0
 #define OPTICS_SVG_VERSION_MINOR 0
-#define OPTICS_SVG_VERSION_PATCH 85
+#define OPTICS_SVG_VERSION_PATCH 86
 
 /* Packed integer version, monotonic — identical layout to OPTICS_GFX_VERSION_NUMBER. */
 #define OPTICS_SVG_VERSION_NUMBER                                                                  \

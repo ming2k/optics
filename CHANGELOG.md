@@ -14,6 +14,50 @@ pre-1.0 release may break source or binary compatibility, so the SONAME
 carries the full version and a mismatched binary fails to load instead of
 silently reading a different descriptor layout.
 
+## [0.0.86] - 2026-11-24
+
+### Changed — Tooling simplification
+
+- **Retired over-engineered tree guardrails and meta-selftests.** Removed
+  `check_leaks.py` (and `leak-lanes.toml`/`leak-exempt.toml`),
+  `check_naming.py`, `check_test_layers.py`, `check_api.py`, `check_c23.py`,
+  `check_doc_links.py`, `check_adr.py`, and the four `tests/optics/*_guardrail.py`
+  selftest scripts. The `lint` suite now keeps four essential tree-level checks:
+  `wayland_listeners`, `version_lockstep_tree`, `library_purity`, and
+  `symbol_reference`.
+
+### Added — Expanded unit, integration, and E2E test coverage
+
+- **Unit suites (`window`, `text`, `scene`, `material`, `app`).** Added
+  `test_platform_wakeup` (cross-thread FIFO + concurrent stress),
+  `test_frame_pipeline_seam` (headless dual-thread simulation of `event` +
+  `display_pacer` + `frame_mailbox` + `platform_wakeup`),
+  `test_text_layout_contracts` (stats, malformed UTF-8, scratch growth, and
+  `optics_text_record` CPU replay), `test_scene_contracts` (version, multi-primitive
+  interleaved/indexed/skinned GLB parsing, and null guards),
+  `test_material_contracts` (version and null guards across all five material
+  filters), and expanded `test_host_binding` (scale, async paste, drop, quiesce,
+  and CPU canvas snapshot submit).
+- **GPU integration suites (`text`, `scene`, `ui`).** Added
+  `test_text_render_pipeline` (Vulkan atlas upload/flush, cache hit/miss stats,
+  outline rendering, CJK autospace, and BiDi selection),
+  `test_scene_render_pipeline` (`parse_glb` → `data_build` → `optics_scene_draw`
+  readback, material table vs override, STEP/CUBICSPLINE animation, `reset_pose`,
+  and GPU skinning), and `test_ui_gpu_render` (GPU vs CPU UI snapshot parity and
+  interaction damage updates).
+- **Public-API E2E suites.** Strengthened `e2e_interaction_session` with
+  per-widget bounding-box pixel diff assertions, added `e2e_motion_session`
+  (spring + hysteresis + UI multi-frame animation and reduced-motion byte-exact
+  snap), and added `e2e_gpu_stack` (six-library public-API Vulkan composition:
+  backdrop, blur, Frosted & Liquid Glass, animated spring, SVG icon, and UI HUD).
+
+### Fixed — Rust build link-mode environment switches
+
+- **`OPTICS_STATIC` / `OPTICS_DYNAMIC` respect falsy values.** `optics-build`
+  now treats unset, empty, `"0"`, and ASCII case-insensitive `"false"` as
+  disabled so shell invocations can override a worktree `.cargo/config.toml`
+  `[env]` entry.
+
 ## [0.0.85] - 2026-11-24
 
 ### Fixed — Canvas image handles and deferred passes across DisplayList replay
