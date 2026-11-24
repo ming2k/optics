@@ -14,6 +14,36 @@ pre-1.0 release may break source or binary compatibility, so the SONAME
 carries the full version and a mismatched binary fails to load instead of
 silently reading a different descriptor layout.
 
+## [0.0.85] - 2026-11-24
+
+### Fixed — Canvas image handles and deferred passes across DisplayList replay
+
+- **Immutable image snapshots share a canonical RenderPlan handle.**
+  `optics_gfx_image_plan_handle` resolves a snapshot to the original
+  `optics_gfx_image *` until a copy-on-write split gives it a new pixel
+  version. Plan producer/consumer edges, upload destinations, dependency
+  scans, and `optics_gfx_plan_require_image` now agree whether an image is
+  referenced directly or through the snapshot a `DisplayList` captured, so a
+  list recorded before `optics_gfx_canvas_begin` no longer misses the pass
+  that `canvas_begin` flushed.
+- **Deferred-pass pending state follows shared image versions.** The ADR-0147
+  `deferred_pending` flag is mirrored in the shared image block, so clearing
+  it when a flushed pass executes is visible to every snapshot still sharing
+  that version. Effect helpers read it through
+  `optics_gfx_image_is_deferred_pending`.
+- **`vk_image` lifetime observation covers the shared image owner.** The
+  acquire is recorded where the `VkImage` is created and the release only when
+  the final shared reference retires, instead of on every wrapper release.
+
+### Changed — Documentation
+
+- **Curated example taxonomy is documented.** Showcase and starter docs now
+  describe `examples/getting_started/` versus `examples/showcase/` per
+  [ADR-0171](docs/adr/0171-curated-examples-taxonomy-and-showcase-design-system.md).
+- **Stale setup and smoke-test steps removed.** GLFW and `headless_demo`
+  references are gone, pkg-config names are `optics-*`, and the manual
+  verification checklist matches the current showcase applications.
+
 ## [0.0.84] - 2026-11-24
 
 ### Fixed — Rust `-sys` bindgen type ownership, dependency prefixes, and static CI gate

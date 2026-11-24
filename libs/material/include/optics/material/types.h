@@ -35,7 +35,7 @@
  * meson.project_version() in the root meson.build). */
 #define OPTICS_MATERIAL_VERSION_MAJOR 0
 #define OPTICS_MATERIAL_VERSION_MINOR 0
-#define OPTICS_MATERIAL_VERSION_PATCH 84
+#define OPTICS_MATERIAL_VERSION_PATCH 85
 
 /* Packed integer version, monotonic — identical layout to
  * OPTICS_GFX_VERSION_NUMBER (major in bits 16..23, minor 8..15, patch 0..7).
