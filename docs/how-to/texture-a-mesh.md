@@ -60,9 +60,12 @@ not write depth. Release the material only after every consuming frame has
 finished.
 
 For glTF or VRM content, prefer Rust
-`Scene::from_glb_with_materials` and `Scene::draw_materials`; the content
-layer maps embedded base-color images, samplers, UV transforms, unlit state,
-alpha behavior, and primitive material indices automatically.
+`Scene::from_glb_with_materials_and_decoder` (supplying your preferred image
+decoder, with no extra system codec link dependencies) or, with the opt-in
+`system-image-codecs` feature enabled, `Scene::from_glb_with_materials`, paired
+with `Scene::draw_materials`; the content layer maps embedded base-color
+images, samplers, UV transforms, unlit state, alpha behavior, and primitive
+material indices automatically.
 
 See [ADR-0048](../adr/0048-textured-surface-materials-and-core-images.md) for
 the engine/content ownership boundary and [API Reference](../reference/api.md)

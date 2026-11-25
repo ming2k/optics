@@ -16,6 +16,9 @@ silently reading a different descriptor layout.
 
 ## [Unreleased]
 
+### Changed
+- **`optics-scene`: built-in image codecs are opt-in (breaking).** `optics-scene` no longer links system `libpng`/`libturbojpeg` by default. `Scene::from_glb_with_materials_and_decoder(device, bytes, target, decode_image)` loads a GLB's base-colour textures through a caller-supplied `FnMut(&str, &[u8]) -> Result<DecodedImage, String>` decoder on every platform, with no codec link dependency. The previous `Scene::from_glb_with_materials`, backed by the system decoders, now requires the new `system-image-codecs` feature (`optics`: `scene-codecs`). Callers that relied on the default link either enable the feature or pass their own decoder.
+
 ### Fixed
 - **`liboptics_gfx`: effects that sample a multi-pass capture are ordered against its last writer.** `optics_gfx_plan_register` bound a deferred effect's input to the *first* pass that wrote it, so blurring an image written by two Canvas passes made the frame's next pass fail with `OPTICS_GFX_ERROR_INVALID_STATE`. It now binds to the last writer, as Canvas sampling already did (ADR-0147, amended 2026-11-25).
 - **`liboptics_gfx`: an ordered write-after-read is accepted.** The RenderPlan validator required every reader to reach every writer of an image, including writers after it. A Canvas pass reusing a scratch image that an earlier effect read (one shadow mask for several windows in a frame) was rejected. A reader and a writer now need a dependency path in either direction, and a Canvas pass depends on its destination's last writer and on every reader since.

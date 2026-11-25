@@ -4,17 +4,21 @@ use optics_gfx::{
 };
 
 use crate::glb_json::{AlphaMode, GlbDocument, GlbImage, GlbSampler};
-use crate::{LoadError, MaterialTarget};
+use crate::{DecodedImage, LoadError, MaterialTarget};
 
-const MAX_TEXTURE_EDGE: u32 = 8192;
-const MAX_IMAGE_ALLOCATION: u64 = 256 * 1024 * 1024;
+pub(crate) const MAX_TEXTURE_EDGE: u32 = 8192;
+pub(crate) const MAX_IMAGE_ALLOCATION: u64 = 256 * 1024 * 1024;
 const MAX_TOTAL_TEXTURE_BYTES: u64 = 512 * 1024 * 1024;
 
-pub(crate) fn load(
+pub(crate) fn load<F>(
     device: &Device,
     doc: &GlbDocument<'_>,
     target: MaterialTarget,
-) -> Result<(Vec<Material>, Material), LoadError> {
+    mut decode: F,
+) -> Result<(Vec<Material>, Material), LoadError>
+where
+    F: FnMut(&str, &[u8]) -> Result<DecodedImage, String>,
+{
     let mut required_textures = vec![false; doc.textures.len()];
     for material in &doc.materials {
         if let Some(info) = &material.base_color_texture {
@@ -47,7 +51,7 @@ pub(crate) fn load(
             .get(image_index)
             .ok_or_else(|| LoadError::Gltf(format!("image index {image_index} out of bounds")))?;
         if images[image_index].is_none() {
-            let decoded = decode_image(device, doc, image)?;
+            let decoded = decode_image(device, doc, image, &mut decode)?;
             let (width, height) = decoded.size();
             let bytes = u64::from(width)
                 .checked_mul(u64::from(height))
@@ -155,11 +159,44 @@ pub(crate) fn load(
     Ok((materials, fallback))
 }
 
-fn decode_image(
+fn validate_decoded_image(decoded: &DecodedImage) -> Result<(), LoadError> {
+    if decoded.width == 0
+        || decoded.height == 0
+        || decoded.width > MAX_TEXTURE_EDGE
+        || decoded.height > MAX_TEXTURE_EDGE
+    {
+        return Err(LoadError::Image(format!(
+            "decoded image dimensions {}x{} exceed limit {MAX_TEXTURE_EDGE}",
+            decoded.width, decoded.height
+        )));
+    }
+    let expected = u64::from(decoded.width)
+        .checked_mul(u64::from(decoded.height))
+        .and_then(|pixels| pixels.checked_mul(4))
+        .filter(|len| *len <= MAX_IMAGE_ALLOCATION)
+        .ok_or_else(|| {
+            LoadError::Image("decoded image buffer exceeds allocation limit".to_string())
+        })?;
+    if decoded.rgba.len() as u64 != expected {
+        return Err(LoadError::Image(format!(
+            "decoded image RGBA length {} does not match {}x{} ({expected} bytes)",
+            decoded.rgba.len(),
+            decoded.width,
+            decoded.height
+        )));
+    }
+    Ok(())
+}
+
+fn decode_image<F>(
     device: &Device,
     doc: &GlbDocument<'_>,
     image: &GlbImage,
-) -> Result<Image, LoadError> {
+    decode: &mut F,
+) -> Result<Image, LoadError>
+where
+    F: FnMut(&str, &[u8]) -> Result<DecodedImage, String>,
+{
     if image.uri.is_some() {
         return Err(LoadError::Unsupported(
             "external image URIs are unsupported for in-memory GLB loading".into(),
@@ -192,23 +229,17 @@ fn decode_image(
         .mime_type
         .as_deref()
         .ok_or_else(|| LoadError::Unsupported("image bufferView missing mimeType".into()))?;
-    let (width, height, rgba) = match mime {
-        "image/png" => {
-            crate::image_codec::decode_png_rgba(encoded, MAX_TEXTURE_EDGE, MAX_IMAGE_ALLOCATION)
-                .map_err(LoadError::Image)?
-        }
-        "image/jpeg" => {
-            crate::image_codec::decode_jpeg_rgba(encoded, MAX_TEXTURE_EDGE, MAX_IMAGE_ALLOCATION)
-                .map_err(LoadError::Image)?
-        }
-        other => {
-            return Err(LoadError::Unsupported(format!(
-                "unsupported base-colour image MIME type {other}"
-            )));
-        }
-    };
+    let decoded = decode(mime, encoded).map_err(LoadError::Image)?;
+    validate_decoded_image(&decoded)?;
 
-    Image::from_bytes(device, width, height, Format::Rgba8Srgb, &rgba).map_err(LoadError::from)
+    Image::from_bytes(
+        device,
+        decoded.width,
+        decoded.height,
+        Format::Rgba8Srgb,
+        &decoded.rgba,
+    )
+    .map_err(LoadError::from)
 }
 
 fn sampler_desc(sampler: &GlbSampler) -> SamplerDesc {
@@ -240,5 +271,57 @@ fn address_mode(mode: u32) -> AddressMode {
         33071 => AddressMode::ClampToEdge,
         33648 => AddressMode::MirroredRepeat,
         _ => AddressMode::Repeat,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{MAX_TEXTURE_EDGE, validate_decoded_image};
+    use crate::{DecodedImage, LoadError};
+
+    #[test]
+    fn accepts_valid_rgba_image() {
+        let img = DecodedImage {
+            width: 2,
+            height: 2,
+            rgba: vec![255; 16],
+        };
+        assert!(validate_decoded_image(&img).is_ok());
+    }
+
+    #[test]
+    fn rejects_zero_or_oversized_dimensions() {
+        let zero = DecodedImage {
+            width: 0,
+            height: 4,
+            rgba: Vec::new(),
+        };
+        assert!(matches!(
+            validate_decoded_image(&zero),
+            Err(LoadError::Image(_))
+        ));
+
+        let huge = DecodedImage {
+            width: MAX_TEXTURE_EDGE + 1,
+            height: 1,
+            rgba: Vec::new(),
+        };
+        assert!(matches!(
+            validate_decoded_image(&huge),
+            Err(LoadError::Image(_))
+        ));
+    }
+
+    #[test]
+    fn rejects_mismatched_buffer_length() {
+        let short = DecodedImage {
+            width: 2,
+            height: 2,
+            rgba: vec![0; 12],
+        };
+        assert!(matches!(
+            validate_decoded_image(&short),
+            Err(LoadError::Image(_))
+        ));
     }
 }

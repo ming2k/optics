@@ -9,6 +9,7 @@ use optics_gfx::{Camera, Device, Format, Material, SceneLight, ScenePass};
 pub use optics_scene_sys as sys;
 
 mod glb_json;
+#[cfg(feature = "system-image-codecs")]
 mod image_codec;
 mod materials;
 
@@ -21,6 +22,14 @@ pub(crate) fn check(rc: sys::optics_gfx_result) -> Result<(), Error> {
 pub struct MaterialTarget {
     pub color_format: Format,
     pub depth_format: Format,
+}
+
+/// Decoded RGBA8 pixel buffer returned by a caller-supplied texture decoder.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DecodedImage {
+    pub width: u32,
+    pub height: u32,
+    pub rgba: Vec<u8>,
 }
 
 /// Failure while validating a GLB or constructing its GPU material resources.
@@ -100,14 +109,39 @@ impl Scene {
         Ok(Scene { raw })
     }
 
-    /// Load a GLB together with its base-colour textures and per-primitive materials.
+    /// Load a GLB together with its base-colour textures and per-primitive materials,
+    /// using the built-in system PNG/JPEG decoders (requires the `system-image-codecs` feature).
+    #[cfg(feature = "system-image-codecs")]
     pub fn from_glb_with_materials(
         device: &Device,
         bytes: &[u8],
         target: MaterialTarget,
     ) -> Result<Scene, LoadError> {
+        Self::from_glb_with_materials_and_decoder(
+            device,
+            bytes,
+            target,
+            image_codec::decode_image_rgba,
+        )
+    }
+
+    /// Load a GLB together with its base-colour textures and per-primitive materials,
+    /// delegating embedded image decoding to a caller-supplied callback.
+    ///
+    /// `decode_image` is invoked once per unique referenced base-colour image with
+    /// `(mime_type, encoded_bytes)` and must return tightly packed RGBA8 pixels.
+    /// If the GLB references no base-colour textures, `decode_image` is never called.
+    pub fn from_glb_with_materials_and_decoder<F>(
+        device: &Device,
+        bytes: &[u8],
+        target: MaterialTarget,
+        decode_image: F,
+    ) -> Result<Scene, LoadError>
+    where
+        F: FnMut(&str, &[u8]) -> Result<DecodedImage, String>,
+    {
         let doc = glb_json::parse_glb(bytes).map_err(LoadError::Gltf)?;
-        let (materials, fallback) = materials::load(device, &doc, target)?;
+        let (materials, fallback) = materials::load(device, &doc, target, decode_image)?;
         let scene = Self::from_glb(device, bytes)?;
         let raw_materials: Vec<*mut sys::optics_gfx_material> =
             materials.iter().map(|material| material.as_raw()).collect();

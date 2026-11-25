@@ -21,3 +21,8 @@ optics-build = { workspace = true }
 # objects (docs/how-to/choose-a-static-or-shared-link.md). OPTICS_STATIC /
 # OPTICS_DYNAMIC in the environment override it.
 static = ["optics-scene-sys/static", "optics-gfx/static"]
+# Opt-in built-in PNG/JPEG decoding for `Scene::from_glb_with_materials` using
+# system `libpng` + `libturbojpeg` via pkg-config on non-Windows targets.
+# Without this feature, `optics-scene` links no image codecs and callers pass
+# their own decoder to `Scene::from_glb_with_materials_and_decoder`.
+system-image-codecs = []

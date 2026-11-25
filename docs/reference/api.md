@@ -169,8 +169,13 @@ overrides the complete scene. `optics_scene_draw_opts` also carries the camera a
 scene, so the draw call itself takes only the frame context and one descriptor.
 
 The safe Rust binding exposes
-`Scene::from_glb_with_materials(device, bytes, MaterialTarget)` and
-`Scene::draw_materials`. It supports embedded PNG/JPEG base-color textures,
+`Scene::from_glb_with_materials_and_decoder(device, bytes, MaterialTarget, decode_image)`
+(zero system image-codec dependencies on all platforms; callers supply their own
+image decoder) and, behind the opt-in `system-image-codecs` feature (or
+`optics`'s `scene-codecs` feature),
+`Scene::from_glb_with_materials(device, bytes, MaterialTarget)` backed by system
+`libpng` / `libturbojpeg` on non-Windows targets, paired with
+`Scene::draw_materials`. It supports embedded base-color textures,
 UV0, `KHR_texture_transform`, `KHR_materials_unlit`, glTF sampler state,
 OPAQUE/MASK/BLEND, alpha cutoff, and double-sided materials. Referenced
 external images and non-zero texture-coordinate sets return `LoadError`
