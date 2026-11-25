@@ -10,7 +10,11 @@
  * The harness asserts only that the calls terminate and the ui context
  * remains intact between frames. Real bugs (heap corruption, use-after-free
  * in the store, double-free in the GC) are caught by ASAN when built with
- * -Db_sanitize=address. */
+ * -Db_sanitize=address.
+ *
+ * Limitation: every widget gets a fresh id, so no population survives
+ * across frames and hysteresis-gated paths (the shrink dwell) are out of
+ * reach. fuzz_ui_store_model.c covers those, with a reference model. */
 
 #include <optics/ui.h>
 #include <stdint.h>

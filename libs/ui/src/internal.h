@@ -337,6 +337,9 @@ typedef struct optics_ui_store {
     /* Frames the load has stayed under the shrink threshold (1/8 of cap).
      * Sustained dwell triggers a halving rehash; see optics_ui__store_reap. */
     uint32_t idle_frames;
+    /* Structural change counter (insert, erase, rehash), wrapping. Debug
+     * validation runs only when it moved, so a steady frame costs nothing. */
+    uint32_t epoch, validated_epoch;
 } optics_ui_store;
 
 /* Shrink hysteresis (see optics_ui__store_reap): the load must stay under 1/8
@@ -790,6 +793,23 @@ optics_ui_node *optics_ui__store_find(const optics_ui *ui, optics_ui_id id);
 optics_ui_node *optics_ui__store_touch(optics_ui *ui,
                                        optics_ui_id id); /* find-or-create, frame-reset */
 void optics_ui__store_reap(optics_ui *ui);               /* phase + GC at frame end */
+/* Structural self-check of the store: power-of-two capacity, load < 3/4,
+ * every node reachable from its home slot, no duplicate ids, and a live
+ * list that threads each occupied slot exactly once. Returns the first
+ * broken invariant, or nullptr. O(cap + probe lengths); for tests and
+ * debug builds. */
+const char *optics_ui__store_validate(const optics_ui *ui);
+/* optics_ui__store_validate, aborting with the reason on failure. */
+void optics_ui__store_check(const optics_ui *ui);
+/* Debug builds validate the store at the end of every reap; override with
+ * -DOPTICS_UI_STORE_VALIDATE=0/1. */
+#ifndef OPTICS_UI_STORE_VALIDATE
+#ifdef NDEBUG
+#define OPTICS_UI_STORE_VALIDATE 0
+#else
+#define OPTICS_UI_STORE_VALIDATE 1
+#endif
+#endif
 
 /* node (node.c) */
 void optics_ui__node_reset_frame(optics_ui_node *n);

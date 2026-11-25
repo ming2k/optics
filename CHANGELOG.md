@@ -14,6 +14,15 @@ pre-1.0 release may break source or binary compatibility, so the SONAME
 carries the full version and a mismatched binary fails to load instead of
 silently reading a different descriptor layout.
 
+## [Unreleased]
+
+### Fixed
+- **`liboptics_ui`: store shrink no longer hangs the UI thread.** The shrink-size loop in `optics_ui__store_reap` halved while the table was already too small, so a population in (cap/16, cap/8] after a spike (e.g. 100 live nodes at cap 1024) was rehashed into 64 slots and `store_grow` spun forever probing a full table. The loop now keeps the new table at ≤ 1/4 load, `store_grow` refuses any capacity at or over the 3/4 load limit, and `test_store_spike` holds survivors through the 300-frame shrink dwell.
+
+### Added
+- **`liboptics_ui`: store self-validation.** `optics_ui__store_validate` checks the retained store's structural invariants (power-of-two capacity, load < 3/4, probe reachability, unique ids, live-list integrity); debug builds run it after every frame that changed the table and abort with the broken invariant. See ADR-0027 (amended 2026-11-25).
+- **Model-based store verification.** `test_store_model` (deterministic scenarios plus seeded random walks) and the `fuzz_ui_store_model` libFuzzer harness check `store.c` against a reference model every frame; the harness joins the `ci-fuzz` matrix with a seed corpus that includes the shrink-freeze regression.
+
 ## [0.0.86] - 2026-11-24
 
 ### Changed — Tooling simplification

@@ -20,6 +20,14 @@ optics_ui_fuzz_harnesses = [
     'deps': [ui_dep],
     'corpus': 'corpus/ui_store',
   },
+  {
+    # Model-checked: store.c compiled in, every frame checked against
+    # ../store_model.h. See the harness header for the byte program.
+    'name': 'fuzz_ui_store_model',
+    'src': files('fuzz_ui_store_model.c', '../../../libs/ui/src/store/store.c'),
+    'deps': [ui_dep],
+    'corpus': 'corpus/ui_store_model',
+  },
 ]
 
 foreach h : optics_ui_fuzz_harnesses
