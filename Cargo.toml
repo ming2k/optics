@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.0.86"
+version = "0.0.87"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/ming2k/optics"
@@ -15,28 +15,28 @@ bindgen = "0.72"
 pkg-config = "0.3"
 
 # Internal build helper
-optics-build = { path = "crates/optics-build", version = "0.0.86" }
+optics-build = { path = "crates/optics-build", version = "0.0.87" }
 
 # Raw FFI (-sys) crates
-optics-app-sys = { path = "crates/optics-app-sys", version = "0.0.86" }
-optics-gfx-sys = { path = "crates/optics-gfx-sys", version = "0.0.86" }
-optics-text-sys = { path = "crates/optics-text-sys", version = "0.0.86" }
-optics-window-sys = { path = "crates/optics-window-sys", version = "0.0.86" }
-optics-ui-sys = { path = "crates/optics-ui-sys", version = "0.0.86" }
-optics-material-sys = { path = "crates/optics-material-sys", version = "0.0.86" }
-optics-svg-sys = { path = "crates/optics-svg-sys", version = "0.0.86" }
-optics-scene-sys = { path = "crates/optics-scene-sys", version = "0.0.86" }
+optics-app-sys = { path = "crates/optics-app-sys", version = "0.0.87" }
+optics-gfx-sys = { path = "crates/optics-gfx-sys", version = "0.0.87" }
+optics-text-sys = { path = "crates/optics-text-sys", version = "0.0.87" }
+optics-window-sys = { path = "crates/optics-window-sys", version = "0.0.87" }
+optics-ui-sys = { path = "crates/optics-ui-sys", version = "0.0.87" }
+optics-material-sys = { path = "crates/optics-material-sys", version = "0.0.87" }
+optics-svg-sys = { path = "crates/optics-svg-sys", version = "0.0.87" }
+optics-scene-sys = { path = "crates/optics-scene-sys", version = "0.0.87" }
 
 # Safe wrapper crates & pure-Rust motion crate
-optics-app = { path = "crates/optics-app", version = "0.0.86" }
-optics-gfx = { path = "crates/optics-gfx", version = "0.0.86" }
-optics-text = { path = "crates/optics-text", version = "0.0.86" }
-optics-window = { path = "crates/optics-window", version = "0.0.86" }
-optics-ui = { path = "crates/optics-ui", version = "0.0.86" }
-optics-material = { path = "crates/optics-material", version = "0.0.86" }
-optics-svg = { path = "crates/optics-svg", version = "0.0.86" }
-optics-motion = { path = "crates/optics-motion", version = "0.0.86" }
-optics-scene = { path = "crates/optics-scene", version = "0.0.86" }
+optics-app = { path = "crates/optics-app", version = "0.0.87" }
+optics-gfx = { path = "crates/optics-gfx", version = "0.0.87" }
+optics-text = { path = "crates/optics-text", version = "0.0.87" }
+optics-window = { path = "crates/optics-window", version = "0.0.87" }
+optics-ui = { path = "crates/optics-ui", version = "0.0.87" }
+optics-material = { path = "crates/optics-material", version = "0.0.87" }
+optics-svg = { path = "crates/optics-svg", version = "0.0.87" }
+optics-motion = { path = "crates/optics-motion", version = "0.0.87" }
+optics-scene = { path = "crates/optics-scene", version = "0.0.87" }
 
 [profile.dev]
 opt-level = 0

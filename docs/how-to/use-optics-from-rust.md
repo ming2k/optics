@@ -28,13 +28,13 @@ C one, plus:
 
 Build the C stack at the **same version** as the crates you depend on.
 `optics-build` probes with `pkg-config --exact-version`, and the SONAMEs carry
-the full version, so a `0.0.85` install cannot serve `0.0.86` crates.
+the full version, so a `0.0.86` install cannot serve `0.0.87` crates.
 
 Either keep an uninstalled build tree:
 
 ```bash
 git clone https://github.com/ming2k/optics && cd optics
-git checkout v0.0.86
+git checkout v0.0.87
 meson setup build -Dtests=false
 meson compile -C build
 ```
@@ -59,14 +59,14 @@ Pin the Git dependency to the tag or revision that matches the C build:
 ```toml
 [dependencies]
 # Full desktop application: window + UI + app shell (default features).
-optics = { git = "https://github.com/ming2k/optics", tag = "v0.0.86" }
+optics = { git = "https://github.com/ming2k/optics", tag = "v0.0.87" }
 ```
 
 Pick a narrower set of modules with `default-features = false`:
 
 ```toml
 # Headless rendering only: no window system, no UI toolkit.
-optics = { git = "https://github.com/ming2k/optics", tag = "v0.0.86", default-features = false, features = ["gfx"] }
+optics = { git = "https://github.com/ming2k/optics", tag = "v0.0.87", default-features = false, features = ["gfx"] }
 ```
 
 The [feature table](../explanation/rust-bindings.md#feature-flags--subsystem-mapping)
@@ -104,7 +104,7 @@ Then choose the link mode. The default links the shared objects; the `static`
 feature embeds the Optics archives instead:
 
 ```toml
-optics = { git = "https://github.com/ming2k/optics", tag = "v0.0.86", features = ["static"] }
+optics = { git = "https://github.com/ming2k/optics", tag = "v0.0.87", features = ["static"] }
 ```
 
 [Choose a Static or Shared Link](choose-a-static-or-shared-link.md) explains
@@ -123,7 +123,7 @@ directory the loader already searches, the binary builds and then fails to
 start:
 
 ```text
-error while loading shared libraries: liboptics_gfx.so.0.0.86: cannot open shared object file
+error while loading shared libraries: liboptics_gfx.so.0.0.87: cannot open shared object file
 ```
 
 Use one of:
