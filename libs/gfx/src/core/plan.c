@@ -191,7 +191,7 @@ optics_gfx_result optics_gfx_frame_plan_upload(optics_gfx_frame *f,
             (void)optics_gfx_render_plan_node_add_dependency(&f->render_plan, i, index);
     }
 
-    r = optics_gfx_render_plan_validate(&f->render_plan);
+    r = optics_gfx_render_plan_validate_reported(&f->render_plan);
     if (r != OPTICS_GFX_OK) {
         /* Remove the ordering edges that point at the rejected node before
          * truncating it; a dangling dependency would poison every later
@@ -311,24 +311,14 @@ uint32_t optics_gfx_plan_register(optics_gfx_plan *p, const optics_gfx_plan_pass
         if (desc->input_tokens[i]) {
             dep = optics_gfx_plan_token_index(p, desc->input_tokens[i]);
         } else if (desc->inputs[i]) {
-            const void *in_handle = optics_gfx_image_plan_handle(desc->inputs[i]);
-            /* Find the node that produced this image. Canvas target writes are
-             * providers too, not only deferred-effect outputs; an effect that
-             * samples a Canvas target must depend on that pass. */
-            for (uint32_t k = 0; k < p->render_plan->node_count && dep == UINT32_MAX; ++k) {
-                const optics_gfx_render_node *n = &p->render_plan->nodes[k];
-                for (uint32_t a = 0; a < n->access_count; ++a) {
-                    const optics_gfx_render_access *access = &n->accesses[a];
-                    if (access->mode != OPTICS_GFX_RENDER_ACCESS_WRITE &&
-                        access->mode != OPTICS_GFX_RENDER_ACCESS_READ_WRITE)
-                        continue;
-                    if (access->resource.kind == OPTICS_GFX_RENDER_RESOURCE_IMAGE &&
-                        access->resource.handle == in_handle) {
-                        dep = k;
-                        break;
-                    }
-                }
-            }
+            /* The producer is the *last* node that wrote this image — Canvas
+             * target writes count, not only deferred-effect outputs. Binding to
+             * the first writer ordered the effect against stale contents and
+             * left the later writers unreachable, so any image written by two
+             * passes before an effect sampled it failed plan validation at the
+             * frame's next pass. */
+            dep = optics_gfx_render_plan_last_writer(p->render_plan,
+                                                     optics_gfx_image_plan_handle(desc->inputs[i]));
         }
         if (dep == UINT32_MAX)
             continue;
@@ -382,6 +372,47 @@ uint32_t optics_gfx_plan_register(optics_gfx_plan *p, const optics_gfx_plan_pass
         optics_gfx_image_set_deferred_pending(p->render_plan->nodes[index].effect_outputs[i], true);
     p->pass_count++;
     return index;
+}
+
+optics_gfx_result optics_gfx_render_plan_validate_reported(const optics_gfx_render_plan *plan) {
+    optics_gfx_render_plan_issue issue = {};
+    optics_gfx_result r = optics_gfx_render_plan_check(plan, &issue);
+    if (r == OPTICS_GFX_OK)
+        return r;
+    const char *rule = issue.rule ? issue.rule : "plan rejected";
+    const char *a = issue.node < plan->node_count && plan->nodes[issue.node].label
+                        ? plan->nodes[issue.node].label
+                        : "?";
+    const char *b = issue.other < plan->node_count && plan->nodes[issue.other].label
+                        ? plan->nodes[issue.other].label
+                        : "?";
+    if (issue.node == UINT32_MAX)
+        OPTICS_GFX_FAILF(r, "RenderPlan: %s", rule);
+    else if (issue.other == UINT32_MAX)
+        OPTICS_GFX_FAILF(r, "RenderPlan: %s (node %u '%s')", rule, issue.node, a);
+    else
+        OPTICS_GFX_FAILF(r, "RenderPlan: %s (node %u '%s', node %u '%s')", rule, issue.node, a,
+                         issue.other, b);
+    return r;
+}
+
+void optics_gfx_plan_require_readers(optics_gfx_plan *p, const void *handle) {
+    if (!p || !p->render_plan || !handle)
+        return;
+    for (uint32_t i = 0; i < p->render_plan->node_count; ++i) {
+        optics_gfx_render_node *n = &p->render_plan->nodes[i];
+        if (n->kind != OPTICS_GFX_RENDER_NODE_EFFECT || n->effect_executed)
+            continue;
+        for (uint32_t a = 0; a < n->access_count; ++a) {
+            const optics_gfx_render_access *access = &n->accesses[a];
+            if (access->mode == OPTICS_GFX_RENDER_ACCESS_READ &&
+                access->resource.kind == OPTICS_GFX_RENDER_RESOURCE_IMAGE &&
+                access->resource.handle == handle) {
+                n->effect_required = true;
+                break;
+            }
+        }
+    }
 }
 
 void optics_gfx_plan_require_index(optics_gfx_plan *p, uint32_t index) {

@@ -144,8 +144,28 @@ void optics_gfx_render_plan_init(optics_gfx_render_plan *plan,
 optics_gfx_result optics_gfx_render_plan_add_node(optics_gfx_render_plan *plan,
                                                   const optics_gfx_render_node_desc *desc,
                                                   uint32_t *out_index);
-/* Validate the complete plan. Pure: no device, no allocation. */
+/* Why a plan was rejected: the rule that failed and the nodes it names
+ * (UINT32_MAX when the rule concerns the plan as a whole). Static strings; the
+ * caller turns this into the thread's last-error diagnostic. */
+typedef struct optics_gfx_render_plan_issue {
+    const char *rule;
+    uint32_t node;
+    uint32_t other;
+} optics_gfx_render_plan_issue;
+
+/* Validate the complete plan. Pure: no device, no allocation.
+ *
+ * Ordering rules for one resource version: two writers must be ordered (the
+ * later depends on the earlier), and every reader must be ordered against
+ * every writer — after it (read-after-write) or before it (write-after-read,
+ * the writer depends on the reader). An access pair with no dependency path in
+ * either direction is unordered and rejected. */
 optics_gfx_result optics_gfx_render_plan_validate(const optics_gfx_render_plan *plan);
+
+/* optics_gfx_render_plan_validate, also reporting the first violation into
+ * `issue` (nullable). */
+optics_gfx_result optics_gfx_render_plan_check(const optics_gfx_render_plan *plan,
+                                               optics_gfx_render_plan_issue *issue);
 
 /* Index of the last node that writes `handle` as an image, or UINT32_MAX.
  * Callers name a producer through this instead of keeping a second last-writer

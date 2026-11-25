@@ -61,11 +61,23 @@ static bool depends_on(const optics_gfx_render_plan *plan, uint32_t from, uint32
     return false;
 }
 
-optics_gfx_result optics_gfx_render_plan_validate(const optics_gfx_render_plan *plan) {
+#define PLAN_REJECT(code, why, a, b)                                                               \
+    do {                                                                                           \
+        if (issue)                                                                                 \
+            *issue = (optics_gfx_render_plan_issue){.rule = (why), .node = (a), .other = (b)};     \
+        return (code);                                                                             \
+    } while (0)
+
+optics_gfx_result optics_gfx_render_plan_check(const optics_gfx_render_plan *plan,
+                                               optics_gfx_render_plan_issue *issue) {
+    if (issue)
+        *issue = (optics_gfx_render_plan_issue){
+            .rule = nullptr, .node = UINT32_MAX, .other = UINT32_MAX};
     if (!plan || !target_valid(&plan->target))
-        return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
+        PLAN_REJECT(OPTICS_GFX_ERROR_INVALID_ARGUMENT, "invalid render target contract", UINT32_MAX,
+                    UINT32_MAX);
     if (plan->node_count > OPTICS_GFX_RENDER_PLAN_MAX_NODES)
-        return OPTICS_GFX_ERROR_OUT_OF_RANGE;
+        PLAN_REJECT(OPTICS_GFX_ERROR_OUT_OF_RANGE, "too many nodes", UINT32_MAX, UINT32_MAX);
 
     size_t total_transient = 0;
     for (uint32_t i = 0; i < plan->node_count; ++i) {
@@ -73,45 +85,61 @@ optics_gfx_result optics_gfx_render_plan_validate(const optics_gfx_render_plan *
         if (n->kind < OPTICS_GFX_RENDER_NODE_UPLOAD || n->kind > OPTICS_GFX_RENDER_NODE_OUTPUT ||
             n->access_count > OPTICS_GFX_RENDER_PLAN_MAX_ACCESSES ||
             n->dependency_count > OPTICS_GFX_RENDER_PLAN_MAX_DEPENDENCIES)
-            return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
+            PLAN_REJECT(OPTICS_GFX_ERROR_INVALID_ARGUMENT, "malformed node", i, UINT32_MAX);
         if ((n->required_capabilities & ~plan->target.capabilities) != 0)
-            return OPTICS_GFX_ERROR_UNSUPPORTED;
+            PLAN_REJECT(OPTICS_GFX_ERROR_UNSUPPORTED, "node needs a capability the target lacks", i,
+                        UINT32_MAX);
         if (n->transient_bytes > SIZE_MAX - total_transient)
-            return OPTICS_GFX_ERROR_OUT_OF_RANGE;
+            PLAN_REJECT(OPTICS_GFX_ERROR_OUT_OF_RANGE, "transient budget overflow", i, UINT32_MAX);
         total_transient += n->transient_bytes;
         for (uint32_t a = 0; a < n->access_count; ++a) {
             const optics_gfx_render_access *access = &n->accesses[a];
             if (access->resource.kind != OPTICS_GFX_RENDER_RESOURCE_IMAGE &&
                 access->resource.kind != OPTICS_GFX_RENDER_RESOURCE_BUFFER)
-                return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
+                PLAN_REJECT(OPTICS_GFX_ERROR_INVALID_ARGUMENT,
+                            "access names an unknown resource kind", i, UINT32_MAX);
             if (!access->resource.handle || !region_valid(&access->region))
-                return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
+                PLAN_REJECT(OPTICS_GFX_ERROR_INVALID_ARGUMENT,
+                            "access has no handle or a bad region", i, UINT32_MAX);
             if (access->mode < OPTICS_GFX_RENDER_ACCESS_READ ||
                 access->mode > OPTICS_GFX_RENDER_ACCESS_READ_WRITE)
-                return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
+                PLAN_REJECT(OPTICS_GFX_ERROR_INVALID_ARGUMENT, "access has an unknown mode", i,
+                            UINT32_MAX);
         }
         for (uint32_t d = 0; d < n->dependency_count; ++d) {
             uint32_t dep = n->dependencies[d];
             if (dep >= plan->node_count || dep == i)
-                return OPTICS_GFX_ERROR_INVALID_STATE;
+                PLAN_REJECT(OPTICS_GFX_ERROR_INVALID_STATE, "dependency out of range or on itself",
+                            i, dep);
             for (uint32_t k = 0; k < d; ++k)
                 if (n->dependencies[k] == dep)
-                    return OPTICS_GFX_ERROR_INVALID_STATE;
+                    PLAN_REJECT(OPTICS_GFX_ERROR_INVALID_STATE, "duplicate dependency", i, dep);
         }
     }
     if (plan->target.transient_budget_bytes &&
         total_transient > plan->target.transient_budget_bytes)
-        return OPTICS_GFX_ERROR_OUT_OF_RANGE;
+        PLAN_REJECT(OPTICS_GFX_ERROR_OUT_OF_RANGE, "transient budget exceeded", UINT32_MAX,
+                    UINT32_MAX);
 
     /* Cycle detection and ordering:
-     *   - a write must not be consumed without a dependency path;
+     *   - a reader and a writer of one version need a dependency path in one
+     *     direction or the other: the reader after the writer consumes it
+     *     (read-after-write), the writer after the reader overwrites it only
+     *     once the read is done (write-after-read). With neither path the
+     *     pair is unordered;
      *   - two writers of one version need an ordering path;
-     *   - a cycle is a dependency path back to itself. */
+     *   - a cycle is a dependency path back to itself.
+     *
+     * The reader-writer rule used to demand a path from every reader to every
+     * writer. That rejected any image a later pass overwrote after an effect
+     * had read it — a scratch image reused across effects in one frame — even
+     * though the overwrite was ordered after the read. */
     for (uint32_t i = 0; i < plan->node_count; ++i) {
         for (uint32_t d = 0; d < plan->nodes[i].dependency_count; ++d) {
             uint8_t state[OPTICS_GFX_RENDER_PLAN_MAX_NODES] = {};
             if (depends_on(plan, plan->nodes[i].dependencies[d], i, state))
-                return OPTICS_GFX_ERROR_INVALID_STATE;
+                PLAN_REJECT(OPTICS_GFX_ERROR_INVALID_STATE, "dependency cycle", i,
+                            plan->nodes[i].dependencies[d]);
         }
         for (uint32_t a = 0; a < plan->nodes[i].access_count; ++a) {
             const optics_gfx_render_access *read = &plan->nodes[i].accesses[a];
@@ -125,9 +153,13 @@ optics_gfx_result optics_gfx_render_plan_validate(const optics_gfx_render_plan *
                     if (!is_writer(write->mode) ||
                         !same_resource(&read->resource, &write->resource))
                         continue;
-                    uint8_t state[OPTICS_GFX_RENDER_PLAN_MAX_NODES] = {};
-                    if (!depends_on(plan, i, j, state))
-                        return OPTICS_GFX_ERROR_INVALID_STATE;
+                    uint8_t after[OPTICS_GFX_RENDER_PLAN_MAX_NODES] = {};
+                    if (depends_on(plan, i, j, after))
+                        continue;
+                    uint8_t before[OPTICS_GFX_RENDER_PLAN_MAX_NODES] = {};
+                    if (!depends_on(plan, j, i, before))
+                        PLAN_REJECT(OPTICS_GFX_ERROR_INVALID_STATE,
+                                    "read and write of one image are unordered", i, j);
                 }
             }
         }
@@ -144,12 +176,19 @@ optics_gfx_result optics_gfx_render_plan_validate(const optics_gfx_render_plan *
                         continue;
                     uint8_t state[OPTICS_GFX_RENDER_PLAN_MAX_NODES] = {};
                     if (!depends_on(plan, j, i, state))
-                        return OPTICS_GFX_ERROR_INVALID_STATE;
+                        PLAN_REJECT(OPTICS_GFX_ERROR_INVALID_STATE,
+                                    "two writes of one image are unordered", j, i);
                 }
             }
         }
     }
     return OPTICS_GFX_OK;
+}
+
+#undef PLAN_REJECT
+
+optics_gfx_result optics_gfx_render_plan_validate(const optics_gfx_render_plan *plan) {
+    return optics_gfx_render_plan_check(plan, nullptr);
 }
 
 void optics_gfx_render_plan_init(optics_gfx_render_plan *plan,

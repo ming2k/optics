@@ -16,6 +16,7 @@ negative_knowledge: true
 - Consulted: `libs/flux` (effect runtime, frame submission, canvas sampling seam), `libs/prism` (material filters)
 - Informed: Core Engineering
 - Extends: [ADR-0089](0089-rendering-program-and-execution-plan.md), [ADR-0091](0091-drawing-group-and-effect-semantics.md), [ADR-0092](0092-resource-planning-and-retirement.md)
+- Amended: 2026-11-25 — effects bind to an input's last writer, a write-after-read is ordered rather than rejected, an overwrite runs the passes that read the old contents first, and a plan rejection names its rule (see the amendment below).
 
 ---
 
@@ -339,6 +340,55 @@ is how a project learns to ignore its gates.
 - **Never add a second submission path for deferred work.** Pruned and executed
   passes share one command stream and one submit; a parallel queue would need
   its own synchronisation and would break the ordering argument above.
+
+## Amendment — 2026-11-25: ordering against Canvas target writes
+
+A host that renders a capture in more than one Canvas pass and then blurs it, or
+reuses one scratch image across several effects in a frame (a shadow mask per
+window), hit three defects in how deferred passes were ordered against Canvas
+writes. A fourth one hid all three. `test_plan_effect_order` pins each case.
+
+1. **An effect depends on its input's last writer.** `optics_gfx_plan_register`
+   scanned the plan forwards and bound an input to the *first* node that wrote
+   it. The effect was then ordered against stale contents, and validation
+   (every reader ordered against every writer) found the later writers
+   unreachable. The frame's next Canvas pass was rejected with
+   `INVALID_STATE`, so any capture written by two passes could not be blurred.
+   The scan now uses `optics_gfx_render_plan_last_writer`, as Canvas sampling
+   and frame output already did.
+2. **A write-after-read is ordered, not rejected.** The validator demanded a
+   path from every reader to every writer of a version, including writers that
+   come *after* the reader. A pass overwriting an image an earlier effect read
+   could never validate, however it was ordered. The rule is now that a reader
+   and a writer need a path in *one* direction: reader after writer is
+   read-after-write, writer after reader is write-after-read. A Canvas pass's
+   node now depends on its destination's last writer and on every node that
+   read the destination since, not only on the previous node.
+3. **An overwrite runs the passes that read the old contents.** Once (2) is
+   accepted, a deferred effect that read an image and was materialized only
+   after a pass overwrote it would execute late and sample the new pixels.
+   Deferral would then change the result. `optics_gfx_canvas_begin` now
+   requires every unexecuted effect that reads its destination before its
+   boundary flush, so those effects run against the contents they were
+   registered against. They give up pruning, and only in exactly this case.
+4. **A rejection says why.** `optics_gfx_render_plan_check` reports the rule and
+   the two nodes it names. Every gfx gate (Canvas begin and end, upload, frame
+   output) goes through `optics_gfx_render_plan_validate_reported`, which writes
+   that into the thread's last-error slot. A rejected pass was previously a bare
+   `INVALID_STATE` with an empty diagnostic. That is why (1) surfaced
+   downstream as an unexplained failure.
+
+Negative knowledge added by this amendment:
+
+- **Never bind a consumer to the first writer of a resource.** The producer of
+  the contents a node reads is the latest writer before it. The first writer is
+  only correct while there is exactly one, which is the case every
+  single-pass test exercises.
+- **Never require a reader to reach a writer that comes after it.** That rule
+  cannot be satisfied by any ordering, so it forbids reuse rather than catching
+  hazards. Unordered pairs are the hazard.
+- **Never let a deferred pass outlive the contents it reads.** A boundary that
+  overwrites an input is a consumer of every pending pass reading it.
 
 ## References
 

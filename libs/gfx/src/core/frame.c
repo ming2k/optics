@@ -386,7 +386,7 @@ optics_gfx_result optics_gfx_surface_sync_content(optics_gfx_surface *s, optics_
         optics_gfx_result plan_result =
             optics_gfx_render_plan_add_node(&f->render_plan, &node, &index);
         if (plan_result == OPTICS_GFX_OK)
-            plan_result = optics_gfx_render_plan_validate(&f->render_plan);
+            plan_result = optics_gfx_render_plan_validate_reported(&f->render_plan);
         if (plan_result != OPTICS_GFX_OK) {
             if (f->render_plan.node_count == index + 1u)
                 f->render_plan.node_count = index;

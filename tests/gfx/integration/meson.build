@@ -62,6 +62,12 @@ test_render_plan_frame = executable('test_render_plan_frame',
 )
 test('render_plan_frame', test_render_plan_frame, suite : 'integration')
 
+test_plan_effect_order = executable('test_plan_effect_order',
+  'test_plan_effect_order.c',
+  dependencies : [optics_gfx_test_support_dep],
+)
+test('plan_effect_order', test_plan_effect_order, suite : 'integration')
+
 if host_machine.system() == 'linux'
   test_dmabuf = executable('test_dmabuf',
     'test_dmabuf.c',

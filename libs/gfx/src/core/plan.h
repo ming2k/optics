@@ -126,6 +126,19 @@ void *optics_gfx_plan_alloc_params(optics_gfx_plan *p, size_t bytes, size_t alig
  * Nothing touches the command buffer here: the body is built on require. */
 uint32_t optics_gfx_plan_register(optics_gfx_plan *p, const optics_gfx_plan_pass_desc *desc);
 
+/* optics_gfx_render_plan_validate that, on rejection, leaves the rule and
+ * the nodes it names (index and label) in the thread's last-error slot. Every
+ * gfx call site that gates on the plan uses this, so a rejected pass is never
+ * a bare INVALID_STATE. */
+optics_gfx_result optics_gfx_render_plan_validate_reported(const optics_gfx_render_plan *plan);
+
+/* A pass is about to overwrite the image `handle`. Every deferred pass that
+ * reads it and has not executed yet is required now, so the flush at this
+ * boundary runs it against the contents it was registered to read. Without
+ * this a pass materialized after the overwrite would read the new pixels:
+ * deferral would change the result, which pruning must never do. */
+void optics_gfx_plan_require_readers(optics_gfx_plan *p, const void *handle);
+
 /* Mark a pass required by index without sampling anything — the seam for a host
  * that consumes an output by drawing it. Idempotent. */
 void optics_gfx_plan_require_index(optics_gfx_plan *p, uint32_t index);

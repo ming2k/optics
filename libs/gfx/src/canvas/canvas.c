@@ -441,9 +441,16 @@ optics_gfx_result optics_gfx_canvas_begin(optics_gfx_canvas *c,
         goto invalid;
     /* ADR-0147: a canvas pass is a pass boundary, and the only place compute
      * may be inserted. Flush every deferred pass the previous pass's draws
-     * required, so its output is written before this pass samples it. */
-    if (desc->frame && desc->frame->surface)
+     * required, so its output is written before this pass samples it — and
+     * every deferred pass that reads the image this pass is about to
+     * overwrite, so it reads the contents it was registered against rather
+     * than this pass's (write-after-read). */
+    if (desc->frame && desc->frame->surface) {
+        optics_gfx_plan_require_readers(&desc->frame->plan,
+                                        image ? optics_gfx_image_plan_handle(image)
+                                              : (const void *)desc->frame->surface);
         optics_gfx_plan_flush(&desc->frame->plan, optics_gfx_frame_vk_command_buffer(desc->frame));
+    }
     c->bound_cpu_target = target && target->is_cpu ? target : nullptr;
     /* ADR-0089 1B-1: compile the Canvas pass into the frame's RenderPlan and
      * validate its target/resource contract before the backend opens a pass.
@@ -467,10 +474,33 @@ optics_gfx_result optics_gfx_canvas_begin(optics_gfx_canvas *c,
             .mode = OPTICS_GFX_RENDER_ACCESS_WRITE,
             .region = region,
         };
-        uint32_t deps[1] = {};
-        uint32_t dep_count = plan->node_count ? 1u : 0u;
-        if (dep_count)
-            deps[0] = plan->node_count - 1u;
+        /* Order the pass after the previous node (submission order), after the
+         * last writer of its destination (write-after-write), and after every
+         * node that read the destination since (write-after-read). Readers of
+         * an earlier version are ordered behind that writer already. */
+        uint32_t deps[OPTICS_GFX_RENDER_PLAN_MAX_DEPENDENCIES] = {};
+        uint32_t dep_count = 0;
+        const uint32_t last_writer = optics_gfx_render_plan_last_writer(plan, resource);
+        for (uint32_t k = plan->node_count; k-- > 0;) {
+            bool needed = k + 1u == plan->node_count || k == last_writer;
+            for (uint32_t a = 0; !needed && a < plan->nodes[k].access_count; ++a) {
+                const optics_gfx_render_access *ra = &plan->nodes[k].accesses[a];
+                needed = (last_writer == UINT32_MAX || k > last_writer) &&
+                         ra->mode == OPTICS_GFX_RENDER_ACCESS_READ &&
+                         ra->resource.kind == OPTICS_GFX_RENDER_RESOURCE_IMAGE &&
+                         ra->resource.handle == resource;
+            }
+            if (!needed)
+                continue;
+            if (dep_count == OPTICS_GFX_RENDER_PLAN_MAX_DEPENDENCIES) {
+                OPTICS_GFX_FAIL(OPTICS_GFX_ERROR_OUT_OF_RANGE,
+                                "Canvas pass overwrites an image read by more passes than the "
+                                "RenderPlan can order");
+                c->bound_cpu_target = nullptr;
+                return OPTICS_GFX_ERROR_OUT_OF_RANGE;
+            }
+            deps[dep_count++] = k;
+        }
         const optics_gfx_render_node_desc node = {
             .kind = OPTICS_GFX_RENDER_NODE_CANVAS,
             .label = "canvas.pass",
@@ -483,7 +513,7 @@ optics_gfx_result optics_gfx_canvas_begin(optics_gfx_canvas *c,
         uint32_t node_index = UINT32_MAX;
         optics_gfx_result plan_result = optics_gfx_render_plan_add_node(plan, &node, &node_index);
         if (plan_result == OPTICS_GFX_OK)
-            plan_result = optics_gfx_render_plan_validate(plan);
+            plan_result = optics_gfx_render_plan_validate_reported(plan);
         if (plan_result != OPTICS_GFX_OK) {
             if (node_index != UINT32_MAX && plan->node_count == node_index + 1u)
                 plan->node_count = node_index;
@@ -540,12 +570,12 @@ optics_gfx_result optics_gfx_canvas_end(optics_gfx_canvas *c) {
      * pass's node while it recorded. Re-validate before the output transform
      * consumes the pass's write: a read the plan cannot order fails closed. */
     if (c->plan_node != UINT32_MAX && c->frame && c->frame->surface) {
-        optics_gfx_result plan_result = optics_gfx_render_plan_validate(&c->frame->render_plan);
+        optics_gfx_result plan_result =
+            optics_gfx_render_plan_validate_reported(&c->frame->render_plan);
         if (plan_result != OPTICS_GFX_OK) {
             if (c->pass_error == OPTICS_GFX_OK)
                 c->pass_error = plan_result;
             result = plan_result;
-            OPTICS_GFX_FAIL(plan_result, "Canvas pass cannot be described by the RenderPlan");
         }
     }
     c->plan_node = UINT32_MAX;

@@ -1,6 +1,8 @@
 #include "../../../libs/gfx/src/core/render_plan.h"
 #include "optics_test.h"
 
+#include <string.h>
+
 static optics_gfx_render_target target(void) {
     return (optics_gfx_render_target){
         .width = 128,
@@ -268,6 +270,66 @@ static void rejects_write_after_plan_read(void) {
     OT_EXPECT(optics_gfx_render_plan_validate(&plan) == OPTICS_GFX_ERROR_INVALID_STATE);
 }
 
+/* The same write-after-read with the writer ordered after the read is legal:
+ * a scratch image reused by two effects in one frame. The reader must not be
+ * required to depend on a writer that comes after it. */
+static void accepts_ordered_write_after_read(void) {
+    optics_gfx_render_plan plan;
+    optics_gfx_render_target t = target();
+    optics_gfx_render_plan_init(&plan, &t);
+    const void *image = (const void *)0x60;
+    optics_gfx_render_access first = write_image(image, 0);
+    optics_gfx_render_access read = read_image(image, 0, true);
+    optics_gfx_render_access second = write_image(image, 0);
+    uint32_t w0 = 0, r = 0;
+    OT_EXPECT(optics_gfx_render_plan_add_node(
+                  &plan,
+                  &(optics_gfx_render_node_desc){
+                      .kind = OPTICS_GFX_RENDER_NODE_CANVAS, .accesses = &first, .access_count = 1},
+                  &w0) == OPTICS_GFX_OK);
+    OT_EXPECT(optics_gfx_render_plan_add_node(
+                  &plan,
+                  &(optics_gfx_render_node_desc){.kind = OPTICS_GFX_RENDER_NODE_EFFECT,
+                                                 .accesses = &read,
+                                                 .access_count = 1,
+                                                 .dependencies = &w0,
+                                                 .dependency_count = 1},
+                  &r) == OPTICS_GFX_OK);
+    OT_EXPECT(optics_gfx_render_plan_add_node(
+                  &plan,
+                  &(optics_gfx_render_node_desc){.kind = OPTICS_GFX_RENDER_NODE_CANVAS,
+                                                 .accesses = &second,
+                                                 .access_count = 1,
+                                                 .dependencies = &r,
+                                                 .dependency_count = 1},
+                  nullptr) == OPTICS_GFX_OK);
+    OT_EXPECT(optics_gfx_render_plan_validate(&plan) == OPTICS_GFX_OK);
+}
+
+/* A rejection names its rule and the two nodes it concerns. */
+static void check_reports_the_unordered_pair(void) {
+    optics_gfx_render_plan plan;
+    optics_gfx_render_target t = target();
+    optics_gfx_render_plan_init(&plan, &t);
+    optics_gfx_render_access write = write_image((const void *)0x70, 1);
+    optics_gfx_render_access read = read_image((const void *)0x70, 1, true);
+    OT_EXPECT(optics_gfx_render_plan_add_node(
+                  &plan,
+                  &(optics_gfx_render_node_desc){
+                      .kind = OPTICS_GFX_RENDER_NODE_UPLOAD, .accesses = &write, .access_count = 1},
+                  nullptr) == OPTICS_GFX_OK);
+    OT_EXPECT(optics_gfx_render_plan_add_node(
+                  &plan,
+                  &(optics_gfx_render_node_desc){
+                      .kind = OPTICS_GFX_RENDER_NODE_CANVAS, .accesses = &read, .access_count = 1},
+                  nullptr) == OPTICS_GFX_OK);
+    optics_gfx_render_plan_issue issue = {};
+    OT_EXPECT(optics_gfx_render_plan_check(&plan, &issue) == OPTICS_GFX_ERROR_INVALID_STATE);
+    OT_EXPECT(issue.rule != nullptr && strstr(issue.rule, "unordered") != nullptr);
+    OT_EXPECT(issue.node == 1u && issue.other == 0u);
+    OT_EXPECT(optics_gfx_render_plan_validate(&plan) == OPTICS_GFX_ERROR_INVALID_STATE);
+}
+
 int main(void) {
     valid_chain();
     rejects_unordered_read();
@@ -278,5 +340,7 @@ int main(void) {
     rejects_upload_read_without_edge();
     rejects_output_blit_without_canvas_edge();
     rejects_write_after_plan_read();
+    accepts_ordered_write_after_read();
+    check_reports_the_unordered_pair();
     return OT_REPORT();
 }
