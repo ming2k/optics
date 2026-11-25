@@ -159,6 +159,12 @@ test('ui_contracts', contract_test, suite : 'unit')
 store_fault_test = executable('test_store_fault', 'test_store_fault.c',
   '../../libs/ui/src/store/store.c', dependencies : [ui_dep, m_dep, optics_test_dep])
 test('ui_store_fault', store_fault_test, suite : 'unit')
+# Model-based store stress (store_model.h): store.c compiled in, checked
+# against a reference model and its structural invariants every frame. A
+# store bug that loops forever fails on the timeout instead of hanging CI.
+store_model_test = executable('test_store_model', 'test_store_model.c',
+  '../../libs/ui/src/store/store.c', dependencies : [ui_dep, m_dep, optics_test_dep])
+test('ui_store_model', store_model_test, suite : 'unit', timeout : 120)
 
 snapshot_test = executable('test_snapshot', 'test_snapshot.c', dependencies : [ui_dep, m_dep, optics_test_dep])
 test('ui_snapshot', snapshot_test, suite : 'integration')

@@ -2,6 +2,7 @@
 
 #include "../internal.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 
 static uint32_t slot_index(optics_ui_id id, uint32_t cap) {
@@ -48,6 +49,7 @@ static void live_unlink(optics_ui_store *s, uint32_t i) {
 /* Backward-shift deletion preserves probe reachability without allocating.
  * cursor is the next live-list slot in the ongoing reap pass. */
 static void store_erase(optics_ui_store *s, uint32_t hole, uint32_t *cursor) {
+    s->epoch++;
     live_unlink(s, hole);
     s->count--;
     uint32_t mask = s->cap - 1;
@@ -76,6 +78,10 @@ static void store_erase(optics_ui_store *s, uint32_t hole, uint32_t *cursor) {
 
 static optics_gfx_result store_grow(optics_ui *ui, uint32_t new_cap) {
     optics_ui_store *s = &ui->store;
+    /* Linear probing needs a free slot to terminate; refuse any capacity
+     * that would leave the rehashed table at or over the 3/4 load limit. */
+    if ((uint64_t)s->count * 4 >= (uint64_t)new_cap * 3)
+        return OPTICS_GFX_ERROR_INVALID_ARGUMENT;
     optics_ui_store_slot *slots = optics_ui__alloc(ui, new_cap * sizeof *slots);
     if (!slots)
         return OPTICS_GFX_ERROR_OUT_OF_MEMORY;
@@ -101,6 +107,7 @@ static optics_gfx_result store_grow(optics_ui *ui, uint32_t new_cap) {
     optics_ui__free(ui, s->slots);
     s->slots = slots;
     s->cap = new_cap;
+    s->epoch++;
     s->live_head = new_head;
     s->live_tail = new_tail;
     return OPTICS_GFX_OK;
@@ -170,6 +177,7 @@ static bool store_insert(optics_ui *ui, optics_ui_node *n) {
     s->slots[i].id = n->id;
     s->slots[i].node = n;
     s->count++;
+    s->epoch++;
     live_link(s, i);
     return true;
 }
@@ -254,11 +262,21 @@ void optics_ui__store_reap(optics_ui *ui) {
      * dwell time before it can trigger again). */
     if (s->cap > OPTICS_UI_STORE_MIN_CAP && (uint64_t)s->count * 8 <= s->cap) {
         if (++s->idle_frames >= OPTICS_UI_STORE_SHRINK_FRAMES) {
+            /* Entry condition (count*8 <= cap) puts cap/2 at <= 1/4 load.
+             * Keep halving only while the next size stays at <= 1/4 load,
+             * well clear of the 3/4 growth threshold. (The inverted test
+             * this replaced halved while the table was already too small
+             * and rehashed e.g. 100 live nodes into 64 slots, spinning
+             * forever in store_grow's probe loop.) */
             uint32_t want = s->cap / 2;
-            while (want > OPTICS_UI_STORE_MIN_CAP && (uint64_t)s->count * 8 > want)
+            while (want / 2 >= OPTICS_UI_STORE_MIN_CAP && (uint64_t)s->count * 4 <= want / 2)
                 want /= 2;
-            if (want < s->cap && store_grow(ui, want) == OPTICS_GFX_OK)
-                s->idle_frames = 0;
+            /* Restart the dwell whether or not the rehash succeeded: a
+             * refused or out-of-memory shrink must not be retried on every
+             * following frame. */
+            if (want < s->cap)
+                (void)store_grow(ui, want);
+            s->idle_frames = 0;
         }
     } else {
         s->idle_frames = 0;
@@ -276,5 +294,74 @@ void optics_ui__store_reap(optics_ui *ui) {
         ui->focused_id = 0;
         ui->focus_visible = false;
     }
+#if OPTICS_UI_STORE_VALIDATE
+    /* Debug builds re-prove the table after every frame that changed its
+     * structure: a broken invariant aborts here, at the frame that broke
+     * it, instead of surfacing later as a hang in a probe loop or a
+     * silently lost node. Steady frames skip the O(cap) walk. */
+    if (s->epoch != s->validated_epoch) {
+        optics_ui__store_check(ui);
+        s->validated_epoch = s->epoch;
+    }
+#endif
     OPTICS_GFX_PROFILE_ZONE_END(z);
+}
+
+const char *optics_ui__store_validate(const optics_ui *ui) {
+    const optics_ui_store *s = &ui->store;
+    if (!s->slots)
+        return s->cap || s->count ? "no slot array but nonzero cap/count" : nullptr;
+    if (s->cap < 4 || (s->cap & (s->cap - 1)))
+        return "capacity is not a power of two >= 4";
+    /* Linear probing terminates only on an empty slot, and growth keeps
+     * the load under 3/4: either bound broken means a lookup or rehash
+     * can spin forever. */
+    if ((uint64_t)s->count * 4 >= (uint64_t)s->cap * 3)
+        return "load factor at or above 3/4";
+    uint32_t occupied = 0, mask = s->cap - 1;
+    for (uint32_t i = 0; i < s->cap; i++) {
+        optics_ui_id id = s->slots[i].id;
+        if (!id) {
+            if (s->slots[i].node)
+                return "empty slot holds a node";
+            continue;
+        }
+        occupied++;
+        if (!s->slots[i].node || s->slots[i].node->id != id)
+            return "slot id does not match its node";
+        /* Reachable: no empty slot between the home slot and this one. */
+        for (uint32_t j = slot_index(id, s->cap); j != i; j = (j + 1) & mask)
+            if (!s->slots[j].id)
+                return "occupied slot unreachable from its home (probe gap)";
+        /* Unique: the first match on the probe path is this slot. */
+        if (optics_ui__store_find(ui, id) != s->slots[i].node)
+            return "duplicate id in the table";
+    }
+    if (occupied != s->count)
+        return "occupied slots disagree with count";
+    /* The live list threads every occupied slot exactly once. */
+    uint32_t walked = 0, prev = OPTICS_UI_STORE_LINK_NONE;
+    for (uint32_t i = s->live_head; i != OPTICS_UI_STORE_LINK_NONE; i = s->slots[i].next_live) {
+        if (i >= s->cap || !s->slots[i].id)
+            return "live list visits an empty or out-of-range slot";
+        if (s->slots[i].prev_live != prev)
+            return "live list back-link broken";
+        if (++walked > s->count)
+            return "live list longer than count (cycle or stale slot)";
+        prev = i;
+    }
+    if (walked != s->count)
+        return "live list shorter than count (lost node)";
+    if (s->live_tail != prev)
+        return "live list tail does not match the last node";
+    return nullptr;
+}
+
+void optics_ui__store_check(const optics_ui *ui) {
+    const char *broken = optics_ui__store_validate(ui);
+    if (!broken)
+        return;
+    fprintf(stderr, "optics-ui: retained store invariant violated: %s (cap=%u count=%u)\n", broken,
+            ui->store.cap, ui->store.count);
+    abort();
 }

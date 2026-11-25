@@ -14,6 +14,9 @@ negative_knowledge: true
 - Date: 2026-07-21
 - Scope: lens (L2 toolkit). Defines the persistent node map and its
   garbage-collection policy.
+- Amended: 2026-11-25 — shrink sizing rule, the store's structural
+  invariants and their debug-build enforcement, and the model-based
+  verification that guards them (see the amendment below).
 
 ## Context
 
@@ -99,6 +102,61 @@ Negative:
   grace-window storage; mitigated by the small (8-frame) window.
 - Cluster rehash on delete is O(cluster) — acceptable because the grace
   window bounds how many nodes die per frame.
+
+## Amendment — 2026-11-25: shrink sizing, invariants, verification
+
+**What failed.** The shrink path (added after this ADR, alongside the
+live list) chose its target with `while (want > MIN_CAP && count * 8 >
+want) want /= 2` — the comparison was inverted, so it halved *while the
+table was already too small*. Any population in (cap/16, cap/8] after a
+spike, held for the 300-frame dwell, was rehashed into 64 slots: e.g.
+100 live nodes at cap 1024 (a file manager leaving a large thumbnail
+grid). Linear probing into a full table never finds a free slot, so
+`store_grow` spun forever on the UI thread. It shipped through v0.0.86
+because no test held a surviving population across the dwell — the
+spike test let everything expire, and the public-API fuzz harness mints
+a fresh id per widget, so neither could reach the band.
+
+**Decision.**
+
+1. **Shrink target.** After `OPTICS_UI_STORE_SHRINK_FRAMES` consecutive
+   frames at load <= 1/8, halve while the *next* size keeps load <= 1/4
+   (`count * 4 <= want / 2`), never below `OPTICS_UI_STORE_MIN_CAP`. The
+   dwell restarts after any attempt, successful or not.
+2. **Rehash precondition.** `store_grow` refuses (returns
+   `OPTICS_GFX_ERROR_INVALID_ARGUMENT`) any capacity at which the table
+   would be at or above 3/4 load. A wrong caller can now only fail to
+   resize; it cannot hang.
+3. **Invariants, stated and checked.** `optics_ui__store_validate`
+   proves: capacity is a power of two >= 4; load < 3/4 (so every probe
+   terminates); every occupied slot is reachable from its home slot; ids
+   are unique; the live list threads every occupied slot exactly once
+   with consistent back-links and tail. Debug builds
+   (`OPTICS_UI_STORE_VALIDATE`, on unless `NDEBUG`) run it at the end of
+   every reap whose frame changed the table's structure (a wrapping
+   `epoch` counts inserts, erases, and rehashes) and abort with the
+   broken invariant — at the frame that broke it, not later as a hang.
+4. **Model-based verification.** `tests/ui/store_model.h` drives
+   `store.c` directly against a reference model (who must be present,
+   at which retained pointer) and checks, every changed frame: the
+   invariants, model agreement, pointer stability, hysteresis (no
+   shrink before the dwell), and proportionate capacity (the table must
+   shrink after a sustained collapse). It backs a deterministic unit
+   test (`test_store_model`: the freeze regression, a shrink-band sweep
+   for capacities 128–16384, gradual decline, threshold wobble, grace
+   re-entry, seeded random walks) and a libFuzzer harness
+   (`fuzz_ui_store_model`, byte programs with population *holds* so the
+   dwell is reachable) with a committed seed corpus. Mutation-checked:
+   the original inverted loop, a wrong backward-shift test, a forgotten
+   reap cursor, a grace off-by-one, dropped back-links, a hysteresis that
+   never resets, and a disabled shrink each fail it.
+
+**Negative knowledge.** A table that can resize in both directions needs
+tests that *hold* a population through every resize trigger, not just
+spike-and-expire; crash-only fuzzing over the public API cannot reach
+hysteresis-gated paths. State the load invariants in code and check them
+in debug builds — the bug was a one-character class of error that the
+invariant check reports immediately.
 
 ## References
 

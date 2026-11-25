@@ -65,6 +65,9 @@ jobs:
           - target: fuzz_ui_store
             dir: tests/ui/fuzz
             corpus: tests/ui/fuzz/corpus/ui_store
+          - target: fuzz_ui_store_model
+            dir: tests/ui/fuzz
+            corpus: tests/ui/fuzz/corpus/ui_store_model
           - target: fuzz_svg_parse
             dir: tests/svg/fuzz
             corpus: tests/svg/fuzz/corpus/svg_parse

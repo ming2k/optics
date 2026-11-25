@@ -21,6 +21,11 @@ silently reading a different descriptor layout.
 - **`liboptics_gfx`: an ordered write-after-read is accepted.** The RenderPlan validator required every reader to reach every writer of an image, including writers after it. A Canvas pass reusing a scratch image that an earlier effect read (one shadow mask for several windows in a frame) was rejected. A reader and a writer now need a dependency path in either direction, and a Canvas pass depends on its destination's last writer and on every reader since.
 - **`liboptics_gfx`: deferral never changes what an effect reads.** A Canvas pass that overwrites an image now first runs every unexecuted effect that reads it. An effect materialized after the overwrite therefore still sees the contents it was registered against.
 - **`liboptics_gfx`: RenderPlan rejections carry a diagnostic.** `optics_gfx_get_last_error` names the failed rule and the two nodes for every plan gate (Canvas begin and end, upload, frame output), where it used to report nothing.
+- **`liboptics_ui`: store shrink no longer hangs the UI thread.** The shrink-size loop in `optics_ui__store_reap` halved while the table was already too small, so a population in (cap/16, cap/8] after a spike (e.g. 100 live nodes at cap 1024) was rehashed into 64 slots and `store_grow` spun forever probing a full table. The loop now keeps the new table at ≤ 1/4 load, `store_grow` refuses any capacity at or over the 3/4 load limit, and `test_store_spike` holds survivors through the 300-frame shrink dwell.
+
+### Added
+- **`liboptics_ui`: store self-validation.** `optics_ui__store_validate` checks the retained store's structural invariants (power-of-two capacity, load < 3/4, probe reachability, unique ids, live-list integrity); debug builds run it after every frame that changed the table and abort with the broken invariant. See ADR-0027 (amended 2026-11-25).
+- **Model-based store verification.** `test_store_model` (deterministic scenarios plus seeded random walks) and the `fuzz_ui_store_model` libFuzzer harness check `store.c` against a reference model every frame; the harness joins the `ci-fuzz` matrix with a seed corpus that includes the shrink-freeze regression.
 
 ## [0.0.86] - 2026-11-24
 

@@ -37,6 +37,20 @@ static void saw_button(const optics_ui_semantics *s, optics_gfx_rect b, optics_u
         g_seen_button = true;
 }
 
+/* Frames that keep `keep` buttons alive, so the store holds a nonzero
+ * population while the shrink hysteresis counts down. */
+static void hold_population(optics_ui *ui, int keep, int frames) {
+    for (int f = 0; f < frames; f++) {
+        optics_ui_begin(ui, &(optics_ui_input){.size = sizeof(optics_ui_input)});
+        for (int i = 0; i < keep; i++) {
+            char label[32];
+            snprintf(label, sizeof label, "spike##%d", i);
+            optics_ui_button(ui, &(optics_ui_button_opts){.label = label});
+        }
+        optics_ui_test_end(ui);
+    }
+}
+
 /* Build `count` buttons in one frame, then run `idle` empty frames so
  * the store passes through ENTERING -> LEAVING -> reaped, including the
  * cluster clears around each reaped slot. */
@@ -80,6 +94,26 @@ int main(void) {
     /* 3. Re-spike after the dwell: the store must still create, find,
      *    and reap normally (a corrupted list shows up here or at exit). */
     spike_and_dwell(ui, 500, GRACE_FRAMES + 4);
+
+    /* 3b. Shrink with survivors: after a spike grows the table, keep a
+     *     population above OPTICS_UI_STORE_MIN_CAP (64) but under 1/8 of
+     *     capacity alive past OPTICS_UI_STORE_SHRINK_FRAMES (300). The
+     *     inverted shrink-size loop picked 64 slots for 100+ live nodes
+     *     and spun forever rehashing (seen as a frozen Arca window after
+     *     leaving a large thumbnail grid). Several survivor counts cover
+     *     the halving boundaries. */
+    /* The bad band is cap/16 < live <= cap/8: a 600-node spike leaves
+     * cap at 1024 and 100 survivors sit in it on the first shrink; the
+     * larger spikes walk down several 300-frame halvings into the band. */
+    static const struct {
+        int spike, keep, frames;
+    } shrink[] = {{600, 100, 320}, {600, 65, 320}, {4000, 65, 1300}, {2000, 200, 1300}};
+    for (size_t k = 0; k < sizeof shrink / sizeof shrink[0]; k++) {
+        spike_and_dwell(ui, shrink[k].spike, 0);
+        hold_population(ui, shrink[k].keep, shrink[k].frames);
+        OT_EXPECT(k < sizeof shrink / sizeof shrink[0]); /* did not hang */
+    }
+    spike_and_dwell(ui, 0, GRACE_FRAMES + 4);
 
     /* 4. Ordinary frames still work after all the GC: build a button
      *    and verify the retained node carries the button role (the
