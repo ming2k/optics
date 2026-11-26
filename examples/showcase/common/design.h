@@ -4,7 +4,7 @@
  *
  * Strictly uses public <optics/ui.h> APIs. Enforces a consistent 8px spacing
  * scale, typographic hierarchy, card surfaces, and property rows across
- * widget_gallery, material_gallery, and scene_studio.
+ * the showcase applications (currently widget_gallery).
  */
 
 #ifndef OPTICS_SHOWCASE_DESIGN_H

@@ -1,6 +1,6 @@
 # Reference Specifications
 
-Technical descriptions of C APIs, exported symbols, material properties, effect operators, and concurrency rules. Consult these documents for exact lookup information.
+Technical descriptions of C APIs, exported symbols, effect operators, and concurrency rules. Consult these documents for exact lookup information.
 
 ---
 
@@ -10,8 +10,6 @@ Technical descriptions of C APIs, exported symbols, material properties, effect 
 | :--- | :--- |
 | **[Public API Architecture](api.md)** | Core C API conventions, lifecycle contracts, and header structure. |
 | **[Exported Symbol Index](symbols.md)** | Index of exported C symbols, grouped by public header. |
-| **[SVG Document Compiler](svg.md)** | SVG parse/paint/rasterize contracts, flat shape IR, ownership, and resource limits. |
-| **[Material System](material.md)** | Technical specification for physical materials: Liquid Glass, Frosted Glass, Acrylic, and Mica. |
 | **[Image Effect Operators](effect.md)** | Pixel operators, blur algorithms, tone mapping, and scratch render target rules in `<optics/gfx/effect.h>`. |
 | **[Thread Safety & Concurrency](thread-safety.md)** | Thread-safety contracts across `optics_gfx_device`, surfaces, frame loops, and presentation. |
 | **[Glossary](glossary.md)** | Authoritative glossary of optics, rendering, geometry, and UI terminology. |

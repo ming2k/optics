@@ -29,7 +29,6 @@
 
 #include <optics/gfx.h>
 #include <optics/gfx/observe.h>
-#include <optics/material.h>
 #include <optics/ui.h>
 
 #include <stdalign.h>
@@ -228,30 +227,7 @@ static void lane_funnel_oom(optics_gfx_device *d) {
               c.live == 0);
 }
 
-/* --- 2/3. libraries must route through it ----------------------------- */
-
-static void lane_material_uses_funnel(optics_gfx_device *d) {
-    optics_material_mica_filter *warm = nullptr;
-    if (optics_material_mica_filter_create(d, &warm) != OPTICS_GFX_OK) {
-        fprintf(stderr, "info: optics_material_mica_filter unavailable; lane skipped\n");
-        return;
-    }
-    optics_material_mica_filter_release(warm);
-
-    size_t before = g_live_bytes;
-    uint64_t frees_before = g_frees;
-
-    optics_material_mica_filter *f = nullptr;
-    OT_EXPECT(optics_material_mica_filter_create(d, &f) == OPTICS_GFX_OK);
-    size_t after_create = g_live_bytes;
-    /* A filter is a struct plus its frame slots; any growth here is material's
-     * memory arriving through the caller's allocator. */
-    OT_EXPECT(after_create > before);
-
-    optics_material_mica_filter_release(f);
-    OT_EXPECT(g_live_bytes == before);
-    OT_EXPECT(g_frees > frees_before);
-}
+/* --- 2. peer libraries must route through it -------------------------- */
 
 static void lane_ui_uses_funnel(optics_gfx_device *d) {
     optics_ui_desc ld = {.size = sizeof(ld), .device = d};
@@ -261,11 +237,33 @@ static void lane_ui_uses_funnel(optics_gfx_device *d) {
         return;
     }
     size_t before = g_live_bytes;
+    /* Registering and unregistering a runtime vector icon must also route
+     * through the device allocator funnel and drain completely on unregister. */
+    const optics_ui_icon_cmd ic_cmds[] = {
+        {.kind = OPTICS_UI_ICON_CMD_CIRCLE, .params = {12.0f, 12.0f, 8.0f}},
+    };
+    const optics_ui_icon_run ic_runs[] = {
+        {.first_cmd = 0u,
+         .count = 1u,
+         .color = optics_gfx_color_rgba_premul(255, 255, 255, 255),
+         .paint = OPTICS_UI_ICON_PAINT_FILL},
+    };
+    optics_ui_icon_id ic = optics_ui_icon_register(ui, &(optics_ui_icon_desc){
+                                                           .cmds = ic_cmds,
+                                                           .count = 1u,
+                                                           .runs = ic_runs,
+                                                           .run_count = 1u,
+                                                       });
+    OT_EXPECT(ic != OPTICS_UI_ICON_NONE);
+    OT_EXPECT(g_live_bytes > before);
+
     /* A frame build allocates from the ui funnel. */
     optics_ui_begin(ui, nullptr);
+    optics_ui_icon(ui, &(optics_ui_icon_opts){.id = ic, .size = 24.0f});
     optics_ui_end(ui);
     size_t during = g_live_bytes;
 
+    optics_ui_icon_unregister(ui, ic);
     optics_ui_release(ui);
     optics_gfx_device_wait_idle(d);
 
@@ -410,7 +408,6 @@ int main(void) {
     lane_funnel_contract(d);
     lane_funnel_rejects_unattributed(d);
     lane_funnel_oom(d);
-    lane_material_uses_funnel(d);
     lane_ui_uses_funnel(d);
     lane_image_snapshot_oom(d);
     lane_image_lut_oom(d);

@@ -106,13 +106,21 @@ static void test_button_no_click_when_disabled(void) {
     optics_ui_release(ui);
 }
 
-static size_t rendered_icon_pixels_with_outline(optics_ui_icon_id icon, bool *center_lit,
+static const optics_ui_icon_cmd TEST_CIRCLE_CMDS[] = {
+    {.kind = OPTICS_UI_ICON_CMD_CIRCLE, .params = {12.0f, 12.0f, 9.0f}},
+};
+
+static size_t rendered_icon_pixels_with_outline(const optics_ui_icon_desc *custom,
+                                                optics_ui_icon_id builtin_icon, bool *center_lit,
                                                 bool with_outline, size_t *outline_pixels) {
     optics_ui *ui = nullptr;
     OT_EXPECT(optics_ui_create(&(optics_ui_desc){}, &ui) == OPTICS_GFX_OK);
     optics_ui_theme theme = optics_ui_theme_dark();
     theme.color_fg = optics_gfx_color_rgba_premul(255, 255, 255, 255);
     optics_ui_set_theme(ui, theme);
+
+    optics_ui_icon_id icon = custom ? optics_ui_icon_register(ui, custom) : builtin_icon;
+    OT_EXPECT(icon != OPTICS_UI_ICON_NONE);
 
     optics_ui_input input = {.display_size = {24, 24}, .dt_seconds = 0.016f};
     optics_ui_begin(ui, &input);
@@ -168,15 +176,26 @@ static size_t rendered_icon_pixels_with_outline(optics_ui_icon_id icon, bool *ce
     return lit;
 }
 
-static size_t rendered_icon_pixels(optics_ui_icon_id icon, bool *center_lit) {
-    return rendered_icon_pixels_with_outline(icon, center_lit, false, nullptr);
+static size_t rendered_icon_pixels(const optics_ui_icon_desc *custom, bool *center_lit) {
+    return rendered_icon_pixels_with_outline(custom, OPTICS_UI_ICON_NONE, center_lit, false,
+                                             nullptr);
 }
 
-static void test_material_rounded_star_pair_uses_filled_svg_paths(void) {
+static void test_filled_and_stroked_vector_icons_distinguish_center(void) {
     bool outline_center = false;
     bool filled_center = false;
-    size_t outline_pixels = rendered_icon_pixels(OPTICS_UI_ICON_STAR_ROUNDED, &outline_center);
-    size_t filled_pixels = rendered_icon_pixels(OPTICS_UI_ICON_STAR_ROUNDED_FILLED, &filled_center);
+    optics_ui_icon_desc ring = {
+        .cmds = TEST_CIRCLE_CMDS,
+        .count = 1u,
+        .paint = OPTICS_UI_ICON_PAINT_STROKE,
+    };
+    optics_ui_icon_desc disc = {
+        .cmds = TEST_CIRCLE_CMDS,
+        .count = 1u,
+        .paint = OPTICS_UI_ICON_PAINT_FILL,
+    };
+    size_t outline_pixels = rendered_icon_pixels(&ring, &outline_center);
+    size_t filled_pixels = rendered_icon_pixels(&disc, &filled_center);
     OT_EXPECT(outline_pixels > 0);
     OT_EXPECT(filled_pixels > 0);
     OT_EXPECT(!outline_center);
@@ -195,11 +214,11 @@ static void test_icon_outline_adds_a_contour_without_changing_intrinsic_size(voi
     optics_ui_begin(ui, &IN0);
     optics_ui_row_begin(ui, nullptr);
     optics_ui_push_id(ui, "plain");
-    optics_ui_icon(ui, &(optics_ui_icon_opts){.id = OPTICS_UI_ICON_GLOBE, .size = 24.0f});
+    optics_ui_icon(ui, &(optics_ui_icon_opts){.id = OPTICS_UI_ICON_CHEVRON_RIGHT, .size = 24.0f});
     optics_ui_pop_id(ui);
     optics_ui_push_id(ui, "outlined");
     optics_ui_push_style(ui, outline);
-    optics_ui_icon(ui, &(optics_ui_icon_opts){.id = OPTICS_UI_ICON_GLOBE, .size = 24.0f});
+    optics_ui_icon(ui, &(optics_ui_icon_opts){.id = OPTICS_UI_ICON_CHEVRON_RIGHT, .size = 24.0f});
     optics_ui_pop_style(ui);
     optics_ui_pop_id(ui);
     optics_ui_close(ui);
@@ -213,8 +232,8 @@ static void test_icon_outline_adds_a_contour_without_changing_intrinsic_size(voi
 
     bool center_lit = false;
     size_t contour = 0;
-    size_t lit =
-        rendered_icon_pixels_with_outline(OPTICS_UI_ICON_GLOBE, &center_lit, true, &contour);
+    size_t lit = rendered_icon_pixels_with_outline(nullptr, OPTICS_UI_ICON_CHEVRON_RIGHT,
+                                                   &center_lit, true, &contour);
     OT_EXPECT(lit > 0);
     OT_EXPECT(contour > 0);
 }
@@ -224,20 +243,20 @@ static void test_icon_button_requests_pointer_cursor(void) {
     OT_EXPECT(optics_ui_create(&(optics_ui_desc){}, &ui) == OPTICS_GFX_OK);
 
     optics_ui_begin(ui, &IN0);
-    optics_ui_button(ui, &(optics_ui_button_opts){.icon = OPTICS_UI_ICON_PLAY});
+    optics_ui_button(ui, &(optics_ui_button_opts){.icon = OPTICS_UI_ICON_CHEVRON_RIGHT});
     optics_ui_test_end(ui);
 
     optics_ui_input hover = IN0;
     hover.cursor = (optics_gfx_point){10.0f, 10.0f};
     optics_ui_begin(ui, &hover);
-    optics_ui_button(ui, &(optics_ui_button_opts){.icon = OPTICS_UI_ICON_PLAY});
+    optics_ui_button(ui, &(optics_ui_button_opts){.icon = OPTICS_UI_ICON_CHEVRON_RIGHT});
     OT_EXPECT(optics_ui_get_cursor_hint(ui) == OPTICS_UI_CURSOR_POINTER);
     optics_ui_test_end(ui);
 
     optics_ui_input away = IN0;
     away.cursor = (optics_gfx_point){300.0f, 150.0f};
     optics_ui_begin(ui, &away);
-    optics_ui_button(ui, &(optics_ui_button_opts){.icon = OPTICS_UI_ICON_PLAY});
+    optics_ui_button(ui, &(optics_ui_button_opts){.icon = OPTICS_UI_ICON_CHEVRON_RIGHT});
     OT_EXPECT(optics_ui_get_cursor_hint(ui) == OPTICS_UI_CURSOR_DEFAULT);
     optics_ui_test_end(ui);
 
@@ -284,7 +303,7 @@ int main(void) {
     test_button_click();
     test_button_mouse_secondary();
     test_button_no_click_when_disabled();
-    test_material_rounded_star_pair_uses_filled_svg_paths();
+    test_filled_and_stroked_vector_icons_distinguish_center();
     test_icon_outline_adds_a_contour_without_changing_intrinsic_size();
     test_icon_button_requests_pointer_cursor();
     return OT_REPORT();

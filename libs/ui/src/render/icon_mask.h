@@ -57,14 +57,14 @@ typedef enum optics_ui__icon_mask_layer : uint32_t {
 typedef struct optics_ui__icon_run_span {
     uint32_t first_cmd;
     uint32_t count;
-    uint32_t color; /* straight-alpha 0xRRGGBBAA; 0 = follow the caller's colour */
+    optics_gfx_color color; /* premultiplied 0xAARRGGBB; 0 = follow the caller's colour */
     bool fill;
 } optics_ui__icon_run_span;
 
 /* Resolve `desc` into up to `cap` run spans. Returns 0 for a malformed
  * descriptor (an out-of-range run table) or an empty stream. */
-uint32_t optics_ui__icon_run_spans(const optics_ui_icon_desc *desc, uint8_t mode,
-                                   optics_ui__icon_run_span *out, uint32_t cap);
+uint32_t optics_ui__icon_run_spans(const optics_ui_icon_desc *desc, optics_ui__icon_run_span *out,
+                                   uint32_t cap);
 
 /* Append one run's command stream to `p`, scaled by `s` and offset by (ox, oy).
  * The single emitter for icon geometry: the bake and the vector fallback both
@@ -73,14 +73,13 @@ void optics_ui__emit_run_path(optics_gfx_path *p, const optics_ui_icon_cmd *cmds
                               uint32_t count, float s, float ox, float oy);
 
 /* Resolve one run's colour: a run carrying `color == 0` follows the caller's
- * (theme) colour; an explicit run colour is straight-alpha 0xRRGGBBAA and is
- * premultiplied here so it composites with the same SRC_OVER contract as every
- * other canvas draw. */
-optics_gfx_color optics_ui__icon_run_color(uint32_t run_color, optics_gfx_color theme_color);
+ * (theme) colour; otherwise returns the run's premultiplied `optics_gfx_color`. */
+optics_gfx_color optics_ui__icon_run_color(optics_gfx_color run_color,
+                                           optics_gfx_color theme_color);
 
 /* The coverage mask for one paint run of one icon at one device size. */
 typedef struct optics_ui__icon_mask {
-    int32_t icon_id;
+    optics_ui_icon_id icon_id;
     uint32_t dev_px;       /* icon box edge, device px                     */
     uint32_t dev_stroke_q; /* body stroke width in 1/16 device px; 0 = fill */
     uint32_t outline_q;    /* outline width in 1/16 device px; 0 = body     */
@@ -109,6 +108,9 @@ void optics_ui__icon_mask_pool_init(optics_ui *ui);
 /* Release every cached mask (images included) and empty the pool. */
 void optics_ui__icon_mask_pool_destroy(optics_ui *ui);
 
+/* Evict every cached mask belonging to `icon_id` (called on unregister). */
+void optics_ui__icon_mask_evict(optics_ui *ui, optics_ui_icon_id icon_id);
+
 /* Look up — baking on miss — the mask for one LAYER of `icon_id`'s paint run
  * `run_index` at `dev_px` device pixels, with `dev_stroke` device-pixel body
  * stroke width (0 for a fill run) and `outline` device-pixel outline width (0
@@ -126,8 +128,8 @@ void optics_ui__icon_mask_pool_destroy(optics_ui *ui);
  * `dev_stroke` and `outline` are quantised to 1/16 device px inside the key so
  * the pool has bounded cardinality; the quantised values are what the mask is
  * baked with, so key and bytes always agree. */
-optics_ui__icon_mask *optics_ui__icon_mask_acquire(optics_ui *ui, int32_t icon_id, uint32_t dev_px,
-                                                   float dev_stroke, float outline,
+optics_ui__icon_mask *optics_ui__icon_mask_acquire(optics_ui *ui, optics_ui_icon_id icon_id,
+                                                   uint32_t dev_px, float dev_stroke, float outline,
                                                    uint32_t run_index,
                                                    optics_ui__icon_mask_layer layer);
 

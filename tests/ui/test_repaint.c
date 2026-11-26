@@ -952,15 +952,16 @@ static void test_icon_damage_reaches_past_its_command_rect(void) {
 
     for (int i = 0; i < 4; i++) {
         optics_ui_begin(ui, &IN0);
-        optics_ui_icon(ui, &(optics_ui_icon_opts){
-                               .id = OPTICS_UI_ICON_CHECK, .box = {.id = "ic"}, .size = 16.0f});
+        optics_ui_icon(ui, &(optics_ui_icon_opts){.id = OPTICS_UI_ICON_CHEVRON_RIGHT,
+                                                  .box = {.id = "ic"},
+                                                  .size = 16.0f});
         optics_ui_test_end(ui);
         render_frame(ui, canvas);
     }
 
     /* A colour change repaints the icon, halo included. */
     optics_ui_begin(ui, &IN0);
-    optics_ui_icon(ui, &(optics_ui_icon_opts){.id = OPTICS_UI_ICON_CHECK,
+    optics_ui_icon(ui, &(optics_ui_icon_opts){.id = OPTICS_UI_ICON_CHEVRON_RIGHT,
                                               .box = {.id = "ic"},
                                               .size = 16.0f,
                                               .color = 0xFFFF0000u});
@@ -1217,6 +1218,725 @@ static void test_host_caret_does_not_keep_an_unfocused_context_awake(void) {
     optics_ui_release(ui);
 }
 
+/* Parameterized helper: verify that blurring a textfield with a transparent
+ * resting border (or border_width == 0 minimalist 1.5px ring) erases EVERY
+ * pixel in the outer perimeter (all 4 edges + all 4 rounded corners) under
+ * regional damage repainting, across 1x/HiDPI scales and fractional origins. */
+static void check_textfield_blur_border_case(float scale, float border_width, float pad) {
+    optics_ui *ui = nullptr;
+    optics_gfx_canvas *canvas = nullptr;
+    const uint32_t dev_w = (uint32_t)(400.0f * scale);
+    const uint32_t dev_h = (uint32_t)(200.0f * scale);
+    OT_EXPECT(optics_ui_create(&(optics_ui_desc){.scale = scale}, &ui) == OPTICS_GFX_OK);
+    OT_EXPECT(
+        optics_gfx_canvas_create(&(optics_gfx_canvas_desc){.type = OPTICS_GFX_TYPE_CANVAS_DESC,
+                                                           .backend = OPTICS_GFX_CANVAS_BACKEND_CPU,
+                                                           .scale = 1.0f,
+                                                           .width = dev_w,
+                                                           .height = dev_h},
+                                 &canvas) == OPTICS_GFX_OK);
+
+    optics_ui_theme theme = optics_ui_get_theme(ui);
+    theme.color_bg = optics_gfx_color_rgba_premul(21, 24, 35, 255);
+    theme.color_surface_sunken = theme.color_bg;
+    theme.color_border = 0; /* transparent at rest; accent border only while focused */
+    theme.color_accent = optics_gfx_color_rgba_premul(102, 156, 255, 255);
+    theme.border_width = border_width;
+    theme.corner_radius = 8.0f;
+    optics_ui_set_theme(ui, theme);
+
+    char buf_a[64] = "/home/user/path";
+    char buf_b[64] = "";
+    optics_gfx_rect rect_a = {};
+    optics_gfx_rect rect_b = {};
+    const optics_gfx_color bg_clear = optics_gfx_color_rgba_premul(32, 36, 51, 255);
+
+    for (int i = 0; i < 3; i++) {
+        optics_ui_begin(ui, &IN0);
+        optics_ui_row_begin(ui, &(optics_ui_layout_opts){.pad = pad, .gap = 16.0f});
+        optics_ui_response ra = optics_ui_textedit(
+            ui, &(optics_ui_textedit_opts){.box = {.id = "tf_a", .width = 150.0f, .height = 32.0f},
+                                           .buf = buf_a,
+                                           .cap = sizeof buf_a});
+        optics_ui_response rb = optics_ui_textedit(
+            ui, &(optics_ui_textedit_opts){.box = {.id = "tf_b", .width = 150.0f, .height = 32.0f},
+                                           .buf = buf_b,
+                                           .cap = sizeof buf_b});
+        optics_ui_row_end(ui);
+        optics_ui_test_end(ui);
+        rect_a = ra.rect;
+        rect_b = rb.rect;
+        OT_EXPECT(optics_gfx_canvas_begin(canvas, &(optics_gfx_canvas_pass_desc){
+                                                      .type = OPTICS_GFX_TYPE_CANVAS_PASS_DESC,
+                                                      .clear_color = &bg_clear}) == OPTICS_GFX_OK);
+        OT_EXPECT(optics_ui_test_snapshot_render(ui, canvas) == OPTICS_GFX_OK);
+        OT_EXPECT(optics_gfx_canvas_end(canvas) == OPTICS_GFX_OK);
+    }
+
+    /* Click inside `tf_a` to focus it and paint its accent border. */
+    optics_ui_input click_a = IN0;
+    click_a.cursor = (optics_gfx_point){rect_a.x + 20.0f, rect_a.y + 16.0f};
+    click_a.mouse_pressed[OPTICS_UI_MOUSE_LEFT] = true;
+    click_a.mouse_down[OPTICS_UI_MOUSE_LEFT] = true;
+    optics_ui_begin(ui, &click_a);
+    optics_ui_row_begin(ui, &(optics_ui_layout_opts){.pad = pad, .gap = 16.0f});
+    optics_ui_textedit(
+        ui, &(optics_ui_textedit_opts){.box = {.id = "tf_a", .width = 150.0f, .height = 32.0f},
+                                       .buf = buf_a,
+                                       .cap = sizeof buf_a});
+    optics_ui_textedit(
+        ui, &(optics_ui_textedit_opts){.box = {.id = "tf_b", .width = 150.0f, .height = 32.0f},
+                                       .buf = buf_b,
+                                       .cap = sizeof buf_b});
+    optics_ui_row_end(ui);
+    optics_ui_test_end(ui);
+    OT_EXPECT(optics_gfx_canvas_begin(canvas, &(optics_gfx_canvas_pass_desc){
+                                                  .type = OPTICS_GFX_TYPE_CANVAS_PASS_DESC,
+                                                  .clear_color = &bg_clear}) == OPTICS_GFX_OK);
+    OT_EXPECT(optics_ui_test_snapshot_render(ui, canvas) == OPTICS_GFX_OK);
+    OT_EXPECT(optics_gfx_canvas_end(canvas) == OPTICS_GFX_OK);
+
+    /* Settle one quiet frame so `tf_a` is focused and steady on screen. */
+    optics_ui_begin(ui, &IN0);
+    optics_ui_row_begin(ui, &(optics_ui_layout_opts){.pad = pad, .gap = 16.0f});
+    optics_ui_response focused_a = optics_ui_textedit(
+        ui, &(optics_ui_textedit_opts){.box = {.id = "tf_a", .width = 150.0f, .height = 32.0f},
+                                       .buf = buf_a,
+                                       .cap = sizeof buf_a});
+    optics_ui_textedit(
+        ui, &(optics_ui_textedit_opts){.box = {.id = "tf_b", .width = 150.0f, .height = 32.0f},
+                                       .buf = buf_b,
+                                       .cap = sizeof buf_b});
+    optics_ui_row_end(ui);
+    optics_ui_test_end(ui);
+    OT_EXPECT(focused_a.focused);
+    OT_EXPECT(optics_gfx_canvas_begin(canvas, &(optics_gfx_canvas_pass_desc){
+                                                  .type = OPTICS_GFX_TYPE_CANVAS_PASS_DESC,
+                                                  .clear_color = &bg_clear}) == OPTICS_GFX_OK);
+    OT_EXPECT(optics_ui_test_snapshot_render(ui, canvas) == OPTICS_GFX_OK);
+    OT_EXPECT(optics_gfx_canvas_end(canvas) == OPTICS_GFX_OK);
+
+    /* Confirm the focused border genuinely paints outside `rect_a` (in device px). */
+    const int32_t box_x0 = (int32_t)floorf(rect_a.x * scale);
+    const int32_t box_y0 = (int32_t)floorf(rect_a.y * scale);
+    const int32_t box_x1 = (int32_t)ceilf((rect_a.x + rect_a.w) * scale);
+    const int32_t box_y1 = (int32_t)ceilf((rect_a.y + rect_a.h) * scale);
+    uint32_t w = 0, h = 0, stride = 0;
+    const uint8_t *fb = optics_gfx_canvas_read_pixels(canvas, &w, &h, &stride);
+    const uint8_t *p_top = fb + (size_t)(box_y0 - 1) * stride + (size_t)((box_x0 + box_x1) / 2) * 4;
+    OT_EXPECT(p_top[2] > 70); /* blue channel well above toolbar bg (51) */
+
+    /* Now click `tf_b`: frame 1 moves focus to `tf_b` (and must flag
+     * `anim_pending` so a damage-driven host schedules frame 2 without waiting
+     * for mouse release), frame 2 builds `tf_a` unfocused. Both frames repaint
+     * regionally using ONLY `damage_rects` scaled to device pixels. */
+    optics_ui_input click_b = IN0;
+    click_b.cursor = (optics_gfx_point){rect_b.x + 20.0f, rect_b.y + 16.0f};
+    click_b.mouse_pressed[OPTICS_UI_MOUSE_LEFT] = true;
+    click_b.mouse_down[OPTICS_UI_MOUSE_LEFT] = true;
+    optics_ui_begin(ui, &click_b);
+    optics_ui_row_begin(ui, &(optics_ui_layout_opts){.pad = pad, .gap = 16.0f});
+    optics_ui_textedit(
+        ui, &(optics_ui_textedit_opts){.box = {.id = "tf_a", .width = 150.0f, .height = 32.0f},
+                                       .buf = buf_a,
+                                       .cap = sizeof buf_a});
+    optics_ui_textedit(
+        ui, &(optics_ui_textedit_opts){.box = {.id = "tf_b", .width = 150.0f, .height = 32.0f},
+                                       .buf = buf_b,
+                                       .cap = sizeof buf_b});
+    optics_ui_row_end(ui);
+    optics_ui_end(ui);
+    OT_EXPECT(optics_ui_anim_pending(ui));
+    {
+        uint32_t count = 0;
+        const optics_gfx_rect *rects = damage_rects(ui, &count);
+        OT_EXPECT(count >= 1);
+        optics_gfx_rect dev_rects[OPTICS_UI_DAMAGE_RECTS_CAPACITY];
+        for (uint32_t i = 0; i < count; i++) {
+            float x0 = floorf(rects[i].x * scale);
+            float y0 = floorf(rects[i].y * scale);
+            float x1 = ceilf((rects[i].x + rects[i].w) * scale);
+            float y1 = ceilf((rects[i].y + rects[i].h) * scale);
+            dev_rects[i] = (optics_gfx_rect){x0, y0, x1 - x0, y1 - y0};
+        }
+        optics_ui_scene_snapshot *snap = nullptr;
+        OT_EXPECT(optics_ui_snapshot_create(ui, &snap) == OPTICS_GFX_OK);
+        OT_EXPECT(optics_gfx_canvas_begin(canvas,
+                                          &(optics_gfx_canvas_pass_desc){
+                                              .type = OPTICS_GFX_TYPE_CANVAS_PASS_DESC,
+                                              .clear_color = &bg_clear,
+                                              .damage = {.rects = dev_rects, .count = count}}) ==
+                  OPTICS_GFX_OK);
+        OT_EXPECT(optics_ui_snapshot_submit(snap, canvas) == OPTICS_GFX_OK);
+        OT_EXPECT(optics_gfx_canvas_end(canvas) == OPTICS_GFX_OK);
+        OT_EXPECT(optics_ui_snapshot_activate(ui, snap) == OPTICS_GFX_OK);
+        optics_ui_snapshot_release(snap);
+    }
+
+    /* Frame 2: `tf_a` now builds unfocused (border removed). */
+    optics_ui_begin(ui, &IN0);
+    optics_ui_row_begin(ui, &(optics_ui_layout_opts){.pad = pad, .gap = 16.0f});
+    optics_ui_response blurred_a = optics_ui_textedit(
+        ui, &(optics_ui_textedit_opts){.box = {.id = "tf_a", .width = 150.0f, .height = 32.0f},
+                                       .buf = buf_a,
+                                       .cap = sizeof buf_a});
+    optics_ui_textedit(
+        ui, &(optics_ui_textedit_opts){.box = {.id = "tf_b", .width = 150.0f, .height = 32.0f},
+                                       .buf = buf_b,
+                                       .cap = sizeof buf_b});
+    optics_ui_row_end(ui);
+    optics_ui_end(ui);
+    OT_EXPECT(!blurred_a.focused);
+    OT_EXPECT(!optics_ui_anim_pending(ui));
+
+    uint32_t blur_count = 0;
+    const optics_gfx_rect *blur_rects = damage_rects(ui, &blur_count);
+    OT_EXPECT(blur_count >= 1);
+    const optics_gfx_rect outer_border = {
+        floorf(rect_a.x) - 1.0f,
+        floorf(rect_a.y) - 1.0f,
+        ceilf(rect_a.x + rect_a.w) - floorf(rect_a.x) + 2.0f,
+        ceilf(rect_a.y + rect_a.h) - floorf(rect_a.y) + 2.0f,
+    };
+    bool covers_outer = false;
+    for (uint32_t i = 0; i < blur_count; i++)
+        covers_outer |= rect_covers(blur_rects[i], outer_border);
+    OT_EXPECT(covers_outer);
+
+    {
+        optics_gfx_rect dev_rects[OPTICS_UI_DAMAGE_RECTS_CAPACITY];
+        for (uint32_t i = 0; i < blur_count; i++) {
+            float x0 = floorf(blur_rects[i].x * scale);
+            float y0 = floorf(blur_rects[i].y * scale);
+            float x1 = ceilf((blur_rects[i].x + blur_rects[i].w) * scale);
+            float y1 = ceilf((blur_rects[i].y + blur_rects[i].h) * scale);
+            dev_rects[i] = (optics_gfx_rect){x0, y0, x1 - x0, y1 - y0};
+        }
+        optics_ui_scene_snapshot *snap = nullptr;
+        OT_EXPECT(optics_ui_snapshot_create(ui, &snap) == OPTICS_GFX_OK);
+        OT_EXPECT(
+            optics_gfx_canvas_begin(
+                canvas, &(optics_gfx_canvas_pass_desc){
+                            .type = OPTICS_GFX_TYPE_CANVAS_PASS_DESC,
+                            .clear_color = &bg_clear,
+                            .damage = {.rects = dev_rects, .count = blur_count}}) == OPTICS_GFX_OK);
+        OT_EXPECT(optics_ui_snapshot_submit(snap, canvas) == OPTICS_GFX_OK);
+        OT_EXPECT(optics_gfx_canvas_end(canvas) == OPTICS_GFX_OK);
+        OT_EXPECT(optics_ui_snapshot_activate(ui, snap) == OPTICS_GFX_OK);
+        optics_ui_snapshot_release(snap);
+    }
+
+    /* Scan the ENTIRE 4-device-pixel halo outside `tf_a` (all four sides AND
+     * all four rounded corners) — every pixel must equal `bg_clear` (32,36,51). */
+    fb = optics_gfx_canvas_read_pixels(canvas, &w, &h, &stride);
+    const int32_t halo = 4;
+    uint32_t stale_pixels = 0;
+    for (int32_t py = box_y0 - halo; py < box_y1 + halo; py++) {
+        for (int32_t px = box_x0 - halo; px < box_x1 + halo; px++) {
+            if (px >= box_x0 && px < box_x1 && py >= box_y0 && py < box_y1)
+                continue;
+            const uint8_t *p = fb + (size_t)py * stride + (size_t)px * 4;
+            if (p[0] != 32 || p[1] != 36 || p[2] != 51 || p[3] != 255)
+                stale_pixels++;
+        }
+    }
+    OT_EXPECT(stale_pixels == 0);
+
+    optics_gfx_canvas_release(canvas);
+    optics_ui_release(ui);
+}
+
+static void test_textfield_blur_erases_outer_focus_border(void) {
+    check_textfield_blur_border_case(1.0f, 1.0f, 16.0f); /* 1x standard 1px focus border */
+    check_textfield_blur_border_case(2.0f, 1.0f, 16.0f); /* 2x HiDPI 1px focus border */
+    check_textfield_blur_border_case(1.0f, 0.0f,
+                                     16.0f); /* minimalist 0px rest / 1.5px focus ring */
+    check_textfield_blur_border_case(1.0f, 0.5f, 16.4f); /* fractional origin + hairline border */
+}
+
+/* Mid-frame or post-build focus changes (optics_ui_set_focus, click-outside
+ * dismissal, Tab traversal) must request one follow-up frame via anim_pending
+ * so damage-driven hosts paint the updated border immediately, then settle. */
+static void test_focus_transition_requests_followup_frame(void) {
+    optics_ui *ui = nullptr;
+    OT_EXPECT(optics_ui_create(&(optics_ui_desc){}, &ui) == OPTICS_GFX_OK);
+
+    char buf_a[32] = "alpha";
+    char buf_b[32] = "beta";
+
+    for (int i = 0; i < 2; i++) {
+        optics_ui_begin(ui, &IN0);
+        optics_ui_row_begin(ui, &(optics_ui_layout_opts){.pad = 12.0f, .gap = 12.0f});
+        optics_ui_textedit(
+            ui, &(optics_ui_textedit_opts){.box = {.id = "fa", .width = 120.0f, .height = 28.0f},
+                                           .buf = buf_a,
+                                           .cap = sizeof buf_a});
+        optics_ui_textedit(
+            ui, &(optics_ui_textedit_opts){.box = {.id = "fb", .width = 120.0f, .height = 28.0f},
+                                           .buf = buf_b,
+                                           .cap = sizeof buf_b});
+        optics_ui_row_end(ui);
+        optics_ui_test_end(ui);
+    }
+    OT_EXPECT(!optics_ui_anim_pending(ui));
+
+    /* 1. Programmatic focus (e.g. Ctrl+L) after widget build. */
+    optics_ui_begin(ui, &IN0);
+    optics_ui_row_begin(ui, &(optics_ui_layout_opts){.pad = 12.0f, .gap = 12.0f});
+    optics_ui_textedit(
+        ui, &(optics_ui_textedit_opts){.box = {.id = "fa", .width = 120.0f, .height = 28.0f},
+                                       .buf = buf_a,
+                                       .cap = sizeof buf_a});
+    optics_ui_set_focus(ui, optics_ui_current_id(ui, "fa"));
+    optics_ui_textedit(
+        ui, &(optics_ui_textedit_opts){.box = {.id = "fb", .width = 120.0f, .height = 28.0f},
+                                       .buf = buf_b,
+                                       .cap = sizeof buf_b});
+    optics_ui_row_end(ui);
+    optics_ui_test_end(ui);
+    OT_EXPECT(optics_ui_anim_pending(ui));
+
+    /* Next quiet frame settles immediately. */
+    optics_ui_begin(ui, &IN0);
+    optics_ui_row_begin(ui, &(optics_ui_layout_opts){.pad = 12.0f, .gap = 12.0f});
+    optics_ui_textedit(
+        ui, &(optics_ui_textedit_opts){.box = {.id = "fa", .width = 120.0f, .height = 28.0f},
+                                       .buf = buf_a,
+                                       .cap = sizeof buf_a});
+    optics_ui_textedit(
+        ui, &(optics_ui_textedit_opts){.box = {.id = "fb", .width = 120.0f, .height = 28.0f},
+                                       .buf = buf_b,
+                                       .cap = sizeof buf_b});
+    optics_ui_row_end(ui);
+    optics_ui_test_end(ui);
+    OT_EXPECT(!optics_ui_anim_pending(ui));
+
+    /* 2. Tab traversal (happens in optics_ui_end after widgets built). */
+    optics_ui_input tab_in = IN0;
+    tab_in.key_count = 1;
+    tab_in.keys[0] = (optics_ui_key_event){.key = OPTICS_UI_KEY_TAB, .pressed = true};
+    optics_ui_begin(ui, &tab_in);
+    optics_ui_row_begin(ui, &(optics_ui_layout_opts){.pad = 12.0f, .gap = 12.0f});
+    optics_ui_textedit(
+        ui, &(optics_ui_textedit_opts){.box = {.id = "fa", .width = 120.0f, .height = 28.0f},
+                                       .buf = buf_a,
+                                       .cap = sizeof buf_a});
+    optics_ui_textedit(
+        ui, &(optics_ui_textedit_opts){.box = {.id = "fb", .width = 120.0f, .height = 28.0f},
+                                       .buf = buf_b,
+                                       .cap = sizeof buf_b});
+    optics_ui_row_end(ui);
+    optics_ui_test_end(ui);
+    OT_EXPECT(optics_ui_anim_pending(ui));
+
+    /* 3. Click outside any focusable widget clears focus in optics_ui_end. */
+    optics_ui_input miss = IN0;
+    miss.cursor = (optics_gfx_point){390.0f, 190.0f};
+    miss.mouse_pressed[OPTICS_UI_MOUSE_LEFT] = true;
+    miss.mouse_down[OPTICS_UI_MOUSE_LEFT] = true;
+    optics_ui_begin(ui, &miss);
+    optics_ui_row_begin(ui, &(optics_ui_layout_opts){.pad = 12.0f, .gap = 12.0f});
+    optics_ui_textedit(
+        ui, &(optics_ui_textedit_opts){.box = {.id = "fa", .width = 120.0f, .height = 28.0f},
+                                       .buf = buf_a,
+                                       .cap = sizeof buf_a});
+    optics_ui_textedit(
+        ui, &(optics_ui_textedit_opts){.box = {.id = "fb", .width = 120.0f, .height = 28.0f},
+                                       .buf = buf_b,
+                                       .cap = sizeof buf_b});
+    optics_ui_row_end(ui);
+    optics_ui_test_end(ui);
+    OT_EXPECT(optics_ui_anim_pending(ui));
+
+    /* Quiet frame after clear settles with no pending animation. */
+    optics_ui_begin(ui, &IN0);
+    optics_ui_row_begin(ui, &(optics_ui_layout_opts){.pad = 12.0f, .gap = 12.0f});
+    optics_ui_textedit(
+        ui, &(optics_ui_textedit_opts){.box = {.id = "fa", .width = 120.0f, .height = 28.0f},
+                                       .buf = buf_a,
+                                       .cap = sizeof buf_a});
+    optics_ui_textedit(
+        ui, &(optics_ui_textedit_opts){.box = {.id = "fb", .width = 120.0f, .height = 28.0f},
+                                       .buf = buf_b,
+                                       .cap = sizeof buf_b});
+    optics_ui_row_end(ui);
+    optics_ui_test_end(ui);
+    OT_EXPECT(!optics_ui_anim_pending(ui));
+
+    optics_ui_release(ui);
+}
+
+/* A fixed-width label whose text shrinks still vacates the old glyphs' pixels
+ * even though its layout box (`final_rect`) did not change. */
+static void test_shrinking_label_damages_vacated_glyphs(void) {
+    optics_ui *ui = nullptr;
+    optics_gfx_canvas *canvas = nullptr;
+    OT_EXPECT(optics_ui_create(&(optics_ui_desc){}, &ui) == OPTICS_GFX_OK);
+    OT_EXPECT(
+        optics_gfx_canvas_create(&(optics_gfx_canvas_desc){.type = OPTICS_GFX_TYPE_CANVAS_DESC,
+                                                           .backend = OPTICS_GFX_CANVAS_BACKEND_CPU,
+                                                           .scale = 1.0f,
+                                                           .width = 400,
+                                                           .height = 200},
+                                 &canvas) == OPTICS_GFX_OK);
+
+    const optics_ui_label_opts long_lbl = {
+        .text = "wide label content",
+        .box = {.id = "lbl", .width = 240.0f},
+    };
+    const optics_ui_label_opts short_lbl = {
+        .text = "a",
+        .box = {.id = "lbl", .width = 240.0f},
+    };
+
+    for (int i = 0; i < 3; i++) {
+        optics_ui_begin(ui, &IN0);
+        optics_ui_label(ui, &long_lbl);
+        optics_ui_test_end(ui);
+        render_frame(ui, canvas);
+    }
+
+    /* Record the wide glyph extent by changing to a same-length string first,
+     * then shrink to "a" and verify the damage still spans the wide glyphs. */
+    const optics_ui_label_opts long_lbl2 = {
+        .text = "wide label contenx",
+        .box = {.id = "lbl", .width = 240.0f},
+    };
+    optics_ui_begin(ui, &IN0);
+    optics_ui_label(ui, &long_lbl2);
+    optics_ui_end(ui);
+    uint32_t wide_count = 0;
+    const optics_gfx_rect *wide_rects = damage_rects(ui, &wide_count);
+    OT_EXPECT(wide_count == 1);
+    const optics_gfx_rect wide_extent = wide_rects[0];
+    {
+        optics_ui_scene_snapshot *snap = nullptr;
+        OT_EXPECT(optics_ui_snapshot_create(ui, &snap) == OPTICS_GFX_OK);
+        OT_EXPECT(optics_ui_snapshot_activate(ui, snap) == OPTICS_GFX_OK);
+        optics_ui_snapshot_release(snap);
+    }
+
+    optics_ui_begin(ui, &IN0);
+    optics_ui_label(ui, &short_lbl);
+    optics_ui_end(ui);
+    uint32_t shrink_count = 0;
+    const optics_gfx_rect *shrink_rects = damage_rects(ui, &shrink_count);
+    OT_EXPECT(shrink_count >= 1);
+    bool covers_wide = false;
+    for (uint32_t i = 0; i < shrink_count; i++)
+        covers_wide |= rect_covers(shrink_rects[i], wide_extent);
+    OT_EXPECT(covers_wide);
+
+    optics_gfx_canvas_release(canvas);
+    optics_ui_release(ui);
+}
+
+/* Unhovering a stretched selectable row removes its background rect while its
+ * icon and text remain — shrinking `node_paint_bounds` without changing
+ * `final_rect`. Regional damage must still cover the full row so a damage-
+ * scoped repaint erases the outer hover pill instead of leaving a stale frame
+ * around the icon+text box. */
+static void test_selectable_unhover_erases_full_row_background(void) {
+    optics_ui *ui = nullptr;
+    optics_gfx_canvas *canvas = nullptr;
+    OT_EXPECT(optics_ui_create(&(optics_ui_desc){}, &ui) == OPTICS_GFX_OK);
+    OT_EXPECT(
+        optics_gfx_canvas_create(&(optics_gfx_canvas_desc){.type = OPTICS_GFX_TYPE_CANVAS_DESC,
+                                                           .backend = OPTICS_GFX_CANVAS_BACKEND_CPU,
+                                                           .scale = 1.0f,
+                                                           .width = 240,
+                                                           .height = 100},
+                                 &canvas) == OPTICS_GFX_OK);
+
+    optics_ui_theme theme = optics_ui_theme_dark();
+    theme.color_bg = optics_gfx_color_rgba_premul(25, 28, 40, 255);
+    theme.color_hover = optics_gfx_color_rgba_premul(255, 255, 255, 48);
+    theme.corner_radius = 8.0f;
+    optics_ui_set_theme(ui, theme);
+
+    const optics_gfx_color sidebar_bg = optics_gfx_color_rgba_premul(28, 32, 46, 255);
+    const optics_ui_input base_in = {.display_size = {240, 100}, .dt_seconds = 0.016f};
+    optics_gfx_rect row_rect = {};
+
+    /* Frame 1-2: settle resting state. */
+    for (int i = 0; i < 2; i++) {
+        optics_ui_begin(ui, &base_in);
+        optics_ui_column_begin(ui, &(optics_ui_layout_opts){.box = {.id = "sb", .width = 200.0f},
+                                                            .pad = 6.0f,
+                                                            .cross = OPTICS_UI_STRETCH,
+                                                            .bg = sidebar_bg});
+        optics_ui_response r = optics_ui_selectable(
+            ui, &(optics_ui_selectable_opts){.box = {.id = "dl", .height = 30.0f},
+                                             .label = "Downloads",
+                                             .icon = OPTICS_UI_ICON_CHEVRON_RIGHT,
+                                             .icon_size = 18.0f,
+                                             .selected = false});
+        optics_ui_column_end(ui);
+        optics_ui_end(ui);
+        row_rect = r.rect;
+        optics_ui_scene_snapshot *snap = nullptr;
+        OT_EXPECT(optics_ui_snapshot_create(ui, &snap) == OPTICS_GFX_OK);
+        OT_EXPECT(optics_gfx_canvas_begin(
+                      canvas,
+                      &(optics_gfx_canvas_pass_desc){.type = OPTICS_GFX_TYPE_CANVAS_PASS_DESC,
+                                                     .clear_color = &sidebar_bg}) == OPTICS_GFX_OK);
+        OT_EXPECT(optics_ui_snapshot_submit(snap, canvas) == OPTICS_GFX_OK);
+        OT_EXPECT(optics_gfx_canvas_end(canvas) == OPTICS_GFX_OK);
+        OT_EXPECT(optics_ui_snapshot_activate(ui, snap) == OPTICS_GFX_OK);
+        optics_ui_snapshot_release(snap);
+    }
+
+    /* Frame 3: hover inside "Downloads" and paint regionally. */
+    optics_ui_input hover_in = base_in;
+    hover_in.cursor = (optics_gfx_point){row_rect.x + 20.0f, row_rect.y + 15.0f};
+    optics_ui_begin(ui, &hover_in);
+    optics_ui_column_begin(ui, &(optics_ui_layout_opts){.box = {.id = "sb", .width = 200.0f},
+                                                        .pad = 6.0f,
+                                                        .cross = OPTICS_UI_STRETCH,
+                                                        .bg = sidebar_bg});
+    optics_ui_response hovered =
+        optics_ui_selectable(ui, &(optics_ui_selectable_opts){.box = {.id = "dl", .height = 30.0f},
+                                                              .label = "Downloads",
+                                                              .icon = OPTICS_UI_ICON_CHEVRON_RIGHT,
+                                                              .icon_size = 18.0f,
+                                                              .selected = false});
+    optics_ui_column_end(ui);
+    optics_ui_end(ui);
+    OT_EXPECT(hovered.hovered);
+    {
+        uint32_t count = 0;
+        const optics_gfx_rect *rects = damage_rects(ui, &count);
+        OT_EXPECT(count >= 1);
+        optics_ui_scene_snapshot *snap = nullptr;
+        OT_EXPECT(optics_ui_snapshot_create(ui, &snap) == OPTICS_GFX_OK);
+        OT_EXPECT(optics_gfx_canvas_begin(
+                      canvas, &(optics_gfx_canvas_pass_desc){
+                                  .type = OPTICS_GFX_TYPE_CANVAS_PASS_DESC,
+                                  .clear_color = &sidebar_bg,
+                                  .damage = {.rects = rects, .count = count}}) == OPTICS_GFX_OK);
+        OT_EXPECT(optics_ui_snapshot_submit(snap, canvas) == OPTICS_GFX_OK);
+        OT_EXPECT(optics_gfx_canvas_end(canvas) == OPTICS_GFX_OK);
+        OT_EXPECT(optics_ui_snapshot_activate(ui, snap) == OPTICS_GFX_OK);
+        optics_ui_snapshot_release(snap);
+    }
+
+    /* Confirm the right-side hover fill (outside the icon+text box) actually painted. */
+    uint32_t w = 0, h = 0, stride = 0;
+    const uint8_t *fb = optics_gfx_canvas_cpu_pixels(canvas, &w, &h, &stride);
+    const uint32_t probe_y = (uint32_t)(row_rect.y + row_rect.h * 0.5f);
+    const uint32_t probe_left_x = (uint32_t)(row_rect.x + 2.0f);
+    const uint32_t probe_right_x = (uint32_t)(row_rect.x + row_rect.w - 4.0f);
+    const uint8_t *p_right = fb + (size_t)probe_y * stride + (size_t)probe_right_x * 4;
+    OT_EXPECT(p_right[0] > 35);
+
+    /* Frame 4: move cursor off "Downloads"; damage must cover the entire row,
+     * and regional repaint must clear the outer edges back to sidebar_bg. */
+    optics_ui_input leave_in = base_in;
+    leave_in.cursor = (optics_gfx_point){row_rect.x + 20.0f, row_rect.y + row_rect.h + 10.0f};
+    optics_ui_begin(ui, &leave_in);
+    optics_ui_column_begin(ui, &(optics_ui_layout_opts){.box = {.id = "sb", .width = 200.0f},
+                                                        .pad = 6.0f,
+                                                        .cross = OPTICS_UI_STRETCH,
+                                                        .bg = sidebar_bg});
+    optics_ui_response unhovered =
+        optics_ui_selectable(ui, &(optics_ui_selectable_opts){.box = {.id = "dl", .height = 30.0f},
+                                                              .label = "Downloads",
+                                                              .icon = OPTICS_UI_ICON_CHEVRON_RIGHT,
+                                                              .icon_size = 18.0f,
+                                                              .selected = false});
+    optics_ui_column_end(ui);
+    optics_ui_end(ui);
+    OT_EXPECT(!unhovered.hovered);
+
+    uint32_t leave_count = 0;
+    const optics_gfx_rect *leave_rects = damage_rects(ui, &leave_count);
+    OT_EXPECT(leave_count >= 1);
+    bool covers_row = false;
+    for (uint32_t i = 0; i < leave_count; i++)
+        covers_row |= rect_covers(leave_rects[i], row_rect);
+    OT_EXPECT(covers_row);
+
+    {
+        optics_ui_scene_snapshot *snap = nullptr;
+        OT_EXPECT(optics_ui_snapshot_create(ui, &snap) == OPTICS_GFX_OK);
+        OT_EXPECT(optics_gfx_canvas_begin(canvas,
+                                          &(optics_gfx_canvas_pass_desc){
+                                              .type = OPTICS_GFX_TYPE_CANVAS_PASS_DESC,
+                                              .clear_color = &sidebar_bg,
+                                              .damage = {.rects = leave_rects,
+                                                         .count = leave_count}}) == OPTICS_GFX_OK);
+        OT_EXPECT(optics_ui_snapshot_submit(snap, canvas) == OPTICS_GFX_OK);
+        OT_EXPECT(optics_gfx_canvas_end(canvas) == OPTICS_GFX_OK);
+        OT_EXPECT(optics_ui_snapshot_activate(ui, snap) == OPTICS_GFX_OK);
+        optics_ui_snapshot_release(snap);
+    }
+
+    fb = optics_gfx_canvas_cpu_pixels(canvas, &w, &h, &stride);
+    const uint8_t *pl = fb + (size_t)probe_y * stride + (size_t)probe_left_x * 4;
+    const uint8_t *pr = fb + (size_t)probe_y * stride + (size_t)probe_right_x * 4;
+    OT_EXPECT(pl[0] == 28 && pl[1] == 32 && pl[2] == 46 && pl[3] == 255);
+    OT_EXPECT(pr[0] == 28 && pr[1] == 32 && pr[2] == 46 && pr[3] == 255);
+
+    optics_gfx_canvas_release(canvas);
+    optics_ui_release(ui);
+}
+
+/* Clearing a container's background to transparent leaves it with empty
+ * `node_paint_bounds`, yet the previously painted background box must still
+ * appear in `damage_rects`. */
+static void test_container_bg_clear_damages_vacated_box(void) {
+    optics_ui *ui = nullptr;
+    OT_EXPECT(optics_ui_create(&(optics_ui_desc){}, &ui) == OPTICS_GFX_OK);
+
+    const optics_gfx_color sel = optics_gfx_color_rgba_premul(102, 156, 255, 80);
+    optics_ui_begin(ui, &IN0);
+    optics_ui_row_begin(ui, &(optics_ui_layout_opts){
+                                .box = {.id = "row", .width = 180.0f, .height = 36.0f}, .bg = sel});
+    optics_ui_label(ui, &(optics_ui_label_opts){.text = "file.txt"});
+    optics_ui_row_end(ui);
+    optics_ui_test_end(ui);
+
+    optics_ui_begin(ui, &IN0);
+    optics_ui_row_begin(ui, &(optics_ui_layout_opts){
+                                .box = {.id = "row", .width = 180.0f, .height = 36.0f}, .bg = 0});
+    optics_ui_label(ui, &(optics_ui_label_opts){.text = "file.txt"});
+    optics_ui_row_end(ui);
+    optics_ui_end(ui);
+
+    uint32_t count = 0;
+    const optics_gfx_rect *rects = damage_rects(ui, &count);
+    OT_EXPECT(count >= 1);
+    const optics_gfx_rect expected = {0, 0, 180.0f, 36.0f};
+    bool covered = false;
+    for (uint32_t i = 0; i < count; i++)
+        covered |= rect_covers(rects[i], expected);
+    OT_EXPECT(covered);
+
+    optics_ui_release(ui);
+}
+
+/* A FLOW leaf changed on a skipped (unactivated) frame must remain in
+ * `damage_rects` on a subsequent frame even when another FLOW leaf changes. */
+static void test_skipped_frame_preserves_flow_node_damage(void) {
+    optics_ui *ui = nullptr;
+    OT_EXPECT(optics_ui_create(&(optics_ui_desc){}, &ui) == OPTICS_GFX_OK);
+
+    /* Establish steady baseline and activate. */
+    for (int i = 0; i < 2; i++) {
+        optics_ui_begin(ui, &IN0);
+        optics_ui_column_begin(ui, &(optics_ui_layout_opts){.gap = 40.0f});
+        optics_ui_label(ui, &(optics_ui_label_opts){.box = {.id = "a"}, .text = "alpha"});
+        optics_ui_label(ui, &(optics_ui_label_opts){.box = {.id = "b"}, .text = "beta"});
+        optics_ui_column_end(ui);
+        optics_ui_test_end(ui);
+    }
+
+    /* Frame N: mutate A, do NOT activate (simulating a skipped/superseded frame). */
+    optics_ui_begin(ui, &IN0);
+    optics_ui_column_begin(ui, &(optics_ui_layout_opts){.gap = 40.0f});
+    optics_ui_label(ui, &(optics_ui_label_opts){.box = {.id = "a"}, .text = "ALPHA"});
+    optics_ui_label(ui, &(optics_ui_label_opts){.box = {.id = "b"}, .text = "beta"});
+    optics_ui_column_end(ui);
+    optics_ui_end(ui);
+    uint32_t a_count = 0;
+    const optics_gfx_rect *a_rects = damage_rects(ui, &a_count);
+    OT_EXPECT(a_count == 1);
+    const optics_gfx_rect rect_a = a_rects[0];
+
+    /* Frame N+1: keep A mutated, mutate B. Both A and B must be damaged. */
+    optics_ui_begin(ui, &IN0);
+    optics_ui_column_begin(ui, &(optics_ui_layout_opts){.gap = 40.0f});
+    optics_ui_label(ui, &(optics_ui_label_opts){.box = {.id = "a"}, .text = "ALPHA"});
+    optics_ui_label(ui, &(optics_ui_label_opts){.box = {.id = "b"}, .text = "BETA"});
+    optics_ui_column_end(ui);
+    optics_ui_end(ui);
+    uint32_t both_count = 0;
+    const optics_gfx_rect *both_rects = damage_rects(ui, &both_count);
+    OT_EXPECT(both_count >= 2);
+    bool covers_a = false;
+    for (uint32_t i = 0; i < both_count; i++)
+        covers_a |= rect_covers(both_rects[i], rect_a);
+    OT_EXPECT(covers_a);
+
+    optics_ui_release(ui);
+}
+
+/* Right-aligned (`OPTICS_UI_END`) labels place `rel.x` past the box midpoint;
+ * `optics_ui__cmd_rel_rect` must measure width to the trailing edge
+ * (`box.w - rel.x`), not `box.w - 2 * rel.x`, which previously collapsed their
+ * paint extent to zero. */
+static void test_right_aligned_label_reports_localized_damage(void) {
+    optics_ui *ui = nullptr;
+    OT_EXPECT(optics_ui_create(&(optics_ui_desc){}, &ui) == OPTICS_GFX_OK);
+
+    for (int i = 0; i < 2; i++) {
+        optics_ui_begin(ui, &IN0);
+        optics_ui_label(ui, &(optics_ui_label_opts){.box = {.id = "sz", .width = 200.0f},
+                                                    .text = "12 KB",
+                                                    .align = OPTICS_UI_END});
+        optics_ui_test_end(ui);
+    }
+
+    optics_ui_begin(ui, &IN0);
+    optics_ui_label(ui, &(optics_ui_label_opts){.box = {.id = "sz", .width = 200.0f},
+                                                .text = "9 KB",
+                                                .align = OPTICS_UI_END});
+    optics_ui_end(ui);
+
+    uint32_t count = 0;
+    const optics_gfx_rect *rects = damage_rects(ui, &count);
+    OT_EXPECT(count == 1);
+    if (count == 1) {
+        /* Damage must sit on the right side of the 200px box, not fall back to
+         * the full 400x200 viewport or collapse to zero. */
+        OT_EXPECT(rects[0].x > 100.0f);
+        OT_EXPECT(rects[0].x + rects[0].w <= 200.0f);
+        OT_EXPECT(rects[0].w > 0.0f && rects[0].w < 100.0f);
+    }
+
+    optics_ui_release(ui);
+}
+
+/* Multi-line wrapped labels emit lines whose `rel.y` is in the bottom half of
+ * the node box; `optics_ui__cmd_rel_rect` must resolve height against
+ * `box.h - rel.y` so bottom lines are included in damage bounds. */
+static void test_wrapped_label_bottom_lines_reported_in_damage(void) {
+    optics_ui *ui = nullptr;
+    OT_EXPECT(optics_ui_create(&(optics_ui_desc){}, &ui) == OPTICS_GFX_OK);
+
+    optics_gfx_rect box = {};
+    for (int i = 0; i < 2; i++) {
+        optics_ui_begin(ui, &IN0);
+        optics_ui_label(ui, &(optics_ui_label_opts){
+                                .box = {.id = "wrap", .max_width = 90.0f},
+                                .text = "alpha beta gamma delta epsilon zeta eta theta",
+                                .wrap = true,
+                            });
+        optics_ui_test_end(ui);
+        box = optics_ui_node_bounds(optics_ui_node_first_child(optics_ui_root(ui)));
+    }
+    OT_EXPECT(box.h > 40.0f);
+
+    optics_ui_begin(ui, &IN0);
+    optics_ui_label(ui, &(optics_ui_label_opts){
+                            .box = {.id = "wrap", .max_width = 90.0f},
+                            .text = "alpha beta gamma delta epsilon zeta eta omega",
+                            .wrap = true,
+                        });
+    optics_ui_end(ui);
+
+    uint32_t count = 0;
+    const optics_gfx_rect *rects = damage_rects(ui, &count);
+    OT_EXPECT(count >= 1);
+    optics_gfx_rect u = {0, 0, 0, 0};
+    for (uint32_t i = 0; i < count; i++)
+        u = optics_gfx_rect_union(u, rects[i]);
+    OT_EXPECT(u.y + u.h >= box.y + box.h - 1.0f);
+    OT_EXPECT(u.w <= 95.0f);
+
+    optics_ui_release(ui);
+}
+
 int main(void) {
     test_null_safety();
     test_first_frames_repaint_then_settle();
@@ -1241,5 +1961,13 @@ int main(void) {
     test_caret_clock_live_tracks_focus_and_switch();
     test_host_owned_caret_reports_no_damage_or_clock();
     test_host_caret_does_not_keep_an_unfocused_context_awake();
+    test_textfield_blur_erases_outer_focus_border();
+    test_focus_transition_requests_followup_frame();
+    test_shrinking_label_damages_vacated_glyphs();
+    test_selectable_unhover_erases_full_row_background();
+    test_container_bg_clear_damages_vacated_box();
+    test_skipped_frame_preserves_flow_node_damage();
+    test_right_aligned_label_reports_localized_damage();
+    test_wrapped_label_bottom_lines_reported_in_damage();
     return OT_REPORT();
 }

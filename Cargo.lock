@@ -135,10 +135,7 @@ dependencies = [
  "optics-app",
  "optics-build",
  "optics-gfx",
- "optics-material",
  "optics-motion",
- "optics-scene",
- "optics-svg",
  "optics-text",
  "optics-ui",
  "optics-window",
@@ -189,60 +186,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "optics-material"
-version = "0.0.87"
-dependencies = [
- "optics-build",
- "optics-gfx",
- "optics-gfx-sys",
- "optics-material-sys",
-]
-
-[[package]]
-name = "optics-material-sys"
-version = "0.0.87"
-dependencies = [
- "optics-build",
- "optics-gfx-sys",
-]
-
-[[package]]
 name = "optics-motion"
 version = "0.0.87"
-
-[[package]]
-name = "optics-scene"
-version = "0.0.87"
-dependencies = [
- "optics-build",
- "optics-gfx",
- "optics-scene-sys",
-]
-
-[[package]]
-name = "optics-scene-sys"
-version = "0.0.87"
-dependencies = [
- "optics-build",
- "optics-gfx-sys",
-]
-
-[[package]]
-name = "optics-svg"
-version = "0.0.87"
-dependencies = [
- "optics-build",
- "optics-gfx",
- "optics-svg-sys",
-]
-
-[[package]]
-name = "optics-svg-sys"
-version = "0.0.87"
-dependencies = [
- "optics-build",
- "optics-gfx-sys",
-]
 
 [[package]]
 name = "optics-text"

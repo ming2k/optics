@@ -52,7 +52,6 @@ ui_sources = files(
   'src/patterns/datagrid.c',
   'src/patterns/tree_view.c',
   'src/patterns/menu.c',
-  'src/icon_data.c',
   'src/icon_runtime.c',
   'src/a11y/semantics.c',
   'src/place/place.c',
@@ -69,7 +68,7 @@ ui_lib = library('optics_ui',
   # most common ui misuse (stack temporaries) in debug AND release
   # alike. Builds that must not abort can define OPTICS_UI_NO_BORROW_CHECK.
   c_args                : ['-DOPTICS_UI_BUILDING=1', '-DOPTICS_UI_DEBUG_BORROWS=1'],
-  dependencies          : [gfx_dep, text_dep, svg_dep, m_dep],
+  dependencies          : [gfx_dep, text_dep, m_dep],
   gnu_symbol_visibility : 'hidden',
   soversion             : optics_soname,
   version               : meson.project_version(),
@@ -80,7 +79,6 @@ install_headers('include/optics/ui.h', subdir : 'optics')
 install_headers(
     'include/optics/ui/patterns.h',
   'include/optics/ui/icon.h',
-  'include/optics/ui/material.h',
   'include/optics/ui/export.h',
   subdir : 'optics/ui',
 )
@@ -88,7 +86,7 @@ install_headers(
 ui_dep = declare_dependency(
   link_with           : ui_lib,
   include_directories : ui_inc,
-  dependencies        : [gfx_dep, text_dep, svg_dep],
+  dependencies        : [gfx_dep, text_dep],
 )
 
 pkg.generate(
@@ -97,6 +95,6 @@ pkg.generate(
   filebase    : 'optics-ui',
   description : 'Immediate-mode UI over a retained core, built on gfx',
   version     : meson.project_version(),
-  requires    : ['optics-gfx >= ' + meson.project_version(), 'optics-text >= ' + meson.project_version(), 'optics-svg >= ' + meson.project_version()],
+  requires    : ['optics-gfx >= ' + meson.project_version(), 'optics-text >= ' + meson.project_version()],
 )
 

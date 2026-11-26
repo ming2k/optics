@@ -211,7 +211,7 @@ optics_ui_tab_action optics_ui_tab_strip(optics_ui *ui, const optics_ui_tab_stri
                 optics_gfx_color close_fg =
                     close_hovered ? ui->theme.color_fg
                                   : optics_ui__opacity_color(ui->theme.color_fg, 0.65f);
-                if (opts && opts->close_icon != OPTICS_UI_ICON_INVALID) {
+                if (opts && opts->close_icon != OPTICS_UI_ICON_NONE) {
                     optics_ui__drawlist_push(ui, n,
                                              (optics_ui_draw_cmd){
                                                  .kind = OPTICS_UI_DRAW_ICON,
@@ -232,10 +232,10 @@ optics_ui_tab_action optics_ui_tab_strip(optics_ui *ui, const optics_ui_tab_stri
                                                  .kind = OPTICS_UI_DRAW_TEXT,
                                                  .rel =
                                                      {
-                                                         .x = -pad_right - 4.0f,
+                                                         .x = -pad_right,
                                                          .y = (tab_h - 12.0f) * 0.5f - 1.0f,
-                                                         .w = 0,
-                                                         .h = 0,
+                                                         .w = close_size,
+                                                         .h = close_size,
                                                      },
                                                  .color = close_fg,
                                                  .text = "×",
@@ -279,7 +279,7 @@ optics_ui_tab_action optics_ui_tab_strip(optics_ui *ui, const optics_ui_tab_stri
                     .height = tab_h,
                 },
             .icon = opts->new_icon,
-            .label = (opts->new_icon != OPTICS_UI_ICON_INVALID) ? nullptr : "+",
+            .label = (opts->new_icon != OPTICS_UI_ICON_NONE) ? nullptr : "+",
             .variant = OPTICS_UI_BUTTON_SUBTLE,
         };
 

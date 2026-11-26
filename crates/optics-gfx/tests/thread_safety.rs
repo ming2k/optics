@@ -12,9 +12,6 @@ fn test_thread_safety_invariants() {
     assert_send::<optics_gfx::Sampler>();
     assert_sync::<optics_gfx::Sampler>();
 
-    assert_send::<optics_gfx::Material>();
-    assert_sync::<optics_gfx::Material>();
-
     assert_send::<optics_gfx::IccProfile>();
     assert_sync::<optics_gfx::IccProfile>();
 

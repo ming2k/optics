@@ -4,9 +4,9 @@
  * The depth/colour attachment a caller owns and feeds to a pass via
  * optics_gfx_pass_desc (peer-defined attachments, ADR-0001). gfx owns the
  * VkImage, the backing GPU-allocator memory (optics_gfx_vk_alloc_image), and
- * the VkImageView; the refcount lifecycle mirrors optics_gfx_buffer /
- * optics_gfx_mesh. This is the replacement for the raw Vulkan
- * image/memory/view plumbing every depth-using example used to carry.
+ * VkImageView; the refcount lifecycle mirrors optics_gfx_buffer. This is
+ * the replacement for the raw Vulkan image/memory/view plumbing every
+ * depth-using example used to carry.
  */
 #include "image_internal.h"
 #include "internal.h"

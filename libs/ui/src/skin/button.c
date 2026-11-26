@@ -42,6 +42,7 @@ void optics_ui__skin_button(optics_ui *ui, optics_ui_node *n, const optics_ui_wi
                                          .rel = {rs->padding, text_y, 0, 0},
                                          .color = fg,
                                          .text = rec->content.label,
+                                         .text_advance = rec->content.text.width,
                                          .text_size = rs->font_size,
                                      });
             if (rec->hover_t > 0.001f && !disabled) {
@@ -108,7 +109,7 @@ void optics_ui__skin_button(optics_ui *ui, optics_ui_node *n, const optics_ui_wi
 
     /* Content layout & drawing */
     float glyph_s = rec->content.glyph_size > 0.0f ? rec->content.glyph_size : rs->font_size;
-    bool has_icon = rec->content.icon != OPTICS_UI_ICON_INVALID && rec->content.icon != 0;
+    bool has_icon = optics_ui__icon_valid(ui, rec->content.icon);
     bool has_image = rec->content.image != nullptr;
     bool has_label = rec->content.label && rec->content.label[0];
 
@@ -170,6 +171,7 @@ void optics_ui__skin_button(optics_ui *ui, optics_ui_node *n, const optics_ui_wi
                                      .rel = {text_x, text_y, 0, 0},
                                      .color = text_col,
                                      .text = rec->content.label,
+                                     .text_advance = rec->content.text.width,
                                      .text_size = rs->font_size,
                                  });
     }

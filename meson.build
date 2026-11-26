@@ -63,13 +63,10 @@ else
 endif
 
 opt_text = get_option('text')
-opt_scene = get_option('scene')
 opt_motion = get_option('motion')
-opt_svg = get_option('svg')
-opt_material = get_option('material')
-# ui consumes glyph and svg. The feature graph is explicit here so a
+# ui consumes text. The feature graph is explicit here so a
 # disabled dependency cannot turn into a late undefined reference.
-opt_ui = opt_text and opt_svg
+opt_ui = opt_text
 
 subdir('libs/gfx')
 
@@ -79,34 +76,14 @@ else
   text_dep = declare_dependency()
 endif
 
-if opt_scene
-  subdir('libs/scene')
-else
-  scene_dep = declare_dependency()
-endif
-
 if opt_motion
   subdir('libs/motion')
 else
   motion_dep = declare_dependency()
 endif
 
-if opt_svg
-  subdir('libs/svg')
-else
-  svg_dep = declare_dependency()
-endif
-
-if opt_material
-  subdir('libs/material')
-else
-  # Always defined so tests/examples can reference it unconditionally; empty
-  # when the library is off.
-  material_dep = declare_dependency()
-endif
-
 # window is the platform shell and needs gfx only. ui is the UI engine and
-# needs glyph + svg. app is the one library that links both.
+# needs text. app is the one library that links both.
 subdir('libs/window')
 
 if opt_ui
@@ -136,21 +113,6 @@ if opt_text
   optics_deps += [text_dep]
   optics_requires += ['optics-text = ' + meson.project_version()]
   optics_compile_args += '-DOPTICS_HAVE_TEXT=1'
-endif
-if opt_scene
-  optics_deps += [scene_dep]
-  optics_requires += ['optics-scene = ' + meson.project_version()]
-  optics_compile_args += '-DOPTICS_HAVE_SCENE=1'
-endif
-if opt_svg
-  optics_deps += [svg_dep]
-  optics_requires += ['optics-svg = ' + meson.project_version()]
-  optics_compile_args += '-DOPTICS_HAVE_SVG=1'
-endif
-if opt_material
-  optics_deps += [material_dep]
-  optics_requires += ['optics-material = ' + meson.project_version()]
-  optics_compile_args += '-DOPTICS_HAVE_MATERIAL=1'
 endif
 if opt_ui
   optics_deps += [ui_dep, app_dep]

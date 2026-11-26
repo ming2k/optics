@@ -11,11 +11,8 @@
 ├── examples/           getting_started/ starters and showcase/ applications (ADR-0171)
 ├── include/            Canonical umbrella C23 header <optics/optics.h> (ADR-0160)
 ├── libs/
-│   ├── gfx/            Vulkan RHI, 2D canvas, 3D draw core, compute, effects
+│   ├── gfx/            Vulkan RHI, 2D canvas, compute, effects
 │   ├── text/           Text shaping, layout metrics, glyph atlas
-│   ├── svg/            SVG document compiler (device-less, links gfx only)
-│   ├── scene/          3D scene graph, cameras, glTF loading
-│   ├── material/       Surface materials (Liquid Glass, Frosted, Acrylic, Mica)
 │   ├── motion/         Header-only spring physics and parametric easing (ADR-0158)
 │   ├── window/         Native window, event pump, frame cadence, platform services
 │   ├── ui/             Headless UI engine
@@ -32,10 +29,7 @@
 |------|----------------|----------------|-------|----------|
 | `gfx` | `libs/gfx/include/optics/gfx/` | `libs/gfx/src/` | `tests/gfx/` | `examples/getting_started/` |
 | `text` | `libs/text/include/optics/text/` | `libs/text/src/` | `tests/text/` | `examples/showcase/` |
-| `scene` | `libs/scene/include/optics/scene/` | `libs/scene/src/` | `tests/scene/` | `examples/showcase/` |
-| `material` | `libs/material/include/optics/material/` | `libs/material/src/` | `tests/material/` | `examples/showcase/` |
 | `motion` | `libs/motion/include/optics/motion/` | Header-only (`export.h`) | `tests/motion/` | `examples/showcase/` |
-| `svg` | `libs/svg/include/optics/svg/` | `libs/svg/src/` | `tests/svg/` | `examples/getting_started/` |
 | `ui` | `libs/ui/include/optics/ui/` | `libs/ui/src/` | `tests/ui/` | `examples/showcase/` |
 | `window` | `libs/window/include/optics/window/` | `libs/window/src/` | `tests/window/` | `examples/getting_started/` |
 | `app` | `libs/app/include/optics/app.h` | `libs/app/src/` | `tests/app/` | `examples/getting_started/` |

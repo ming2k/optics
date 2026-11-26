@@ -289,15 +289,6 @@ OPTICS_GFX_API uint64_t optics_gfx_device_labels_emitted(const optics_gfx_device
  *     "store"       ui/store  retained node-store slots
  *     "arena"       ui/core   context arena bytes
  *     "atlas"       text/atlas rasterised glyph entries
- *     "scene"       scene-graph nodes
- *
- *   OPTICS_GFX_SCOPE_DEVICE, owned by material (ADR-0134) — per-material so a leak names
- *   the material rather than "a filter":
- *     "filter_mica"            material/material
- *     "filter_frosted"         material/material
- *     "filter_acrylic"         material/material
- *     "filter_liquid_glass"    material/material
- *     "filter_backdrop_layer"  material/material
  *
  *   OPTICS_GFX_SCOPE_PROCESS
  *     "fd"          window        file descriptors (dup/open/pipe/eventfd)

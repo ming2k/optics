@@ -44,6 +44,7 @@ void optics_ui__skin_checkbox(optics_ui *ui, optics_ui_node *n,
                                          .rel = {rs->padding, text_y, 0, 0},
                                          .color = fg,
                                          .text = rec->content.label,
+                                         .text_advance = rec->content.text.width,
                                          .text_size = rs->font_size,
                                      });
         }
@@ -128,6 +129,7 @@ void optics_ui__skin_checkbox(optics_ui *ui, optics_ui_node *n,
                                          .rel = {label_x, text_y, 0, 0},
                                          .color = fg,
                                          .text = rec->content.label,
+                                         .text_advance = rec->content.text.width,
                                          .text_size = rs->font_size,
                                      });
         }
@@ -187,6 +189,7 @@ void optics_ui__skin_checkbox(optics_ui *ui, optics_ui_node *n,
                                      .rel = {label_x, text_y, 0, 0},
                                      .color = fg,
                                      .text = rec->content.label,
+                                     .text_advance = rec->content.text.width,
                                      .text_size = rs->font_size,
                                  });
     }

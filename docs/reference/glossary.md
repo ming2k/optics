@@ -17,10 +17,8 @@
 | Ear clipping        | Polygon triangulation algorithm; optics_gfx_canvas uses it for fill tessellation in v0.     |
 | Frame               | One pass through `optics_gfx_surface_begin_frame` … `optics_gfx_frame_present`.                   |
 | Glyph atlas         | Texture packing rasterized glyphs for glyph-run draws (`libs/text/src/atlas.c`).      |
-| Material            | `<optics/gfx/scene.h>` object bundling a pipeline, descriptor data and colour for a draw.  |
-| Mesh                | `<optics/gfx/scene.h>` vertex buffer plus optional index buffer.                           |
 | Path                | optics_gfx_canvas's sequence of verbs + points describing a 2D shape.                       |
-| Peer                | A consumer of gfx-core that records into a `optics_gfx_frame` (canvas, scene, compute, your own). |
+| Peer                | A consumer of gfx-core that records into a `optics_gfx_frame` (canvas, compute, your own). |
 | Pipeline cache      | Vulkan cache of compiled pipelines; gfx-core shares one across peers. Lifetime is the `optics_gfx_device`; cross-session persistence is consumer-owned (Skia `PersistentCache` model — load/save hooks on `optics_gfx_device_desc`, NULL by default). |
 | Premultiplied alpha | Storage convention where R, G, B are multiplied by A before storage; gfx's universal default. |
 | Primaries           | The xy chromaticities of a color space's red, green, and blue primaries plus its white point; defines the gamut. |

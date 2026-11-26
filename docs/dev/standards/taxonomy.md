@@ -21,7 +21,7 @@ WORKING   │  (Information-Oriented) │  (Understanding-Orient) │
           └─────────────────────────┴─────────────────────────┘
 ```
 
-- **`docs/tutorials/`**: Guided, hands-on lessons taking a newcomer through building their first 2D/3D applications. Focuses on learning and onboarding confidence.
+- **`docs/tutorials/`**: Guided, hands-on lessons taking a newcomer through building their first 2D applications. Focuses on learning and onboarding confidence.
 - **`docs/how-to/`**: Step-by-step problem-solving recipes for specific graphics or UI tasks (e.g. applying a blur effect, recording and presenting a frame, CPU fallback). Focuses on accomplishing a practical outcome.
 - **`docs/reference/`**: Precise technical descriptions of C APIs, exported symbols, composition graphs, shader effects, and threading contracts without tutorial narrative.
 - **`docs/explanation/`**: Conceptual deep dives, physical optics models (Liquid Glass), value-semantic rendering, and Vulkan architecture. Focuses on understanding the system.

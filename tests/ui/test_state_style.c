@@ -238,13 +238,11 @@ static void test_minimalist_theme_defaults_and_borders(void) {
     optics_ui_theme dark = optics_ui_theme_dark();
     optics_ui_theme classic_light = optics_ui_theme_classic(false);
     optics_ui_theme classic_dark = optics_ui_theme_classic(true);
-    optics_ui_theme mat = optics_ui_theme_for_material(OPTICS_UI_MATERIAL_LIQUID_GLASS, true);
 
     OT_EXPECT_NEAR(def.border_width, 0.0f, 0.0f);
     OT_EXPECT_NEAR(dark.border_width, 0.0f, 0.0f);
     OT_EXPECT_NEAR(classic_light.border_width, 1.0f, 0.0f);
     OT_EXPECT_NEAR(classic_dark.border_width, 1.0f, 0.0f);
-    OT_EXPECT_NEAR(mat.border_width, 1.0f, 0.0f);
 
     /* Semantic surface tokens (ADR-0105) */
     OT_EXPECT(def.color_surface != 0);

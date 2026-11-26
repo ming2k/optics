@@ -6,15 +6,12 @@
 - **Clean Git State**: Do not leave scratch files, temporary binaries, or untracked test logs in the working tree.
 
 ## 2. Core Mental Model & Subsystem Boundaries
-- **Topology**: Optics is a C23 graphics and UI stack of nine semantic libraries under `libs/` with unified `<optics/...>` headers and `optics_<mod>_` symbols (ADR-0170). Dependencies point one way; the build graph is the authority (`meson.build` per library):
-  - `gfx` (`liboptics_gfx`, Vulkan only): Vulkan 1.3 RHI, 2D vector canvas (GPU & CPU backend `<optics/gfx/canvas_cpu.h>`), 3D draw core, compute pipelines, image effects, analytic curve kernel. One library, one ABI, no optional modules.
+- **Topology**: Optics is a pure C23 2D graphics and UI stack of six orthogonal libraries under `libs/` with unified `<optics/...>` headers and `optics_<mod>_` symbols (ADR-0170, ADR-0174). Dependencies point one way; the build graph is the authority (`meson.build` per library):
+  - `gfx` (`liboptics_gfx`, Vulkan only): Vulkan 1.3 RHI, 2D vector canvas (GPU & CPU backend `<optics/gfx/canvas_cpu.h>`), compute pipelines, image effects, analytic curve kernel, analytic SDF, color management. One library, one ABI, no optional modules.
   - `text` (`liboptics_text`, → gfx): HarfBuzz-backed text shaping, layout metrics, and dynamic texture atlas caching.
-  - `svg` (`liboptics_svg`, → gfx): Vector-art document compiler (SVG path grammar, shape decomposition, gradient resolution, headless rasterization).
-  - `scene` (`liboptics_scene`, → gfx): Scene graph, cameras, hierarchical transforms, glTF loading.
-  - `material` (`liboptics_material`, → gfx): Surface materials: Liquid Glass (refraction, dispersion, contact AO), Frosted Glass, Acrylic, and Mica.
   - `motion` (`<optics/motion.h>`, header-only, libm): Closed-form analytic spring integration and parametric easing.
   - `window` (`liboptics_window`, → gfx): Native OS windowing, event pump, display pacing (Wayland, Win32, Cocoa), event seam (ADR-0107), dual-thread pipeline (ADR-0124), and the UI-host seam `<optics/window/host.h>`. Must never include a UI header.
-  - `ui` (`liboptics_ui`, → gfx, text, svg): Immediate-mode UI engine, layout (Grid/Flex/Flow), retained store, accessibility tree. Headless: must never include a windowing header.
+  - `ui` (`liboptics_ui`, → gfx, text): Immediate-mode UI engine, layout (Grid/Flex/Flow), retained store, per-context format-agnostic vector icon registry, accessibility tree. Headless: must never include a windowing header.
   - `app` (`liboptics_app`, → window, ui): Application shell. The only library that links both `window` and `ui`; implements `optics_window_ui_host` over an `optics_ui` context.
 - **Pure C23 Baseline**: Idiomatic modern C (`-std=c23`) across all modules:
   - Pointers: Always use `nullptr` (never `NULL` or `0`).
@@ -24,7 +21,7 @@
   - Assertions: Standard C23 `static_assert(cond, msg)`.
 - **Descriptor Rule**: A public function takes at most four parameters; anything needing more configuration takes exactly one typed descriptor (`const optics_<mod>_<item>_opts *` or `_desc *`), never two. Scalar setters, getters and pure math/geometry kernels stay positional. Variant suffixes (`_ex`, `_wrapped`, `_primary`) are forbidden: a variant is a descriptor field.
 - **Semantic Naming & Namespace (ADR-0170)**: Every library uses its canonical semantic name under `libs/<mod>/`, installs headers under `include/optics/`, prefixes public C symbols with `optics_<mod>_`, and publishes `optics-<mod>` crates.
-- **Material Boundary Separation (ADR-0063)**: `gfx` must NEVER reference named materials (`optics_material_`, `liquid_glass`) or higher-level shaders. Enforced natively by linker and build-system dependency isolation.
+- **Core Purity Boundary (ADR-0174)**: Core libraries must NEVER embed external asset/document format parsers (SVG, PNG, JPEG, glTF, JSON) or branded OS materials (`optics_material_`, `liquid_glass`, `mica`, `acrylic`). Enforced by `tools/check_library_purity.py`.
 - **Zero-Alloc Steady-State Frame**: A frame that builds the same widgets as the previous one runs `optics_ui_begin` ➔ `optics_ui_end` without calling libc `malloc`/`calloc`/`realloc`/`free`, whatever the input; it borrows from the per-frame arena (`ui->arena`). Structural change (a node entering or leaving, the node store resizing) may use the persistent allocator. Enforced by `tests/ui/test_zero_alloc.c`.
 - **Library Stdout Purity**: Shared library TUs must never write to `stdout` (`printf`, `puts`), reserving stdout for IPC. Use `stderr` for diagnostics.
 

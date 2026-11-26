@@ -47,7 +47,7 @@ meson test -C build-release-asan --no-suite bench --no-suite fuzz
 
 Point the binding build scripts at `build-release` and run the repository-root
 Cargo workspace as described in [Testing](testing.md#rust-workspaces). Follow the
-[Pre-release smoke verification checklist](manual-testing.md#7-pre-release-smoke-verification-checklist)
+[Pre-release smoke verification checklist](manual-testing.md#6-pre-release-smoke-verification-checklist)
 to manually verify interactive `gfx`, `material`, and `window` applications.
 
 ## Create the Source Artifact

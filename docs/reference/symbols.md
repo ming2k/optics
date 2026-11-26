@@ -11,7 +11,7 @@ For the shape of the API (object model, lifecycle, error model), see
 [Thread Safety](thread-safety.md).
 
 
-## gfx — rendering foundation: RHI, canvas, scene draw core, compute, effects
+## gfx — rendering foundation: Vulkan 1.3 RHI, 2D canvas, compute, image effects
 
 ### `<optics/gfx/canvas.h>`
 
@@ -352,21 +352,6 @@ For the shape of the API (object model, lifecycle, error model), see
 |--------|-------------|
 | `optics_gfx_profile_query` | Query profiler runtime state. |
 
-### `<optics/gfx/scene.h>`
-
-| Symbol | Description |
-|--------|-------------|
-| `optics_gfx_camera_perspective` |  |
-| `optics_gfx_camera_look_at` |  |
-| `optics_gfx_mesh_create` |  |
-| `optics_gfx_mesh_retain` |  |
-| `optics_gfx_mesh_release` | Destruction is deferred: a released mesh's vertex/index buffers may still be bound by in-flight frames, so they are destroyed by the device retire queue only after the GPU provably passed every batch that could reference them. |
-| `optics_gfx_material_create` |  |
-| `optics_gfx_material_retain` |  |
-| `optics_gfx_material_release` | Drop one owned reference. |
-| `optics_gfx_material_get_alpha_mode` |  |
-| `optics_gfx_scene_draw_mesh` |  |
-
 ### `<optics/gfx/sdf.h>`
 
 | Symbol | Description |
@@ -472,125 +457,6 @@ For the shape of the API (object model, lifecycle, error model), see
 | `optics_text_byte_for_x` |  |
 | `optics_text_selection_rects` |  |
 | `optics_text_visual_move` |  |
-
-## svg — SVG document compiler
-
-### `<optics/svg.h>`
-
-| Symbol | Description |
-|--------|-------------|
-| `optics_svg_version` |  |
-| `optics_svg_version_number` |  |
-| `optics_svg_version_check` |  |
-| `optics_svg_version_string` |  |
-| `optics_svg_parse` | Parse `opts->text` into a document. |
-| `optics_svg_retain` | Retain/release. |
-| `optics_svg_release` |  |
-| `optics_svg_live_documents` | Live document count for the whole process. |
-| `optics_svg_viewport` | The document's intrinsic size in user units: the `viewBox` extent when present, else the `width`/`height` attributes, else the geometric bounds of the shapes. |
-| `optics_svg_attribute` | Value of a root `<svg>` attribute (e.g. "data-hotspot-x"), or NULL. |
-| `optics_svg_shape_count` |  |
-| `optics_svg_shape_at` | Fill `out` with shape `index`. |
-| `optics_svg_gradient_at` | Resolve gradient `index` (a `optics_svg_paint::gradient` value). |
-| `optics_svg_path_emit` | Append a shape's geometry to `path`, in document user space. |
-| `optics_svg_draw` | Paint `opts->document` into `opts->canvas` or `opts->encoder`. |
-| `optics_svg_rasterize` | Rasterize a document with the headless software canvas. |
-| `optics_svg_pixmap_deinit` | Release `pixmap->pixels` and zero the struct. |
-
-## scene — 3D scene graph and glTF loading
-
-### `<optics/scene.h>`
-
-| Symbol | Description |
-|--------|-------------|
-| `optics_scene_version` |  |
-| `optics_scene_version_number` |  |
-| `optics_scene_version_check` |  |
-| `optics_scene_version_string` |  |
-| `optics_scene_load_glb` | Parse a .glb (binary glTF 2.0) and build GPU resources on `device`. |
-| `optics_scene_parse_glb` | Parse a .glb into device-independent scene data (CPU parse only). |
-| `optics_scene_data_build` | Upload a parsed scene onto `device`: one optics_gfx_mesh per primitive. |
-| `optics_scene_data_free` | Release a parsed scene data. |
-| `optics_scene_data_primitive_count` | Number of mesh primitives in the parsed scene. |
-| `optics_scene_data_bounds` | World-space axis-aligned bounding box of parsed primitives. |
-| `optics_scene_retain` |  |
-| `optics_scene_release` |  |
-| `optics_scene_set_materials` | Transactionally replace the scene-owned per-index material table. |
-| `optics_scene_primitive_count` | Number of mesh primitives in the scene. |
-| `optics_scene_bounds` | World-space axis-aligned bounding box of every primitive drawn by the scene. |
-| `optics_scene_humanoid_bone_position` | Current model-space position of a VRM humanoid bone (e.g. "head" or "hips"). |
-| `optics_scene_load_animation_glb` | Load animation from a binary glTF/VRMA file and bind its channels to `target`. |
-| `optics_scene_animation_retain` |  |
-| `optics_scene_animation_release` |  |
-| `optics_scene_animation_duration` |  |
-| `optics_scene_animation_channel_count` |  |
-| `optics_scene_apply_animation` | Reset to the model rest pose, then sample and apply the clip. |
-| `optics_scene_reset_pose` |  |
-| `optics_scene_draw` | Record mesh draw calls composed with each node's world matrix. |
-
-## material — surface materials
-
-### `<optics/material/acrylic.h>`
-
-| Symbol | Description |
-|--------|-------------|
-| `optics_material_acrylic_filter_create` |  |
-| `optics_material_acrylic_filter_warmup` | Pre-warm compute pipelines ahead of time to eliminate cold-start JIT hitches (ADR-0141). |
-| `optics_material_acrylic_filter_retain` |  |
-| `optics_material_acrylic_filter_release` |  |
-| `optics_material_acrylic_filter_apply` |  |
-
-### `<optics/material/backdrop_layer.h>`
-
-| Symbol | Description |
-|--------|-------------|
-| `optics_material_backdrop_layer_filter_create` |  |
-| `optics_material_backdrop_layer_filter_warmup` | Pre-warm compute pipelines ahead of time to eliminate cold-start JIT hitches (ADR-0141). |
-| `optics_material_backdrop_layer_filter_retain` |  |
-| `optics_material_backdrop_layer_filter_release` | Release only after every submission that references the filter's outputs has completed (its frame-slot fence has signalled, or after optics_gfx_device_wait_idle): release destroys the filter's compute pipelines inline. |
-| `optics_material_backdrop_layer_filter_apply` |  |
-| `optics_material_backdrop_layer_filter_stats` |  |
-
-### `<optics/material/frosted.h>`
-
-| Symbol | Description |
-|--------|-------------|
-| `optics_material_frosted_filter_create` |  |
-| `optics_material_frosted_filter_warmup` | Pre-warm compute pipelines ahead of time to eliminate cold-start JIT hitches (ADR-0141). |
-| `optics_material_frosted_filter_retain` |  |
-| `optics_material_frosted_filter_release` |  |
-| `optics_material_frosted_filter_apply` |  |
-
-### `<optics/material/liquid_glass.h>`
-
-| Symbol | Description |
-|--------|-------------|
-| `optics_material_liquid_glass_max_shapes` | Number of shapes this build supports per glass body (the dispatch pushes one SDF per shape; the shader fuses them pairwise). |
-| `optics_material_liquid_glass_filter_create` |  |
-| `optics_material_liquid_glass_filter_warmup` | Pre-warm compute pipelines ahead of time to eliminate cold-start JIT hitches (ADR-0141). |
-| `optics_material_liquid_glass_filter_retain` |  |
-| `optics_material_liquid_glass_filter_release` | Release only after every submission that references the filter's outputs has completed (its frame-slot fence has signalled, or after optics_gfx_device_wait_idle): release destroys the filter's compute pipelines inline. |
-| `optics_material_liquid_glass_filter_apply` |  |
-| `optics_material_liquid_glass_filter_stats` |  |
-
-### `<optics/material/mica.h>`
-
-| Symbol | Description |
-|--------|-------------|
-| `optics_material_mica_filter_create` |  |
-| `optics_material_mica_filter_warmup` | Pre-warm compute pipelines ahead of time to eliminate cold-start JIT hitches (ADR-0141). |
-| `optics_material_mica_filter_retain` |  |
-| `optics_material_mica_filter_release` |  |
-| `optics_material_mica_filter_apply` |  |
-
-### `<optics/material/types.h>`
-
-| Symbol | Description |
-|--------|-------------|
-| `optics_material_version` |  |
-| `optics_material_version_number` |  |
-| `optics_material_version_check` | True when the linked library can stand in for the one compiled against: same major, and its (minor, patch) is >= the requested one. |
-| `optics_material_version_string` |  |
 
 ## motion — springs and easing (header-only)
 
@@ -730,7 +596,6 @@ For the shape of the API (object model, lifecycle, error model), see
 | `optics_ui_theme_default` |  |
 | `optics_ui_theme_dark` |  |
 | `optics_ui_theme_classic` | Classic theme generator: provides a 1px wireframe border baseline (border_width = 1.0f) for applications desiring traditional desktop control outlines. |
-| `optics_ui_theme_for_material` | Material-paired theme generator: returns a full design token set tailored for UI components resting on top of the given physical material surface (ADR-0032, ADR-0101). |
 | `optics_ui_push_style` | Scoped style stack (ADR-0061 item 4): every widget declared between optics_ui_push_style and optics_ui_pop_style resolves its unset style atoms against the merged scope — the primitive from which callers build their own design-system scopes ("danger", "sidebar"). |
 | `optics_ui_pop_style` |  |
 | `optics_ui_set_text_family` |  |
@@ -867,14 +732,9 @@ For the shape of the API (object model, lifecycle, error model), see
 
 | Symbol | Description |
 |--------|-------------|
-| `optics_ui_icon_info` | Resolve an icon id — built-in (0 .. |
-| `optics_ui_icon_register_svg` | Register an SVG string as a runtime icon. |
-
-### `<optics/ui/material.h>`
-
-| Symbol | Description |
-|--------|-------------|
-| `optics_ui_material_recipe_default` | Standard recipe factory: returns reference neutral recipes for light/dark modes. |
+| `optics_ui_icon_register` | Register a vector icon on `ui`. |
+| `optics_ui_icon_unregister` | Unregister a runtime icon previously returned by `optics_ui_icon_register`, reclaiming its storage and invalidating cached coverage masks. |
+| `optics_ui_icon_info` | Resolve an icon id (built-in or registered on `ui`) to its descriptor, or nullptr if unknown. |
 
 ### `<optics/ui/patterns.h>`
 

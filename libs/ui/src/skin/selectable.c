@@ -14,7 +14,7 @@ void optics_ui__skin_selectable(optics_ui *ui, optics_ui_node *n,
     bool selected = (rec->state & OPTICS_UI_STATE_SELECTED) != 0;
     float h = rec->bounds.h;
 
-    bool has_icon = rec->content.icon != 0 && optics_ui__icon_valid((int32_t)rec->content.icon);
+    bool has_icon = optics_ui__icon_valid(ui, rec->content.icon);
     float icon_size =
         has_icon ? (rec->content.glyph_size > 0.0f ? rec->content.glyph_size : rs->icon_size)
                  : 0.0f;
@@ -25,12 +25,14 @@ void optics_ui__skin_selectable(optics_ui *ui, optics_ui_node *n,
     float fill = rec->hover_t * 0.6f;
     if (selected || fill > 0.001f) {
         optics_gfx_color bg =
-            selected ? rs->bg_pressed : optics_ui__lerp_color(rs->bg, rs->bg_hover, fill);
-        optics_ui__drawlist_push(ui, n,
-                                 (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_RECT,
-                                                      .rel = {0, 0, 0, 0},
-                                                      .color = bg,
-                                                      .radius = rs->corner_radius});
+            selected ? rs->bg_pressed : optics_ui__lerp_color(0, rs->bg_hover, fill);
+        if ((bg & 0xFF000000u) != 0) {
+            optics_ui__drawlist_push(ui, n,
+                                     (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_RECT,
+                                                          .rel = {0, 0, 0, 0},
+                                                          .color = bg,
+                                                          .radius = rs->corner_radius});
+        }
     }
 
     float text_y = floorf((h - rec->content.text.height) * 0.5f);
@@ -56,5 +58,6 @@ void optics_ui__skin_selectable(optics_ui *ui, optics_ui_node *n,
                              .rel = {x, text_y, 0, 0}, /* left-aligned (rel.w 0) */
                              .color = fg,
                              .text = rec->content.label,
+                             .text_advance = rec->content.text.width,
                              .text_size = rs->font_size});
 }

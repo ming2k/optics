@@ -107,7 +107,7 @@ optics_ui_datagrid_action optics_ui_datagrid(optics_ui *ui, const optics_ui_data
                 .variant = OPTICS_UI_BUTTON_SUBTLE,
                 .icon = (c->sort == OPTICS_UI_SORT_ASC)    ? OPTICS_UI_ICON_CHEVRON_UP
                         : (c->sort == OPTICS_UI_SORT_DESC) ? OPTICS_UI_ICON_CHEVRON_DOWN
-                                                           : 0,
+                                                           : OPTICS_UI_ICON_NONE,
             });
 
         if (r.clicked && c->sortable) {

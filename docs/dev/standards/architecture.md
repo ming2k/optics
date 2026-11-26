@@ -7,29 +7,23 @@ each one. A rule without a mechanism is not listed here.
 
 ## 1. Library Graph
 
-Nine libraries under `libs/`, plus Rust crates under `crates/`.
+Six libraries under `libs/`, plus Rust crates under `crates/`.
 Dependencies point one way. The Meson dependency declarations are the
 authority; this diagram is a rendering of them.
 
 ```text
 app ──┬──► window ───────────────► gfx
-      └──► ui ──┬──► text ───────► gfx
-                └──► svg ────────► gfx
-scene ───────────────────────────► gfx
-material ────────────────────────► gfx
+      └──► ui ────► text ────────► gfx
 motion   (header-only; libm only)
 ```
 
 | Library | Depends on | Owns |
 |---|---|---|
-| `gfx` (`liboptics_gfx`) | Vulkan | RHI, 2D canvas (GPU and CPU backends), 3D draw core, compute, image effects, curve kernel, distance fields, math. One library, one ABI: no optional modules. |
+| `gfx` (`liboptics_gfx`) | Vulkan | RHI, 2D canvas (GPU and CPU backends), compute, image effects, curve kernel, distance fields, color management, math. One library, one ABI: no optional modules. |
 | `text` (`liboptics_text`) | gfx | Text shaping, layout metrics, glyph atlas. |
-| `svg` (`liboptics_svg`) | gfx | SVG static-art compiler. Device-less (ADR-0136). |
-| `scene` (`liboptics_scene`) | gfx | Scene graph, transforms, glTF loading. |
-| `material` (`liboptics_material`) | gfx | Named surface materials (ADR-0063). |
 | `motion` (`<optics/motion.h>`) | libm | Motion vocabulary. Header-only (ADR-0158). |
 | `window` (`liboptics_window`) | gfx | Window, event pump, frame cadence, clipboard, IME, dialogs, accessibility bridge, and the UI-host seam `<optics/window/host.h>`. |
-| `ui` (`liboptics_ui`) | gfx, text, svg | UI engine. Headless. |
+| `ui` (`liboptics_ui`) | gfx, text | UI engine, per-context vector icon registry. Headless. |
 | `app` (`liboptics_app`) | window, ui | Application shell: implements `optics_window_ui_host` over an `optics_ui` context. |
 
 There are no numbered layers. The earlier "Layer 0–3" model implied edges that
@@ -65,9 +59,9 @@ alone.
 
 ## 3. Red-Lines
 
-### 3.1 Material Boundary Separation (ADR-0063)
-- **Red-Line**: `gfx` must NEVER reference named materials (`optics_material_`, `liquid_glass`, frosted glass, mica, acrylic) or higher-level material shaders.
-- **Enforcement**: The Meson dependency graph gives `libs/gfx` no `material_dep` and no material include path, so a material header or symbol fails at compile/link time. `tools/check_library_purity.py` (`meson test --suite lint`) additionally rejects named-material references in `gfx` sources. `gfx` exposes generic shader pipelines, bindless handles, and canvas render targets; high-level BRDF models belong exclusively to `material`.
+### 3.1 Core Purity — No Format Parsers or Branded OS Materials (ADR-0174)
+- **Red-Line**: The core stack must NEVER embed external asset/document format parsers (PNG, JPEG, WebP, SVG, JSON, glTF, VRM) or branded OS aesthetic shader packs (`liquid_glass`, `frosted_glass`, `acrylic`, `mica`). Callers decode assets externally and feed `optics_gfx_image`, `optics_gfx_path`, or `optics_ui_icon_desc`.
+- **Enforcement**: `tools/check_library_purity.py` (`meson test --suite lint`) rejects retired non-core library directories (`libs/svg`, `libs/scene`, `libs/material`) and rejects branded OS material references in `libs/gfx` and `libs/ui`.
 
 ### 3.2 Vulkan RHI Purity & Headless Software Fallback (ADR-0006, ADR-0019)
 - **Red-Line**: Optics maintains no runtime RHI abstraction layer. Vulkan 1.3 is the primary GPU backend.

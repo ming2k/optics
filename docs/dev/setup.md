@@ -71,20 +71,16 @@ Useful feature options are defined in `meson_options.txt`:
 | Option | Default | Effect |
 |--------|---------|--------|
 | `text` | `true` | Build the `text` (`liboptics_text`) shaping library. |
-| `scene` | `true` | Build the `scene` (`liboptics_scene`) 3D scene-graph library. |
-| `material` | `true` | Build the `material` (`liboptics_material`) surface-material library. |
 | `motion` | `true` | Install the header-only `<optics/motion.h>` motion vocabulary. |
-| `svg` | `true` | Build the `svg` (`liboptics_svg`) SVG document compiler. |
 | `examples` | `false` | Build all available C examples. |
 | `tests` | `false` | Build C tests and benchmarks. |
 | `fuzz` | `false` | Build fuzz harnesses (libFuzzer when available). |
 
 `gfx` itself has no module switches: every `liboptics_gfx` carries the canvas,
-scene, compute and effect modules, so its ABI is identified by its version
-alone. The options above only select which sibling libraries are built. The
-`ui`/`app` stack is built only when `text` and `svg` are both enabled. A
-`gfx`+`window`-only build is `-Dtext=false -Dsvg=false -Dscene=false
--Dmaterial=false -Dmotion=false`.
+compute and effect modules, so its ABI is identified by its version alone. The
+options above only select which sibling libraries are built. The `ui`/`app`
+stack is built only when `text` is enabled. A `gfx`+`window`-only build is
+`-Dtext=false -Dmotion=false`.
 
 After changing options or installing a missing dependency, reconfigure:
 
@@ -102,7 +98,6 @@ meson test -C build --no-suite bench --no-suite fuzz
 Run representative binaries from their module directories:
 
 ```bash
-./build/examples/showcase/scene_studio
 ./build/examples/showcase/widget_gallery
 ./build/examples/getting_started/headless_canvas /tmp/out.ppm
 ```
@@ -142,7 +137,7 @@ specific clang-format binary.
 |---------|-------------|
 | Compiler rejects `#embed` | Nothing to do — the generated-header fallback builds automatically. To force it (or verify it), add `-DFLUX_SHADER_NO_EMBED=1` to `c_args`. |
 | `slangc` not found | Install Vulkan SDK 1.4+ or the pinned Slang release from the official tarball, then ensure `slangc` is in PATH. |
-| FreeType, HarfBuzz, Fontconfig, or FriBidi missing | Install the text development packages for a UI build. A deliberately gfx-only build passes `-Dtext=false -Dsvg=false`, which also disables `ui` and `app`; `window` needs only `gfx`. |
+| FreeType, HarfBuzz, Fontconfig, or FriBidi missing | Install the text development packages for a UI build. A deliberately gfx-only build passes `-Dtext=false`, which also disables `ui` and `app`; `window` needs only `gfx`. |
 | `window` reports that its backend was skipped | Install Wayland, XKB Common, and Vulkan development files, then reconfigure. |
 | Vulkan integration tests skip | Confirm `vulkaninfo --summary` finds a Vulkan 1.3 device or install Lavapipe. |
 

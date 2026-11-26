@@ -79,39 +79,34 @@ typedef struct optics_ui_draw_cmd {
     float outline_width;
     const char *text; /* OPTICS_UI_DRAW_TEXT: arena-copied utf8 */
     float text_size;
-    float text_weight;       /* 0 = use theme default */
-    int32_t text_family;     /* optics_ui_text_family captured at build; 0 = default */
-    int32_t icon_id;         /* OPTICS_UI_DRAW_ICON: enum optics_ui_icon_id */
-    optics_gfx_image *image; /* OPTICS_UI_DRAW_IMAGE: host-owned texture, borrowed
+    float text_weight;         /* 0 = use theme default */
+    int32_t text_family;       /* optics_ui_text_family captured at build; 0 = default */
+    optics_ui_icon_id icon_id; /* OPTICS_UI_DRAW_ICON: built-in or context-registered id */
+    optics_gfx_image *image;   /* OPTICS_UI_DRAW_IMAGE: host-owned texture, borrowed
                           for the frame; must outlive snapshot publication */
 } optics_ui_draw_cmd;
 
-enum {
-    OPTICS_UI_ICON_RENDER_STROKE = 0,
-    OPTICS_UI_ICON_RENDER_FILL = 1,
-};
-
-/* Upper bound on the paint runs one icon may resolve to. A runtime SVG keeps
- * one run per source shape; the registry already caps its shape count, so this
- * bound is what the replay span buffer and the mask pool are both sized from.
- * It is a hard ceiling, not a target: an icon with more runs than this is
- * refused by the bake and rendered through the vector path instead. */
+/* Upper bound on the paint runs one icon may resolve to. */
 #define OPTICS_UI_ICON_MAX_RUNS 64u
 
-/* Generated beside optics_ui_icon_table from the vendored SVG source style. */
-extern const uint8_t optics_ui_icon_render_modes[OPTICS_UI_ICON_COUNT];
+/* Per-context registered vector icon slot (icon_runtime.c). */
+typedef struct optics_ui__icon_slot {
+    uint32_t generation;
+    bool occupied;
+    optics_ui_icon_cmd *cmds;
+    optics_ui_icon_run *runs;
+    optics_ui_icon_desc desc;
+} optics_ui__icon_slot;
 
-/* The built-in icon table (indexed by optics_ui_icon_id < OPTICS_UI_ICON_COUNT).
- * Internal: not part of the installed API surface; optics_ui_icon_info() is the
- * public read access. */
-extern const optics_ui_icon_desc optics_ui_icon_table[OPTICS_UI_ICON_COUNT];
+typedef struct optics_ui__icon_registry {
+    optics_ui__icon_slot *slots;
+    uint32_t cap;
+} optics_ui__icon_registry;
 
-/* icon registry (icon_runtime.c) — resolve an icon id, built-in or
- * runtime-registered (optics_ui_icon_register_svg), to its command stream and
- * render mode. optics_ui__icon_desc returns NULL for unknown ids. */
-bool optics_ui__icon_valid(int32_t id);
-const optics_ui_icon_desc *optics_ui__icon_desc(int32_t id);
-uint8_t optics_ui__icon_mode(int32_t id);
+void optics_ui__icon_registry_init(optics_ui *ui);
+void optics_ui__icon_registry_destroy(optics_ui *ui);
+bool optics_ui__icon_valid(const optics_ui *ui, optics_ui_icon_id id);
+const optics_ui_icon_desc *optics_ui__icon_desc(const optics_ui *ui, optics_ui_icon_id id);
 
 /* ------------------------------------------------------------------ */
 /*  Retained node slot (ADR-0027)                                     */
@@ -245,8 +240,12 @@ struct optics_ui_node {
     optics_gfx_rect render_rect;
     /* The pixels `render_rect`'s frame actually covered, captured from the
      * snapshot (ADR-0144). Survives the arena, so a LEAVING node's vacated
-     * region is still known after its command list has been recycled. */
+     * region is still known after its command list has been recycled.
+     * `prev_paint_rect` snapshots `render_paint_rect` during `optics_ui_end`
+     * so `optics_ui_damage_rects` still sees the previous frame's paint even
+     * if a caller activates the new snapshot before querying damage. */
     optics_gfx_rect render_paint_rect;
+    optics_gfx_rect prev_paint_rect;
     /* The clip this node imposed on its children last frame, and the band it was
      * composited into (ADR-0149). Both change what descendants look like without
      * any descendant's own state changing:
@@ -262,6 +261,10 @@ struct optics_ui_node {
      * explicitly. `has_prev_clip` distinguishes "never built" from "clips nothing". */
     bool has_prev_clip;
     optics_gfx_rect prev_clip;
+    /* Snapshot of `prev_clip` captured during `optics_ui_end` before any
+     * activation overwrites `prev_clip`, keeping `optics_ui_damage_rects`
+     * order-independent with respect to `optics_ui_snapshot_activate`. */
+    optics_gfx_rect damage_prev_clip;
     optics_ui_band prev_band;
     uint32_t prev_band_order;
 
@@ -269,6 +272,7 @@ struct optics_ui_node {
     optics_gfx_display_list *cached_dl;
     optics_gfx_rect cached_clip;
     uint64_t visual_revision, cached_revision, presented_revision;
+    uint64_t self_revision, presented_self_revision;
     float cached_scale;
 
     /* persistent per-node user state (optics_ui_node_state) */
@@ -411,6 +415,7 @@ struct optics_ui {
     uint32_t clip_overflow;
 
     optics_ui_store store;
+    optics_ui__icon_registry icons;       /* per-context vector icon registry */
     optics_ui__icon_mask_pool icon_masks; /* baked coverage masks (ADR-0112); pool
                                            * storage is allocated at optics_ui_create so
                                            * the struct stays fixed-size */
@@ -472,10 +477,14 @@ struct optics_ui {
      * context-global hovered id had no reader (dead state). */
     optics_ui_id active_id; /* captured (e.g. dragging) */
     optics_ui_id focused_id;
-    bool focus_visible;                /* keyboard modality (ADR-0058): true when the last
-                                        * focus move came from Tab traversal; cleared by a
-                                        * pointer press or programmatic optics_ui_set_focus.
-                                        * Drives OPTICS_UI_STATE_FOCUS_VISIBLE. */
+    bool focus_visible;          /* keyboard modality (ADR-0058): true when the last
+                                  * focus move came from Tab traversal; cleared by a
+                                  * pointer press or programmatic optics_ui_set_focus.
+                                  * Drives OPTICS_UI_STATE_FOCUS_VISIBLE. */
+    optics_ui_id focus_at_begin; /* focus snapshot at optics_ui_begin, for detecting
+                                  * mid/post-build focus transitions that need a
+                                  * follow-up frame to settle visuals */
+    bool focus_visible_at_begin;
     optics_ui_id scroll_hot_id;        /* deepest scroll container under cursor */
     optics_ui_cursor_hint cursor_hint; /* semantic cursor for the top hovered control */
     optics_ui_response last_response;
@@ -1036,6 +1045,35 @@ static inline optics_gfx_rect optics_ui__offset_rel(optics_gfx_rect box, optics_
     return (optics_gfx_rect){x, box.y + rel.y, w, h};
 }
 
+/* Command-aware variant of `optics_ui__offset_rel`.
+ *
+ * For boxes/rects/borders/clips, `rel.w == 0` / `rel.h == 0` denotes a
+ * symmetrically inset fill (`box.w - 2 * rel.x`, `box.h - 2 * rel.y`).
+ * For `OPTICS_UI_DRAW_TEXT`, `rel.w == 0` / `rel.h == 0` instead places the
+ * text origin at `(rel.x, rel.y)` and runs to the trailing edge of `box`
+ * (`box.w - rel.x`, `box.h - rel.y`): subtracting `2 * rel.x` or `2 * rel.y`
+ * collapsed right-aligned labels (`OPTICS_UI_END`), narrow icon+label rows,
+ * and the bottom half of wrapped/multiline text to zero extent. Negative
+ * `rel.w`/`rel.h` keep symmetric centering margins. */
+static inline optics_gfx_rect optics_ui__cmd_rel_rect(optics_gfx_rect box,
+                                                      const optics_ui_draw_cmd *c) {
+    if (!c)
+        return box;
+    if (c->kind != OPTICS_UI_DRAW_TEXT)
+        return optics_ui__offset_rel(box, c->rel);
+    const optics_gfx_rect rel = c->rel;
+    float w = rel.w > 0.0f
+                  ? rel.w
+                  : (rel.w < 0.0f ? box.w - 2.0f * rel.x : (rel.x < 0.0f ? box.w : box.w - rel.x));
+    float h = rel.h > 0.0f ? rel.h : (rel.h < 0.0f ? box.h - 2.0f * rel.y : box.h - rel.y);
+    if (w < 0.0f)
+        w = 0.0f;
+    if (h < 0.0f)
+        h = 0.0f;
+    float x = (rel.x < 0.0f && rel.w > 0.0f) ? box.x + box.w + rel.x - w : box.x + rel.x;
+    return (optics_gfx_rect){x, box.y + rel.y, w, h};
+}
+
 /* The box a text command paints into, in absolute coordinates, from the advance
  * its widget recorded.
  *
@@ -1125,7 +1163,7 @@ static inline optics_gfx_rect optics_ui__node_child_clip(const optics_ui_node *n
  * is derived from the same value replay uses and biased outward. */
 static inline optics_gfx_rect optics_ui__cmd_paint_extent(optics_gfx_rect box,
                                                           const optics_ui_draw_cmd *c) {
-    const optics_gfx_rect rel_rect = optics_ui__offset_rel(box, c->rel);
+    const optics_gfx_rect rel_rect = optics_ui__cmd_rel_rect(box, c);
     if (!c)
         return rel_rect;
     switch (c->kind) {
@@ -1134,14 +1172,24 @@ static inline optics_gfx_rect optics_ui__cmd_paint_extent(optics_gfx_rect box,
         /* Paint nothing themselves; including them would re-widen every clipped
          * subtree to its clip rectangle. */
         return (optics_gfx_rect){0, 0, 0, 0};
-    case OPTICS_UI_DRAW_TEXT:
+    case OPTICS_UI_DRAW_TEXT: {
         /* Positioned from the advance its widget recorded, exactly as replay
          * positions it. Neither consumer shapes here. */
-        return optics_ui__text_bounds(rel_rect, c->text_advance, c->rel.w < 0.0f, c->rel.h < 0.0f);
+        optics_gfx_rect tb =
+            optics_ui__text_bounds(rel_rect, c->text_advance, c->rel.w < 0.0f, c->rel.h < 0.0f);
+        if (tb.w > 0.0f && tb.h > 0.0f && c->outline_width > 0.0f &&
+            (c->outline_color >> 24) != 0) {
+            const float e = c->outline_width;
+            tb = (optics_gfx_rect){tb.x - e, tb.y - e, tb.w + 2.0f * e, tb.h + 2.0f * e};
+        }
+        return tb;
+    }
     case OPTICS_UI_DRAW_BORDER: {
         if (!(c->width > 0.0f) || (c->color >> 24) == 0)
             return (optics_gfx_rect){0, 0, 0, 0};
-        const float e = c->width * 0.5f;
+        /* Half the stroke sits outside the box, plus 1 logical px to absorb
+         * replay's `snap_rect` shift and SDF/path AA fringe at any scale. */
+        const float e = c->width * 0.5f + 1.0f;
         return (optics_gfx_rect){rel_rect.x - e, rel_rect.y - e, rel_rect.w + 2.0f * e,
                                  rel_rect.h + 2.0f * e};
     }
@@ -1249,8 +1297,25 @@ static inline optics_gfx_color optics_ui__lerp_color(optics_gfx_color a, optics_
     return optics_gfx_color_from_linear(r);
 }
 
+/* Retarget a premultiplied colour to alpha `a`, rescaling RGB proportionally so
+ * the premultiplied sRGB invariant (R, G, B <= A) holds. Replacing only the
+ * alpha byte left RGB > A, which decoded as overdriven grey instead of a
+ * translucent tint. */
 static inline optics_gfx_color optics_ui__color_alpha(optics_gfx_color c, uint8_t a) {
-    return (c & 0x00FFFFFFu) | ((uint32_t)a << 24);
+    uint32_t old_a = (c >> 24) & 0xFFu;
+    if (old_a == 0 || a == 0)
+        return 0;
+    float s = (float)a / (float)old_a;
+    uint32_t r = (uint32_t)((float)((c >> 16) & 0xFFu) * s + 0.5f);
+    uint32_t g = (uint32_t)((float)((c >> 8) & 0xFFu) * s + 0.5f);
+    uint32_t b = (uint32_t)((float)(c & 0xFFu) * s + 0.5f);
+    if (r > a)
+        r = a;
+    if (g > a)
+        g = a;
+    if (b > a)
+        b = a;
+    return ((uint32_t)a << 24) | (r << 16) | (g << 8) | b;
 }
 
 /* Scale a premultiplied colour's RGBA channels by `o` (clamped 0..1) — the

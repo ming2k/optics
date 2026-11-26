@@ -292,8 +292,7 @@ typedef enum optics_gfx_struct_type : uint32_t {
     OPTICS_GFX_TYPE_PASS_DESC = 4,
     OPTICS_GFX_TYPE_IMAGE_DESC = 5,
     OPTICS_GFX_TYPE_CANVAS_DESC = 6,
-    OPTICS_GFX_TYPE_MESH_DESC = 7,
-    OPTICS_GFX_TYPE_MATERIAL_DESC = 8,
+    /* 7, 8 were 3D scene mesh/material descriptor tags — retired. Never reuse. */
     OPTICS_GFX_TYPE_COMPUTE_PIPELINE_DESC = 9,
     OPTICS_GFX_TYPE_SAMPLER_DESC = 10,
     OPTICS_GFX_TYPE_BUFFER_DESC = 11,
@@ -305,10 +304,7 @@ typedef enum optics_gfx_struct_type : uint32_t {
     OPTICS_GFX_TYPE_SURFACE_DMABUF_DESC = 17,
     OPTICS_GFX_TYPE_SURFACE_READBACK_DESC = 18,
     OPTICS_GFX_TYPE_CANVAS_PASS_DESC = 19,
-    /* 20 was the liquid-glass material's descriptor tag — retired when the
-     * material moved to the material library (ADR-0063). Never reuse. */
-    OPTICS_GFX_TYPE_MESH_SKIN_DESC = 21,
-    OPTICS_GFX_TYPE_MATERIAL_SURFACE_DESC = 22,
+    /* 20, 21, 22 were retired material/scene descriptor tags. Never reuse. */
     OPTICS_GFX_TYPE_EFFECT_BLUR_REGIONS_DESC = 23,
     /* 24 was the no-stencil canvas descriptor's tag — retired when analytic
      * tiled coverage replaced stencil-then-cover (ADR-0116/0120). Never reuse. */
@@ -322,7 +318,7 @@ typedef enum optics_gfx_struct_type : uint32_t {
     OPTICS_GFX_TYPE_SURFACE_OFFSCREEN_FORMAT_DESC = 32,
     OPTICS_GFX_TYPE_EFFECT_SHADOW_DESC = 40,
     OPTICS_GFX_TYPE_CPU_TARGET_DESC = 46,
-    OPTICS_GFX_TYPE_MATERIAL_VECTOR_DESC = 47,
+    /* 47 was scene vector material descriptor tag — retired. Never reuse. */
     OPTICS_GFX_TYPE_OBSERVE_OPTS = 48,
     OPTICS_GFX_TYPE_OBSERVE_REPORT_OPTS = 49,
     OPTICS_GFX_TYPE_DEVICE_ALLOC_OPTS = 50,
@@ -374,9 +370,6 @@ static_assert(OPTICS_GFX_TYPE_DISPLAY_LIST_DESERIALIZE_OPTS == 54,
 #define OPTICS_GFX_TYPE_pass_desc OPTICS_GFX_TYPE_PASS_DESC
 #define OPTICS_GFX_TYPE_image_desc OPTICS_GFX_TYPE_IMAGE_DESC
 #define OPTICS_GFX_TYPE_canvas_desc OPTICS_GFX_TYPE_CANVAS_DESC
-#define OPTICS_GFX_TYPE_mesh_desc OPTICS_GFX_TYPE_MESH_DESC
-#define OPTICS_GFX_TYPE_material_desc OPTICS_GFX_TYPE_MATERIAL_DESC
-#define OPTICS_GFX_TYPE_material_vector_desc OPTICS_GFX_TYPE_MATERIAL_VECTOR_DESC
 #define OPTICS_GFX_TYPE_compute_pipeline_desc OPTICS_GFX_TYPE_COMPUTE_PIPELINE_DESC
 #define OPTICS_GFX_TYPE_sampler_desc OPTICS_GFX_TYPE_SAMPLER_DESC
 #define OPTICS_GFX_TYPE_buffer_desc OPTICS_GFX_TYPE_BUFFER_DESC
@@ -870,7 +863,7 @@ OPTICS_GFX_API void optics_gfx_device_memory_stats(optics_gfx_device *d,
                                                    optics_gfx_memory_stats *out);
 
 /* Batched uploads. Between begin and flush, upload work from
- * optics_gfx_image_create, optics_gfx_image_update_region, optics_gfx_mesh_create and
+ * optics_gfx_image_create, optics_gfx_image_update_region, and
  * optics_gfx_buffer_create (GPU_LOCAL with initial_data) accumulates into one
  * queue submission instead of one submission per resource — this is
  * the fast path for bulk asset loading.
@@ -959,7 +952,7 @@ OPTICS_GFX_API size_t optics_gfx_buffer_size(const optics_gfx_buffer *b);
 /*  ADR-0001). This is how consumers get a depth attachment without    */
 /*  writing raw Vulkan image/memory/view plumbing: gfx owns the      */
 /*  image, the backing GPU allocator memory, and the view, mirroring  */
-/*  the refcount lifecycle of optics_gfx_buffer / optics_gfx_mesh.                */
+/*  the refcount lifecycle of optics_gfx_buffer.                                  */
 /* ================================================================== */
 
 typedef enum optics_gfx_target_usage : uint32_t {

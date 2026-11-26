@@ -7,7 +7,7 @@ optics_ui_response optics_ui_icon(optics_ui *ui, const optics_ui_icon_opts *opts
     if (!opts)
         opts = &default_opts;
 
-    if (!optics_ui__icon_valid((int32_t)opts->id) || opts->id == OPTICS_UI_ICON_INVALID)
+    if (!optics_ui__icon_valid(ui, opts->id))
         return (optics_ui_response){};
 
     optics_ui__apply_box(ui, opts->box);

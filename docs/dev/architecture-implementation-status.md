@@ -6,6 +6,11 @@
 > verification is `meson test -C build --suite ...` plus the `tools/check_*.py`
 > gates. Treat the validation snapshots below as decision history, not a current
 > runbook.
+>
+> [ADR-0174](../adr/0174-pure-graphics-ui-core-retire-format-parsers-3d-and-materials.md)
+> retired `libs/scene`, `libs/svg`, `libs/material`, and the `gfx` 3D scene core.
+> Rows below that describe them (materials, scene vector draws, SVG) are
+> history only; that code and its tests no longer exist.
 
 ## 2D rasterizer: what is live (2026-11-16)
 

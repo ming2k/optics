@@ -118,6 +118,5 @@ this frame, and try again on the next iteration.
 
 | Want to...                              | Read                                               |
 |-----------------------------------------|----------------------------------------------------|
-| Build a 3D app                          | [03 — Your first 3D scene application](03-first-3d-app.md) |
 | Understand the frame lifecycle          | [How to record and present a frame](../how-to/record-and-present-a-frame.md) |
 | See every canvas method                 | [`libs/gfx/include/optics/gfx/canvas.h`](../../libs/gfx/include/optics/gfx/canvas.h) |

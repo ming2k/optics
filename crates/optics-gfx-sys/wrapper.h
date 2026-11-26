@@ -20,5 +20,4 @@
 #include <optics/gfx/dmabuf.h>
 #include <optics/gfx/effect.h>
 #include <optics/gfx/math.h>
-#include <optics/gfx/scene.h>
 #include <optics/gfx/vulkan.h>

@@ -256,56 +256,6 @@ static void test_skin_scratch_lifecycle(void) {
     optics_ui_release(ui);
 }
 
-static void test_material_theme_and_cascade_resolution(void) {
-    optics_ui_theme light = optics_ui_theme_default();
-    optics_ui_theme dark = optics_ui_theme_dark();
-
-    /* 1. Theme recipe defaults: dual-polarity contrast */
-    OT_EXPECT_NEAR(light.materials.foundation.plate_polarity, 1.0f, 0.0f); /* Pearl */
-    OT_EXPECT_NEAR(dark.materials.foundation.plate_polarity, 0.0f, 0.0f);  /* Smoke */
-    OT_EXPECT_NEAR(light.materials.command.plate_polarity, 1.0f, 0.0f);
-    OT_EXPECT_NEAR(dark.materials.command.plate_polarity, 0.0f, 0.0f);
-    OT_EXPECT_NEAR(light.materials.floating.plate_polarity, 1.0f, 0.0f);
-    OT_EXPECT_NEAR(dark.materials.floating.plate_polarity, 0.0f, 0.0f);
-    /* ui body is a pure dielectric medium: zero opaque plate, governed by Contact AO */
-    OT_EXPECT_NEAR(light.materials.optics_ui_body.plate_opacity, 0.0f, 0.0f);
-    OT_EXPECT_NEAR(dark.materials.optics_ui_body.plate_opacity, 0.0f, 0.0f);
-    OT_EXPECT(light.materials.optics_ui_body.contact_ao > 0.0f);
-    OT_EXPECT(dark.materials.optics_ui_body.ambient_fresnel > 0.0f);
-
-    /* Dark mode requires higher border highlight for silhouette contrast */
-    OT_EXPECT(dark.materials.foundation.border_highlight >
-              light.materials.foundation.border_highlight);
-
-    /* 2. Cascade style resolution: material kind -> mapped recipe */
-    optics_ui *ui = nullptr;
-    OT_EXPECT(optics_ui_create(&(optics_ui_desc){}, &ui) == OPTICS_GFX_OK);
-
-    optics_ui_style s_acrylic = optics_ui_style_init();
-    s_acrylic.fields = OPTICS_UI_STYLE_MATERIAL;
-    s_acrylic.material = OPTICS_UI_MATERIAL_ACRYLIC;
-
-    optics_ui_style_resolved r_light = optics_ui__style_resolve(ui, &s_acrylic, &light, 0);
-    OT_EXPECT(r_light.material == OPTICS_UI_MATERIAL_ACRYLIC);
-    OT_EXPECT_NEAR(r_light.material_recipe.plate_polarity, 1.0f, 0.0f);
-    OT_EXPECT_NEAR(r_light.material_recipe.plate_opacity, light.materials.floating.plate_opacity,
-                   0.0f);
-
-    optics_ui_style_resolved r_dark = optics_ui__style_resolve(ui, &s_acrylic, &dark, 0);
-    OT_EXPECT(r_dark.material == OPTICS_UI_MATERIAL_ACRYLIC);
-    OT_EXPECT_NEAR(r_dark.material_recipe.plate_polarity, 0.0f, 0.0f);
-    OT_EXPECT_NEAR(r_dark.material_recipe.plate_opacity, dark.materials.floating.plate_opacity,
-                   0.0f);
-
-    /* Unset material resolves to OPTICS_UI_MATERIAL_NONE and zeroed recipe */
-    optics_ui_style s_empty = optics_ui_style_init();
-    optics_ui_style_resolved r_none = optics_ui__style_resolve(ui, &s_empty, &light, 0);
-    OT_EXPECT(r_none.material == OPTICS_UI_MATERIAL_NONE);
-    OT_EXPECT_NEAR(r_none.material_recipe.plate_opacity, 0.0f, 0.0f);
-
-    optics_ui_release(ui);
-}
-
 int main(void) {
     test_merge_is_per_field();
     test_scope_reaches_terse_widgets();
@@ -314,6 +264,5 @@ int main(void) {
     test_box_style_beats_scope_beats_theme();
     test_outline_atoms_reach_draw_commands();
     test_skin_scratch_lifecycle();
-    test_material_theme_and_cascade_resolution();
     return OT_REPORT();
 }

@@ -15,16 +15,12 @@ lookup surfaces for this checkout.
 | `<optics/gfx/canvas.h>`     | Yes              | 2D drawing: path, paint, image drawing, canvas.                    |
 | `<optics/gfx/canvas_cpu.h>` | Yes              | Headless software (CPU) canvas: `optics_gfx_canvas_create (CPU backend)`, pixel readback. No Vulkan. |
 | `<optics/gfx/dmabuf.h>`     | Yes (Linux-only behaviour) | Linux dma-buf import into sampled `optics_gfx_image` objects.            |
-| `<optics/gfx/scene.h>`      | Yes              | 3D primitives: camera, mesh, material, draw.                       |
 | `<optics/gfx/compute.h>`    | Yes              | Compute pipeline + dispatch.                                       |
 | `<optics/gfx/effect.h>`     | Yes              | Image-domain effects (blur, shadow). See [effect reference](effect.md). |
 | `<optics/text.h>`     | Iff `-Dtext=true`   | Sibling library: shaping, glyph atlas, text measure/draw.          |
-| `<optics/scene.h>`     | Iff `-Dscene=true`   | Sibling library: glTF/GLB loading, animation, materials.           |
-| `<optics/svg.h>` | Iff `-Dsvg=true` | Document compiler: SVG parse, flat shape IR, paint and CPU rasterize. |
 | `<optics/ui.h>` | Iff `OPTICS_HAVE_UI` | Immediate-mode UI, layout, widget and snapshot surface. |
 | `<optics/window.h>` | Yes | Native window shell, event pump and desktop integration. |
 | `<optics/app.h>` | Iff `OPTICS_HAVE_APP` | Application shell joining `window` and `ui`. |
-| `<optics/material.h>` | Iff `OPTICS_HAVE_MATERIAL` | Surface materials: Liquid Glass, Frosted Glass, Acrylic, Mica. |
 | `<optics/motion.h>` | Iff `OPTICS_HAVE_MOTION` | Header-only closed-form spring and parametric easing vocabulary. |
 
 `<optics/optics.h>` exposes optional layers only when `optics.pc` supplies the
@@ -43,9 +39,9 @@ or pull a raw `VkCommandBuffer` back.
 
 | Pattern              | Applied to                                                                                  |
 |----------------------|---------------------------------------------------------------------------------------------|
-| Opaque pointer       | `optics_gfx_device`, `optics_gfx_surface`, `optics_gfx_frame`, `optics_gfx_buffer`, `optics_gfx_target`, `optics_gfx_image`, `optics_gfx_canvas`, `optics_gfx_path`, `optics_gfx_mesh`, `optics_gfx_material`, `optics_gfx_sampler`, `optics_gfx_graphics_pipeline`, `optics_gfx_compute_pipeline`. Never dereferenced by the caller. |
+| Opaque pointer       | `optics_gfx_device`, `optics_gfx_surface`, `optics_gfx_frame`, `optics_gfx_buffer`, `optics_gfx_target`, `optics_gfx_image`, `optics_gfx_canvas`, `optics_gfx_path`, `optics_gfx_sampler`, `optics_gfx_graphics_pipeline`, `optics_gfx_compute_pipeline`. Never dereferenced by the caller. |
 | Atomic refcount      | Every heavy resource above. `_retain` is `[[nodiscard]]` and returns the same pointer; `_release` is null-safe.  |
-| Value type           | `optics_gfx_vec2/3/4`, `optics_gfx_mat3x2`, `optics_gfx_mat4`, `optics_gfx_quat`, `optics_gfx_color`, `optics_gfx_point`, `optics_gfx_rect`, `optics_gfx_camera`, `optics_gfx_vertex`, `optics_gfx_scene_light`. Pass by value; live on the stack or in a `optics_gfx_arena`. |
+| Value type           | `optics_gfx_vec2/3/4`, `optics_gfx_mat3x2`, `optics_gfx_mat4`, `optics_gfx_quat`, `optics_gfx_color`, `optics_gfx_point`, `optics_gfx_rect`. Pass by value; live on the stack or in a `optics_gfx_arena`. |
 | Arena-owned          | `optics_gfx_path`, `optics_gfx_brush`. Reset/destroy the arena to free; no per-element release.         |
 
 ## Resource lifecycle
@@ -72,9 +68,6 @@ pointer is **retained by the constructor**:
 | `optics_gfx_surface_desc.vk_surface_khr`      | No (raw Vulkan handle, caller-owned) |
 | `optics_gfx_image_desc.initial_data`          | No (copied once at upload time) |
 | `optics_gfx_dmabuf_image_desc.planes[].fd`    | Yes, only when `optics_gfx_image_import_dmabuf` returns `OPTICS_GFX_OK` |
-| `optics_gfx_mesh_desc.vertices` / `indices`   | No (copied once at upload time) |
-| `optics_gfx_material_surface_desc.base_color_image` | Yes |
-| `optics_gfx_material_surface_desc.base_color_sampler` | Yes |
 
 The retain happens at `_create`; the matching release happens at the
 container's final `_release`. Callers are free to drop their own
@@ -93,7 +86,6 @@ until the frame consuming it has been submitted and presented:
 | `optics_gfx_canvas_fill_path(c, path, paint)`       | `path`, `paint`        |
 | `optics_gfx_canvas_stroke_path(c, path, paint)`     | `path`, `paint`        |
 | `optics_gfx_canvas_fill_rect(c, r, paint)`          | `paint`                |
-| `optics_gfx_scene_draw_mesh(f, opts)`               | `mesh`, `material`     |
 | `optics_gfx_compute_dispatch(cmd, opts)`            | `pipeline`, `push_constants` |
 
 The safest pattern is: keep dependencies retained for the lifetime of
@@ -156,30 +148,8 @@ encoding with immutable publication (ADR-0089 through ADR-0094):
 | `optics_gfx_canvas_save_layer` | Pushes an isolated layer buffer for group opacity compositing. |
 | `optics_gfx_canvas_submit_display_list` | Unpacks and executes an immutable `optics_gfx_display_list`. |
 | `optics_gfx_canvas_*`    | Flattens / tessellates geometry, writes vertices into the frame's transient ring, records `vkCmdDraw` against the active pipeline. |
-| `optics_gfx_scene_draw_mesh` | Records `vkCmdBindPipeline` + push constants + `vkCmdBindVertexBuffers` + `vkCmdDrawIndexed`. |
 | `optics_gfx_compute_dispatch` | Records `vkCmdBindPipeline` + bindless set + push constants + `vkCmdDispatch`. |
 | `optics_gfx_graphics_pipeline_bind` | Records `vkCmdBindPipeline` + bindless set + push constants. |
-
-## Scene-graph content layer (scene)
-
-`scene` preserves glTF primitive material indices. C hosts install
-an index-aligned material table with `optics_scene_set_materials`; a null
-`optics_scene_draw_opts.material` selects that table, while a non-null value
-overrides the complete scene. `optics_scene_draw_opts` also carries the camera and
-scene, so the draw call itself takes only the frame context and one descriptor.
-
-The safe Rust binding exposes
-`Scene::from_glb_with_materials_and_decoder(device, bytes, MaterialTarget, decode_image)`
-(zero system image-codec dependencies on all platforms; callers supply their own
-image decoder) and, behind the opt-in `system-image-codecs` feature (or
-`optics`'s `scene-codecs` feature),
-`Scene::from_glb_with_materials(device, bytes, MaterialTarget)` backed by system
-`libpng` / `libturbojpeg` on non-Windows targets, paired with
-`Scene::draw_materials`. It supports embedded base-color textures,
-UV0, `KHR_texture_transform`, `KHR_materials_unlit`, glTF sampler state,
-OPAQUE/MASK/BLEND, alpha cutoff, and double-sided materials. Referenced
-external images and non-zero texture-coordinate sets return `LoadError`
-instead of silently rendering an incomplete material.
 
 Pipeline-bound state is cached per-canvas / per-pass so an identical
 paint kind drawn N times in a row costs one `vkCmdBindPipeline`; with
@@ -507,13 +477,12 @@ submit-and-end, nothing recorded is pending. Required reading for
 
 ## Library versioning
 
-Every library in the stack (`liboptics_gfx`, `liboptics_text`, `liboptics_scene`,
-`liboptics_ui`, `liboptics_window`, `liboptics_app`, `liboptics_material`,
-`liboptics_svg`, and header-only `<optics/motion.h>`) releases as a
-unit and shares one version: `meson.project_version()`. Each library exposes
-the same four accessors under its own prefix (`optics_gfx_*`, `optics_ui_*`,
-`optics_window_*`, `optics_material_*`, `optics_svg_*`, `optics_motion_*`,
-`optics_text_*`, `optics_scene_*`) — one versioning scheme, learn once, apply
+Every library in the stack (`liboptics_gfx`, `liboptics_text`,
+`liboptics_ui`, `liboptics_window`, `liboptics_app`, and header-only
+`<optics/motion.h>`) releases as a unit and shares one version:
+`meson.project_version()`. Each library exposes the same four accessors under
+its own prefix (`optics_gfx_*`, `optics_ui_*`, `optics_window_*`,
+`optics_motion_*`, `optics_text_*`) — one versioning scheme, learn once, apply
 to every library the consumer links.
 
 | Macro / accessor                | Returns                                                     |

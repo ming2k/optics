@@ -10,10 +10,9 @@ fn main() {
             "OPTICS_WINDOW",
             "OPTICS_UI",
             "OPTICS_TEXT",
-            "OPTICS_SVG",
             "OPTICS_GFX",
         ],
-        include_libs: &["app", "window", "ui", "text", "svg", "gfx"],
+        include_libs: &["app", "window", "ui", "text", "gfx"],
         extra_pkg_config_includes: &[],
         headers: &["app.h"],
     });

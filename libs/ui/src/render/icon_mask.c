@@ -82,6 +82,27 @@ void optics_ui__icon_mask_pool_destroy(optics_ui *ui) {
     }
 }
 
+void optics_ui__icon_mask_evict(optics_ui *ui, optics_ui_icon_id icon_id) {
+    if (!ui || !ui->icon_masks.entries)
+        return;
+    uint32_t i = 0;
+    while (i < ui->icon_masks.count) {
+        optics_ui__icon_mask *m = &ui->icon_masks.entries[i];
+        if (m->icon_id == icon_id) {
+            optics_ui__free(ui, m->host);
+            if (m->image)
+                optics_gfx_image_release(m->image);
+            uint32_t last = ui->icon_masks.count - 1u;
+            if (i != last)
+                ui->icon_masks.entries[i] = ui->icon_masks.entries[last];
+            ui->icon_masks.entries[last] = (optics_ui__icon_mask){};
+            ui->icon_masks.count = last;
+        } else {
+            ++i;
+        }
+    }
+}
+
 /* NEAREST is not an optimisation here — it is the correctness condition. The
  * mask is baked at exactly the device resolution it is drawn at, so any
  * filtering would blend neighbouring coverage values and soften the edges. */
@@ -142,8 +163,8 @@ static void bake_run_layer(optics_gfx_canvas *canvas, optics_gfx_arena *arena,
         canvas, &(optics_gfx_canvas_draw_geometry_opts){.geom = &g, .brush = &b});
 }
 
-uint32_t optics_ui__icon_run_spans(const optics_ui_icon_desc *desc, uint8_t mode,
-                                   optics_ui__icon_run_span *out, uint32_t cap) {
+uint32_t optics_ui__icon_run_spans(const optics_ui_icon_desc *desc, optics_ui__icon_run_span *out,
+                                   uint32_t cap) {
     if (!desc || !desc->cmds || desc->count == 0 || !out || cap == 0)
         return 0;
     if (desc->runs && desc->run_count > 0) {
@@ -156,7 +177,7 @@ uint32_t optics_ui__icon_run_spans(const optics_ui_icon_desc *desc, uint8_t mode
                 .first_cmd = r->first_cmd,
                 .count = r->count,
                 .color = r->color,
-                .fill = r->fill != 0,
+                .fill = r->paint == OPTICS_UI_ICON_PAINT_FILL,
             };
         }
         return n;
@@ -165,7 +186,7 @@ uint32_t optics_ui__icon_run_spans(const optics_ui_icon_desc *desc, uint8_t mode
         .first_cmd = 0,
         .count = desc->count,
         .color = 0,
-        .fill = mode == OPTICS_UI_ICON_RENDER_FILL,
+        .fill = desc->paint == OPTICS_UI_ICON_PAINT_FILL,
     };
     return 1;
 }
@@ -175,28 +196,28 @@ void optics_ui__emit_run_path(optics_gfx_path *p, const optics_ui_icon_cmd *cmds
     for (uint32_t i = first; i < first + count; ++i) {
         const optics_ui_icon_cmd *cmd = &cmds[i];
         const float *pp = cmd->params;
-        switch (cmd->type) {
-        case 0:
+        switch (cmd->kind) {
+        case OPTICS_UI_ICON_CMD_MOVE:
             optics_gfx_path_move_to(p, pp[0] * s + ox, pp[1] * s + oy);
             break;
-        case 1:
+        case OPTICS_UI_ICON_CMD_LINE:
             optics_gfx_path_line_to(p, pp[0] * s + ox, pp[1] * s + oy);
             break;
-        case 2:
+        case OPTICS_UI_ICON_CMD_CUBIC:
             optics_gfx_path_cubic_to(p, pp[0] * s + ox, pp[1] * s + oy, pp[2] * s + ox,
                                      pp[3] * s + oy, pp[4] * s + ox, pp[5] * s + oy);
             break;
-        case 3:
+        case OPTICS_UI_ICON_CMD_QUAD:
             optics_gfx_path_quad_to(p, pp[0] * s + ox, pp[1] * s + oy, pp[2] * s + ox,
                                     pp[3] * s + oy);
             break;
-        case 4:
+        case OPTICS_UI_ICON_CMD_CLOSE:
             optics_gfx_path_close(p);
             break;
-        case 5:
+        case OPTICS_UI_ICON_CMD_CIRCLE:
             optics_gfx_path_add_circle(p, pp[0] * s + ox, pp[1] * s + oy, pp[2] * s);
             break;
-        case 6:
+        case OPTICS_UI_ICON_CMD_RECT:
             optics_gfx_path_add_rect(
                 p, (optics_gfx_rect){pp[0] * s + ox, pp[1] * s + oy, pp[2] * s, pp[3] * s});
             break;
@@ -206,17 +227,12 @@ void optics_ui__emit_run_path(optics_gfx_path *p, const optics_ui_icon_cmd *cmds
     }
 }
 
-optics_gfx_color optics_ui__icon_run_color(uint32_t run_color, optics_gfx_color theme_color) {
-    if (run_color == 0)
-        return theme_color;
-    uint8_t r = (uint8_t)(run_color >> 16);
-    uint8_t g = (uint8_t)(run_color >> 8);
-    uint8_t b = (uint8_t)run_color;
-    uint8_t a = (uint8_t)(run_color >> 24);
-    return optics_gfx_color_rgba_premul(r, g, b, a);
+optics_gfx_color optics_ui__icon_run_color(optics_gfx_color run_color,
+                                           optics_gfx_color theme_color) {
+    return run_color != 0 ? run_color : theme_color;
 }
 
-static optics_ui__icon_mask *pool_find(optics_ui *ui, int32_t icon_id, uint32_t dev_px,
+static optics_ui__icon_mask *pool_find(optics_ui *ui, optics_ui_icon_id icon_id, uint32_t dev_px,
                                        uint32_t dev_stroke_q, uint32_t outline_q,
                                        uint32_t run_index, optics_ui__icon_mask_layer layer) {
     for (uint32_t i = 0; i < ui->icon_masks.count; ++i) {
@@ -256,17 +272,16 @@ static uint32_t quantize_16(float v) {
     return q > UINT16_MAX ? UINT16_MAX : q;
 }
 
-optics_ui__icon_mask *optics_ui__icon_mask_acquire(optics_ui *ui, int32_t icon_id, uint32_t dev_px,
-                                                   float dev_stroke, float outline,
+optics_ui__icon_mask *optics_ui__icon_mask_acquire(optics_ui *ui, optics_ui_icon_id icon_id,
+                                                   uint32_t dev_px, float dev_stroke, float outline,
                                                    uint32_t run_index,
                                                    optics_ui__icon_mask_layer layer) {
     if (!ui || dev_px == 0 || dev_px > OPTICS_UI_ICON_MASK_MAX_PX || ui->icon_masks.cap == 0)
         return nullptr;
 
-    const optics_ui_icon_desc *desc = optics_ui__icon_desc(icon_id);
+    const optics_ui_icon_desc *desc = optics_ui__icon_desc(ui, icon_id);
     optics_ui__icon_run_span spans[OPTICS_UI_ICON_MAX_RUNS];
-    uint32_t span_count = optics_ui__icon_run_spans(desc, optics_ui__icon_mode(icon_id), spans,
-                                                    OPTICS_UI_ICON_MAX_RUNS);
+    uint32_t span_count = optics_ui__icon_run_spans(desc, spans, OPTICS_UI_ICON_MAX_RUNS);
     if (run_index >= span_count)
         return nullptr;
     const optics_ui__icon_run_span *run = &spans[run_index];

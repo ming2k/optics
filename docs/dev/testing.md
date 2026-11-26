@@ -83,9 +83,8 @@ Current E2E scenarios:
 | `e2e_gfx_version` | Umbrella version → `gfx` runtime version, with no UI/canvas requirement |
 | `e2e_public_api` | Umbrella version lockstep → UI frame → snapshot → CPU pixels |
 | `e2e_interaction_session` | Pointer press/release → checkbox toggle → focused text input → accessibility walk → per-widget pixel diff |
-| `e2e_document_pipeline` | SVG → `svg` raster; SVG → runtime icon → UI snapshot → immutable `DisplayList` → serialize/deserialize → byte-identical pixels |
 | `e2e_motion_session` | Analytic spring + hysteresis → multi-frame UI snapshots → monotonic visual motion & reduced-motion byte-identical snap |
-| `e2e_gpu_stack` (`integration`) | Public-API-only full GPU stack: backdrop → Dual-Kawase blur → Frosted & Liquid Glass → animated spring + HUD UI + SVG icon → Vulkan readback |
+| `e2e_gpu_stack` (`integration`) | Public-API-only full GPU stack: backdrop → Dual-Kawase blur → animated spring + HUD UI + registered vector icon → Vulkan readback |
 
 ## One Harness, One Fixture Layer
 
@@ -290,37 +289,11 @@ layer guardrail, and run the exact layer you touched.
 
 ## Golden References
 
-`tests/material/golden/liquid_glass_default.pam` is a tolerance golden: a
-rendered reference that `tests/material/integration/test_material_golden.c`
-compares against with a per-channel tolerance (12/255) and a small
-outlier allowance, layered over driver-independent hard invariants
-(exact silhouette, edge-direction preservation, rim-brightness
-direction, same-device bit-identical re-render).
-
-Driver validity, and its limits:
-
-- The committed reference is generated on **lavapipe** (the CI's Vulkan
-  implementation). Any Mesa version can regenerate it bit-identically
-  on the same implementation.
-- A *different* driver (real Intel/AMD/NVIDIA hardware, MoltenVK) may
-  legitimately differ by a few quantization steps — that is what the
-  tolerance and the outlier allowance absorb. The hard invariants
-  do the strict work everywhere else.
-- If a golden comparison fails, first check `max_delta` in the test's
-  stderr line: a few hundred pixels at delta ≤ 24 on new hardware is
-  driver variance (tune `GOLDEN_TOLERANCE` only if the new value still
-  discriminates); a systematic shift of every pixel is a real
-  regression.
-- Regenerate deliberately, never casually:
-
-```bash
-OPTICS_MATERIAL_GOLDEN_UPDATE=1 ./build/tests/material/integration/test_material_golden
-git diff tests/material/golden/   # the reference must be part of the change
-```
-
-A golden commit whose diff shows the reference but not the recipe (or
-vice versa) is wrong: one visual change, one reference update, one
-commit.
+`tests/gfx/integration/test_compute_golden.c` renders a known pattern through
+the compute pipeline and asserts the read-back pixels exactly. Golden checks
+must be paired with driver-independent invariants so that a legitimate
+driver difference is distinguishable from a regression. A change to a golden
+expectation belongs in the same commit as the visual change that motivated it.
 
 ## Manual or Example Verification
 

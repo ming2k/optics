@@ -146,7 +146,7 @@ int32_t optics_ui_popup_menu(optics_ui *ui, const optics_ui_menu_opts *opts) {
             state->focused_index = (int32_t)i;
         }
 
-        if (it->icon != 0) {
+        if (it->icon != OPTICS_UI_ICON_NONE) {
             optics_ui_icon(ui, &(optics_ui_icon_opts){
                                    .id = it->icon,
                                    .size = 14.0f,

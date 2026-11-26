@@ -1,6 +1,6 @@
 [package]
 name = "optics-gfx"
-description = "Safe Rust bindings to gfx: a Vulkan-first 2D/3D graphics library"
+description = "Safe Rust bindings to gfx: a Vulkan-first 2D graphics library"
 publish = false
 links = "optics_gfx_rs"
 version.workspace = true

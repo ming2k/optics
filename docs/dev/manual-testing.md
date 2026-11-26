@@ -9,7 +9,7 @@ This document defines manual verification protocols, interactive inspection proc
 Optics enforces deterministic, headless testing across the C and Rust codebases for mechanical correctness, mathematical regressions, and memory safety. However, graphics and windowing systems include properties that cannot be verified through headless unit tests alone:
 
 1. **Live Compositor Presentation**: Frame pacing, swapchain resizing, vsync synchronization, and zero-flicker buffer swapping on live display servers.
-2. **Visual & Optical Fidelity**: Real-time evaluation of refractive distortion, chromatic aberration, dual-Kawase blur, and procedural noise dithering across diverse GPU hardware and driver implementations.
+2. **Visual Fidelity**: Real-time evaluation of antialiased vector coverage, text rendering, and effect output (blur, shadow) across diverse GPU hardware and driver implementations.
 3. **Interactive Human Input**: Mouse cursor precision, focus navigation, caret positioning, IME composition windows, clipboard synchronization, and cross-application drag-and-drop.
 4. **Desktop Shell Integration**: Native window decorations, fractional DPI scaling, system theme transitions (dark/light mode), and accessibility tree emission.
 
@@ -18,8 +18,8 @@ Optics enforces deterministic, headless testing across the C and Rust codebases 
 | Verification Channel | Primary Scope | Execution Mode | Governing Document |
 | :--- | :--- | :--- | :--- |
 | **Mechanical Unit / Integration** | Math, layout algorithms, CPU tessellation, memory budgets, leak tracking | Automated (`meson test`) | [Testing](testing.md) |
-| **Tolerance Goldens** | Raster stability, Lavapipe visual regression gates | Automated (`test_material_golden`) | [Testing](testing.md#golden-references) |
-| **Interactive Examples** | Materials, 2D/3D pipelines, font shaping, window shells, drag-and-drop | Manual human inspection | This document |
+| **Golden Outputs** | Compute and raster output stability on Lavapipe | Automated (`compute_golden`) | [Testing](testing.md) |
+| **Interactive Examples** | 2D canvas, compute, font shaping, window shells, drag-and-drop | Manual human inspection | This document |
 | **Pre-Release Smoke Matrix** | Clean build, compositor matrix, window lifecycle, OS packaging | Manual release gate | This document & [Release](release.md) |
 
 ---
@@ -28,7 +28,7 @@ Optics enforces deterministic, headless testing across the C and Rust codebases 
 
 ### 2.1 Build Configuration
 
-Manual verification requires compiling the interactive example targets across `gfx`, `material`, `window`, `ui`, `scene`, and `text`:
+Manual verification requires compiling the interactive example targets across `gfx`, `text`, `window`, `ui`, and `app`:
 
 ```bash
 # Clean setup with examples, tests, and debugging symbols enabled
@@ -45,54 +45,20 @@ Run interactive binaries with Vulkan validation layers active to intercept synch
 ```bash
 # Linux / macOS
 export VK_LAYER_KHR_VALIDATION=1
-./build/examples/showcase/material_gallery
+./build/examples/showcase/widget_gallery
 
 # Windows (PowerShell)
 $env:VK_LAYER_KHR_VALIDATION = "1"
-.\build\examples\showcase\material_gallery.exe
+.\build\examples\showcase\widget_gallery.exe
 ```
 
 ---
 
-## 3. Visual Effects and Material Inspection
+## 3. Core Graphics Verification
 
-The primary visual test bed is the modern material showcase (`examples/showcase/material_gallery`), consolidating `libs/material`, `libs/gfx`, and `libs/ui`.
+Run the core rendering pipelines to verify path tessellation, font shaping, and compute barriers.
 
-### 3.1 Execution and Controls
-
-```bash
-./build/examples/showcase/material_gallery
-```
-
-| Key Binding | Target View / Action | Verification Focus |
-| :--- | :--- | :--- |
-| `1` | **4-Up Comparison Grid** | View all 4 core materials simultaneously under identical lighting. |
-| `2` | **Liquid Glass Fullscreen** | Inspect SDF refraction, chromatic dispersion, and specular rim. |
-| `3` | **Frosted Glass Fullscreen** | Inspect dual-Kawase blur smoothness and vibrancy saturation boost. |
-| `4` | **Acrylic Fullscreen** | Inspect luminance plate balancing and blue-noise grain dither. |
-| `5` | **Mica & Mica Alt Fullscreen**| Inspect screen-anchored sampling and wallpaper blend. |
-| `D` | **Toggle Dark / Light** | Verify instant theme plate polarity adaptation without visual popping. |
-| `F` | **Toggle Inactive Fallback** | Verify Mica degrades cleanly to an opaque fallback tint when inactive. |
-| `Space` | **Pause / Resume Motion** | Freeze background animation to inspect static edge sharpness and dither. |
-| `Esc` | **Quit** | Clean teardown without Vulkan validation warnings on stderr. |
-
-### 3.2 Visual Defect Inspection Checklist
-
-When inspecting materials, check for the following visual artifacts:
-
-- [ ] **Liquid Glass Refraction**: Moving background patterns (radial stripes, geometry) bend smoothly around rounded rectangle silhouettes. No pixelated stair-stepping or discontinuous tear lines.
-- [ ] **Chromatic Dispersion**: A subtle RGB split appears near high-curvature boundaries. Colors must fringe naturally without severe color clamping or blowout.
-- [ ] **Dual-Kawase Blur**: Background remains soft and diffuse; no blocky 4x4 or 8x8 downsampling grid artifacts appear during rapid movement.
-- [ ] **Procedural Noise Dither (Acrylic / Mica)**: Noise grain is fine, uniform, and prevents banding in smooth luminance gradients. Dither must not crawl or vibrate when the window is stationary.
-- [ ] **Boundary Lighting**: 1px inner SDF borders and specular rim highlights remain razor-sharp under high-DPI scaling factors (1.0x, 1.5x, 2.0x).
-
----
-
-## 4. 2D Canvas & 3D Core Graphics Verification
-
-Run the core rendering pipelines to verify path tessellation, font shaping, compute barriers, and 3D scene execution.
-
-### 4.1 2D Canvas Pipeline (`examples/getting_started/canvas_window`)
+### 3.1 2D Canvas Pipeline (`examples/getting_started/canvas_window`)
 
 ```bash
 ./build/examples/getting_started/canvas_window
@@ -104,32 +70,7 @@ Run the core rendering pipelines to verify path tessellation, font shaping, comp
 3. Move the pointer: the rounded-rectangle proxy tracks it without visible lag while the circle ring keeps animating.
 4. Resize the window repeatedly: verify the canvas viewport and animation adjust dynamically without stretching or aspect-ratio distortion.
 
-### 4.2 3D Lighting & Transform Pipeline (`examples/showcase/scene_studio`)
-
-```bash
-./build/examples/showcase/scene_studio
-```
-
-**Verification Steps:**
-1. Confirm the model auto-orbits continuously with correct depth-buffer occlusion (back faces never draw over front faces).
-2. Inspect Phong specular highlights across the model: light reflectance calculates smoothly without vertex-clamping jumps.
-3. Press `Space` or use the toolbar button to pause/resume orbit, then drag the **Speed** slider in the inspector: motion responds immediately.
-4. Adjust **Pitch**, **FOV**, and **Ambient** in the inspector: the camera and lighting update live without stutter or GPU memory pressure warnings.
-
-### 4.3 glTF Asset Loading (`examples/showcase/scene_studio`)
-
-```bash
-./build/examples/showcase/scene_studio
-./build/examples/showcase/scene_studio --file path/to/model.glb
-```
-
-**Verification Steps:**
-1. Verify the bundled `Duck.glb` asset loads, parses, and displays immediately upon startup.
-2. Confirm the asset name appears in the floating toolbar badge.
-3. Load a custom `.glb` with `--file`; an unreadable path must exit with a clear error instead of a blank window.
-4. Rename or hide the bundled asset and relaunch: the viewer falls back to the procedurally generated cube.
-
-### 4.4 Typography and Text Shaping (`examples/showcase/widget_gallery`)
+### 3.2 Typography and Text Shaping (`examples/showcase/widget_gallery`)
 
 ```bash
 ./build/examples/showcase/widget_gallery
@@ -140,7 +81,7 @@ Run the core rendering pipelines to verify path tessellation, font shaping, comp
 2. Check glyph edge rendering: subpixel positioning and dual-layer R8 atlas blitting must not introduce blurry halos or clipped ascenders/descenders.
 3. Toggle display DPI or move between displays: text re-shapes cleanly without font rasterization fuzziness.
 
-### 4.5 Compute Pipeline Synchronization (`examples/getting_started/compute_pass`)
+### 3.3 Compute Pipeline Synchronization (`examples/getting_started/compute_pass`)
 
 ```bash
 ./build/examples/getting_started/compute_pass
@@ -152,11 +93,11 @@ Run the core rendering pipelines to verify path tessellation, font shaping, comp
 
 ---
 
-## 5. UI Widgets, Window Shell, and Interaction Protocols
+## 4. UI Widgets, Window Shell, and Interaction Protocols
 
 Verify desktop user interface controls, input handling, window lifecycle, and system capabilities hosted within `libs/window` and `libs/ui`.
 
-### 5.1 Retained UI Controls (`examples/showcase/widget_gallery`)
+### 4.1 Retained UI Controls (`examples/showcase/widget_gallery`)
 
 ```bash
 ./build/examples/showcase/widget_gallery
@@ -173,7 +114,7 @@ Verify desktop user interface controls, input handling, window lifecycle, and sy
 | **Tree View** | Expand/collapse a branch and select a leaf. | Disclosure state toggles and exactly one leaf shows the selected highlight. |
 | **Data Grid** | Click a sortable header and drag a column divider. | Rows reorder by the chosen column; the column width follows the pointer. |
 
-### 5.2 Text Field, Caret, and Clipboard (`examples/showcase/widget_gallery`)
+### 4.2 Text Field, Caret, and Clipboard (`examples/showcase/widget_gallery`)
 
 Verify retained text editing (`ADR-0036`, `ADR-0057`, `ADR-0064`):
 
@@ -190,7 +131,7 @@ Verify retained text editing (`ADR-0036`, `ADR-0057`, `ADR-0064`):
    - Paste clipboard text into an external text editor (e.g., terminal or VS Code): text matches.
    - Copy text from an external application and press `Ctrl+V`: text pastes into the text field at the caret position.
 
-### 5.3 Overlays, Modals, and Z-Bands (`examples/showcase/widget_gallery`)
+### 4.3 Overlays, Modals, and Z-Bands (`examples/showcase/widget_gallery`)
 
 ```bash
 ./build/examples/showcase/widget_gallery
@@ -208,7 +149,7 @@ Select the **Overlays & DnD** page (or press `4`) before running these checks.
    - Open a menu near the screen edge: menu repositioning ensures it does not clip outside window boundaries.
    - Click anywhere outside the menu: menu closes immediately.
 
-### 5.4 Cross-Platform Drag and Drop (`examples/showcase/widget_gallery`)
+### 4.4 Cross-Platform Drag and Drop (`examples/showcase/widget_gallery`)
 
 ```bash
 ./build/examples/showcase/widget_gallery
@@ -229,7 +170,7 @@ Select the **Overlays & DnD** page (or press `4`) before running these checks.
 
 ---
 
-## 6. Cross-Platform and Compositor Matrix
+## 5. Cross-Platform and Compositor Matrix
 
 Execute manual checks across the target desktop environments:
 
@@ -244,7 +185,7 @@ Execute manual checks across the target desktop environments:
 
 ---
 
-## 7. Pre-Release Smoke Verification Checklist
+## 6. Pre-Release Smoke Verification Checklist
 
 Before tagging or distributing a release, execute the following smoke protocol from a clean clone:
 
@@ -258,15 +199,15 @@ meson compile -C build-release
 meson test -C build-release --no-suite bench --no-suite fuzz
 
 # 3. Interactive smoke pass
-./build-release/examples/showcase/material_gallery   # Run 30s; cycle keys 1-5, D, F
+./build-release/examples/getting_started/canvas_window  # Run 30s; resize and move the pointer
 ./build-release/examples/showcase/widget_gallery                # Test button, slider, text input, clipboard
-./build-release/examples/showcase/scene_studio           # Verify 3D rendering and camera orbit
+./build-release/examples/getting_started/compute_pass    # Verify compute output and clean exit
 ./build-release/examples/showcase/widget_gallery               # Verify drag-and-drop interaction
 ```
 
 ### Manual Release Acceptance Sign-Off
 
-- [ ] All four smoke applications start within 1 second on a cold launch.
+- [ ] All smoke applications start within 1 second on a cold launch.
 - [ ] No GPU validation layer warnings or memory leak assertions are emitted to stderr.
 - [ ] Window resize operations do not produce black frame flashing or tearing.
 - [ ] Keyboard navigation, mouse clicks, and clipboard shortcuts function reliably.
@@ -274,7 +215,7 @@ meson test -C build-release --no-suite bench --no-suite fuzz
 
 ---
 
-## 8. Defect Reporting Protocol
+## 7. Defect Reporting Protocol
 
 When reporting a manual testing defect, include the following environment header:
 
@@ -283,10 +224,10 @@ When reporting a manual testing defect, include the following environment header
 Platform: Linux (Fedora 40) / Windows 11 23H2 / macOS 14.5
 Compositor / Window Manager: GNOME 46 (Wayland) / KWin / DWM / Cocoa
 GPU & Driver: AMD Radeon RX 6800 XT (RADV 24.1.2) / NVIDIA RTX 4080 (555.58)
-Binary Executed: ./build/examples/showcase/material_gallery
+Binary Executed: ./build/examples/showcase/widget_gallery
 Steps to Reproduce:
   1. Launch binary with VK_LAYER_KHR_VALIDATION=1
-  2. Press key '2' to enter Liquid Glass Fullscreen
+  2. Open the page under test (e.g. Layout or Text Input)
   3. Drag window across monitors with different DPI scale factors
 Observed Behavior: [Describe visual artifact, input stall, or crash]
 Expected Behavior: [Describe expected correct presentation]

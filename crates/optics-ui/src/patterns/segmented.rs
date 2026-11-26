@@ -15,7 +15,7 @@ impl SegmentedItem {
     pub fn text(label: impl Into<String>) -> Self {
         Self {
             label: Some(label.into()),
-            icon: optics_ui_sys::optics_ui_icon_id(u32::MAX), // invalid icon
+            icon: optics_ui_sys::optics_ui_icon_id::OPTICS_UI_ICON_NONE,
             disabled: false,
         }
     }

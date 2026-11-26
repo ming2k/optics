@@ -22,11 +22,8 @@ ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "docs" / "reference" / "symbols.md"
 
 LIBRARIES = [
-    ("gfx", "rendering foundation: RHI, canvas, scene draw core, compute, effects"),
+    ("gfx", "rendering foundation: Vulkan 1.3 RHI, 2D canvas, compute, image effects"),
     ("text", "text shaping, layout and glyph runs"),
-    ("svg", "SVG document compiler"),
-    ("scene", "3D scene graph and glTF loading"),
-    ("material", "surface materials"),
     ("motion", "springs and easing (header-only)"),
     ("window", "native window, event pump and platform services"),
     ("ui", "immediate-mode UI engine"),

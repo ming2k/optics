@@ -1,7 +1,7 @@
 /*
  * Allocator stress test via public APIs.
  *
- * Exercises optics_gfx_image_create / optics_gfx_mesh_create paths under heavy
+ * Exercises optics_gfx_image_create / optics_gfx_buffer_create paths under heavy
  * churn to validate the GPU memory allocator: pooling, coalescing,
  * dedicated-fallback for oversize, and absence of leaks under ASan.
  *
@@ -12,7 +12,6 @@
 #include "gfx_test.h"
 #include "optics_test.h"
 #include <optics/gfx.h>
-#include <optics/gfx/scene.h>
 #include <optics/gfx/vulkan.h>
 
 #include <pthread.h>
@@ -108,20 +107,16 @@ static void *image_mesh_worker(void *p) {
             return nullptr;
         optics_gfx_image_release(img);
 
-        optics_gfx_vertex verts[3] = {
-            {{0, 0, 0}, {0, 0, 1}, {0, 0}},
-            {{1, 0, 0}, {0, 0, 1}, {1, 0}},
-            {{0, 1, 0}, {0, 0, 1}, {0, 1}},
-        };
-        optics_gfx_mesh_desc mdesc = {
-            .type = OPTICS_GFX_TYPE_MESH_DESC,
-            .vertices = verts,
-            .vertex_count = 3,
-        };
-        optics_gfx_mesh *mesh = nullptr;
-        if (optics_gfx_mesh_create(a->d, &mdesc, &mesh) != OPTICS_GFX_OK)
+        uint32_t payload[8] = {1, 2, 3, 4, 5, 6, 7, 8};
+        optics_gfx_buffer_desc bdesc = OPTICS_GFX_BUFFER_DESC_INIT;
+        bdesc.size = sizeof(payload);
+        bdesc.usage = OPTICS_GFX_BUFFER_USAGE_VERTEX | OPTICS_GFX_BUFFER_USAGE_STORAGE;
+        bdesc.location = OPTICS_GFX_BUFFER_GPU_LOCAL;
+        bdesc.initial_data = payload;
+        optics_gfx_buffer *buf = nullptr;
+        if (optics_gfx_buffer_create(a->d, &bdesc, &buf) != OPTICS_GFX_OK)
             return nullptr;
-        optics_gfx_mesh_release(mesh);
+        optics_gfx_buffer_release(buf);
 
         a->completed++;
     }
@@ -231,25 +226,18 @@ int main(void) {
         }
     }
 
-    /* --- meshes share their own pool with buffers --- */
+    /* --- GPU-local buffers exercise the buffer slab pool --- */
     {
-        optics_gfx_vertex verts[3] = {
-            {{0, 0, 0}, {0, 0, 1}, {0, 0}},
-            {{1, 0, 0}, {0, 0, 1}, {1, 0}},
-            {{0, 1, 0}, {0, 0, 1}, {0, 1}},
-        };
-        uint32_t indices[3] = {0, 1, 2};
-        optics_gfx_mesh_desc mdesc = {
-            .type = OPTICS_GFX_TYPE_MESH_DESC,
-            .vertices = verts,
-            .vertex_count = 3,
-            .indices = indices,
-            .index_count = 3,
-        };
+        uint32_t payload[16] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
+        optics_gfx_buffer_desc bdesc = OPTICS_GFX_BUFFER_DESC_INIT;
+        bdesc.size = sizeof(payload);
+        bdesc.usage = OPTICS_GFX_BUFFER_USAGE_VERTEX | OPTICS_GFX_BUFFER_USAGE_INDEX;
+        bdesc.location = OPTICS_GFX_BUFFER_GPU_LOCAL;
+        bdesc.initial_data = payload;
         for (int i = 0; i < 64; ++i) {
-            optics_gfx_mesh *mesh = nullptr;
-            OT_EXPECT(optics_gfx_mesh_create(d, &mdesc, &mesh) == OPTICS_GFX_OK);
-            optics_gfx_mesh_release(mesh);
+            optics_gfx_buffer *buf = nullptr;
+            OT_EXPECT(optics_gfx_buffer_create(d, &bdesc, &buf) == OPTICS_GFX_OK);
+            optics_gfx_buffer_release(buf);
         }
     }
 

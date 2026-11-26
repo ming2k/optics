@@ -91,20 +91,10 @@ endif
 # Icon coverage-mask cache (ADR-0112): bake sizing, key identity, layer
 # separation, device-grid-exact placement at fractional scales, and the run
 # resolver that keeps the mask path and the vector fallback in agreement.
-#
-# icon_mask.c is compiled in directly because optics_ui__icon_mask_* are hidden in
-# liboptics_ui (same direct-link pattern as test_icon_runtime_content), which also
-# means the icon registry must be compiled in — icon_mask.c resolves runs through
-# it. That local registry is why this binary contains no runtime-SVG rendering
-# assertion: a runtime icon registered here would live in this binary's registry,
-# invisible to the liboptics_ui replay that draws it. End-to-end runtime-icon
-# rendering is covered by test_icon_mask_render below, which links only the
-# shared library.
 test_icon_mask = executable('test_icon_mask',
   'test_icon_mask.c',
   '../../libs/ui/src/render/icon_mask.c',
   '../../libs/ui/src/icon_runtime.c',
-  '../../libs/ui/src/icon_data.c',
   dependencies        : [ui_dep, m_dep, optics_test_dep],
   include_directories : [ui_inc, gfx_inc],
   c_args              : ['-DOPTICS_UI_STATIC=1'],
@@ -112,43 +102,12 @@ test_icon_mask = executable('test_icon_mask',
 test('icon_mask', test_icon_mask, suite : 'unit')
 
 # End-to-end runtime-icon rendering through the PUBLIC API only (ADR-0112).
-# Links solely against the shared libraries: compiling any icon registry source
-# here would create a second registry, and a runtime SVG registered into it would
-# be invisible to liboptics_ui's replay — the icon would render blank and the pixel
-# assertions would look like a mask bug. Per-run colour survival on both the mask
-# path and the vector fallback is asserted here because only this link line can
-# observe the real registry.
 test_icon_mask_render = executable('test_icon_mask_render',
   'test_icon_mask_render.c',
   dependencies        : [ui_dep, m_dep, optics_test_dep],
   include_directories : ui_inc,
 )
 test('icon_mask_render', test_icon_mask_render, suite : 'integration')
-
-# Content of registered runtime-icon streams. Compiles the registration
-# sources directly (same pattern as test_drawlist_hash): the registry
-# accessors are hidden symbols that do not link from liboptics_ui.so.
-test_icon_runtime_content = executable('test_icon_runtime_content',
-  'test_icon_runtime_content.c',
-  '../../libs/ui/src/icon_runtime.c',
-  '../../libs/ui/src/icon_data.c',
-  dependencies        : [ui_dep, m_dep, optics_test_dep],
-  include_directories : ui_inc,
-  c_args              : ['-DOPTICS_UI_STATIC=1'],
-)
-test('icon_runtime_content', test_icon_runtime_content, suite : 'unit')
-
-# Per-shape colour runs recorded by runtime SVG registration. Same
-# direct-link pattern as test_icon_runtime_content.
-test_icon_runtime_runs = executable('test_icon_runtime_runs',
-  'test_icon_runtime_runs.c',
-  '../../libs/ui/src/icon_runtime.c',
-  '../../libs/ui/src/icon_data.c',
-  dependencies        : [ui_dep, m_dep, optics_test_dep],
-  include_directories : ui_inc,
-  c_args              : ['-DOPTICS_UI_STATIC=1'],
-)
-test('icon_runtime_runs', test_icon_runtime_runs, suite : 'unit')
 
 if get_option('fuzz')
   subdir('fuzz')

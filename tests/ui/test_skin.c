@@ -243,7 +243,7 @@ static void build_separator(optics_ui *ui) {
     optics_ui_separator(ui, nullptr);
 }
 static void build_icon(optics_ui *ui) {
-    optics_ui_icon(ui, &(optics_ui_icon_opts){.id = OPTICS_UI_ICON_GLOBE, .size = 24.0f});
+    optics_ui_icon(ui, &(optics_ui_icon_opts){.id = OPTICS_UI_ICON_CHEVRON_RIGHT, .size = 24.0f});
 }
 static void build_image(optics_ui *ui) {
     optics_ui_image(ui, &(optics_ui_image_opts){.width = 32.0f, .height = 32.0f});
@@ -307,10 +307,56 @@ static void test_every_kind_dispatches_and_is_replaceable(void) {
     }
 }
 
+/* Selection highlight tint derived from `rs->accent` via `optics_ui__color_alpha`
+ * must preserve the premultiplied sRGB invariant (R, G, B <= A). Replacing only
+ * the alpha byte produced R,G,B > A, which rendered as opaque-looking grey. */
+static void test_textedit_selection_color_is_premultiplied(void) {
+    optics_ui *ui = nullptr;
+    OT_EXPECT(optics_ui_create(&(optics_ui_desc){}, &ui) == OPTICS_GFX_OK);
+
+    optics_ui_theme theme = optics_ui_get_theme(ui);
+    theme.color_accent = optics_gfx_color_rgba_premul(102, 156, 255, 255);
+    optics_ui_set_theme(ui, theme);
+
+    char buf[32] = "/home/user";
+    optics_ui_begin(ui, &IN0);
+    optics_ui_textedit(
+        ui, &(optics_ui_textedit_opts){.box = {.id = "sel_tf", .width = 160.0f, .height = 32.0f},
+                                       .buf = buf,
+                                       .cap = sizeof buf});
+    optics_ui_textedit_set_selection(ui, &(optics_ui_textedit_set_selection_opts){
+                                             .label = "sel_tf", .sel_start = 0, .sel_end = 10});
+    optics_ui_test_end(ui);
+
+    optics_ui_begin(ui, &IN0);
+    optics_ui_textedit(
+        ui, &(optics_ui_textedit_opts){.box = {.id = "sel_tf", .width = 160.0f, .height = 32.0f},
+                                       .buf = buf,
+                                       .cap = sizeof buf});
+    optics_ui_test_end(ui);
+
+    optics_ui_node *n = optics_ui_find(ui, optics_ui_current_id(ui, "sel_tf"));
+    OT_EXPECT(n != nullptr && n->cmd_count >= 2);
+    if (n && n->cmd_count >= 2) {
+        /* cmds[0] = background rect, cmds[1] = selection highlight rect */
+        const optics_gfx_color col = n->cmds[1].color;
+        const uint32_t a = (col >> 24) & 0xFFu;
+        const uint32_t r = (col >> 16) & 0xFFu;
+        const uint32_t g = (col >> 8) & 0xFFu;
+        const uint32_t b = col & 0xFFu;
+        OT_EXPECT(a == 0x40u);
+        OT_EXPECT(r <= a && g <= a && b <= a);
+        OT_EXPECT(b > g && g > r);
+    }
+
+    optics_ui_release(ui);
+}
+
 int main(void) {
     test_null_override_equality();
     test_custom_skin_record_and_output();
     test_context_skin_override();
     test_every_kind_dispatches_and_is_replaceable();
+    test_textedit_selection_color_is_premultiplied();
     return OT_REPORT();
 }

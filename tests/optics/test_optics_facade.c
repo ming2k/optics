@@ -26,27 +26,8 @@ int main(void) {
     static_assert(OPTICS_GFX_VERSION_PATCH == OPTICS_VERSION_PATCH, "gfx/Optics patch mismatch");
 
 #if defined(OPTICS_TEXT_VERSION_MAJOR)
-    static_assert(OPTICS_TEXT_VERSION_MAJOR == OPTICS_VERSION_MAJOR, "Glyph/Optics major mismatch");
-    static_assert(OPTICS_TEXT_VERSION_PATCH == OPTICS_VERSION_PATCH, "Glyph/Optics patch mismatch");
-#endif
-
-#if defined(OPTICS_MATERIAL_VERSION_MAJOR)
-    static_assert(OPTICS_MATERIAL_VERSION_MAJOR == OPTICS_VERSION_MAJOR,
-                  "material/Optics major mismatch");
-    static_assert(OPTICS_MATERIAL_VERSION_PATCH == OPTICS_VERSION_PATCH,
-                  "material/Optics patch mismatch");
-#endif
-
-#if defined(OPTICS_SCENE_VERSION_MAJOR)
-    static_assert(OPTICS_SCENE_VERSION_MAJOR == OPTICS_VERSION_MAJOR,
-                  "scene/Optics major mismatch");
-    static_assert(OPTICS_SCENE_VERSION_PATCH == OPTICS_VERSION_PATCH,
-                  "scene/Optics patch mismatch");
-#endif
-
-#if defined(OPTICS_SVG_VERSION_MAJOR)
-    static_assert(OPTICS_SVG_VERSION_MAJOR == OPTICS_VERSION_MAJOR, "svg/Optics major mismatch");
-    static_assert(OPTICS_SVG_VERSION_PATCH == OPTICS_VERSION_PATCH, "svg/Optics patch mismatch");
+    static_assert(OPTICS_TEXT_VERSION_MAJOR == OPTICS_VERSION_MAJOR, "text/Optics major mismatch");
+    static_assert(OPTICS_TEXT_VERSION_PATCH == OPTICS_VERSION_PATCH, "text/Optics patch mismatch");
 #endif
 
     static_assert(OPTICS_UI_VERSION_MAJOR == OPTICS_VERSION_MAJOR, "ui/Optics major mismatch");

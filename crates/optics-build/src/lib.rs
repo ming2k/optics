@@ -16,9 +16,6 @@ const OPTICS_LIBS: &[&str] = &[
     "optics_app",
     "optics_window",
     "optics_ui",
-    "optics_material",
-    "optics_scene",
-    "optics_svg",
     "optics_text",
     "optics_gfx",
 ];

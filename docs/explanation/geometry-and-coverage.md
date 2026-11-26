@@ -39,10 +39,10 @@ from an exact path.
 | Distance field (device) | Rounded-rect field, border ring adjustment, one-pixel analytic coverage | `libs/gfx/src/canvas/shaders/canvas_sdf.frag.slang` |
 | Distance field (host) | The same field via the shared primitive | `libs/gfx/src/canvas/backend_cpu.c` (`frag_sdf`) |
 | Strategy dispatch | Which geometry class takes the analytic path and under which paint/blend/transform. Rounded rect, circle and squircle are analytic when solid + SRC_OVER + axis-uniform | `libs/gfx/src/canvas/canvas.c` (`canvas_draw_geometry`, `draw_sdf_shape`) |
-| Material distance fields | Rounded-rect field via the shared snippet; squircle field local to the material | `libs/gfx/include/optics/gfx/shaders/optics_gfx_sdf.slang` (included by `material/src/shaders/frosted.comp.slang`, `liquid_glass.comp.slang`, `acrylic.comp.slang`, `mica.comp.slang`, `backdrop_frost.comp.slang`) |
+| Shared SDF shader snippet | Analytic rounded-rect and squircle signed distance + derivatives for custom Slang consumers | `libs/gfx/include/optics/gfx/shaders/optics_gfx_sdf.slang` |
 | Baked coverage (opt-in) | Device-resolution icon coverage mask, rasterized once per icon size by the CPU canvas | `libs/ui/src/render/icon_mask.c` |
 | Glyph coverage | FreeType-rasterised coverage atlas (host-resident or device) | `libs/text/src/atlas.c` |
-| Icon vector source | SVG path parsing; elliptical arcs converted to cubic Béziers | `libs/svg/src/path.c` |
+| Icon vector source | Format-agnostic per-context vector command streams (`optics_ui_icon_desc`) | `libs/ui/src/icon_runtime.c` |
 
 ## The curve pipeline, in order
 

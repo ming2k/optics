@@ -34,7 +34,7 @@ optics_ui_response optics_ui_button(optics_ui *ui, const optics_ui_button_opts *
         tm = optics_ui__text_measure_label(ui, label, font_size, 0.0f);
 
     float glyph_size = font_size;
-    bool has_icon = opts->icon != OPTICS_UI_ICON_INVALID && opts->icon != 0;
+    bool has_icon = optics_ui__icon_valid(ui, opts->icon);
     bool has_image = opts->image != nullptr;
     bool has_label = label[0] != '\0';
 

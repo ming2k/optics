@@ -70,11 +70,17 @@ void optics_ui__free(optics_ui *ui, void *ptr) {
 #include <optics/gfx/canvas_cpu.h>
 #include <optics/ui/icon.h>
 
+static const optics_ui_icon_cmd CIRCLE_RING_CMDS[] = {
+    {.kind = OPTICS_UI_ICON_CMD_CIRCLE, .params = {12.0f, 12.0f, 9.0f}},
+};
+
 /* Count distinct partial-coverage values in a rendered icon's alpha channel. */
-static int icon_partial_levels(optics_ui_icon_id id, float size) {
+static int icon_partial_levels(const optics_ui_icon_desc *custom, optics_ui_icon_id builtin_id,
+                               float size) {
     optics_ui *ui = nullptr;
     if (optics_ui_create(&(optics_ui_desc){.scale = 1.0f}, &ui) != OPTICS_GFX_OK)
         return -1;
+    optics_ui_icon_id id = custom ? optics_ui_icon_register(ui, custom) : builtin_id;
     const uint32_t w = 32, h = 32;
     optics_ui_input in = {.display_size = {(float)w, (float)h}, .dt_seconds = 0.016f};
     optics_ui_begin(ui, &in);
@@ -118,12 +124,13 @@ static int icon_partial_levels(optics_ui_icon_id id, float size) {
     return levels;
 }
 
-/* Coverage-weighted centroid of an icon rendered into a `box` box at `scale`. */
-static bool icon_centroid(optics_ui_icon_id id, float size, float scale, uint32_t box,
+/* Coverage-weighted centroid of a symmetric icon rendered into a `box` box at `scale`. */
+static bool icon_centroid(const optics_ui_icon_desc *desc, float size, float scale, uint32_t box,
                           double *out_cx, double *out_cy) {
     optics_ui *ui = nullptr;
     if (optics_ui_create(&(optics_ui_desc){.scale = scale}, &ui) != OPTICS_GFX_OK)
         return false;
+    optics_ui_icon_id id = optics_ui_icon_register(ui, desc);
     uint32_t w = (uint32_t)(box * scale), h = w;
     optics_ui_input in = {.display_size = {(float)box, (float)box}, .dt_seconds = 0.016f};
     optics_ui_begin(ui, &in);
@@ -179,13 +186,18 @@ static bool icon_centroid(optics_ui_icon_id id, float size, float scale, uint32_
     return ok;
 }
 
-/* alert_circle's ink is symmetric about the 24-unit box centre, so its centroid
- * is the box centre regardless of stroke details. */
+/* A circle centred at (12, 12) has symmetric ink about the 24-unit box centre,
+ * so its centroid is the box centre regardless of stroke details. */
 static void check_centred_at_scale(float scale) {
     const float size = 14.0f;
     uint32_t box = 24;
     double cx = 0, cy = 0;
-    OT_EXPECT(icon_centroid(OPTICS_UI_ICON_ALERT_CIRCLE, size, scale, box, &cx, &cy));
+    optics_ui_icon_desc ring = {
+        .cmds = CIRCLE_RING_CMDS,
+        .count = 1u,
+        .paint = OPTICS_UI_ICON_PAINT_STROKE,
+    };
+    OT_EXPECT(icon_centroid(&ring, size, scale, box, &cx, &cy));
     /* The icon node fills `size` logical px at the layout origin; its centre is
      * size*scale/2 in device px, minus half a pixel for pixel-centre indexing. */
     double expect = (double)size * scale * 0.5 - 0.5;
@@ -199,13 +211,13 @@ int main(void) {
         optics_ui *ui = nullptr;
         OT_EXPECT(optics_ui_create(&(optics_ui_desc){.scale = 1.0f}, &ui) == OPTICS_GFX_OK);
 
-        float stroke = 2.0f * 20.0f / 24.0f;
+        float stroke = 2.0f;
         optics_ui__icon_mask *a = optics_ui__icon_mask_acquire(
-            ui, OPTICS_UI_ICON_CHECK, 20u, stroke, 0.0f, 0u, OPTICS_UI_ICON_MASK_BODY);
+            ui, OPTICS_UI_ICON_CHEVRON_RIGHT, 24u, stroke, 0.0f, 0u, OPTICS_UI_ICON_MASK_BODY);
         OT_EXPECT(a != nullptr);
         if (a) {
-            OT_EXPECT(a->dev_px == 20u);
-            OT_EXPECT(a->w == 20u + 2u * a->halo);
+            OT_EXPECT(a->dev_px == 24u);
+            OT_EXPECT(a->w == 24u + 2u * a->halo);
             OT_EXPECT(a->h == a->w);
             /* Device-less ui: the mask lives as host bytes, not an image. */
             OT_EXPECT(a->host != nullptr);
@@ -226,35 +238,54 @@ int main(void) {
 
         /* Same request returns the same entry — no duplicate bakes. */
         optics_ui__icon_mask *again = optics_ui__icon_mask_acquire(
-            ui, OPTICS_UI_ICON_CHECK, 20u, stroke, 0.0f, 0u, OPTICS_UI_ICON_MASK_BODY);
+            ui, OPTICS_UI_ICON_CHEVRON_RIGHT, 24u, stroke, 0.0f, 0u, OPTICS_UI_ICON_MASK_BODY);
         OT_EXPECT(again == a);
 
         /* A different device size is a different entry. */
         optics_ui__icon_mask *bigger = optics_ui__icon_mask_acquire(
-            ui, OPTICS_UI_ICON_CHECK, 24u, stroke, 0.0f, 0u, OPTICS_UI_ICON_MASK_BODY);
+            ui, OPTICS_UI_ICON_CHEVRON_RIGHT, 28u, stroke, 0.0f, 0u, OPTICS_UI_ICON_MASK_BODY);
         OT_EXPECT(bigger != nullptr && bigger != a);
         if (bigger)
-            OT_EXPECT(bigger->dev_px == 24u);
+            OT_EXPECT(bigger->dev_px == 28u);
 
         /* An outline layer is its own entry, and an outline layer with no
          * outline width is meaningless rather than silently a body mask. */
         optics_ui__icon_mask *outline = optics_ui__icon_mask_acquire(
-            ui, OPTICS_UI_ICON_CHECK, 20u, stroke, 1.5f, 0u, OPTICS_UI_ICON_MASK_OUTLINE);
+            ui, OPTICS_UI_ICON_CHEVRON_RIGHT, 24u, stroke, 1.5f, 0u, OPTICS_UI_ICON_MASK_OUTLINE);
         OT_EXPECT(outline != nullptr && outline != a);
-        OT_EXPECT(optics_ui__icon_mask_acquire(ui, OPTICS_UI_ICON_CHECK, 20u, stroke, 0.0f, 0u,
-                                               OPTICS_UI_ICON_MASK_OUTLINE) == nullptr);
+        OT_EXPECT(optics_ui__icon_mask_acquire(ui, OPTICS_UI_ICON_CHEVRON_RIGHT, 24u, stroke, 0.0f,
+                                               0u, OPTICS_UI_ICON_MASK_OUTLINE) == nullptr);
 
         /* A body-layer mask never carries the outline, so asking with an outline
          * width must not mint a second entry with byte-identical coverage. */
         optics_ui__icon_mask *body_dup = optics_ui__icon_mask_acquire(
-            ui, OPTICS_UI_ICON_CHECK, 20u, stroke, 1.5f, 0u, OPTICS_UI_ICON_MASK_BODY);
+            ui, OPTICS_UI_ICON_CHEVRON_RIGHT, 24u, stroke, 1.5f, 0u, OPTICS_UI_ICON_MASK_BODY);
         OT_EXPECT(body_dup == a);
 
         /* An unknown run index and a zero device size are rejected, so a caller
          * falls back instead of masking nothing. */
-        OT_EXPECT(optics_ui__icon_mask_acquire(ui, OPTICS_UI_ICON_CHECK, 20u, stroke, 0.0f, 7u,
-                                               OPTICS_UI_ICON_MASK_BODY) == nullptr);
-        OT_EXPECT(optics_ui__icon_mask_acquire(ui, OPTICS_UI_ICON_CHECK, 0u, stroke, 0.0f, 0u,
+        OT_EXPECT(optics_ui__icon_mask_acquire(ui, OPTICS_UI_ICON_CHEVRON_RIGHT, 24u, stroke, 0.0f,
+                                               7u, OPTICS_UI_ICON_MASK_BODY) == nullptr);
+        OT_EXPECT(optics_ui__icon_mask_acquire(ui, OPTICS_UI_ICON_CHEVRON_RIGHT, 0u, stroke, 0.0f,
+                                               0u, OPTICS_UI_ICON_MASK_BODY) == nullptr);
+
+        /* Unregistering a runtime icon evicts all of its cached coverage masks
+         * and rejects subsequent lookups through the stale generational id. */
+        optics_ui_icon_id dyn = optics_ui_icon_register(
+            ui, &(optics_ui_icon_desc){
+                    .cmds = CIRCLE_RING_CMDS, .count = 1u, .paint = OPTICS_UI_ICON_PAINT_STROKE});
+        OT_EXPECT(dyn != OPTICS_UI_ICON_NONE);
+        uint32_t before_dyn = ui->icon_masks.count;
+        optics_ui__icon_mask *dyn_body =
+            optics_ui__icon_mask_acquire(ui, dyn, 24u, stroke, 0.0f, 0u, OPTICS_UI_ICON_MASK_BODY);
+        optics_ui__icon_mask *dyn_out = optics_ui__icon_mask_acquire(ui, dyn, 24u, stroke, 1.5f, 0u,
+                                                                     OPTICS_UI_ICON_MASK_OUTLINE);
+        OT_EXPECT(dyn_body != nullptr && dyn_out != nullptr);
+        OT_EXPECT(ui->icon_masks.count == before_dyn + 2u);
+
+        optics_ui_icon_unregister(ui, dyn);
+        OT_EXPECT(ui->icon_masks.count == before_dyn);
+        OT_EXPECT(optics_ui__icon_mask_acquire(ui, dyn, 24u, stroke, 0.0f, 0u,
                                                OPTICS_UI_ICON_MASK_BODY) == nullptr);
 
         optics_ui_release(ui); /* must free every cached mask without leaking */
@@ -262,14 +293,22 @@ int main(void) {
 
     /* ---- rendered icons carry far more coverage than 4x MSAA allows ---- */
     {
-        /* 4x MSAA can express at most 3 partial levels. A 14 px stroked icon
-         * through the mask path must clear that comfortably. */
-        int chevron = icon_partial_levels(OPTICS_UI_ICON_CHEVRON_RIGHT, 14.0f);
-        int circle = icon_partial_levels(OPTICS_UI_ICON_ALERT_CIRCLE, 14.0f);
+        optics_ui_icon_desc ring = {
+            .cmds = CIRCLE_RING_CMDS,
+            .count = 1u,
+            .paint = OPTICS_UI_ICON_PAINT_STROKE,
+        };
+        optics_ui_icon_desc disc = {
+            .cmds = CIRCLE_RING_CMDS,
+            .count = 1u,
+            .paint = OPTICS_UI_ICON_PAINT_FILL,
+        };
+        int chevron = icon_partial_levels(nullptr, OPTICS_UI_ICON_CHEVRON_RIGHT, 14.0f);
+        int circle = icon_partial_levels(&ring, OPTICS_UI_ICON_NONE, 14.0f);
+        int filled = icon_partial_levels(&disc, OPTICS_UI_ICON_NONE, 20.0f);
         OT_EXPECT(chevron > 3);
         OT_EXPECT(circle > 3);
-        int star = icon_partial_levels(OPTICS_UI_ICON_STAR_ROUNDED_FILLED, 20.0f);
-        OT_EXPECT(star > 3);
+        OT_EXPECT(filled > 3);
     }
 
     /* ---- placement is device-grid exact at every scale ---- */
@@ -278,35 +317,30 @@ int main(void) {
     check_centred_at_scale(1.5f);
     check_centred_at_scale(2.0f);
 
-    /* ---- filled (non-stroke) icons bake and render ---- */
-    {
-        int filled = icon_partial_levels(OPTICS_UI_ICON_STAR_ROUNDED_FILLED, 16.0f);
-        int outline = icon_partial_levels(OPTICS_UI_ICON_STAR_ROUNDED, 16.0f);
-        OT_EXPECT(filled > 0);
-        OT_EXPECT(outline > 0);
-    }
-
-    /* ---- run resolution is the single source of truth ---- *
-     * The vector fallback's old bug was resolving an icon's paint runs
-     * differently from the mask path (collapsing the stream to one paint), which
-     * silently discarded every per-shape colour. These two functions are now the
-     * only run resolver, so pin their contract directly: a hand-built descriptor
-     * with three runs must resolve to exactly three spans with their colours and
-     * fill/stroke modes intact, and each colour must survive resolution.
-     *
-     * End-to-end rendering of a multi-colour runtime SVG is covered separately by
-     * test_icon_mask_render, which links only the shared library (see
-     * meson.build for why that must not compile a second icon registry). */
+    /* ---- run resolution is the single source of truth ---- */
     {
         static const optics_ui_icon_cmd cmds[] = {
-            {0, {1, 1}},      {1, {2, 2}},   {4, {}},      /* "ring"   */
-            {5, {12, 12, 3}},                              /* "hub"    */
-            {0, {8, 12}},     {1, {11, 15}}, {1, {16, 8}}, /* "tick" */
+            {.kind = OPTICS_UI_ICON_CMD_MOVE, .params = {1, 1}},
+            {.kind = OPTICS_UI_ICON_CMD_LINE, .params = {2, 2}},
+            {.kind = OPTICS_UI_ICON_CMD_CLOSE},
+            {.kind = OPTICS_UI_ICON_CMD_CIRCLE, .params = {12, 12, 3}},
+            {.kind = OPTICS_UI_ICON_CMD_MOVE, .params = {8, 12}},
+            {.kind = OPTICS_UI_ICON_CMD_LINE, .params = {11, 15}},
+            {.kind = OPTICS_UI_ICON_CMD_LINE, .params = {16, 8}},
         };
         optics_ui_icon_run runs[] = {
-            {.first_cmd = 0, .count = 3, .color = 0xFF0000FFu, .fill = 0},
-            {.first_cmd = 3, .count = 1, .color = 0xFF00FF00u, .fill = 1},
-            {.first_cmd = 4, .count = 3, .color = 0xFFFF0000u, .fill = 0},
+            {.first_cmd = 0,
+             .count = 3,
+             .color = optics_gfx_color_rgba_premul(255, 0, 0, 255),
+             .paint = OPTICS_UI_ICON_PAINT_STROKE},
+            {.first_cmd = 3,
+             .count = 1,
+             .color = optics_gfx_color_rgba_premul(0, 255, 0, 255),
+             .paint = OPTICS_UI_ICON_PAINT_FILL},
+            {.first_cmd = 4,
+             .count = 3,
+             .color = optics_gfx_color_rgba_premul(0, 0, 255, 255),
+             .paint = OPTICS_UI_ICON_PAINT_STROKE},
         };
         optics_ui_icon_desc desc = {
             .cmds = cmds,
@@ -315,41 +349,35 @@ int main(void) {
             .run_count = 3,
         };
         optics_ui__icon_run_span spans[OPTICS_UI_ICON_MAX_RUNS];
-        uint32_t n = optics_ui__icon_run_spans(&desc, OPTICS_UI_ICON_RENDER_STROKE, spans,
-                                               OPTICS_UI_ICON_MAX_RUNS);
+        uint32_t n = optics_ui__icon_run_spans(&desc, spans, OPTICS_UI_ICON_MAX_RUNS);
         OT_EXPECT(n == 3);
         if (n == 3) {
             OT_EXPECT(spans[0].first_cmd == 0 && spans[0].count == 3 && !spans[0].fill);
             OT_EXPECT(spans[1].first_cmd == 3 && spans[1].count == 1 && spans[1].fill);
             OT_EXPECT(spans[2].first_cmd == 4 && spans[2].count == 3 && !spans[2].fill);
-            /* Distinct colours are preserved, not collapsed to the theme. */
             optics_gfx_color theme = optics_gfx_color_rgba_premul(1, 2, 3, 255);
             OT_EXPECT(optics_ui__icon_run_color(spans[0].color, theme) != theme);
             OT_EXPECT(optics_ui__icon_run_color(spans[1].color, theme) != theme);
             OT_EXPECT(optics_ui__icon_run_color(spans[2].color, theme) != theme);
             OT_EXPECT(optics_ui__icon_run_color(spans[0].color, theme) !=
                       optics_ui__icon_run_color(spans[1].color, theme));
-            /* color == 0 means "follow the caller", exactly like a built-in. */
             OT_EXPECT(optics_ui__icon_run_color(0, theme) == theme);
         }
 
-        /* A collapsed descriptor (built-in icon) is exactly one span covering the
-         * whole stream, painted in the caller's colour. */
-        optics_ui_icon_desc collapsed = {.cmds = cmds, .count = 7};
-        n = optics_ui__icon_run_spans(&collapsed, OPTICS_UI_ICON_RENDER_FILL, spans,
-                                      OPTICS_UI_ICON_MAX_RUNS);
+        optics_ui_icon_desc collapsed = {
+            .cmds = cmds, .count = 7, .paint = OPTICS_UI_ICON_PAINT_FILL};
+        n = optics_ui__icon_run_spans(&collapsed, spans, OPTICS_UI_ICON_MAX_RUNS);
         OT_EXPECT(n == 1);
         if (n == 1) {
             OT_EXPECT(spans[0].first_cmd == 0 && spans[0].count == 7);
-            OT_EXPECT(spans[0].fill);       /* fill mode from the icon table */
-            OT_EXPECT(spans[0].color == 0); /* follow the caller's colour */
+            OT_EXPECT(spans[0].fill);
+            OT_EXPECT(spans[0].color == 0);
         }
 
-        /* A run table that overruns the command stream is refused outright, so a
-         * corrupt descriptor degrades to "no spans" rather than reading OOB. */
-        optics_ui_icon_run bad_runs[] = {{.first_cmd = 6, .count = 99, .color = 0, .fill = 0}};
+        optics_ui_icon_run bad_runs[] = {
+            {.first_cmd = 6, .count = 99, .color = 0, .paint = OPTICS_UI_ICON_PAINT_STROKE}};
         optics_ui_icon_desc bad = {.cmds = cmds, .count = 7, .runs = bad_runs, .run_count = 1};
-        OT_EXPECT(optics_ui__icon_run_spans(&bad, 0, spans, OPTICS_UI_ICON_MAX_RUNS) == 0);
+        OT_EXPECT(optics_ui__icon_run_spans(&bad, spans, OPTICS_UI_ICON_MAX_RUNS) == 0);
     }
 
     return OT_REPORT();

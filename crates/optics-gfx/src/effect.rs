@@ -170,8 +170,8 @@ impl BlurredImage<'_> {
 
     /// Raw `optics_gfx_image` pointer of the borrowed blur output. Borrowed: it
     /// stays valid only while this `BlurredImage` (its filter's frame slot)
-    /// is alive. For consumers in a sibling binding crate — material's
-    /// liquid-glass filter takes it as the frosted backdrop input.
+    /// is alive. For consumers that pass the blurred image to their own
+    /// compute or effect stage.
     pub fn as_raw(&self) -> *mut sys::optics_gfx_image {
         self.raw
     }

@@ -24,7 +24,7 @@ extern "C" {
 
 typedef struct optics_ui_segmented_item {
     const char *label;      /* text or label string (NULL if icon-only) */
-    optics_ui_icon_id icon; /* OPTICS_UI_ICON_INVALID if text-only */
+    optics_ui_icon_id icon; /* OPTICS_UI_ICON_NONE if text-only */
     bool disabled;
 } optics_ui_segmented_item;
 
@@ -194,7 +194,7 @@ OPTICS_UI_API optics_ui_datagrid_action optics_ui_datagrid(optics_ui *ui,
 
 typedef struct optics_ui_tree_item {
     const char *label;
-    optics_ui_icon_id icon; /* 0 or OPTICS_UI_ICON_INVALID = none */
+    optics_ui_icon_id icon; /* OPTICS_UI_ICON_NONE = none */
     uint32_t depth;         /* Indentation level (0 = root) */
     bool is_leaf;           /* True if leaf (no expansion chevron) */
     bool expanded;          /* In-out: subtree expanded */

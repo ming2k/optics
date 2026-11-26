@@ -122,13 +122,22 @@ def main() -> int:
     for path in sorted((ROOT / "libs" / "gfx").glob("**/*.[ch]")):
         errors += check_file(path, MATERIAL_RE, "gfx references a named material")
 
+    for path in sorted((ROOT / "libs" / "ui").glob("**/*.[ch]")):
+        errors += check_file(path, MATERIAL_RE, "ui references a branded OS material")
+
+    for forbidden_mod in ("svg", "scene", "material"):
+        if (ROOT / "libs" / forbidden_mod).exists():
+            errors.append(
+                f"libs/{forbidden_mod}: retired non-core library must not exist in the core stack"
+            )
+
     if errors:
         sys.stderr.write("library purity failed:\n")
         for error in errors:
             sys.stderr.write(f"  - {error}\n")
         return 1
 
-    print("library purity ok: no stdout in libs, no material references in gfx")
+    print("library purity ok: no stdout in libs, no branded materials or retired asset parsers")
     return 0
 
 

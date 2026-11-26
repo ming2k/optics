@@ -17,7 +17,6 @@
 #include <optics/gfx/effect.h>
 #include <optics/gfx/observe.h>
 #include <optics/gfx/vulkan.h>
-#include <optics/material.h>
 
 #include <string.h>
 
@@ -305,32 +304,11 @@ int main(void) {
         OT_EXPECT(optics_gfx_device_labels_emitted(d) == labels_before + 1u);
     }
 
-    /* ---- 6. A material's dispatches are prunable too (ADR-0147) ----
-     *
-     * This is the assertion that Phase 2 exists for. Before it, every material
-     * recorded eagerly: an apply that nothing sampled still cost its full
-     * dispatch set (measured 4.8 ms/frame for 64 liquid-glass bodies on a
-     * 1024x1024 target). Registering a pass must now be enough for the plan to
-     * prune it when no consumer appears.
-     */
+    /* ---- 6. A DisplayList recording a pending blur materializes it ---- */
     {
-        optics_material_liquid_glass_filter *glass = nullptr;
-        OT_EXPECT(optics_material_liquid_glass_filter_create(d, &glass) == OPTICS_GFX_OK);
-
-        optics_gfx_image *slab_target = nullptr;
-        OT_EXPECT(optics_gfx_image_create(
-                      d,
-                      &(optics_gfx_image_desc){.type = OPTICS_GFX_TYPE_IMAGE_DESC,
-                                               .width = W,
-                                               .height = H,
-                                               .format = OPTICS_GFX_FORMAT_RGBA8_UNORM,
-                                               .usage = OPTICS_GFX_IMAGE_USAGE_RENDER_TARGET},
-                      &slab_target) == OPTICS_GFX_OK);
-
         optics_gfx_frame *frame = nullptr;
         OT_EXPECT(optics_gfx_surface_begin_frame(s, nullptr, &frame) == OPTICS_GFX_OK);
 
-        /* A blur the material samples, so the chain has both kinds of pass. */
         optics_gfx_effect_blur_desc bd = OPTICS_GFX_EFFECT_BLUR_DESC_INIT;
         bd.input = target;
         bd.sigma = 3.0f;
@@ -338,70 +316,25 @@ int main(void) {
         OT_EXPECT(optics_gfx_blur_filter_apply(
                       blur, &(optics_gfx_blur_filter_apply_opts){
                                 .frame = frame, .desc = &bd, .out = &blurred}) == OPTICS_GFX_OK);
-        OT_EXPECT(optics_gfx_frame_materialize_image(frame, blurred) == OPTICS_GFX_OK);
-
-        optics_material_liquid_glass_shape shape = {
-            .bounds = {4.0f, 4.0f, (float)W - 8.0f, (float)H - 8.0f},
-            .corner_radius = 8.0f,
-        };
-        optics_material_liquid_glass_group group = OPTICS_MATERIAL_LIQUID_GLASS_GROUP_INIT;
-        group.shapes = &shape;
-        group.shape_count = 1u;
-
-        optics_material_liquid_glass_desc gd = OPTICS_MATERIAL_LIQUID_GLASS_DESC_INIT;
-        gd.input = target;
-        gd.blurred_input = blurred;
-        gd.groups = &group;
-        gd.group_count = 1u;
-        optics_material_output out = {};
-        OT_EXPECT(optics_material_liquid_glass_filter_apply(
-                      glass, &(optics_material_liquid_glass_filter_apply_opts){
-                                 .frame = frame, .desc = &gd, .out = &out}) == OPTICS_GFX_OK);
-        OT_EXPECT(out.image != nullptr);
-
-        optics_gfx_frame_plan_counters stats = {};
-        OT_EXPECT(optics_gfx_frame_plan_stats(frame, &stats) == OPTICS_GFX_OK);
-        OT_EXPECT(stats.registered >= 2u);
-        OT_EXPECT(stats.executed == 1u); /* the blur only: the material is still pending */
-
-        /* Nothing draws `out.image`, so the material pass must be pruned while
-         * the blur it needed still ran. */
-        OT_EXPECT(optics_gfx_frame_submit(frame) == OPTICS_GFX_OK);
-        OT_EXPECT(optics_gfx_frame_present(frame) == OPTICS_GFX_OK);
-        OT_EXPECT(optics_gfx_frame_plan_stats(frame, &stats) == OPTICS_GFX_ERROR_INVALID_STATE);
-
-        /* When a DisplayList records `out.image` before `optics_gfx_canvas_begin`
-         * (the host `on_prepare` -> `on_record` -> `optics_gfx_canvas_begin` ->
-         * `optics_gfx_canvas_submit_display_list` flow), the encoder snapshots
-         * `out.image` while its deferred pass is still pending. `optics_gfx_canvas_begin`
-         * flushes the required pass; replaying the DisplayList must observe the
-         * cleared pending state on the snapshot and composite the material. */
-        OT_EXPECT(optics_gfx_surface_begin_frame(s, nullptr, &frame) == OPTICS_GFX_OK);
-        OT_EXPECT(optics_gfx_blur_filter_apply(
-                      blur, &(optics_gfx_blur_filter_apply_opts){
-                                .frame = frame, .desc = &bd, .out = &blurred}) == OPTICS_GFX_OK);
-        gd.blurred_input = blurred;
-        out = (optics_material_output){};
-        OT_EXPECT(optics_material_liquid_glass_filter_apply(
-                      glass, &(optics_material_liquid_glass_filter_apply_opts){
-                                 .frame = frame, .desc = &gd, .out = &out}) == OPTICS_GFX_OK);
-        OT_EXPECT(out.image != nullptr);
+        OT_EXPECT(blurred != nullptr);
 
         optics_gfx_encoder *enc = nullptr;
         OT_EXPECT(optics_gfx_encoder_create(nullptr, &enc) == OPTICS_GFX_OK);
-        optics_gfx_geometry geom = optics_gfx_geom_rect(
-            (optics_gfx_rect){out.origin_x, out.origin_y, (float)out.width, (float)out.height});
+        optics_gfx_geometry geom =
+            optics_gfx_geom_rect((optics_gfx_rect){0, 0, (float)W, (float)H});
         optics_gfx_brush brush = {
             .kind = OPTICS_GFX_BRUSH_IMAGE_PATTERN,
             .blend = OPTICS_GFX_BLEND_SRC_OVER,
             .opacity = 1.0f,
-            .image = {.image = out.image, .tint = optics_gfx_color_rgba_premul(255, 255, 255, 255)},
+            .image = {.image = blurred, .tint = optics_gfx_color_rgba_premul(255, 255, 255, 255)},
         };
         optics_gfx_encoder_draw_geometry(
             enc, &(optics_gfx_encoder_draw_geometry_opts){.geom = &geom, .brush = &brush});
         optics_gfx_display_list *dl = nullptr;
         OT_EXPECT(optics_gfx_encoder_finish(enc, &dl) == OPTICS_GFX_OK);
         optics_gfx_encoder_destroy(enc);
+
+        OT_EXPECT(optics_gfx_frame_materialize_image(frame, blurred) == OPTICS_GFX_OK);
 
         optics_gfx_color black = optics_gfx_color_rgba(0, 0, 0, 255);
         OT_EXPECT(optics_gfx_canvas_begin(canvas, &(optics_gfx_canvas_pass_desc){
@@ -414,8 +347,9 @@ int main(void) {
         OT_EXPECT(optics_gfx_canvas_end(canvas) == OPTICS_GFX_OK);
         optics_gfx_display_list_release(dl);
 
+        optics_gfx_frame_plan_counters stats = {};
         OT_EXPECT(optics_gfx_frame_plan_stats(frame, &stats) == OPTICS_GFX_OK);
-        OT_EXPECT(stats.executed == 2u);
+        OT_EXPECT(stats.executed == 1u);
         OT_EXPECT(optics_gfx_frame_submit(frame) == OPTICS_GFX_OK);
         OT_EXPECT(optics_gfx_frame_present(frame) == OPTICS_GFX_OK);
 
@@ -429,9 +363,6 @@ int main(void) {
             }
         }
         OT_EXPECT(any_nonblack);
-
-        optics_gfx_image_release(slab_target);
-        optics_material_liquid_glass_filter_release(glass);
     }
 
     /* ---- 7. The raw recording path cannot read a pending output ----

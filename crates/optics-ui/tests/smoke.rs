@@ -5,14 +5,42 @@
 use optics_ui::{Input, TextBuf, Ui};
 
 #[test]
-fn register_svg_icon_accepts_valid_and_rejects_garbage() {
-    let svg = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\" fill=\"none\" \
-               stroke=\"currentColor\" stroke-width=\"2\"><circle cx=\"12\" cy=\"12\" r=\"9\"/>\
-               <line x1=\"12\" y1=\"7\" x2=\"12\" y2=\"13\"/></svg>";
-    let id = optics_ui::register_svg_icon(svg).expect("valid svg registers");
-    assert!(id.0 >= optics_ui::sys::optics_ui_icon_id::OPTICS_UI_ICON_COUNT.0);
-    assert!(optics_ui::register_svg_icon("this is not svg <<<").is_none());
-    assert!(optics_ui::register_svg_icon("<svg viewBox=\"0 0 24 24\"></svg>").is_none());
+fn register_vector_icon_accepts_valid_and_rejects_empty() {
+    let mut ui = Ui::headless().expect("create headless ui");
+    let cmds = [
+        optics_ui::sys::optics_ui_icon_cmd {
+            kind: optics_ui::sys::optics_ui_icon_cmd_kind::OPTICS_UI_ICON_CMD_CIRCLE,
+            _pad: [0; 3],
+            params: [12.0, 12.0, 9.0, 0.0, 0.0, 0.0],
+        },
+        optics_ui::sys::optics_ui_icon_cmd {
+            kind: optics_ui::sys::optics_ui_icon_cmd_kind::OPTICS_UI_ICON_CMD_MOVE,
+            _pad: [0; 3],
+            params: [12.0, 7.0, 0.0, 0.0, 0.0, 0.0],
+        },
+        optics_ui::sys::optics_ui_icon_cmd {
+            kind: optics_ui::sys::optics_ui_icon_cmd_kind::OPTICS_UI_ICON_CMD_LINE,
+            _pad: [0; 3],
+            params: [12.0, 13.0, 0.0, 0.0, 0.0, 0.0],
+        },
+    ];
+    let id = ui
+        .register_icon(
+            &cmds,
+            &[],
+            optics_ui::sys::optics_ui_icon_paint::OPTICS_UI_ICON_PAINT_STROKE,
+        )
+        .expect("valid vector icon registers");
+    assert_ne!(id, optics_ui::sys::optics_ui_icon_id::OPTICS_UI_ICON_NONE);
+    assert!(
+        ui.register_icon(
+            &[],
+            &[],
+            optics_ui::sys::optics_ui_icon_paint::OPTICS_UI_ICON_PAINT_STROKE,
+        )
+        .is_none()
+    );
+    ui.unregister_icon(id);
 }
 
 #[test]
@@ -37,7 +65,7 @@ fn headless_frame_drives_widgets() {
         f.column().show_flat(|f| {
             f.label("Settings");
             f.label("A label");
-            f.icon(optics_ui::Icon::Globe, 16.0);
+            f.icon(optics_ui::Icon::ChevronRight, 16.0);
             f.separator();
             f.checkbox("Wrap", &mut wrap);
             f.switch("Compact mode", &mut wrap);

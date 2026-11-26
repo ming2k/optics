@@ -121,7 +121,7 @@ void wg_page_layout_data(optics_ui *ui, const ds_palette *p, wg_app *app) {
         "gfx",
         "liboptics_gfx",
         "Vulkan 1.3",
-        "RHI, 2D/3D canvas, compute",
+        "RHI, 2D canvas, compute",
         "text",
         "liboptics_text",
         "gfx, HarfBuzz",

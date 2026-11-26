@@ -37,7 +37,7 @@ optics_ui_response optics_ui_selectable(optics_ui *ui, const optics_ui_selectabl
 
     optics_ui_style_resolved rs = optics_ui__style_resolve(ui, &eff, t, r.state);
     float resolved_icon_size = opts->icon_size > 0.0f ? opts->icon_size : rs.icon_size;
-    bool has_icon = opts->icon != 0 && optics_ui__icon_valid((int32_t)opts->icon);
+    bool has_icon = optics_ui__icon_valid(ui, opts->icon);
     float icon_size = has_icon ? resolved_icon_size : 0.0f;
     float icon_gap = has_icon ? (rs.gap > 0.0f ? rs.gap : 8.0f) : 0.0f;
     float content_w = icon_size + icon_gap + tm.width;

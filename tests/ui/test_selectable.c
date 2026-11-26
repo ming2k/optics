@@ -119,9 +119,70 @@ static void test_selected_surface_uses_theme(void) {
     optics_ui_release(ui);
 }
 
+/* Hovering a selectable row over a container whose surface differs from
+ * `theme.color_bg` must blend `color_hover` from transparent rather than
+ * mixing in opaque `theme.color_bg`. */
+static void test_selectable_hover_blends_from_transparent(void) {
+    optics_ui *ui = nullptr;
+    OT_EXPECT(optics_ui_create(&(optics_ui_desc){}, &ui) == OPTICS_GFX_OK);
+    optics_ui_theme theme = optics_ui_theme_default();
+    theme.color_bg = optics_gfx_color_rgba_premul(255, 255, 255, 255);
+    theme.color_hover = optics_gfx_color_rgba_premul(20, 24, 36, 48);
+    theme.corner_radius = 6.0f;
+    optics_ui_set_theme(ui, theme);
+
+    const optics_gfx_color sidebar_bg = optics_gfx_color_rgba_premul(210, 214, 224, 255);
+    optics_ui_input input = {.display_size = {120, 40}, .dt_seconds = 0.016f};
+    optics_ui_begin(ui, &input);
+    optics_ui_column_begin(
+        ui, &(optics_ui_layout_opts){.box = {.width = 120.0f, .height = 40.0f}, .bg = sidebar_bg});
+    optics_ui_selectable(ui, &(optics_ui_selectable_opts){.box = {.width = 120.0f, .height = 40.0f},
+                                                          .label = "Item",
+                                                          .selected = false});
+    optics_ui_column_end(ui);
+    optics_ui_test_end(ui);
+
+    input.cursor = (optics_gfx_point){10.0f, 20.0f};
+    optics_ui_begin(ui, &input);
+    optics_ui_column_begin(
+        ui, &(optics_ui_layout_opts){.box = {.width = 120.0f, .height = 40.0f}, .bg = sidebar_bg});
+    optics_ui_selectable(ui, &(optics_ui_selectable_opts){.box = {.width = 120.0f, .height = 40.0f},
+                                                          .label = "Item",
+                                                          .selected = false});
+    optics_ui_column_end(ui);
+    optics_ui_test_end(ui);
+
+    optics_gfx_canvas *canvas = nullptr;
+    OT_EXPECT(
+        optics_gfx_canvas_create(&(optics_gfx_canvas_desc){.type = OPTICS_GFX_TYPE_CANVAS_DESC,
+                                                           .backend = OPTICS_GFX_CANVAS_BACKEND_CPU,
+                                                           .scale = 1.0f,
+                                                           .width = 120,
+                                                           .height = 40},
+                                 &canvas) == OPTICS_GFX_OK);
+    OT_EXPECT(optics_gfx_canvas_begin(canvas, &(optics_gfx_canvas_pass_desc){
+                                                  .type = OPTICS_GFX_TYPE_CANVAS_PASS_DESC,
+                                                  .clear_color = &sidebar_bg}) == OPTICS_GFX_OK);
+    OT_EXPECT(optics_ui_test_snapshot_render(ui, canvas) == OPTICS_GFX_OK);
+    OT_EXPECT(optics_gfx_canvas_end(canvas) == OPTICS_GFX_OK);
+
+    uint32_t width = 0, height = 0, stride = 0;
+    const uint8_t *fb = optics_gfx_canvas_cpu_pixels(canvas, &width, &height, &stride);
+    OT_EXPECT(fb != nullptr);
+    uint8_t p[4];
+    pixel(fb, stride, 110, 20, p);
+    /* Dark translucent hover over (210, 214, 224) must darken, not lighten
+     * toward white `theme.color_bg`. */
+    OT_EXPECT(p[0] < 210 && p[1] < 214 && p[2] < 224);
+
+    optics_gfx_canvas_release(canvas);
+    optics_ui_release(ui);
+}
+
 int main(void) {
     test_selectable_click();
     test_selectable_selected_and_disabled();
     test_selected_surface_uses_theme();
+    test_selectable_hover_blends_from_transparent();
     return OT_REPORT();
 }

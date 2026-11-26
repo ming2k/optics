@@ -11,9 +11,6 @@ rust-version.workspace = true
 [dependencies]
 optics-gfx = { workspace = true, optional = true }
 optics-text = { workspace = true, optional = true }
-optics-svg = { workspace = true, optional = true }
-optics-material = { workspace = true, optional = true }
-optics-scene = { workspace = true, optional = true }
 optics-motion = { workspace = true, optional = true }
 optics-window = { workspace = true, optional = true }
 optics-ui = { workspace = true, optional = true }
@@ -26,13 +23,9 @@ optics-build = { workspace = true }
 default = ["app", "motion"]
 gfx = ["dep:optics-gfx"]
 text = ["gfx", "dep:optics-text"]
-svg = ["gfx", "dep:optics-svg"]
-material = ["gfx", "dep:optics-material"]
-scene = ["gfx", "dep:optics-scene"]
-scene-codecs = ["scene", "optics-scene/system-image-codecs"]
 motion = ["dep:optics-motion"]
 window = ["gfx", "dep:optics-window"]
-ui = ["text", "svg", "dep:optics-ui"]
+ui = ["text", "dep:optics-ui"]
 app = ["ui", "window", "dep:optics-app"]
 # Force a static link of every enabled Optics module; the default links the
 # shared objects (docs/how-to/choose-a-static-or-shared-link.md). There is no
@@ -41,9 +34,6 @@ app = ["ui", "window", "dep:optics-app"]
 static = [
     "optics-gfx?/static",
     "optics-text?/static",
-    "optics-svg?/static",
-    "optics-material?/static",
-    "optics-scene?/static",
     "optics-window?/static",
     "optics-ui?/static",
     "optics-app?/static",

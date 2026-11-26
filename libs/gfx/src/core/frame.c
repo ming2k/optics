@@ -1053,16 +1053,6 @@ void optics_gfx_frame_begin_pass(optics_gfx_frame *f, const optics_gfx_pass_desc
     optics_gfx_surface *s = f->surface;
     optics_gfx_per_frame *pf = &s->frames[f->slot];
 
-    /* Pipeline and descriptor bindings persist across the passes of one
-     * command buffer, and any module's pass may bind its own state (the
-     * canvas end_pass output blit always binds its transform pipeline).
-     * The scene bind mirror only observes scene's own binds, so it is
-     * stale by the time a new pass begins: drop it and let the first
-     * scene draw of this pass rebind. */
-    f->scene_bound_pipeline = VK_NULL_HANDLE;
-    f->scene_bound_set = VK_NULL_HANDLE;
-    f->scene_bound_layout = VK_NULL_HANDLE;
-
     /* ADR-0149: an attachment-less pass targets the frame's render image, which
      * on a windowed surface is the persistent content image rather than the
      * acquired swapchain image. The accessor is the single definition of that

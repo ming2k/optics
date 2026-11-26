@@ -1,9 +1,8 @@
 # Changelog
 
 All notable, user-visible changes to the C libraries in this monorepo
-(`liboptics_gfx`, `liboptics_text`, `liboptics_scene`, `liboptics_material`,
-`liboptics_svg`, `liboptics_ui`, `liboptics_window`, `liboptics_app`, and the
-header-only `<optics/motion.h>`) are documented in this file. The Rust binding
+(`liboptics_gfx`, `liboptics_text`, `liboptics_ui`, `liboptics_window`,
+`liboptics_app`, and the header-only `<optics/motion.h>`) are documented in this file. The Rust binding
 crates under `crates/` share the repository-root Cargo workspace and its
 version.
 
@@ -13,6 +12,21 @@ documented in [docs/reference/api.md](docs/reference/api.md) — **any**
 pre-1.0 release may break source or binary compatibility, so the SONAME
 carries the full version and a mismatched binary fails to load instead of
 silently reading a different descriptor layout.
+
+## [Unreleased]
+
+### Removed — Pure graphics & UI core (ADR-0174, breaking)
+
+Optics is now six libraries: `gfx`, `text`, `motion`, `window`, `ui`, `app`. No compatibility shims are kept.
+
+- **`liboptics_svg`, `liboptics_scene`, `liboptics_material` are removed**, along with their Meson options (`-Dsvg`, `-Dscene`, `-Dmaterial`), the `<optics/svg.h>`, `<optics/scene.h>` and `<optics/material.h>` headers, their tests, and the `material_gallery` and `scene_studio` showcases. Decode SVG, PNG, JPEG, glTF and similar formats with an external library and submit `optics_gfx_path`, `optics_gfx_image` or `optics_ui_icon_desc`.
+- **`liboptics_gfx`: the 3D scene core is removed.** `<optics/gfx/scene.h>` (camera, mesh, material, skinning and scene-vector draws) and its shaders are gone. Render custom content through `optics_gfx_graphics_pipeline` inside a frame pass. The retired type tags (7, 8, 20–22, 47) stay reserved and are never reused. The observation ledger no longer has the `scene` or per-material `filter_*` kinds.
+- **`liboptics_ui`: branded materials are removed.** `<optics/ui/material.h>` and the material fields of `optics_ui_theme` and `optics_ui_style` are gone.
+- **`liboptics_ui`: the bundled icon pack is removed.** The 288 built-in icons and the process-global runtime registry are replaced by a per-context registry: `optics_ui_icon_register(ui, desc)`, `optics_ui_icon_unregister(ui, id)` and `optics_ui_icon_info(ui, id)`, with generational ids. `OPTICS_UI_ICON_NONE` is now `0`, so a zero-initialized `{}` means "no icon". Only `OPTICS_UI_ICON_CHEVRON_{UP,DOWN,LEFT,RIGHT}` stay built in. `optics_ui_icon_register_svg` is removed. Register your own vector commands instead.
+- **Rust:** the `optics-svg`, `optics-scene`, `optics-material` crates and their `-sys` crates are removed. The `optics` facade drops its `svg`, `scene`, `scene-codecs` and `material` features, and `ui` no longer implies `svg`. `optics-gfx` drops its scene types and keeps samplers in a dedicated `sampler` module (`Sampler`, `SamplerDesc`, `Filter`, `AddressMode`). `optics_ui::register_svg_icon` is replaced by `Ui::register_icon` and `Ui::unregister_icon`.
+
+### Changed
+- **`tools/check_library_purity.py` enforces the boundary.** It now also rejects the retired library directories, external format parsers and branded OS material names in `libs/`.
 
 ## [0.0.87] - 2026-11-25
 

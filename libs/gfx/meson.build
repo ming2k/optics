@@ -1,6 +1,6 @@
 # liboptics_gfx — the rendering foundation: Vulkan 1.3 RHI, 2D canvas (GPU and CPU
-# backends), 3D draw core, compute pipelines, image effects, the analytic curve
-# kernel and distance fields.
+# backends), compute pipelines, image effects, the analytic curve kernel, and
+# distance fields.
 #
 # gfx is one library with one ABI. There are no per-module build switches:
 # every installed liboptics_gfx exports the same symbols and ships the same headers,
@@ -60,7 +60,6 @@ gfx_sources = files(
   'src/canvas/backend_cpu.c',
   'src/canvas/dmabuf_acquire.c',
   'src/canvas/encoder.c',
-  'src/scene/scene.c',
   'src/compute/compute.c',
   'src/effect/effect.c',
 )
@@ -95,7 +94,6 @@ slangc_flags = ['-target', 'spirv', '-profile', 'spirv_1_6', '-Wno-41012']
 
 gfx_shader_inc = [
   '-I' + meson.current_source_dir() / 'src/canvas/shaders',
-  '-I' + meson.current_source_dir() / 'src/scene/shaders',
   '-I' + meson.current_source_dir() / 'include',
   '-I' + meson.current_source_dir() / 'include/optics/gfx/shaders',
 ]
@@ -104,7 +102,6 @@ optics_gfx_shader_deps = files(
   'src/canvas/shaders/canvas_color.slang',
   'src/canvas/shaders/canvas_image_common.slang',
   'src/canvas/shaders/canvas_tile_common.slang',
-  'src/scene/shaders/scene_color.slang',
   'include/optics/gfx/shaders/optics_gfx_sdf.slang',
   'include/optics/gfx/shaders/optics_gfx_vector_eval.slang',
 )
@@ -126,14 +123,6 @@ optics_gfx_shaders = [
   ['canvas', 'canvas_tile_scan',   'comp', 'canvas_tile_scan_offsets', []],
   ['canvas', 'canvas_tile_scan',   'comp', 'canvas_tile_scan_backdrop', ['-DFOR_BACKDROP=1']],
   ['canvas', 'canvas_vector',      'frag', 'canvas_vector',          []],
-  ['scene',  'scene_unlit',        'vert', 'scene_unlit',         []],
-  ['scene',  'scene_unlit',        'frag', 'scene_unlit',         []],
-  ['scene',  'scene_phong',        'vert', 'scene_phong',         []],
-  ['scene',  'scene_phong',        'frag', 'scene_phong',         []],
-  ['scene',  'scene_unlit_skin',   'vert', 'scene_unlit_skin',    []],
-  ['scene',  'scene_phong_skin',   'vert', 'scene_phong_skin',    []],
-  ['scene',  'scene_vector',       'vert', 'scene_vector',        []],
-  ['scene',  'scene_vector',       'frag', 'scene_vector',        []],
   ['effect', 'effect_blur',        'comp', 'effect_blur',         []],
   ['effect', 'effect_backdrop',    'comp', 'effect_backdrop',     []],
   ['effect', 'effect_shadow',      'comp', 'effect_shadow',       []],
@@ -187,7 +176,6 @@ install_headers(
   'include/optics/gfx/canvas.h',
   'include/optics/gfx/canvas_helpers.h',
   'include/optics/gfx/canvas_cpu.h',
-  'include/optics/gfx/scene.h',
   'include/optics/gfx/compute.h',
   'include/optics/gfx/effect.h',
   subdir : 'optics/gfx',
@@ -210,7 +198,7 @@ pkg.generate(
   libraries   : gfx_lib,
   name        : 'optics-gfx',
   filebase    : 'optics-gfx',
-  description  : 'C23 Vulkan-first graphics library (canvas, scene, compute, effect)',
+  description  : 'C23 Vulkan-first 2D graphics library (RHI, canvas, compute, effect)',
   version      : meson.project_version(),
   extra_cflags : gfx_public_defines,
 )

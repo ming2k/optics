@@ -88,17 +88,16 @@ impl<'surface> Frame<'surface> {
         self.surface.size()
     }
 
-    /// Begin a depth-tested scene pass targeting this frame's surface.
+    /// Begin a depth-tested render pass targeting this frame's surface.
     ///
     /// `depth` must match the surface extent. The target's previous contents
     /// are discarded and depth is cleared to 1.0. The returned guard ends the
-    /// pass on drop; scene drawing APIs accept the guard directly, preventing
-    /// them from escaping the pass bracket.
-    pub fn begin_scene_pass<'frame>(
+    /// pass on drop.
+    pub fn begin_render_pass<'frame>(
         &'frame mut self,
         depth: &'frame Target,
-        color: SceneColorLoad,
-    ) -> Result<ScenePass<'frame, 'surface>, Error> {
+        color: ColorLoad,
+    ) -> Result<RenderPass<'frame, 'surface>, Error> {
         let (width, height) = self.surface.size();
         if depth.size() != (width, height) {
             return Err(Error(
@@ -106,7 +105,7 @@ impl<'surface> Frame<'surface> {
             ));
         }
 
-        self.begin_scene_pass_raw(
+        self.begin_render_pass_raw(
             std::ptr::null_mut(),
             self.surface.format(),
             (width, height),
@@ -115,18 +114,18 @@ impl<'surface> Frame<'surface> {
         )
     }
 
-    /// Begin a depth-tested scene pass targeting a sampleable offscreen image.
+    /// Begin a depth-tested render pass targeting a sampleable offscreen image.
     ///
     /// The color image and depth target must have the same extent. The image
     /// is transitioned from sampleable to color-attachment layout for the
     /// pass and restored when the returned guard ends, so Canvas and image
     /// effects can consume it immediately afterward.
-    pub fn begin_image_scene_pass<'frame>(
+    pub fn begin_image_render_pass<'frame>(
         &'frame mut self,
         target: &'frame Image,
         depth: &'frame Target,
-        color: SceneColorLoad,
-    ) -> Result<ScenePass<'frame, 'surface>, Error> {
+        color: ColorLoad,
+    ) -> Result<RenderPass<'frame, 'surface>, Error> {
         let size = target.size();
         if depth.size() != size {
             return Err(Error(
@@ -134,23 +133,23 @@ impl<'surface> Frame<'surface> {
             ));
         }
         Error::check(unsafe { sys::optics_gfx_frame_prepare_image_target(self.raw, target.raw) })?;
-        self.begin_scene_pass_raw(target.raw, target.format(), size, depth, color)
+        self.begin_render_pass_raw(target.raw, target.format(), size, depth, color)
     }
 
-    fn begin_scene_pass_raw<'frame>(
+    fn begin_render_pass_raw<'frame>(
         &'frame mut self,
         target: *mut sys::optics_gfx_image,
         color_format: Format,
         (width, height): (u32, u32),
         depth: &'frame Target,
-        color: SceneColorLoad,
-    ) -> Result<ScenePass<'frame, 'surface>, Error> {
+        color: ColorLoad,
+    ) -> Result<RenderPass<'frame, 'surface>, Error> {
         let (load_op, clear_color) = match color {
-            SceneColorLoad::Load => (
+            ColorLoad::Load => (
                 sys::optics_gfx_load_op::OPTICS_GFX_LOAD_LOAD,
                 [0.0, 0.0, 0.0, 0.0],
             ),
-            SceneColorLoad::Clear(rgba) => (sys::optics_gfx_load_op::OPTICS_GFX_LOAD_CLEAR, rgba),
+            ColorLoad::Clear(rgba) => (sys::optics_gfx_load_op::OPTICS_GFX_LOAD_CLEAR, rgba),
         };
         let color_attachment = sys::optics_gfx_pass_attachment {
             view: if target.is_null() {
@@ -201,7 +200,7 @@ impl<'surface> Frame<'surface> {
             sys::optics_gfx_frame_set_viewport(self.raw, &vp);
             sys::optics_gfx_frame_set_scissor(self.raw, &sc);
         }
-        Ok(ScenePass {
+        Ok(RenderPass {
             frame: self,
             active: true,
             target,
@@ -209,9 +208,55 @@ impl<'surface> Frame<'surface> {
     }
 
     /// The underlying raw `optics_gfx_frame` pointer. Borrowed; the `Frame`
-    /// retains ownership. Sibling binding crates (e.g. material) use it to
-    /// record material effects into this frame through the C API.
+    /// retains ownership.
     pub fn as_raw(&self) -> *mut sys::optics_gfx_frame {
         self.raw
+    }
+}
+
+/// How a render pass treats the existing surface color.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ColorLoad {
+    /// Preserve color recorded by an earlier pass in the same frame.
+    Load,
+    /// Clear the surface to linear RGBA before drawing.
+    Clear([f32; 4]),
+}
+
+/// Active depth-tested render pass. Dropping the guard ends the pass.
+pub struct RenderPass<'frame, 'surface> {
+    pub(crate) frame: &'frame mut Frame<'surface>,
+    pub(crate) active: bool,
+    pub(crate) target: *mut sys::optics_gfx_image,
+}
+
+impl RenderPass<'_, '_> {
+    /// Raw frame pointer for custom Vulkan/RHI drawing inside this pass.
+    pub fn as_raw(&self) -> *mut sys::optics_gfx_frame {
+        self.frame.raw
+    }
+
+    /// End the pass explicitly. Dropping the guard has the same effect.
+    pub fn end(mut self) {
+        self.finish();
+    }
+
+    fn finish(&mut self) {
+        if !self.active {
+            return;
+        }
+        unsafe {
+            sys::optics_gfx_frame_end_pass(self.frame.raw);
+            if !self.target.is_null() {
+                let _ = sys::optics_gfx_frame_finish_image_target(self.frame.raw, self.target);
+            }
+        }
+        self.active = false;
+    }
+}
+
+impl Drop for RenderPass<'_, '_> {
+    fn drop(&mut self) {
+        self.finish();
     }
 }

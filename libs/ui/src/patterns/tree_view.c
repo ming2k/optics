@@ -167,7 +167,7 @@ optics_ui_tree_action optics_ui_tree_view(optics_ui *ui, const optics_ui_tree_op
         }
 
         /* 3. Item Icon */
-        if (item->icon != 0) {
+        if (item->icon != OPTICS_UI_ICON_NONE) {
             optics_ui_icon(ui, &(optics_ui_icon_opts){
                                    .id = item->icon,
                                    .size = 14.0f,

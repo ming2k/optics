@@ -33,7 +33,6 @@
 #include <optics/gfx/math.h>
 #include <optics/ui/export.h> /* OPTICS_UI_API — single source of truth */
 #include <optics/ui/icon.h>
-#include <optics/ui/material.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -428,11 +427,6 @@ typedef struct optics_ui_theme {
     optics_gfx_color color_slider_track;
     optics_gfx_color color_slider_fill;
     optics_gfx_color color_slider_knob;
-
-    /* Semantic surface material recipes (Mica, Acrylic, Frosted, Liquid Glass).
-     * Populated with dual-plate polarity defaults: Pearl (1.0) on light themes,
-     * Smoke (0.0) on dark themes, with matching tints and border highlights. */
-    optics_ui_theme_materials materials;
 } optics_ui_theme;
 
 OPTICS_UI_API optics_ui_theme optics_ui_theme_default(void);
@@ -441,12 +435,6 @@ OPTICS_UI_API optics_ui_theme optics_ui_theme_dark(void);
 /* Classic theme generator: provides a 1px wireframe border baseline (border_width = 1.0f)
  * for applications desiring traditional desktop control outlines. */
 OPTICS_UI_API optics_ui_theme optics_ui_theme_classic(bool dark);
-
-/* Material-paired theme generator: returns a full design token set tailored for UI
- * components resting on top of the given physical material surface (ADR-0032, ADR-0101).
- * Clears opaque background fills to let the medium shine through, sets high-contrast
- * text polarity against the material plate, and tunes border and hover states. */
-OPTICS_UI_API optics_ui_theme optics_ui_theme_for_material(optics_ui_material_kind kind, bool dark);
 
 /* ================================================================== */
 /*  Style cascade (ADR-0058, amended by ADR-0061)                     */
@@ -483,7 +471,6 @@ typedef enum optics_ui_style_field : uint32_t {
     OPTICS_UI_STYLE_ICON_SIZE = 1u << 11,     /* glyph/icon box size        */
     OPTICS_UI_STYLE_OUTLINE_COLOR = 1u << 12, /* foreground contour colour  */
     OPTICS_UI_STYLE_OUTLINE_WIDTH = 1u << 13, /* contour radius, logical px */
-    OPTICS_UI_STYLE_MATERIAL = 1u << 14,      /* semantic material kind     */
 } optics_ui_style_field;
 
 typedef struct optics_ui_style {
@@ -501,12 +488,11 @@ typedef struct optics_ui_style {
     float font_size;
     float icon_size;
     /* Opt-in contour behind foreground content (text, glyphs, images)
-     * floating over imagery or translucent material. State-independent
+     * floating over imagery or translucent backdrops. State-independent
      * decoration atoms: the resolver neither derives nor dims them, and
      * no theme token exists — unset means none. */
     optics_gfx_color outline_color;
     float outline_width;
-    optics_ui_material_kind material;
 } optics_ui_style;
 
 /* Empty style: nothing set, everything resolves to the theme. */
@@ -540,8 +526,6 @@ typedef struct optics_ui_style_resolved {
     float icon_size;
     optics_gfx_color outline_color;
     float outline_width;
-    optics_ui_material_kind material;
-    optics_ui_material_recipe material_recipe;
 } optics_ui_style_resolved;
 
 /* Scoped style stack (ADR-0061 item 4): every widget declared between

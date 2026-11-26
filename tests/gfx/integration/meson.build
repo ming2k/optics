@@ -89,35 +89,6 @@ test_graphics_pipeline = executable('test_graphics_pipeline',
 )
 test('graphics_pipeline', test_graphics_pipeline, suite : 'integration')
 
-test_scene_mesh = executable('test_scene_mesh',
-  'test_scene_mesh.c',
-  dependencies : [optics_gfx_test_support_dep],
-)
-test('scene_mesh', test_scene_mesh, suite : 'integration')
-
-# Mesh retire queue: churn create -> draw -> release every frame so
-# inline destruction of in-flight vertex/index buffers fails loudly.
-test_mesh_retire = executable('test_mesh_retire',
-  'test_mesh_retire.c',
-  dependencies : [optics_gfx_test_support_dep],
-)
-test('mesh_retire', test_mesh_retire, suite : 'integration')
-
-test_material_retire = executable('test_material_retire',
-  'test_material_retire.c',
-  dependencies : [optics_gfx_test_support_dep],
-)
-test('material_retire', test_material_retire, suite : 'integration')
-
-# Scene GPU rendering with pixel assertions: offscreen surface
-# (ADR-0013) + caller-owned depth. Covers depth testing and the
-# Phong lit path end-to-end.
-test_scene_render = executable('test_scene_render',
-  'test_scene_render.c',
-  dependencies : [optics_gfx_test_support_dep],
-)
-test('scene_render', test_scene_render, suite : 'integration')
-
 test_allocator = executable('test_allocator',
   'test_allocator.c',
   dependencies : [optics_gfx_test_support_dep],
@@ -143,11 +114,11 @@ test_pass_labels = executable('test_pass_labels',
 test('pass_labels', test_pass_labels, suite : 'integration')
 # Hostile-allocator contract test (ADR-0135): the `core.h` rule that peer code
 # must allocate through the device was never verified. This installs an
-# allocator that sees everything and requires material/ui to pass through it.
-if opt_ui and opt_material
+# allocator that sees everything and requires ui to pass through it.
+if opt_ui
   test_hostile_allocator = executable('test_hostile_allocator',
     'test_hostile_allocator.c',
-    dependencies : [optics_gfx_test_support_dep, material_dep, ui_dep],
+    dependencies : [optics_gfx_test_support_dep, ui_dep],
   )
   test('hostile_allocator', test_hostile_allocator, suite : 'integration')
 endif
@@ -316,15 +287,12 @@ test_tile_b4_fine = executable('test_tile_b4_fine',
 test('tile_b4_fine', test_tile_b4_fine, suite : 'integration')
 
 # Deferred pass plan: pruning, materialization, and the in-pass contract
-# (ADR-0147). The test captures a material, so it is built only when
-# material is enabled.
-if get_option('material')
-  test_plan_prune = executable('test_plan_prune',
-    'test_plan_prune.c',
-    dependencies : [optics_gfx_test_support_dep, material_dep],
-  )
-  test('plan_prune', test_plan_prune, suite : 'integration')
-endif
+# (ADR-0147).
+test_plan_prune = executable('test_plan_prune',
+  'test_plan_prune.c',
+  dependencies : [optics_gfx_test_support_dep],
+)
+test('plan_prune', test_plan_prune, suite : 'integration')
 
 # Tile-compute blend and clip integration (ADR-0120 Phase B5 gate)
 test_tile_b5_renderplan = executable('test_tile_b5_renderplan',
@@ -343,13 +311,6 @@ test_tile_gpu_compute = executable('test_tile_gpu_compute',
   dependencies : [optics_gfx_test_support_dep],
 )
 test('tile_gpu_compute', test_tile_gpu_compute, suite : 'integration')
-
-# Perspective-correct vector coverage in scene material (ADR-0117)
-test_scene_vector = executable('test_scene_vector',
-  'test_scene_vector.c',
-  dependencies : [optics_gfx_test_support_dep],
-)
-test('scene_vector', test_scene_vector, suite : 'integration')
 
 # Colour management (ADR-0069): linear-light blending, P3 output
 # transform, LOAD seeding, and linear gradient interpolation, asserted

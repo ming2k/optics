@@ -77,26 +77,21 @@ headless compute example instead:
 ./build/examples/getting_started/compute_pass
 ```
 
-## Step 5 — Explore 2D, 3D, and UI
+## Step 5 — Explore 2D and UI
 
 ```bash
 ./build/examples/getting_started/canvas_window
-./build/examples/showcase/scene_studio
 ./build/examples/showcase/widget_gallery
-./build/examples/showcase/material_gallery
 ```
 
 `canvas_window` draws animated 2D vector geometry through `window` + `gfx`
-without a UI engine. `scene_studio` renders a glTF asset in 3D, `widget_gallery`
-exercises the multi-page UI shell, and `material_gallery` compares the four
-surface materials side by side.
+without a UI engine, and `widget_gallery` exercises the multi-page UI shell.
 
 ## What's Next
 
 | Goal | Read |
 |------|------|
 | Build a 2D app | [Your first 2D canvas application](02-first-2d-app.md) |
-| Build a 3D app | [Your first 3D scene application](03-first-3d-app.md) |
-| Explore visual effects & materials | [Interactive examples showcase](../how-to/run-and-explore-examples.md) |
+| Explore the examples | [Interactive examples showcase](../how-to/run-and-explore-examples.md) |
 | Understand the stack | [Application architecture](../explanation/application-architecture.md) |
 | Look up contracts | [API reference](../reference/api.md), [thread safety](../reference/thread-safety.md), and [glossary](../reference/glossary.md) |

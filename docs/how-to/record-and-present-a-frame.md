@@ -68,16 +68,15 @@ Provide a caller-owned image view in the pass desc:
         .depth                  = &depth,
     };
 
-`examples/showcase/scene_studio/main.c` does exactly this; it owns its own depth image
-and recreates it on surface resize. Copy that pattern when you write a
-3D renderer.
+When you write a custom depth-buffered renderer, create an `optics_gfx_target`
+depth image matching the surface extent and recreate it on surface resize.
 
 ## Recording with a module
 
 For 2D content, do not call `optics_gfx_frame_begin_pass` yourself —
-`optics_gfx_canvas_begin` does it internally. Likewise, `optics_gfx_scene_draw_mesh`
-expects to be called inside an active pass that you began manually
-(or inside a pass that another module opened).
+`optics_gfx_canvas_begin` does it internally. Custom `optics_gfx_graphics_pipeline`
+draws expect to be recorded inside an active pass that you began with
+`optics_gfx_frame_begin_pass`.
 
 You can mix raw Vulkan recording with module drawing within the same
 pass; both write to the same command buffer returned by

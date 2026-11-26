@@ -24,16 +24,16 @@ static optics_ui_tab_action tab_strip(optics_ui *ui, const char *id, const optic
  * ids stay stable across frames. */
 static void build_strip(optics_ui *ui, uint32_t active) {
     optics_ui_tab_item tabs[3] = {
-        {.title = "Alpha", .icon = OPTICS_UI_ICON_INVALID, .closable = true},
-        {.title = "Beta", .icon = OPTICS_UI_ICON_INVALID, .closable = true},
-        {.title = "Gamma", .icon = OPTICS_UI_ICON_INVALID, .closable = true},
+        {.title = "Alpha", .icon = OPTICS_UI_ICON_NONE, .closable = true},
+        {.title = "Beta", .icon = OPTICS_UI_ICON_NONE, .closable = true},
+        {.title = "Gamma", .icon = OPTICS_UI_ICON_NONE, .closable = true},
     };
     optics_ui_tab_strip_opts opts = {.height = 36.0f,
                                      .min_tab_width = 80.0f,
                                      .max_tab_width = 120.0f,
                                      .show_new_button = true,
-                                     .close_icon = OPTICS_UI_ICON_INVALID,
-                                     .new_icon = OPTICS_UI_ICON_INVALID};
+                                     .close_icon = OPTICS_UI_ICON_NONE,
+                                     .new_icon = OPTICS_UI_ICON_NONE};
     tab_strip(ui, "##main-tabs", tabs, 3, active, &opts);
 }
 

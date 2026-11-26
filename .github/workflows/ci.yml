@@ -137,13 +137,9 @@ jobs:
       matrix:
         include:
           - name: no-ui
-            flags: -Dtext=false -Dsvg=false
-          - name: no-material
-            flags: -Dmaterial=false
+            flags: -Dtext=false
           - name: no-motion
             flags: -Dmotion=false
-          - name: no-scene
-            flags: -Dscene=false
     env:
       DEBIAN_FRONTEND: noninteractive
       CC: clang-19

@@ -87,8 +87,6 @@ optics_ui_style optics_ui__style_merge(const optics_ui_style *base, const optics
         out.outline_color = over->outline_color;
     if (f & OPTICS_UI_STYLE_OUTLINE_WIDTH)
         out.outline_width = over->outline_width;
-    if (f & OPTICS_UI_STYLE_MATERIAL)
-        out.material = over->material;
     out.fields = base->fields | over->fields;
     return out;
 }
@@ -137,28 +135,6 @@ optics_ui_style_resolved optics_ui__style_resolve(optics_ui *ui, const optics_ui
     /* No theme tokens exist for the outline atoms: unset means none. */
     r.outline_color = (f & OPTICS_UI_STYLE_OUTLINE_COLOR) ? eff->outline_color : 0;
     r.outline_width = (f & OPTICS_UI_STYLE_OUTLINE_WIDTH) ? eff->outline_width : 0.0f;
-
-    /* Semantic surface material and recipe resolution */
-    r.material = (f & OPTICS_UI_STYLE_MATERIAL) ? eff->material : OPTICS_UI_MATERIAL_NONE;
-    switch (r.material) {
-    case OPTICS_UI_MATERIAL_MICA:
-        r.material_recipe = theme->materials.foundation;
-        break;
-    case OPTICS_UI_MATERIAL_MICA_ALT:
-        r.material_recipe = theme->materials.command;
-        break;
-    case OPTICS_UI_MATERIAL_ACRYLIC:
-    case OPTICS_UI_MATERIAL_FROSTED:
-        r.material_recipe = theme->materials.floating;
-        break;
-    case OPTICS_UI_MATERIAL_LIQUID_GLASS:
-        r.material_recipe = theme->materials.optics_ui_body;
-        break;
-    case OPTICS_UI_MATERIAL_NONE:
-    default:
-        memset(&r.material_recipe, 0, sizeof(r.material_recipe));
-        break;
-    }
 
     /* Slots the cascade is responsible for — set directly, or derived
      * below — tracked so the disabled dim (step 3) touches only those. */

@@ -16,7 +16,6 @@ fn main() {
             "gfx/canvas_cpu.h",
             "gfx/vulkan.h",
             "gfx/dmabuf.h",
-            "gfx/scene.h",
             "gfx/compute.h",
             "gfx/effect.h",
         ],

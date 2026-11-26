@@ -24,11 +24,12 @@
 #define H 224u
 #define BYTES (W * H * 4u)
 
-static const char TEST_SVG[] =
-    "<svg viewBox='0 0 24 24'>"
-    "<circle cx='12' cy='12' r='10' fill='#20c060'/>"
-    "<path d='M7 12 L10 15 L17 8' fill='none' stroke='#ffffff' stroke-width='2.5'/>"
-    "</svg>";
+static const optics_ui_icon_cmd TEST_ICON_CMDS[] = {
+    {.kind = OPTICS_UI_ICON_CMD_CIRCLE, .params = {12.0f, 12.0f, 10.0f}},
+    {.kind = OPTICS_UI_ICON_CMD_MOVE, .params = {7.0f, 12.0f}},
+    {.kind = OPTICS_UI_ICON_CMD_LINE, .params = {10.0f, 15.0f}},
+    {.kind = OPTICS_UI_ICON_CMD_LINE, .params = {17.0f, 8.0f}},
+};
 
 typedef struct ui_state {
     optics_ui_icon_id icon;
@@ -169,9 +170,6 @@ int main(void) {
     cd.surface = surface;
     OT_REQUIRE(optics_gfx_canvas_create(&cd, &gpu_canvas) == OPTICS_GFX_OK);
 
-    optics_ui_icon_id icon = optics_ui_icon_register_svg(TEST_SVG);
-    OT_REQUIRE(icon != OPTICS_UI_ICON_INVALID);
-
     optics_ui *ui = nullptr;
     OT_REQUIRE(optics_ui_create(
                    &(optics_ui_desc){
@@ -180,6 +178,28 @@ int main(void) {
                        .scale = 1.0f,
                    },
                    &ui) == OPTICS_GFX_OK);
+
+    const optics_ui_icon_run icon_runs[2] = {
+        {
+            .first_cmd = 0u,
+            .count = 1u,
+            .color = optics_gfx_color_rgba_premul(0x20, 0xc0, 0x60, 0xff),
+            .paint = OPTICS_UI_ICON_PAINT_FILL,
+        },
+        {
+            .first_cmd = 1u,
+            .count = 3u,
+            .color = optics_gfx_color_rgba_premul(0xff, 0xff, 0xff, 0xff),
+            .paint = OPTICS_UI_ICON_PAINT_STROKE,
+        },
+    };
+    optics_ui_icon_id icon = optics_ui_icon_register(ui, &(optics_ui_icon_desc){
+                                                             .cmds = TEST_ICON_CMDS,
+                                                             .count = 4u,
+                                                             .runs = icon_runs,
+                                                             .run_count = 2u,
+                                                         });
+    OT_REQUIRE(icon != OPTICS_UI_ICON_NONE);
 
     ui_state st = {.icon = icon, .checked = false, .slider_val = 0.4f};
     optics_gfx_color bg = optics_ui_get_theme(ui).color_bg;

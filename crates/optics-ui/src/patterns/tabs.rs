@@ -15,7 +15,7 @@ impl TabItem {
     pub fn new(title: impl Into<String>) -> Self {
         Self {
             title: title.into(),
-            icon: optics_ui_sys::optics_ui_icon_id(u32::MAX),
+            icon: optics_ui_sys::optics_ui_icon_id::OPTICS_UI_ICON_NONE,
             closable: true,
         }
     }
@@ -69,8 +69,8 @@ impl TabStrip {
             min_tab_width: 80.0,
             max_tab_width: 200.0,
             show_new_button: true,
-            close_icon: optics_ui_sys::optics_ui_icon_id(u32::MAX),
-            new_icon: optics_ui_sys::optics_ui_icon_id(u32::MAX),
+            close_icon: optics_ui_sys::optics_ui_icon_id::OPTICS_UI_ICON_NONE,
+            new_icon: optics_ui_sys::optics_ui_icon_id::OPTICS_UI_ICON_NONE,
         }
     }
 

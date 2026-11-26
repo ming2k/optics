@@ -3,7 +3,7 @@
 Optics organizes its in-tree examples into two curated tiers ([ADR-0171](../adr/0171-curated-examples-taxonomy-and-showcase-design-system.md)):
 
 - **`examples/getting_started/`** — minimal, single-concept starters for learning each architectural path.
-- **`examples/showcase/`** — three flagship desktop applications sharing a unified design system (`examples/showcase/common/design.h`).
+- **`examples/showcase/`** — the flagship desktop UI application sharing a unified design system (`examples/showcase/common/design.h`).
 
 ---
 
@@ -20,7 +20,7 @@ Binaries are placed under `./build/examples/getting_started/` and `./build/examp
 
 ---
 
-## 2. Flagship Showcases (`examples/showcase/`)
+## 2. Flagship Showcase (`examples/showcase/`)
 
 ### `widget_gallery` — Multi-Page Desktop UI Showcase
 
@@ -36,27 +36,6 @@ Demonstrates `optics_ui`, `optics_app`, `optics_window`, `optics_text`, and `opt
 ./build/examples/showcase/widget_gallery
 ```
 
-### `material_gallery` — Optical Surface Materials Showcase
-
-Interactive side-by-side and fullscreen comparison of `liboptics_material` over a dynamic animated backdrop:
-
-1. **Liquid Glass** — physical IOR refraction, chromatic dispersion, Fresnel rim highlights.
-2. **Frosted Glass** — dual-Kawase blur with vibrancy boost.
-3. **Acrylic** — dual-Kawase blur, luminance plate balancing, and procedural blue-noise grain.
-4. **Mica & Mica Alt** — wallpaper-anchored backdrop sampling and mineral dither.
-
-```bash
-./build/examples/showcase/material_gallery
-```
-
-### `scene_studio` — 3D glTF 2.0 Studio Viewer
-
-Combines `liboptics_scene` and `liboptics_gfx` depth-buffered 3D rendering with a floating `optics_ui` toolbar and live camera/lighting inspector (`--file path/to/model.glb` loads custom glTF binary assets; defaults to bundled `Duck.glb`).
-
-```bash
-./build/examples/showcase/scene_studio
-```
-
 ---
 
 ## 3. Minimal Starters (`examples/getting_started/`)
@@ -66,5 +45,4 @@ Combines `liboptics_scene` and `liboptics_gfx` depth-buffered 3D rendering with 
 | `build/examples/getting_started/hello_app` | `app`, `ui`, `window` | Minimal windowed GUI app with immediate-mode state and theme switching. |
 | `build/examples/getting_started/canvas_window` | `window`, `gfx` | Native window drawing 2D vector geometry without linking `ui`. |
 | `build/examples/getting_started/headless_canvas` | `gfx` | GPU-free CPU canvas (`<optics/gfx/canvas_cpu.h>`) rendering to PPM. |
-| `build/examples/getting_started/headless_svg` | `svg` | GPU-free SVG parsing and rasterization (`<optics/svg.h>`) to PPM. |
 | `build/examples/getting_started/compute_pass` | `gfx` | Headless Vulkan compute shader dispatch (`Slang -> SPIR-V`) and readback. |

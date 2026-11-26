@@ -201,10 +201,10 @@ released. Positive `sigma` values control bounded sample offsets; they never
 increase the four-dispatch sample count. Sigma 0 records a copy. Release the
 filter only after GPU work that references it has completed.
 
-Named materials do not live in gfx: the liquid-glass material moved to the
-material library with a 1:1 `optics_material_`-prefixed API, and the descriptor knob
-`glare` is now `rim_light`. See the [material reference](material.md) and
-[ADR-0063](../adr/0063-liquid-glass-material-library.md).
+Branded OS surface shaders (Liquid Glass, Frosted Glass, Acrylic, Mica) do not
+live in Optics ([ADR-0174](../adr/0174-pure-graphics-ui-core-retire-format-parsers-3d-and-materials.md));
+`gfx` exposes the orthogonal compute, SDF, blur, backdrop, and shadow
+mechanisms so callers can compose custom effects outside the core stack.
 
 ## Deferred execution
 
@@ -286,6 +286,5 @@ different devices are independent.
 ## See also
 
 - [ADR-0008 — Image-effect pipeline](../adr/0008-image-effect-pipeline.md) — design rationale.
-- [material reference](material.md) — named materials (liquid glass) built on the effect runtime.
 - [`<optics/gfx/compute.h>` reference](api.md#headers) — the primitive effects build on.
 - [`<optics/gfx/canvas.h>` reference](api.md#headers) — `optics_gfx_image` lifecycle.

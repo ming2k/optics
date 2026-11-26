@@ -77,7 +77,7 @@ int main(void) {
     cd.surface = s;
     OT_EXPECT(optics_gfx_canvas_create(&cd, &canvas) == OPTICS_GFX_OK);
 
-    /* --- bulk load inside one batch: 3 solid images + mesh + GPU_LOCAL
+    /* --- bulk load inside one batch: 3 solid images + GPU_LOCAL
      *     buffer, then one flush. Pixels prove the copies landed. --- */
     optics_gfx_image *red = nullptr, *green = nullptr, *blue = nullptr;
     {
@@ -86,19 +86,6 @@ int main(void) {
         green = make_solid(d, 0, 255, 0);
         blue = make_solid(d, 0, 0, 255);
         OT_EXPECT(red && green && blue);
-
-        optics_gfx_vertex verts[3] = {
-            {{0, 0, 0}, {0, 0, 1}, {0, 0}},
-            {{1, 0, 0}, {0, 0, 1}, {1, 0}},
-            {{0, 1, 0}, {0, 0, 1}, {0, 1}},
-        };
-        optics_gfx_mesh_desc mdesc = {
-            .type = OPTICS_GFX_TYPE_MESH_DESC,
-            .vertices = verts,
-            .vertex_count = 3,
-        };
-        optics_gfx_mesh *mesh = nullptr;
-        OT_EXPECT(optics_gfx_mesh_create(d, &mdesc, &mesh) == OPTICS_GFX_OK);
 
         uint32_t payload[4] = {1, 2, 3, 4};
         optics_gfx_buffer_desc bd = OPTICS_GFX_BUFFER_DESC_INIT;
@@ -136,7 +123,6 @@ int main(void) {
         OT_EXPECT(pb[0] < 5 && pb[1] < 5 && pb[2] > 250);
 
         optics_gfx_buffer_release(buf);
-        optics_gfx_mesh_release(mesh);
     }
 
     /* --- auto-flush: begin_frame must flush an unflushed batch before

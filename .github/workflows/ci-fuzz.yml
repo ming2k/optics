@@ -56,9 +56,6 @@ jobs:
           - target: fuzz_coverage_raster
             dir: tests/gfx/fuzz
             corpus: tests/gfx/fuzz/corpus/coverage_raster
-          - target: fuzz_glb_parse
-            dir: tests/scene/fuzz
-            corpus: tests/scene/fuzz/corpus/glb_parse
           - target: fuzz_display_list_deserialize
             dir: tests/gfx/fuzz
             corpus: tests/gfx/fuzz/corpus/display_list_deserialize
@@ -68,9 +65,6 @@ jobs:
           - target: fuzz_ui_store_model
             dir: tests/ui/fuzz
             corpus: tests/ui/fuzz/corpus/ui_store_model
-          - target: fuzz_svg_parse
-            dir: tests/svg/fuzz
-            corpus: tests/svg/fuzz/corpus/svg_parse
     steps:
       - uses: actions/checkout@v4
 

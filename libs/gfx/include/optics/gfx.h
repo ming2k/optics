@@ -13,7 +13,6 @@
  *   <optics/gfx/vulkan.h>   raw Vulkan handle accessors
  *   <optics/gfx/dmabuf.h>   iff built on Linux (OPTICS_GFX_HAVE_DMABUF)
  *   <optics/gfx/canvas.h>   2D canvas (GPU and CPU backends)
- *   <optics/gfx/scene.h>    3D draw core
  *   <optics/gfx/compute.h>  compute pipelines
  *   <optics/gfx/effect.h>   image effects
  *
@@ -39,6 +38,5 @@
 #include <optics/gfx/canvas_helpers.h>
 #include <optics/gfx/compute.h>
 #include <optics/gfx/effect.h>
-#include <optics/gfx/scene.h>
 
 #endif /* OPTICS_GFX_H */

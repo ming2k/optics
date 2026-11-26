@@ -20,14 +20,6 @@ executable('headless_canvas',
   install      : false,
 )
 
-if opt_svg
-  executable('headless_svg',
-    'headless_svg.c',
-    dependencies : [svg_dep],
-    install      : false,
-  )
-endif
-
 # Compute shader starter (Slang -> SPIR-V)
 gs_slangc = find_program('slangc', required : true)
 gs_slang_flags = ['-target', 'spirv', '-profile', 'spirv_1_6', '-Wno-41012']

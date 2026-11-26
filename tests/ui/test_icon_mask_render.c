@@ -1,23 +1,13 @@
 /*
  * Runtime-icon rendering through the public API only (ADR-0112).
  *
- * This binary deliberately links *only* the shared library — it must never
- * compile icon_runtime.c / icon_mask.c. A runtime SVG registered
- * here is stored in liboptics_ui's own icon registry, and ui's replay (also inside
- * liboptics_ui) resolves it from that same registry. Building a local copy of the
- * registry would give the test two registries: the registration would land in the
- * local one while replay read the library's, and every icon would silently render
- * blank. That failure mode is invisible in a pixel assertion — it looks exactly
- * like "the mask path is broken"—so the link line is part of the test's
- * correctness, not an implementation detail.
- *
  * What it pins, end to end:
- *   - the mask path renders a multi-run (multi-colour) SVG with every declared
- *     paint colour intact, at small sizes;
+ *   - the mask path renders a multi-run (multi-colour) vector icon with every
+ *     declared paint colour intact, at small sizes;
  *   - the vector fallback — forced here by an icon larger than the mask bake
  *     limit — renders the same icon with the same per-run colours, so quality
  *     degrades but content never does;
- *   - a built-in icon still follows the theme colour (collapsed single run).
+ *   - a built-in chrome icon still follows the theme colour (collapsed single run).
  */
 #include "optics_test.h"
 #include "ui_test.h"
@@ -26,26 +16,59 @@
 #include <optics/ui.h>
 #include <optics/ui/icon.h>
 
-/* Three explicit paint runs: red ring, green hub, blue tick. Every run carries a
- * colour that cannot be confused with the others or with the theme. */
-static const char SVG_MULTI_RUN[] =
-    "<svg viewBox='0 0 24 24'>"
-    "<circle cx='12' cy='12' r='9' fill='none' stroke='#ff0000' stroke-width='2'/>"
-    "<circle cx='12' cy='12' r='3' fill='#00ff00'/>"
-    "<path d='M8 12 L11 15 L16 8' fill='none' stroke='#0000ff' stroke-width='2'/>"
-    "</svg>";
+static const optics_ui_icon_cmd MULTI_RUN_CMDS[] = {
+    {.kind = OPTICS_UI_ICON_CMD_CIRCLE, .params = {12.0f, 12.0f, 9.0f}},
+    {.kind = OPTICS_UI_ICON_CMD_CIRCLE, .params = {12.0f, 12.0f, 3.0f}},
+    {.kind = OPTICS_UI_ICON_CMD_MOVE, .params = {8.0f, 12.0f}},
+    {.kind = OPTICS_UI_ICON_CMD_LINE, .params = {11.0f, 15.0f}},
+    {.kind = OPTICS_UI_ICON_CMD_LINE, .params = {16.0f, 8.0f}},
+};
 
 typedef struct ink_counts {
     long red, green, blue, other;
 } ink_counts;
 
-/* Render `id` at `size` into a CPU canvas and classify the ink by hue. */
-static ink_counts render_and_classify(optics_ui_icon_id id, float size) {
+/* Render an icon at `size` into a CPU canvas and classify the ink by hue. */
+static ink_counts render_and_classify(bool use_multi_run, optics_ui_icon_id builtin_id,
+                                      float size) {
     ink_counts k = {0, 0, 0, 0};
     uint32_t box = (uint32_t)size + 8u;
     optics_ui *ui = nullptr;
-    if (optics_ui_create(&(optics_ui_desc){.scale = 1.0f}, &ui) != OPTICS_GFX_OK)
+    if (optics_ui_create(&(optics_ui_desc){.theme = optics_ui_theme_dark(), .scale = 1.0f}, &ui) !=
+        OPTICS_GFX_OK)
         return k;
+
+    optics_ui_icon_id id = builtin_id;
+    if (use_multi_run) {
+        const optics_ui_icon_run runs[3] = {
+            {
+                .first_cmd = 0u,
+                .count = 1u,
+                .color = optics_gfx_color_rgba_premul(255, 0, 0, 255),
+                .paint = OPTICS_UI_ICON_PAINT_STROKE,
+            },
+            {
+                .first_cmd = 1u,
+                .count = 1u,
+                .color = optics_gfx_color_rgba_premul(0, 255, 0, 255),
+                .paint = OPTICS_UI_ICON_PAINT_FILL,
+            },
+            {
+                .first_cmd = 2u,
+                .count = 3u,
+                .color = optics_gfx_color_rgba_premul(0, 0, 255, 255),
+                .paint = OPTICS_UI_ICON_PAINT_STROKE,
+            },
+        };
+        id = optics_ui_icon_register(ui, &(optics_ui_icon_desc){
+                                             .cmds = MULTI_RUN_CMDS,
+                                             .count = 5u,
+                                             .runs = runs,
+                                             .run_count = 3u,
+                                         });
+        OT_EXPECT(id != OPTICS_UI_ICON_NONE);
+        OT_EXPECT(optics_ui_icon_info(ui, id) != nullptr);
+    }
 
     optics_ui_input in = {.display_size = {(float)box, (float)box}, .dt_seconds = 0.016f};
     optics_ui_begin(ui, &in);
@@ -82,7 +105,7 @@ static ink_counts render_and_classify(optics_ui_icon_id id, float size) {
                 const uint8_t *p = &px[(size_t)y * stride + (size_t)x * 4];
                 int r = p[0], g = p[1], b = p[2];
                 if (r <= 40 && g <= 40 && b <= 40)
-                    continue; /* background or dim AA fringe below primary threshold */
+                    continue;
                 if (r > g + 40 && r > b + 40)
                     k.red++;
                 else if (g > r + 40 && g > b + 40)
@@ -90,7 +113,7 @@ static ink_counts render_and_classify(optics_ui_icon_id id, float size) {
                 else if (b > r + 40 && b > g + 40)
                     k.blue++;
                 else
-                    k.other++; /* theme-coloured ink: a run lost its colour */
+                    k.other++;
             }
         }
     }
@@ -100,38 +123,27 @@ static ink_counts render_and_classify(optics_ui_icon_id id, float size) {
 }
 
 int main(void) {
-    /* Registration goes through the library that will draw it. */
-    optics_ui_icon_id id = optics_ui_icon_register_svg(SVG_MULTI_RUN);
-    OT_EXPECT(id != OPTICS_UI_ICON_INVALID);
-    OT_EXPECT((int)id >= (int)OPTICS_UI_ICON_COUNT);
-    /* The library's own registry must resolve it — this is the exact assertion
-     * that fails if a second registry exists anywhere in the binary. */
-    OT_EXPECT(optics_ui_icon_info(id, nullptr) != nullptr);
-
     /* ---- mask path: small size, all per-run colours survive ---- */
     {
-        ink_counts k = render_and_classify(id, 20.0f);
+        ink_counts k = render_and_classify(true, OPTICS_UI_ICON_NONE, 20.0f);
         OT_EXPECT(k.red > 0);
         OT_EXPECT(k.green > 0);
         OT_EXPECT(k.blue > 0);
-        /* Nothing should have collapsed to the theme colour. */
         OT_EXPECT(k.other < k.red + k.green + k.blue);
     }
 
-    /* ---- vector fallback: same icon past the mask bake limit ---- *
-     * Quality drops (that is the documented trade-off) but the icon must still
-     * declare all three colours rather than collapsing to one paint. */
+    /* ---- vector fallback: same icon past the mask bake limit ---- */
     {
-        ink_counts k = render_and_classify(id, 300.0f);
+        ink_counts k = render_and_classify(true, OPTICS_UI_ICON_NONE, 300.0f);
         OT_EXPECT(k.red > 100);
         OT_EXPECT(k.green > 100);
         OT_EXPECT(k.blue > 100);
-        OT_EXPECT(k.other < 50); /* no wholesale collapse to theme colour */
+        OT_EXPECT(k.other < 50);
     }
 
-    /* ---- built-in icon: collapsed single run follows the theme ---- */
+    /* ---- built-in chrome icon: collapsed single run follows the theme ---- */
     {
-        ink_counts k = render_and_classify(OPTICS_UI_ICON_CHECK, 20.0f);
+        ink_counts k = render_and_classify(false, OPTICS_UI_ICON_CHEVRON_RIGHT, 20.0f);
         OT_EXPECT(k.red == 0 && k.green == 0 && k.blue == 0);
         OT_EXPECT(k.other > 0);
     }

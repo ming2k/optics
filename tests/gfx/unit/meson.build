@@ -195,12 +195,6 @@ test_canvas_squircle = executable('test_canvas_squircle',
 )
 test('canvas_squircle', test_canvas_squircle, suite : 'unit')
 
-test_scene_camera = executable('test_scene_camera',
-  'test_scene_camera.c',
-  dependencies : [optics_gfx_unit_support_dep],
-)
-test('scene_camera', test_scene_camera, suite : 'unit')
-
 shape_test = executable('test_canvas_shapes', 'test_canvas_shapes.c', dependencies : [optics_gfx_unit_support_dep])
 test('canvas_shapes', shape_test, suite : 'unit')
 

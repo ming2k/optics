@@ -13,9 +13,9 @@
 - **No parallel command-buffer recording.** gfx does not expose
   secondary command buffers. Within one frame, all draw recording
   happens on the thread that called `optics_gfx_surface_begin_frame`.
-  Multi-threaded scene building belongs in caller code that writes
-  to per-thread arenas, with all `optics_gfx_canvas_*` / `optics_gfx_scene_draw_*`
-  calls funnelled to the recording thread.
+  Multi-threaded drawing prep belongs in caller code that writes
+  to per-thread arenas or `optics_gfx_encoder` display lists, with all
+  `optics_gfx_canvas_*` calls funnelled to the recording thread.
 
 ## Per-type matrix
 
@@ -28,9 +28,6 @@
 | `optics_gfx_canvas_*`          | Single-threaded only. Tied to one surface and one frame at a time. Per-canvas geometry scratch is isolated, so two canvases on two threads is supported as long as each thread drives its own canvas + its own frame. There is no API for parallel command-buffer recording into a single frame. |
 | `optics_gfx_path_*`            | Value type owned by a `optics_gfx_arena`. Not refcounted, not thread-safe — the owning arena is single-threaded. |
 | `optics_gfx_brush`             | Plain POD value. Pass it by `const optics_gfx_brush *`. No lifecycle. |
-| `optics_gfx_mesh_*`            | Refcount is atomic. `_create` performs a deferred one-shot upload; same queue lock as `optics_gfx_image`. Safe to call concurrently from worker threads. |
-| `optics_gfx_material_*`        | Refcount is atomic. Immutable after creation. |
-| `optics_gfx_scene_draw_mesh*`  | Single-threaded only. The draw records into the active frame's command buffer; mix only with the thread that began the frame. |
 | `optics_gfx_buffer_*`          | Refcount is atomic. Creation is safe to call concurrently from worker threads (uses the device queue lock for any staging upload). Once created, GPU-side reads/writes follow Vulkan's external-synchronisation rules. |
 | `optics_gfx_sampler_*`         | Refcount is atomic. Creation and release are safe to call concurrently. |
 | `optics_gfx_graphics_pipeline_*`| Refcount is atomic. Creation is safe to call concurrently (relies on the device's `VkPipelineCache` and bindless layout, both immutable post-init). Binding is single-threaded per frame. |

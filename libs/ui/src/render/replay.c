@@ -13,7 +13,7 @@ static inline optics_gfx_rect rect_intersect(optics_gfx_rect a, optics_gfx_rect 
 
 typedef struct snapshot_node {
     optics_ui_id id, semantic_parent;
-    uint64_t incarnation, visual_revision;
+    uint64_t incarnation, visual_revision, self_revision;
     optics_gfx_rect bounds, clip;
     /* The pixels this node's own draw commands covered, resolved against
      * `bounds` at capture time (ADR-0144). `bounds` is where layout put the
@@ -113,6 +113,8 @@ bool optics_ui__mark_subtree_changed(optics_ui *ui, optics_ui_node *n) {
     bool restacked = false;
     if (n->phase != OPTICS_UI_NODE_STABLE)
         self = true;
+    n->prev_paint_rect = n->has_render_rect ? n->render_paint_rect : (optics_gfx_rect){0, 0, 0, 0};
+    n->damage_prev_clip = n->has_prev_clip ? n->prev_clip : (optics_gfx_rect){0, 0, 0, 0};
     if (n->has_render_rect) {
         if (n->final_rect.x != n->render_rect.x || n->final_rect.y != n->render_rect.y ||
             n->final_rect.w != n->render_rect.w || n->final_rect.h != n->render_rect.h)
@@ -177,6 +179,9 @@ bool optics_ui__mark_subtree_changed(optics_ui *ui, optics_ui_node *n) {
         if (c->place != OPTICS_UI_PLACE_ABS && child_changed)
             changed = true;
     }
+    if (self) {
+        n->self_revision++;
+    }
     if (changed) {
         n->visual_revision++;
     }
@@ -210,7 +215,7 @@ optics_gfx_result optics_ui__compile_commands(optics_ui *ui, optics_gfx_encoder 
     for (uint32_t i = 0; i < cmd_count; i++) {
         size_t arena_mark = ui->arena.used;
         const optics_ui_draw_cmd *c = &cmds[i];
-        optics_gfx_rect r = optics_ui__offset_rel(box, c->rel);
+        optics_gfx_rect r = optics_ui__cmd_rel_rect(box, c);
         r = snap_rect(r, scale);
 
         bool is_clip_cmd =
@@ -280,15 +285,14 @@ optics_gfx_result optics_ui__compile_commands(optics_ui *ui, optics_gfx_encoder 
             break;
         }
         case OPTICS_UI_DRAW_ICON: {
-            if (c->icon_id < 0)
+            if (c->icon_id == OPTICS_UI_ICON_NONE)
                 break;
-            const optics_ui_icon_desc *desc = optics_ui__icon_desc(c->icon_id);
+            const optics_ui_icon_desc *desc = optics_ui__icon_desc(ui, c->icon_id);
             if (!desc || !desc->cmds || desc->count == 0)
                 break;
 
             optics_ui__icon_run_span spans[OPTICS_UI_ICON_MAX_RUNS];
-            uint32_t span_count = optics_ui__icon_run_spans(desc, optics_ui__icon_mode(c->icon_id),
-                                                            spans, OPTICS_UI_ICON_MAX_RUNS);
+            uint32_t span_count = optics_ui__icon_run_spans(desc, spans, OPTICS_UI_ICON_MAX_RUNS);
             if (span_count == 0)
                 break;
 
@@ -787,6 +791,7 @@ static optics_gfx_result capture_node(optics_ui *ui, optics_ui_scene_snapshot *s
         .id = n->id,
         .incarnation = n->incarnation,
         .visual_revision = n->visual_revision,
+        .self_revision = n->self_revision,
         .bounds = n->final_rect,
         .paint_bounds = optics_ui__node_paint_bounds(n),
         .child_clip = optics_ui__node_child_clip(n),
@@ -917,6 +922,7 @@ optics_gfx_result optics_ui_snapshot_activate(optics_ui *ui, optics_ui_scene_sna
         n->prev_band = entry->band;
         n->prev_band_order = entry->band_order;
         n->presented_revision = entry->visual_revision;
+        n->presented_self_revision = entry->self_revision;
         n->presented_index = i;
         n->has_prev = true;
     }

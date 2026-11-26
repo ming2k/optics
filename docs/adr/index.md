@@ -216,3 +216,4 @@ them; the current names are:
 | 0171 | [Curated Examples Taxonomy and Showcase Design System](0171-curated-examples-taxonomy-and-showcase-design-system.md) | Accepted |
 | 0172 | [Zero-Stutter Public C API and Clean `window` vs. `app` Runtime Boundary](0172-zero-stutter-api-and-window-app-boundary.md) | Accepted |
 | 0173 | [Retire the algorithm vault and compatibility scaffolding; strokes as coverage contours](0173-retire-vault-and-compat-scaffolding-strokes-as-contours.md) | Accepted |
+| 0174 | [Pure Graphics & UI Core — Retire Format Parsers, 3D Scene, Branded Materials, and Bundled Icon Packs](0174-pure-graphics-ui-core-retire-format-parsers-3d-and-materials.md) | Accepted |

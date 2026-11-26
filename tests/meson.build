@@ -17,12 +17,7 @@ subdir('gfx')
 if get_option('text')
   subdir('text')
 endif
-subdir('material')
 subdir('motion')
-subdir('scene')
-if get_option('svg')
-  subdir('svg')
-endif
 subdir('window')
 if opt_ui
   subdir('ui')

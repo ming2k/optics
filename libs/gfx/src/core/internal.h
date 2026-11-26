@@ -6,7 +6,7 @@
 
 #include "damage_history.h"
 #include <optics/gfx/core.h>
-#include <optics/gfx/math.h>    /* optics_gfx_mat4 (optics_gfx_frame scene caches) */
+#include <optics/gfx/math.h>
 #include <optics/gfx/observe.h> /* optics_gfx_scope, optics_gfx_observe_opts (ADR-0129) */
 #include <optics/gfx/profile.h> /* profiler telemetry facade (ADR-0138) */
 #include <optics/gfx/vulkan.h>  /* optics_gfx_bindless_handle */
@@ -664,7 +664,7 @@ struct optics_gfx_device {
      * lazily on first use; the device frees it via the per-module
      * destroy hook below at teardown. Keeps inter-module coupling
      * to a single typed pointer + a destroy callback, no header
-     * dependency from core into canvas/scene/compute. */
+     * dependency from core into canvas/compute/effect. */
     void *canvas_state;
     void (*canvas_state_destroy)(optics_gfx_device *d);
     void *effect_state;
@@ -1030,26 +1030,6 @@ struct optics_gfx_frame {
      * direct backend path is still authoritative in 1B-1; this records and
      * validates the target/resource contract before a pass begins. */
     optics_gfx_render_plan render_plan;
-    /* Scene-draw caches (scene.c). begin_frame re-initialises this
-     * whole struct, so they are per-frame by construction.
-     *
-     * scene_bound_* mirror the command buffer's current pipeline /
-     * descriptor bindings so scene_draw can skip redundant rebinds
-     * (the canvas backend does the same per pass). Other modules'
-     * passes bind their own pipelines on this command buffer (the
-     * canvas end_pass output blit always does), and bindings persist
-     * across passes — so the mirror is only valid within one pass and
-     * optics_gfx_frame_begin_pass resets it, forcing the first scene draw of
-     * each pass to rebind.
-     *
-     * scene_view_* cache inverse(camera.view): one memcmp per draw
-     * instead of a 4x4 inverse for the common static-camera pass. */
-    VkPipeline scene_bound_pipeline;
-    VkDescriptorSet scene_bound_set;
-    VkPipelineLayout scene_bound_layout;
-    optics_gfx_mat4 scene_view_src;
-    optics_gfx_mat4 scene_view_inv;
-    bool scene_view_inv_valid;
 };
 
 /* Recorders call this before sampling an image. The first use in a frame

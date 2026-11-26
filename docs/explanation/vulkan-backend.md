@@ -134,12 +134,12 @@ Slots in the heap are stable for the lifetime of the device:
 
 The heap is bound once per pipeline as set 0. Shaders reference
 resources by handle (a plain `uint32_t`) rather than by descriptor set
-and binding. The canvas and the scene module both use this path for
+and binding. The canvas, compute, and effect modules all use this path for
 textures and uniform data.
 
 ## Deferred resource destruction (retire queue)
 
-A released `optics_gfx_image`, `optics_gfx_buffer`, `optics_gfx_mesh`, or `optics_gfx_target`
+A released `optics_gfx_image`, `optics_gfx_buffer`, or `optics_gfx_target`
 may still be referenced by batches in flight on the graphics queue —
 frames recorded before the release. Destroying the view/image/buffer
 or freeing its memory at release time can fault the engine mid-batch
@@ -267,7 +267,7 @@ match by usage and smallest-fit capacity; the cache is capped at
 For bulk asset loading, `optics_gfx_uploads_begin` / `optics_gfx_uploads_flush`
 collapse any number of uploads into a single graphics-queue
 submission. While a batch is open, `optics_gfx_image_create`,
-`optics_gfx_image_update_region`, `optics_gfx_mesh_create`,
+`optics_gfx_image_update_region`,
 `optics_gfx_buffer_create` with `initial_data`, and layout transitions
 record their barriers and copies into one device-global command
 buffer; flush submits it once — without waiting — and the checked-out

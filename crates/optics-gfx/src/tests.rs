@@ -77,18 +77,6 @@ fn shadow_params_map_to_descriptor_fields() {
 }
 
 #[test]
-fn vector_material_maps_to_ffi_desc() {
-    assert_eq!(
-        sys::optics_gfx_struct_type::OPTICS_GFX_TYPE_MATERIAL_VECTOR_DESC as u32,
-        47
-    );
-    assert_eq!(
-        sys::optics_gfx_material_kind::OPTICS_GFX_MATERIAL_VECTOR as u32,
-        2
-    );
-}
-
-#[test]
 fn drm_node_maps_to_strict_device_extension() {
     let raw = DrmNode {
         major: 226,

@@ -1,9 +1,7 @@
-//! Safe Rust bindings to **gfx** — a C23 Vulkan-first 2D/3D graphics library.
+//! Safe Rust bindings to **gfx** — a C23 Vulkan-first 2D graphics library.
 //!
 //! This crate wraps the raw FFI in [`optics_gfx_sys`] with RAII handles and a
-//! Rust-native error type. It is the seam through which the ass compositor
-//! drives gfx's device, surface, canvas, and the raw-Vulkan accessors needed
-//! to interoperate with a `VkSurfaceKHR` and to import client buffers.
+//! Rust-native error type.
 //!
 //! [`Canvas`] is backend-agnostic: create it on the GPU from a [`Surface`]
 //! ([`Canvas::new`]) or headless on the **software (CPU)** backend
@@ -12,8 +10,8 @@
 //! CPU pixels come back via [`Canvas::read_pixels`].
 //!
 //! Modules mirror the C headers: devices and surfaces, frames and render
-//! targets, the canvas and its display lists, paints and paths, images, the
-//! scene draw core, blur/shadow effects and dma-buf interop. Everything is
+//! targets, the canvas and its display lists, paints and paths, images,
+//! samplers, blur/shadow effects and dma-buf interop. Everything is
 //! re-exported at the crate root.
 
 #![deny(rust_2018_idioms)]
@@ -66,7 +64,7 @@ mod format;
 mod frame;
 mod image;
 mod paint;
-mod scene;
+mod sampler;
 mod surface;
 mod target;
 #[cfg(test)]
@@ -83,7 +81,7 @@ pub use format::*;
 pub use frame::*;
 pub use image::*;
 pub use paint::*;
-pub use scene::*;
+pub use sampler::*;
 pub use surface::*;
 pub use target::*;
 
@@ -93,10 +91,6 @@ pub(crate) fn vec3(v: [f32; 3]) -> sys::optics_gfx_vec3 {
         y: v[1],
         z: v[2],
     }
-}
-
-pub(crate) fn vec2(v: [f32; 2]) -> sys::optics_gfx_vec2 {
-    sys::optics_gfx_vec2 { x: v[0], y: v[1] }
 }
 
 pub(crate) fn vec4(v: [f32; 4]) -> sys::optics_gfx_vec4 {

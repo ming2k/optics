@@ -1,6 +1,4 @@
-/* test_icon_runtime.c — runtime SVG icon registration
- * (optics_ui_icon_register_svg). CPU-only.
- */
+/* test_icon_runtime.c — per-context vector icon registration & widget integration. CPU-only. */
 
 #include "../../libs/ui/src/internal.h"
 #include "optics_test.h"
@@ -9,20 +7,17 @@
 
 static const optics_ui_input IN0 = {.display_size = {200, 100}, .dt_seconds = 0.016f};
 
-/* Feather-style: circle + line, stroke only, in a 24x24 viewBox. */
-static const char SVG_STROKE[] =
-    "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\" fill=\"none\""
-    " stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\">"
-    "<circle cx=\"12\" cy=\"12\" r=\"9\"/>"
-    "<line x1=\"12\" y1=\"7\" x2=\"12\" y2=\"13\"/>"
-    "</svg>";
+static const optics_ui_icon_cmd STROKE_CMDS[] = {
+    {.kind = OPTICS_UI_ICON_CMD_CIRCLE, .params = {12.0f, 12.0f, 9.0f}},
+    {.kind = OPTICS_UI_ICON_CMD_MOVE, .params = {12.0f, 7.0f}},
+    {.kind = OPTICS_UI_ICON_CMD_LINE, .params = {12.0f, 13.0f}},
+};
 
-/* Material-style: one filled rect (default black fill). */
-static const char SVG_FILL[] = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\">"
-                               "<rect x=\"4\" y=\"4\" width=\"16\" height=\"16\"/>"
-                               "</svg>";
+static const optics_ui_icon_cmd FILL_CMDS[] = {
+    {.kind = OPTICS_UI_ICON_CMD_RECT, .params = {4.0f, 4.0f, 16.0f, 16.0f}},
+};
 
-static int has_icon_cmd(const optics_ui_node *n, int32_t id) {
+static int has_icon_cmd(const optics_ui_node *n, optics_ui_icon_id id) {
     if (!n)
         return 0;
     for (uint32_t i = 0; i < n->cmd_count; i++)
@@ -32,31 +27,43 @@ static int has_icon_cmd(const optics_ui_node *n, int32_t id) {
 }
 
 int main(void) {
-    /* Registration: ids continue where the built-in enum ends. */
-    optics_ui_icon_id stroke = optics_ui_icon_register_svg(SVG_STROKE);
-    OT_EXPECT((int)stroke >= (int)OPTICS_UI_ICON_COUNT);
-    optics_ui_icon_id fill = optics_ui_icon_register_svg(SVG_FILL);
-    OT_EXPECT((int)fill == (int)stroke + 1);
-
-    /* Malformed or empty input is rejected, never crashes. */
-    OT_EXPECT((int)optics_ui_icon_register_svg(nullptr) == (int)OPTICS_UI_ICON_INVALID);
-    OT_EXPECT((int)optics_ui_icon_register_svg("") == (int)OPTICS_UI_ICON_INVALID);
-    OT_EXPECT((int)optics_ui_icon_register_svg("this is not svg <<<") ==
-              (int)OPTICS_UI_ICON_INVALID);
-    OT_EXPECT((int)optics_ui_icon_register_svg("<html><body/></html>") ==
-              (int)OPTICS_UI_ICON_INVALID);
-    OT_EXPECT((int)optics_ui_icon_register_svg("<svg viewBox=\"0 0 24 24\"></svg>") ==
-              (int)OPTICS_UI_ICON_INVALID);
-    OT_EXPECT((int)optics_ui_icon_register_svg("<svg><circle cx=\"1\" cy=\"1\" r=\"1\"/></svg>") >=
-              (int)OPTICS_UI_ICON_COUNT);
-
     optics_ui *ui = nullptr;
     OT_EXPECT(optics_ui_create(&(optics_ui_desc){}, &ui) == OPTICS_GFX_OK);
 
-    /* Runtime ids work through every icon widget, alongside a built-in. */
+    /* Validation: null, empty, out-of-range runs, and bad command kinds are rejected. */
+    OT_EXPECT(
+        optics_ui_icon_register(nullptr, &(optics_ui_icon_desc){.cmds = FILL_CMDS, .count = 1u}) ==
+        OPTICS_UI_ICON_NONE);
+    OT_EXPECT(optics_ui_icon_register(ui, nullptr) == OPTICS_UI_ICON_NONE);
+    OT_EXPECT(optics_ui_icon_register(ui, &(optics_ui_icon_desc){}) == OPTICS_UI_ICON_NONE);
+    OT_EXPECT(optics_ui_icon_register(ui, &(optics_ui_icon_desc){.cmds = FILL_CMDS, .count = 0u}) ==
+              OPTICS_UI_ICON_NONE);
+    const optics_ui_icon_run bad_run = {.first_cmd = 0u, .count = 2u};
+    OT_EXPECT(optics_ui_icon_register(ui, &(optics_ui_icon_desc){
+                                              .cmds = FILL_CMDS,
+                                              .count = 1u,
+                                              .runs = &bad_run,
+                                              .run_count = 1u,
+                                          }) == OPTICS_UI_ICON_NONE);
+
+    optics_ui_icon_id stroke = optics_ui_icon_register(ui, &(optics_ui_icon_desc){
+                                                               .cmds = STROKE_CMDS,
+                                                               .count = 3u,
+                                                               .paint = OPTICS_UI_ICON_PAINT_STROKE,
+                                                           });
+    optics_ui_icon_id fill = optics_ui_icon_register(ui, &(optics_ui_icon_desc){
+                                                             .cmds = FILL_CMDS,
+                                                             .count = 1u,
+                                                             .paint = OPTICS_UI_ICON_PAINT_FILL,
+                                                         });
+    OT_EXPECT(stroke != OPTICS_UI_ICON_NONE);
+    OT_EXPECT(fill != OPTICS_UI_ICON_NONE);
+    OT_EXPECT(fill != stroke);
+
+    /* Runtime ids work through every icon widget, alongside a built-in chrome chevron. */
     optics_ui_begin(ui, &IN0);
     optics_ui_icon(ui, &(optics_ui_icon_opts){.id = stroke, .size = 16.0f});
-    optics_ui_icon(ui, &(optics_ui_icon_opts){.id = OPTICS_UI_ICON_SEARCH, .size = 16.0f});
+    optics_ui_icon(ui, &(optics_ui_icon_opts){.id = OPTICS_UI_ICON_CHEVRON_RIGHT, .size = 16.0f});
     optics_ui_button(ui, &(optics_ui_button_opts){.icon = fill});
     optics_ui_selectable(
         ui, &(optics_ui_selectable_opts){.icon = stroke, .label = "row", .selected = false});
@@ -64,27 +71,26 @@ int main(void) {
     OT_EXPECT(!optics_ui_overflowed(ui));
 
     optics_ui_node *child = optics_ui_node_first_child(optics_ui_root(ui));
-    OT_EXPECT(has_icon_cmd(child, (int32_t)stroke));
+    OT_EXPECT(has_icon_cmd(child, stroke));
     child = optics_ui_node_next_sibling(child);
-    OT_EXPECT(has_icon_cmd(child, (int32_t)OPTICS_UI_ICON_SEARCH));
+    OT_EXPECT(has_icon_cmd(child, OPTICS_UI_ICON_CHEVRON_RIGHT));
     child = optics_ui_node_next_sibling(child);
-    OT_EXPECT(has_icon_cmd(child, (int32_t)fill));
+    OT_EXPECT(has_icon_cmd(child, fill));
     child = optics_ui_node_next_sibling(child);
-    OT_EXPECT(has_icon_cmd(child, (int32_t)stroke));
+    OT_EXPECT(has_icon_cmd(child, stroke));
 
-    /* The no-icon sentinel must stay icon-less even though OPTICS_UI_ICON_COUNT
-     * is now a valid runtime id (the first registration took it). */
+    /* Zero-initialized selectable stays icon-less (OPTICS_UI_ICON_NONE == 0). */
     optics_ui_begin(ui, &IN0);
     optics_ui_selectable(ui, &(optics_ui_selectable_opts){.label = "plain", .selected = false});
     optics_ui_test_end(ui);
     optics_ui_node *row = optics_ui_node_first_child(optics_ui_root(ui));
     OT_EXPECT(row && row->cmd_count == 1 && row->cmds[0].kind == OPTICS_UI_DRAW_TEXT);
 
-    /* Unknown and invalid ids draw nothing and do not crash. */
+    /* Unknown and unregistered ids draw nothing and do not crash. */
+    optics_ui_icon_unregister(ui, fill);
     optics_ui_begin(ui, &IN0);
-    optics_ui_icon(ui, &(optics_ui_icon_opts){.id = OPTICS_UI_ICON_INVALID, .size = 16.0f});
-    optics_ui_icon(ui,
-                   &(optics_ui_icon_opts){.id = (optics_ui_icon_id)(fill + 1000), .size = 16.0f});
+    optics_ui_icon(ui, &(optics_ui_icon_opts){.id = OPTICS_UI_ICON_NONE, .size = 16.0f});
+    optics_ui_icon(ui, &(optics_ui_icon_opts){.id = fill, .size = 16.0f});
     optics_ui_test_end(ui);
     OT_EXPECT(!optics_ui_overflowed(ui));
     OT_EXPECT(optics_ui_node_first_child(optics_ui_root(ui)) == nullptr);

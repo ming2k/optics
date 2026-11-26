@@ -210,6 +210,43 @@ impl Ui {
         unsafe { sys::optics_ui_deliver_drop(self.raw, &opts) };
     }
 
+    /// Register a format-agnostic vector icon on this UI context.
+    ///
+    /// The command stream lives in a 24x24 logical box and is deep-copied into
+    /// context-owned storage. Returns `None` if `cmds` is empty or invalid.
+    pub fn register_icon(
+        &mut self,
+        cmds: &[sys::optics_ui_icon_cmd],
+        runs: &[sys::optics_ui_icon_run],
+        paint: sys::optics_ui_icon_paint,
+    ) -> Option<sys::optics_ui_icon_id> {
+        let desc = sys::optics_ui_icon_desc {
+            cmds: cmds.as_ptr(),
+            count: u32::try_from(cmds.len()).ok()?,
+            runs: if runs.is_empty() {
+                ptr::null()
+            } else {
+                runs.as_ptr()
+            },
+            run_count: u32::try_from(runs.len()).ok()?,
+            paint,
+            _pad: [0; 3],
+        };
+        // SAFETY: self.raw is live; cmds and runs outlive the call and are deep-copied by C.
+        let id = unsafe { sys::optics_ui_icon_register(self.raw, &desc) };
+        if id == sys::optics_ui_icon_id::OPTICS_UI_ICON_NONE {
+            None
+        } else {
+            Some(id)
+        }
+    }
+
+    /// Unregister a previously registered runtime vector icon on this UI context.
+    pub fn unregister_icon(&mut self, id: sys::optics_ui_icon_id) {
+        // SAFETY: self.raw is live; C ignores unknown or built-in ids.
+        unsafe { sys::optics_ui_icon_unregister(self.raw, id) };
+    }
+
     /// Run one immediate-mode frame. The closure receives a [`Frame`] that
     /// borrows the context; widget calls on it build the tree, which is
     /// reconciled and laid out when the closure returns.
@@ -1860,22 +1897,6 @@ impl std::fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
-/// Register an SVG string as a runtime ui icon (see `optics_ui_icon_register_svg`).
-///
-/// The returned id continues where the built-in [`Icon`] enum ends
-/// (`>= OPTICS_UI_ICON_COUNT`). Registration is process-global, never reclaimed,
-/// and — like the rest of ui — not thread-safe: call from the UI thread.
-/// The SVG's own paint colours are ignored; the glyph draws in the theme
-/// colour, stroke-only icons in the 2/24 weight of the built-in set.
-pub fn register_svg_icon(svg: &str) -> Option<sys::optics_ui_icon_id> {
-    let svg = cstr(svg);
-    // SAFETY: svg outlives the call; ui keeps no pointer into it.
-    let id = unsafe { sys::optics_ui_icon_register_svg(svg.as_ptr()) };
-    // OPTICS_UI_ICON_INVALID is (optics_ui_icon_id)-1; the newtype binding makes it
-    // plain data (u32::MAX), so this comparison is sound.
-    if id.0 == u32::MAX { None } else { Some(id) }
-}
-
 /// The built-in default skin for a widget kind (ADR-0059). Useful for
 /// wrapping: a custom skin can call the default to keep the stock chrome
 /// and then add its own. Returns `None` for kinds outside the enum.
@@ -1979,7 +2000,7 @@ pub unsafe fn skin_text(
 }
 
 /// Push a vector icon glyph from inside a skin. `icon` is a raw
-/// `optics_ui_icon_id`, so runtime-registered glyphs ([`register_svg_icon`])
+/// `optics_ui_icon_id`, so runtime-registered glyphs ([`Ui::register_icon`])
 /// work alongside the built-in [`Icon`] set. Same contract as
 /// [`skin_rect`].
 ///

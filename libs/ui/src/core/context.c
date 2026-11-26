@@ -223,8 +223,8 @@ optics_gfx_result optics_ui_create(const optics_ui_desc *desc, optics_ui **out) 
                            &ui->text) != OPTICS_GFX_OK)
         ui->text = nullptr;
 
-    /* Icon coverage-mask cache (ADR-0112). Allocation failure is non-fatal:
-     * the pool stays at cap 0 and icons draw through the live vector path. */
+    /* Per-context vector icon registry and coverage-mask cache (ADR-0112). */
+    optics_ui__icon_registry_init(ui);
     optics_ui__icon_mask_pool_init(ui);
 
     *out = ui;
@@ -244,6 +244,7 @@ void optics_ui_release(optics_ui *ui) {
         return;
     optics_ui_snapshot_release(ui->presented_snapshot);
     optics_ui__icon_mask_pool_destroy(ui);
+    optics_ui__icon_registry_destroy(ui);
     optics_ui__ghost_destroy(ui);
     optics_text_release(ui->text); /* null-safe */
     optics_ui__store_destroy(ui);
@@ -296,19 +297,6 @@ static void optics_ui__theme_normalize(optics_ui_theme *t) {
         t->slider_track_thickness = 6.0f;
     if (t->slider_knob_size <= 0.0f)
         t->slider_knob_size = 14.0f;
-
-    /* Normalize material recipes if uninitialized (e.g. from zero-initialized or older callers) */
-    if (t->materials.foundation.plate_opacity <= 0.0f && !t->materials.foundation.fallback) {
-        uint8_t r = 0, g = 0, b = 0, a = 0;
-        if (t->color_bg)
-            optics_gfx_color_unpack(t->color_bg, &r, &g, &b, &a);
-        bool dark = ((int)r + g + b) < 384;
-        t->materials.foundation = optics_ui_material_recipe_default(OPTICS_UI_MATERIAL_MICA, dark);
-        t->materials.command = optics_ui_material_recipe_default(OPTICS_UI_MATERIAL_MICA_ALT, dark);
-        t->materials.floating = optics_ui_material_recipe_default(OPTICS_UI_MATERIAL_ACRYLIC, dark);
-        t->materials.optics_ui_body =
-            optics_ui_material_recipe_default(OPTICS_UI_MATERIAL_LIQUID_GLASS, dark);
-    }
 }
 
 void optics_ui_set_text_family(optics_ui *ui, optics_ui_text_family family) {
@@ -586,30 +574,8 @@ static optics_gfx_rect rect_intersect_bounds(optics_gfx_rect a, optics_gfx_rect 
  * and including them would re-widen every clipped subtree to its clip rect. A
  * node with no commands has no own paint and contributes nothing here; its
  * descendants are visited separately. */
-/* Where one command paints, in absolute coordinates, resolved against `box`. */
-static optics_gfx_rect paint_of_cmd(optics_gfx_rect box, const optics_ui_draw_cmd *c) {
-    return optics_ui__cmd_paint_extent(box, c);
-}
-
 static optics_gfx_rect node_paint_bounds(const optics_ui_node *n) {
     return optics_ui__node_paint_bounds(n);
-}
-
-/* The same paint, resolved against `box` instead of the node's current
- * `final_rect`. Used only while a node's own command list is still alive (the
- * live walk); a departed node must use its persisted `render_paint_rect`
- * instead, because its command list is arena memory that has been recycled. */
-static optics_gfx_rect node_paint_bounds_at(const optics_ui_node *n, optics_gfx_rect box) {
-    optics_gfx_rect d = {0, 0, 0, 0};
-    if (!n || !n->cmds)
-        return box;
-    for (uint32_t i = 0; i < n->cmd_count; i++) {
-        const optics_ui_draw_cmd *c = &n->cmds[i];
-        if (c->kind == OPTICS_UI_DRAW_CLIP_PUSH || c->kind == OPTICS_UI_DRAW_CLIP_POP)
-            continue;
-        d = rect_union_bounds(d, paint_of_cmd(box, c));
-    }
-    return d.w > 0.0f && d.h > 0.0f ? d : box;
 }
 
 /* ---- regional damage ------------------------------------------------------
@@ -737,17 +703,34 @@ static void damage_walk(const optics_ui *ui, const optics_ui_node *n, bool owned
      * A FLOW node contributes only its own paint delta. `visual_revision` is
      * never consulted here: it rolls up from descendants, and the root's own
      * rect is the entire display, so drift is an owned-body question only. */
-    const bool changed = owned ? (n->subtree_changed || n->visual_revision != n->presented_revision)
-                               : n->self_changed;
+    const bool changed = owned
+                             ? (n->subtree_changed || n->visual_revision != n->presented_revision)
+                             : (n->self_changed || n->self_revision != n->presented_self_revision);
     if (changed) {
-        damage_push(acc, ui, node_paint_bounds(n));
-        /* `render_rect` is what the activated snapshot last drew for this node.
-         * It differs from `final_rect` exactly when the node moved or resized,
-         * and the pixels it vacated still hold the old paint. */
-        if (n->has_render_rect && n->render_rect.w > 0.0f && n->render_rect.h > 0.0f &&
-            (n->render_rect.x != n->final_rect.x || n->render_rect.y != n->final_rect.y ||
-             n->render_rect.w != n->final_rect.w || n->render_rect.h != n->final_rect.h))
-            damage_push(acc, ui, node_paint_bounds_at(n, n->render_rect));
+        const optics_gfx_rect cur = node_paint_bounds(n);
+        /* `prev_paint_rect` is the exact pixels the last activated snapshot
+         * painted for this node (snapshotted during `optics_ui_end` before any
+         * activation overwrites `render_paint_rect`). Whenever the node changes
+         * — whether it moved, resized, shortened its text, or dropped a
+         * hover/selection/focus background or border while keeping the same
+         * layout box — any pixels it previously painted and no longer covers
+         * still hold the old frame and must be repainted. */
+        const optics_gfx_rect prev = n->prev_paint_rect;
+        if (prev.w > 0.0f && prev.h > 0.0f) {
+            const bool cur_valid = cur.w > 0.0f && cur.h > 0.0f;
+            if (cur_valid && prev.x >= cur.x && prev.y >= cur.y &&
+                prev.x + prev.w <= cur.x + cur.w && prev.y + prev.h <= cur.y + cur.h) {
+                damage_push(acc, ui, cur);
+            } else if (cur_valid && cur.x >= prev.x && cur.y >= prev.y &&
+                       cur.x + cur.w <= prev.x + prev.w && cur.y + cur.h <= prev.y + prev.h) {
+                damage_push(acc, ui, prev);
+            } else {
+                damage_push(acc, ui, cur);
+                damage_push(acc, ui, prev);
+            }
+        } else {
+            damage_push(acc, ui, cur);
+        }
 
         /* A clip that changed and a placed node that re-composited both change
          * pixels this node does not own: the clip's old band held descendants that
@@ -757,15 +740,15 @@ static void damage_walk(const optics_ui *ui, const optics_ui_node *n, bool owned
         if (n->restacked) {
             /* The whole placed body, since a re-stacked node can occlude or reveal
              * any part of it, plus the extent the previous stacking showed. */
-            damage_push(acc, ui, node_paint_bounds(n));
+            damage_push(acc, ui, cur);
             if (n->has_render_rect)
-                damage_push(acc, ui,
-                            n->render_paint_rect.w > 0.0f ? n->render_paint_rect : n->render_rect);
-        } else if (n->clip_changed && n->has_prev_clip) {
+                damage_push(acc, ui, prev.w > 0.0f ? prev : n->render_rect);
+        }
+        if (n->clip_changed && n->damage_prev_clip.w > 0.0f && n->damage_prev_clip.h > 0.0f) {
             /* The clip's *previous* extent, which is where pixels the new clip
              * excludes still show the last presented frame, unioned with the new
              * one so a widening clip repaints what it reveals. */
-            damage_push(acc, ui, n->prev_clip);
+            damage_push(acc, ui, n->damage_prev_clip);
             damage_push(acc, ui, optics_ui__node_child_clip(n));
         }
     }
@@ -995,6 +978,8 @@ void optics_ui_begin(optics_ui *ui, const optics_ui_input *input) {
     ui->overflow = false;
     ui->duplicate_ids = false;
     ui->anim_pending = false; /* set true by any eased value still in transit */
+    ui->focus_at_begin = ui->focused_id;
+    ui->focus_visible_at_begin = ui->focus_visible;
     optics_gfx_arena_reset(&ui->arena);
     optics_ui__ghost_begin_frame(ui); /* ghosts survive the reset; clear refresh marks */
 
@@ -1126,6 +1111,15 @@ void optics_ui_end(optics_ui *ui) {
     if (ui->input.mouse_pressed[OPTICS_UI_MOUSE_LEFT] && !ui->click_hit_focusable) {
         ui->focused_id = 0;
         ui->focus_visible = false;
+    }
+
+    /* If focus moved during build (sibling pointer transfer, host
+     * optics_ui_set_focus) or post-build (Tab traversal, click-outside clear,
+     * reaped focused node), widgets built earlier in the pass still reflect
+     * the pre-frame focus state. Request one follow-up frame so old and new
+     * focus borders settle immediately without waiting for unrelated input. */
+    if (ui->focused_id != ui->focus_at_begin || ui->focus_visible != ui->focus_visible_at_begin) {
+        ui->anim_pending = true;
     }
 
     /* Scrollbar chrome is emitted here — after the whole tree (base +

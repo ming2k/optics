@@ -41,8 +41,6 @@ static void test_theme_older_caller_prefix_only(void) {
     OT_EXPECT(got.size == sizeof(optics_ui_theme));
     /* Normalization ran: title size derives from font_size, never 0. */
     OT_EXPECT(got.font_size_title > 0.0f);
-    /* Material normalization ran: default recipes populated. */
-    OT_EXPECT(got.materials.foundation.plate_opacity > 0.0f);
 
     optics_ui_release(ui);
 }

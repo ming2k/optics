@@ -19,7 +19,7 @@ static optics_ui_response build_pressable(optics_ui *ui) {
                         .radius = 12.0f,
                     },
             });
-    optics_ui_icon(ui, &(optics_ui_icon_opts){.id = OPTICS_UI_ICON_PLAY, .size = 24.0f});
+    optics_ui_icon(ui, &(optics_ui_icon_opts){.id = OPTICS_UI_ICON_CHEVRON_RIGHT, .size = 24.0f});
     optics_ui_label(ui, &(optics_ui_label_opts){.text = "A track title"});
     optics_ui_pressable_end(ui);
     return response;

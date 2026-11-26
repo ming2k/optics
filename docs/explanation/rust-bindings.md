@@ -45,9 +45,6 @@ in the workspace manifest.
 | `ui` | Headless Immediate UI | `optics::ui` | `optics-ui` | `liboptics_ui` |
 | `window` | Native OS Window Shell | `optics::window` | `optics-window` | `liboptics_window` |
 | `app` | Application Shell | `optics::app` | `optics-app` | `liboptics_app` |
-| `material` | Liquid Glass & Physical BRDFs | `optics::material` | `optics-material` | `liboptics_material` |
-| `scene` | 3D Scene Graph & Cameras | `optics::scene` | `optics-scene` | `liboptics_scene` |
-| `svg` | Vector Art Compiler (SVG) | `optics::svg` | `optics-svg` | `liboptics_svg` |
 | `motion` | Closed-Form Motion Math | `optics::motion` | `optics-motion` | Pure Safe Rust ([ADR-0158](../adr/0158-transit-header-only-and-zero-so-motion-vocabulary.md)) |
 
 ## Workspace Structure
@@ -68,9 +65,6 @@ and mirrors the one-way dependency graph of `libs/`:
 - `optics-ui-sys` / `optics-ui`: Declarative immediate-mode UI, Flex/Grid layout, retained state machine.
 - `optics-window-sys` / `optics-window`: Native Wayland, Win32, and Cocoa windowing and display pacing.
 - `optics-app-sys` / `optics-app`: Application shell joining `window` and `ui`.
-- `optics-material-sys` / `optics-material`: Refractive Liquid Glass, Frosted Glass, Acrylic, and Mica shaders.
-- `optics-svg-sys` / `optics-svg`: Vector-art document compiler (ADR-0161, ADR-0170).
-- `optics-scene-sys` / `optics-scene`: 3D scene hierarchy and glTF runtime.
 - `optics-motion`: Pure Safe Rust closed-form harmonic springs, smoothing, and easing formulas (no C FFI, no `build.rs`).
 
 ## Version Lockstep

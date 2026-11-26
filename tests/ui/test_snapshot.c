@@ -114,7 +114,7 @@ static void capture_failure_is_not_partial_success(void) {
     OT_EXPECT(optics_ui_create(&(optics_ui_desc){}, &ui) == OPTICS_GFX_OK);
     optics_ui_input in = {.display_size = {100, 100}, .dt_seconds = .016f};
     optics_ui_begin(ui, &in);
-    optics_ui_icon(ui, &(optics_ui_icon_opts){.id = OPTICS_UI_ICON_CHECK, .size = 24});
+    optics_ui_icon(ui, &(optics_ui_icon_opts){.id = OPTICS_UI_ICON_CHEVRON_RIGHT, .size = 24});
     optics_ui_end(ui);
     /* Inject a compile failure through the canonical "frame could not be
      * compiled" flag (optics_ui__set_overflow), which is what arena exhaustion

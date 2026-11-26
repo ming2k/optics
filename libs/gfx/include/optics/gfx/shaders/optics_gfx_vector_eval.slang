@@ -1,10 +1,9 @@
 /*
- * optics_gfx_vector_eval.slang — the single Slang definition for analytic fragment
- * vector evaluation (ADR-0116, ADR-0117, ADR-0121).
+ * optics_gfx_vector_eval.slang — the single Slang definition for analytic
+ * 2D vector coverage evaluation (ADR-0116, ADR-0121).
  *
- * <optics/gfx/curve.h> and <optics/gfx/canvas_tile.h> provide host-side line segment
- * representations; tests/gfx/integration/test_scene_vector.c pins the 3D
- * evaluation and tests/gfx/unit/test_canvas_coverage.c pins the 2D evaluation.
+ * <optics/gfx/curve.h> provides host-side line segment representations;
+ * tests/gfx/unit/test_canvas_coverage.c pins the 2D evaluation.
  */
 
 #ifndef OPTICS_GFX_VECTOR_EVAL_SLANG
@@ -58,21 +57,6 @@ float optics_gfx_vector_eval_coverage(int winding, float min_dist_sq, uint32_t f
     float signed_dist = inside ? dist : -dist;
     float scale = (pixel_scale > 1e-7f) ? pixel_scale : 1e-7f;
     return clamp(signed_dist / scale + 0.5f, 0.0f, 1.0f);
-}
-
-/* Map accumulated winding and minimum distance to perspective-correct coverage
- * using screen-space partial derivatives (Jacobian).
- *   winding: accumulated winding number
- *   min_dist_sq: squared distance to closest segment in object space
- *   fill_rule: 0 = NonZero, 1 = EvenOdd
- *   obj_pos: object-space coordinates with screen-space gradients
- */
-float optics_gfx_vector_eval_coverage_jacobian(int winding, float min_dist_sq, uint32_t fill_rule, float2 obj_pos)
-{
-    float2 dpos_dx = ddx(obj_pos);
-    float2 dpos_dy = ddy(obj_pos);
-    float pixel_scale = sqrt(max(dot(dpos_dx, dpos_dx), dot(dpos_dy, dpos_dy)));
-    return optics_gfx_vector_eval_coverage(winding, min_dist_sq, fill_rule, pixel_scale);
 }
 
 /* ------------------------------------------------------------------ */

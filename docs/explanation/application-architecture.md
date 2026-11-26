@@ -11,14 +11,11 @@ application
   │     ├── window ── window, event loop, frame cadence, desktop integration
   │     │     └── gfx
   │     └── ui ── UI state, layout, input, snapshots
-  │           ├── glyph ── text shaping and dynamic atlas
-  │           ├── svg ── SVG icons and static art
+  │           ├── text ── text shaping and dynamic atlas
   │           └── gfx canvas
   └── direct rendering
-        ├── scene ── glTF content and scene hierarchy
         ├── motion ── motion vocabulary (header-only)
-        ├── material ── surface materials
-        └── gfx canvas / scene / compute / effect
+        └── gfx canvas / compute / effect / custom pipelines
                     └── device, frame, memory, sync
                                       └── Vulkan 1.3
 ```
@@ -77,7 +74,6 @@ records into the same `VkCommandBuffer` returned by
 ### Content and Domain Libraries Feed Draw Primitives
 
 `text` shapes text and feeds `optics_gfx_canvas_draw_glyph_run`;
-`scene` loads glTF content and feeds scene mesh draws;
 `motion` provides closed-form non-divergent motion dynamics. They link
 through public `gfx` APIs and remain separately consumable libraries.
 
@@ -93,13 +89,13 @@ The UI host's `frame` receives the already-folded snapshot; `app` converts it to
 itself applies no policy — it reifies, orders, folds, and forwards. See
 [ADR-0107](../adr/0107-iris-pre-lens-event-seam.md).
 
-## Worked Example: 3D Scene with a 2D HUD
+## Worked Example: Custom Pipeline Content with a 2D HUD
 
 ```c
 optics_gfx_frame *frame;
 optics_gfx_surface_begin_frame(surface, nullptr, &frame);
 
-/* 3D scene with depth */
+/* caller-defined pipeline content with a depth attachment */
 optics_gfx_pass_attachment att = {
     .view        = VK_NULL_HANDLE,
     .load_op     = OPTICS_GFX_LOAD_CLEAR,
@@ -121,11 +117,15 @@ optics_gfx_pass_desc pass = {
 };
 optics_gfx_frame_begin_pass(frame, &pass);
 
-optics_gfx_scene_draw_mesh(frame, &camera, world_matrix, mesh, material);
+/* Bind a caller-defined optics_gfx_graphics_pipeline and record custom draws. */
+optics_gfx_graphics_pipeline_bind(cmd, &(optics_gfx_graphics_pipeline_bind_opts){
+    .pipeline = my_pipeline,
+});
+vkCmdDraw(cmd, 3, 1, 0, 0);
 
 optics_gfx_frame_end_pass(frame);
 
-/* 2D HUD on top of the rendered scene: load instead of clear. */
+/* 2D HUD on top of the rendered content: load instead of clear. */
 optics_gfx_canvas_begin(canvas, frame, nullptr);
 optics_gfx_canvas_fill_rect_color(canvas, hud_rect, panel_color);
 optics_gfx_canvas_end(canvas);

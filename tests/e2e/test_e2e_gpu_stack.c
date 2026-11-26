@@ -3,21 +3,18 @@
  *
  * Strictly public-header-only (<optics/optics.h> + public sub-headers): links
  * the umbrella façade `optics_dep` exactly as a real application does, and
- * composes six libraries in one live Vulkan frame pipeline:
+ * composes the core stack in one live Vulkan frame pipeline:
  *
  *   1. gfx (Vulkan offscreen surface, GPU Canvas, Dual-Kawase blur filter)
- *   2. material (Frosted Glass + Liquid Glass over a real backdrop capture)
- *   3. svg (runtime SVG icon registered into UI)
- *   4. ui + text (interactive UI widgets laid out, snapshotted, and composited
- *      over the material layer)
- *   5. motion (analytic spring advancing a glass body position across frames)
+ *   2. ui + text (interactive UI widgets + per-context registered vector icon,
+ *      laid out, snapshotted, and composited over the blurred panel)
+ *   3. motion (analytic spring advancing a canvas card across frames)
  *
  * Verifies real readback pixels:
  *   - raw backdrop band retains expected high-contrast colors;
- *   - frosted glass panel visibly blends/blurs the striped backdrop;
- *   - liquid glass lens visibly refracts/tints with solid interior coverage;
- *   - foreground UI button & SVG icon render crisply over the glass surface;
- *   - animating the glass body with optics_motion_spring visibly moves pixels
+ *   - blurred backdrop panel visibly softens stripe contrast;
+ *   - foreground UI button & registered vector icon render crisply;
+ *   - animating a card with optics_motion_spring visibly moves pixels
  *     between frame 0 and settled frames with zero leaks.
  */
 
@@ -34,19 +31,10 @@
 #define H 192u
 #define BYTES (W * H * 4u)
 
-static const char BADGE_SVG[] = "<svg viewBox='0 0 24 24'>"
-                                "<circle cx='12' cy='12' r='10' fill='#ff4060'/>"
-                                "<rect x='7' y='10' width='10' height='4' fill='#ffffff'/>"
-                                "</svg>";
-
-static void draw_material_output(optics_gfx_canvas *canvas, optics_material_output out) {
-    if (!out.image)
-        return;
-    optics_gfx_canvas_draw_image(
-        canvas, out.image,
-        (optics_gfx_rect){out.origin_x, out.origin_y, (float)out.width, (float)out.height},
-        nullptr);
-}
+static const optics_ui_icon_cmd BADGE_CMDS[] = {
+    {.kind = OPTICS_UI_ICON_CMD_CIRCLE, .params = {12.0f, 12.0f, 10.0f}},
+    {.kind = OPTICS_UI_ICON_CMD_RECT, .params = {7.0f, 10.0f, 10.0f, 4.0f}},
+};
 
 static const uint8_t *px_at(const uint8_t *px, uint32_t x, uint32_t y) {
     return px + ((size_t)y * W + (size_t)x) * 4u;
@@ -79,7 +67,7 @@ static size_t diff_in_rect(const uint8_t *a, const uint8_t *b, optics_gfx_rect r
     return diff;
 }
 
-/* High-contrast vertical stripe backdrop so blur and refraction are unmistakable. */
+/* High-contrast vertical stripe backdrop so blur and motion are unmistakable. */
 static optics_gfx_image *make_striped_backdrop(optics_gfx_device *device) {
     uint8_t *data = malloc(BYTES);
     OT_REQUIRE(data != nullptr);
@@ -115,11 +103,9 @@ typedef struct compose_env {
     optics_gfx_canvas *canvas;
     optics_gfx_image *backdrop;
     optics_gfx_blur_filter *blur;
-    optics_material_frosted_filter *frosted;
-    optics_material_liquid_glass_filter *glass;
 } compose_env;
 
-static void render_composed_frame(compose_env *env, float glass_x,
+static void render_composed_frame(compose_env *env, float card_x,
                                   const optics_ui_scene_snapshot *ui_snap, uint8_t *out_px) {
     optics_gfx_frame *frame = nullptr;
     OT_REQUIRE(optics_gfx_surface_begin_frame(env->surface, nullptr, &frame) == OPTICS_GFX_OK);
@@ -132,42 +118,9 @@ static void render_composed_frame(compose_env *env, float glass_x,
     OT_REQUIRE(optics_gfx_blur_filter_apply(
                    env->blur, &(optics_gfx_blur_filter_apply_opts){
                                   .frame = frame, .desc = &bd, .out = &blurred}) == OPTICS_GFX_OK);
+    OT_REQUIRE(optics_gfx_frame_materialize_image(frame, blurred) == OPTICS_GFX_OK);
 
-    /* 2. Frosted Glass panel on the left half [16, 48, 120, 112]. */
-    optics_material_frosted_group fg = OPTICS_MATERIAL_FROSTED_GROUP_INIT;
-    fg.shape = (optics_material_frosted_shape){.bounds = {16.0f, 48.0f, 120.0f, 112.0f},
-                                               .corner_radius = 14.0f};
-    fg.tint_color = 0x182848u;
-    optics_material_frosted_desc fd = OPTICS_MATERIAL_FROSTED_DESC_INIT;
-    fd.input = env->backdrop;
-    fd.blurred_input = blurred;
-    fd.groups = &fg;
-    fd.group_count = 1;
-    optics_material_output frosted_out = {};
-    OT_REQUIRE(
-        optics_material_frosted_filter_apply(
-            env->frosted, &(optics_material_frosted_filter_apply_opts){
-                              .frame = frame, .desc = &fd, .out = &frosted_out}) == OPTICS_GFX_OK);
-
-    /* 3. Liquid Glass lens on the right half, animated along X by optics_motion_spring. */
-    const optics_material_liquid_glass_shape glass_shapes[1] = {
-        {.bounds = {glass_x, 56.0f, 96.0f, 96.0f}, .corner_radius = 20.0f},
-    };
-    optics_material_liquid_glass_group lg = OPTICS_MATERIAL_LIQUID_GLASS_GROUP_INIT;
-    lg.shapes = glass_shapes;
-    lg.shape_count = 1;
-    optics_material_liquid_glass_desc ld = OPTICS_MATERIAL_LIQUID_GLASS_DESC_INIT;
-    ld.input = env->backdrop;
-    ld.blurred_input = blurred;
-    ld.groups = &lg;
-    ld.group_count = 1;
-    optics_material_output glass_out = {};
-    OT_REQUIRE(
-        optics_material_liquid_glass_filter_apply(
-            env->glass, &(optics_material_liquid_glass_filter_apply_opts){
-                            .frame = frame, .desc = &ld, .out = &glass_out}) == OPTICS_GFX_OK);
-
-    /* 4. Composite backdrop -> frosted -> liquid glass -> foreground UI snapshot. */
+    /* 2. Composite backdrop -> blurred panel -> spring-animated card -> UI snapshot. */
     optics_gfx_color clear = optics_gfx_color_rgba_premul(0, 0, 0, 255);
     OT_REQUIRE(optics_gfx_canvas_begin(env->canvas, &(optics_gfx_canvas_pass_desc){
                                                         .type = OPTICS_GFX_TYPE_CANVAS_PASS_DESC,
@@ -175,8 +128,22 @@ static void render_composed_frame(compose_env *env, float glass_x,
                                                         .clear_color = &clear}) == OPTICS_GFX_OK);
     optics_gfx_canvas_draw_image(env->canvas, env->backdrop,
                                  (optics_gfx_rect){0.0f, 0.0f, (float)W, (float)H}, nullptr);
-    draw_material_output(env->canvas, frosted_out);
-    draw_material_output(env->canvas, glass_out);
+
+    /* Blurred region on the left half [16, 48, 120, 112]. */
+    optics_gfx_canvas_save(env->canvas);
+    optics_gfx_canvas_clip_rect(env->canvas, (optics_gfx_rect){16.0f, 48.0f, 120.0f, 112.0f});
+    optics_gfx_canvas_draw_image(env->canvas, blurred,
+                                 (optics_gfx_rect){0.0f, 0.0f, (float)W, (float)H}, nullptr);
+    optics_gfx_canvas_restore(env->canvas);
+
+    /* Animated rounded card on the right half driven by optics_motion_spring. */
+    optics_gfx_geometry card_geom =
+        optics_gfx_geom_rrect((optics_gfx_rect){card_x, 56.0f, 96.0f, 96.0f}, 20.0f);
+    optics_gfx_brush card_brush =
+        optics_gfx_brush_solid(optics_gfx_color_rgba_premul(32, 72, 160, 220));
+    optics_gfx_canvas_draw_geometry(env->canvas, &(optics_gfx_canvas_draw_geometry_opts){
+                                                     .geom = &card_geom, .brush = &card_brush});
+
     if (ui_snap)
         OT_EXPECT(optics_ui_snapshot_submit(ui_snap, env->canvas) == OPTICS_GFX_OK);
     OT_REQUIRE(optics_gfx_canvas_end(env->canvas) == OPTICS_GFX_OK);
@@ -204,11 +171,6 @@ int main(void) {
 
     env.backdrop = make_striped_backdrop(device);
     OT_REQUIRE(optics_gfx_blur_filter_create(device, &env.blur) == OPTICS_GFX_OK);
-    OT_REQUIRE(optics_material_frosted_filter_create(device, &env.frosted) == OPTICS_GFX_OK);
-    OT_REQUIRE(optics_material_liquid_glass_filter_create(device, &env.glass) == OPTICS_GFX_OK);
-
-    optics_ui_icon_id icon = optics_ui_icon_register_svg(BADGE_SVG);
-    OT_REQUIRE(icon != OPTICS_UI_ICON_INVALID);
 
     optics_ui *ui = nullptr;
     OT_REQUIRE(optics_ui_create(
@@ -219,7 +181,29 @@ int main(void) {
                    },
                    &ui) == OPTICS_GFX_OK);
 
-    /* Build a minimal HUD overlay (top bar: label + button + SVG icon). */
+    const optics_ui_icon_run badge_runs[2] = {
+        {
+            .first_cmd = 0u,
+            .count = 1u,
+            .color = optics_gfx_color_rgba_premul(0xff, 0x40, 0x60, 0xff),
+            .paint = OPTICS_UI_ICON_PAINT_FILL,
+        },
+        {
+            .first_cmd = 1u,
+            .count = 1u,
+            .color = optics_gfx_color_rgba_premul(0xff, 0xff, 0xff, 0xff),
+            .paint = OPTICS_UI_ICON_PAINT_FILL,
+        },
+    };
+    optics_ui_icon_id icon = optics_ui_icon_register(ui, &(optics_ui_icon_desc){
+                                                             .cmds = BADGE_CMDS,
+                                                             .count = 2u,
+                                                             .runs = badge_runs,
+                                                             .run_count = 2u,
+                                                         });
+    OT_REQUIRE(icon != OPTICS_UI_ICON_NONE);
+
+    /* Build a minimal HUD overlay (top bar: vector icon + label + button). */
     optics_ui_response btn = {};
     optics_ui_input in = {.display_size = {(float)W, (float)H}, .dt_seconds = 1.0f / 60.0f};
     for (int f = 0; f < 2; ++f) {
@@ -249,11 +233,11 @@ int main(void) {
     render_composed_frame(&env, 156.0f, ui_snap, px_frame0);
 
     /* 1. Uncovered bottom-right corner preserves the raw striped backdrop contrast. */
-    const uint8_t *raw_a = px_at(px_frame0, 4u, H - 8u);  /* stripe 0: greenish (40,220,80) */
-    const uint8_t *raw_b = px_at(px_frame0, 12u, H - 8u); /* stripe 1: yellowish (240,180,30) */
+    const uint8_t *raw_a = px_at(px_frame0, 4u, H - 8u);
+    const uint8_t *raw_b = px_at(px_frame0, 12u, H - 8u);
     OT_EXPECT(abs((int)raw_a[0] - (int)raw_b[0]) > 150);
 
-    /* 2. Inside the frosted glass panel, stripe contrast is significantly softened by blur. */
+    /* 2. Inside the blurred panel, stripe contrast is significantly softened by blur. */
     const uint8_t *fr_a = px_at(px_frame0, 52u, 100u);
     const uint8_t *fr_b = px_at(px_frame0, 60u, 100u);
     OT_EXPECT(fr_a[3] > 200);
@@ -262,7 +246,7 @@ int main(void) {
     /* 3. Foreground UI button visibly modifies pixels inside its exact layout rect. */
     OT_EXPECT(diff_in_rect(px_no_ui, px_frame0, btn_rect) > 100);
 
-    /* 4. Advance the glass body along X from 156 -> 208 using optics_motion_spring. */
+    /* 4. Advance the card along X from 156 -> 208 using optics_motion_spring. */
     optics_motion_spring spring = optics_motion_spring_at(156.0f);
     optics_motion_spring_params params = optics_motion_spring_snappy();
     for (int step = 0; step < 30; ++step)
@@ -270,7 +254,6 @@ int main(void) {
     OT_EXPECT(spring.value > 195.0f);
 
     render_composed_frame(&env, spring.value, ui_snap, px_frame_end);
-    /* The glass swept across [150, 50, 160, 110]; pixels there must visibly shift. */
     OT_EXPECT(diff_in_rect(px_frame0, px_frame_end,
                            (optics_gfx_rect){150.0f, 50.0f, 160.0f, 110.0f}) > 500);
 
@@ -280,8 +263,6 @@ int main(void) {
     free(px_frame_end);
     optics_ui_snapshot_release(ui_snap);
     optics_ui_release(ui);
-    optics_material_liquid_glass_filter_release(env.glass);
-    optics_material_frosted_filter_release(env.frosted);
     optics_gfx_blur_filter_release(env.blur);
     optics_gfx_image_release(env.backdrop);
     optics_gfx_canvas_release(env.canvas);

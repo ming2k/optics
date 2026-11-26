@@ -148,35 +148,28 @@ written in the display's space (`optics_gfx_surface_info.content_space`
 reports it). Do not use this on managed platforms — you would
 double-convert.
 
-## Scene (3D) content
+## Custom pipeline content
 
-The scene module renders into whatever pass the caller sets up. The
-color-managed pattern is render-to-texture then composite through the
+A caller-defined graphics pipeline renders into whatever pass the caller
+sets up. The color-managed pattern is render-to-texture then composite through the
 canvas, which applies the output transform:
 
     /* once: a working-space target */
-    optics_gfx_image *scene_rt = nullptr;
-    optics_gfx_image_create (OPTICS_GFX_IMAGE_USAGE_RENDER_TARGET)(d, w, h, OPTICS_GFX_FORMAT_RGBA16_SFLOAT, &scene_rt);
+    optics_gfx_image *content_rt = nullptr;
+    optics_gfx_image_create (OPTICS_GFX_IMAGE_USAGE_RENDER_TARGET)(d, w, h, OPTICS_GFX_FORMAT_RGBA16_SFLOAT, &content_rt);
 
-    /* per frame: render the scene into it, then composite */
-    optics_gfx_frame_prepare_image_target(frame, scene_rt);
-    /* begin pass on scene_rt->view, optics_gfx_scene_draw_mesh_* as usual */
-    optics_gfx_frame_finish_image_target(frame, scene_rt);
-    optics_gfx_canvas_draw_image(canvas, scene_rt, dst_rect, nullptr);
+    /* per frame: render into the 16F target via a custom pipeline, then composite */
+    optics_gfx_frame_prepare_image_target(frame, content_rt);
+    /* begin pass on content_rt->view and record custom draws */
+    optics_gfx_frame_finish_image_target(frame, content_rt);
+    optics_gfx_canvas_draw_image(canvas, content_rt, dst_rect, nullptr);
 
 16F images are working-space linear, so the canvas treats them
-correctly with no tag. Lights are already linear RGB
-(`optics_gfx_scene_light`); mesh base colors are linear floats. When the
-material's `color_format` is RGBA16_SFLOAT (as in the pattern above),
-base-color *textures* go through the same decode rules as canvas
-images — tagged via `optics_gfx_image_color_space_desc`, untagged 8-bit
-UNORM sampled as sRGB — so lighting runs in linear light. Materials
-declared for 8-bit targets keep the legacy raw-gamma path.
+correctly with no tag.
 
 ## Current boundaries
 
-- The **effect** module (blur/backdrop, and the material liquid-glass
-  material built on it) follows its input: 8-bit SDR content keeps the
+- The **effect** module (blur/backdrop/shadow) follows its input: 8-bit SDR content keeps the
   historic RGBA8 path; 16F working-space inputs run in 16F (linear
   light) when the device advertises rgba16f storage, and fail cleanly
   with `OPTICS_GFX_ERROR_UNSUPPORTED` where it does not.
