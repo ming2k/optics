@@ -56,7 +56,7 @@ extern "C" {
 
 #define OPTICS_WINDOW_VERSION_MAJOR 0
 #define OPTICS_WINDOW_VERSION_MINOR 0
-#define OPTICS_WINDOW_VERSION_PATCH 87
+#define OPTICS_WINDOW_VERSION_PATCH 88
 
 /* Packed integer version, monotonic — identical layout to
  * OPTICS_GFX_VERSION_NUMBER (major in bits 16..23, minor 8..15, patch 0..7).

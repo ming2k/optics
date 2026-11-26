@@ -46,7 +46,7 @@ extern "C" {
 
 #define OPTICS_UI_VERSION_MAJOR 0
 #define OPTICS_UI_VERSION_MINOR 0
-#define OPTICS_UI_VERSION_PATCH 87
+#define OPTICS_UI_VERSION_PATCH 88
 
 /* Stringify helpers used by optics_ui_version_string(); OPTICS_UI_STRINGIFY_ adds the
  * indirection level required for macro-expansion of literal tokens. */
