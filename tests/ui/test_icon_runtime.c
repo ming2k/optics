@@ -103,5 +103,34 @@ int main(void) {
     OT_EXPECT(optics_ui_overflowed(ui));
 
     optics_ui_release(ui);
+
+    /* Growing the registry must hand out clean slots. The headless allocator is
+     * libc malloc, which does not zero (ASan fills fresh blocks with 0xbe), so
+     * every slot past the registered ones must read unoccupied, generation 0,
+     * and own no buffers, or teardown frees garbage pointers. 40 registrations
+     * grow the table twice (16 -> 32 -> 64). */
+    optics_ui *grow = nullptr;
+    OT_EXPECT(optics_ui_create(&(optics_ui_desc){}, &grow) == OPTICS_GFX_OK);
+    enum { GROW_COUNT = 40 };
+    optics_ui_icon_id grown[GROW_COUNT] = {};
+    for (uint32_t i = 0; i < GROW_COUNT; i++) {
+        grown[i] = optics_ui_icon_register(grow, &(optics_ui_icon_desc){
+                                                     .cmds = FILL_CMDS,
+                                                     .count = 1u,
+                                                     .paint = OPTICS_UI_ICON_PAINT_FILL,
+                                                 });
+        OT_EXPECT(grown[i] != OPTICS_UI_ICON_NONE);
+        OT_EXPECT(optics_ui_icon_info(grow, grown[i]) != nullptr);
+        for (uint32_t j = 0; j < i; j++)
+            OT_EXPECT(grown[j] != grown[i]);
+    }
+    OT_EXPECT(grow->icons.cap >= GROW_COUNT);
+    for (uint32_t i = GROW_COUNT; i < grow->icons.cap; i++) {
+        const optics_ui__icon_slot *slot = &grow->icons.slots[i];
+        OT_EXPECT(!slot->occupied);
+        OT_EXPECT(slot->generation == 0u);
+        OT_EXPECT(slot->cmds == nullptr && slot->runs == nullptr);
+    }
+    optics_ui_release(grow);
     return OT_REPORT();
 }

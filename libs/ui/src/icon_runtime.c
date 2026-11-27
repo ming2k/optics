@@ -189,6 +189,12 @@ OPTICS_UI_API optics_ui_icon_id optics_ui_icon_register(optics_ui *ui,
             memcpy(new_slots, ui->icons.slots, ui->icons.cap * sizeof(optics_ui__icon_slot));
             optics_ui__free(ui, ui->icons.slots);
         }
+        /* The headless allocator is libc malloc, which does not zero: clear the
+         * grown tail so every new slot starts unoccupied at generation 0 with no
+         * owned buffers. Otherwise a later register can skip a garbage-occupied
+         * slot and registry teardown frees its garbage `cmds`/`runs`. */
+        memset(new_slots + ui->icons.cap, 0,
+               (size_t)(new_cap - ui->icons.cap) * sizeof(optics_ui__icon_slot));
         slot_idx = ui->icons.cap;
         ui->icons.slots = new_slots;
         ui->icons.cap = new_cap;
