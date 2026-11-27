@@ -25,8 +25,7 @@ For the shape of the API (object model, lifecycle, error model), see
 | `optics_gfx_path_cubic_to` |  |
 | `optics_gfx_path_close` |  |
 | `optics_gfx_path_add_rect` |  |
-| `optics_gfx_path_add_round_rect` |  |
-| `optics_gfx_path_add_squircle` |  |
+| `optics_gfx_path_add_rrect` | Orthogonal rounded-rectangle / continuous-curvature squircle path builder (ADR-0175). |
 | `optics_gfx_path_add_circle` |  |
 | `optics_gfx_path_dropped_count` | Number of segments rejected due to arena exhaustion. |
 | `optics_gfx_canvas_create` | Create a canvas on the selected backend. |
@@ -282,6 +281,7 @@ For the shape of the API (object model, lifecycle, error model), see
 | `optics_gfx_vec4_dot` |  |
 | `optics_gfx_vec4_length` |  |
 | `optics_gfx_vec4_normalize` |  |
+| `optics_gfx_corner_radii_normalize` | CSS Backgrounds & Borders Level 3 / Skia proportional radius normalization: clamps negative/non-finite entries to zero and, when adjacent corners exceed their shared edge, scales all four radii by the smallest factor that makes every edge fit. |
 | `optics_gfx_mat3x2_identity` |  |
 | `optics_gfx_mat3x2_translate` |  |
 | `optics_gfx_mat3x2_scale` |  |
@@ -356,12 +356,11 @@ For the shape of the API (object model, lifecycle, error model), see
 
 | Symbol | Description |
 |--------|-------------|
-| `optics_gfx_sdf_circle` | Exact. |
-| `optics_gfx_sdf_round_rect` | Exact, and `radius == 0` is a plain box. |
+| `optics_gfx_sdf_circle` | Exact signed distance to a circle centred on the origin. |
 | `optics_gfx_sdf_ring` | Border of half-width `half` around a shape whose signed distance is `d`: the ring is the set \|d\| <= half. |
-| `optics_gfx_sdf_squircle` | Squircle / continuous-curvature field: a rounded rectangle whose corner arc blends a circular arc (`curvature == 0`, where this is *exactly* optics_gfx_sdf_round_rect) with an L4 superellipse corner (`curvature == 1`, the "G2 squircle"). |
-| `optics_gfx_sdf_squircle_gradient` | Analytic unit gradient of optics_gfx_sdf_squircle with respect to `p` — the outward surface normal of the field. |
-| `optics_gfx_sdf_squircle_sample` | Field and shading normal from ONE evaluation. |
+| `optics_gfx_sdf_rrect` | Exact analytic signed distance to a rounded rectangle / continuous-curvature squircle centred on the origin with independent per-corner radii `(tl, tr, br, bl)` (ADR-0118, ADR-0175). |
+| `optics_gfx_sdf_rrect_gradient` | Analytic unit gradient of optics_gfx_sdf_rrect with respect to `p` — the outward surface normal of the field. |
+| `optics_gfx_sdf_rrect_sample` | Field and shading normal from ONE evaluation. |
 | `optics_gfx_sdf_smooth_union` | Composition: the polynomial smooth-minimum of two fields — the metaball union a fused body is made of. |
 | `optics_gfx_sdf_smooth_union_gradient` | Unit gradient of optics_gfx_sdf_smooth_union with respect to position, from the two fields' unit gradients and their values. |
 | `optics_gfx_sdf_coverage` | Analytic coverage from a signed distance and the screen-space gradient magnitude of the field (`aa`, i.e. how many caller units one pixel spans; pass the result of the transform's scale extraction). |

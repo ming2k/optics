@@ -1548,7 +1548,7 @@ static void vk_restore_layer(const optics_gfx_canvas_backend *self, optics_gfx_c
 
         draw_image_with_sampler_handle(c, nullptr, layer_linear->bindless, nullptr,
                                        optics_gfx_device_default_sampler_handle(c->device), dst,
-                                       src, tint, OPTICS_GFX_BLEND_SRC_OVER, 3u, nullptr, 0.0f);
+                                       src, tint, OPTICS_GFX_BLEND_SRC_OVER, 3u);
         batch_flush(c);
 
         c->states[c->state_top].transform = saved_tx;

@@ -53,7 +53,7 @@ void optics_ui__skin_button(optics_ui *ui, optics_ui_node *n, const optics_ui_wi
                         .kind = OPTICS_UI_DRAW_RECT,
                         .rel = {rs->padding, text_y + tm_h + 1.0f, rec->content.text.width, 1.0f},
                         .color = line_col,
-                        .radius = 0.0f,
+                        .corner_radii = optics_gfx_corner_radii_uniform(0.0f),
                     });
             }
         }
@@ -91,7 +91,7 @@ void optics_ui__skin_button(optics_ui *ui, optics_ui_node *n, const optics_ui_wi
                                      .kind = OPTICS_UI_DRAW_RECT,
                                      .rel = {0, 0, w, h},
                                      .color = bg,
-                                     .radius = btn_radius,
+                                     .corner_radii = optics_gfx_corner_radii_uniform(btn_radius),
                                  });
     }
 
@@ -103,7 +103,7 @@ void optics_ui__skin_button(optics_ui *ui, optics_ui_node *n, const optics_ui_wi
                                      .rel = {0, 0, w, h},
                                      .color = rs->border,
                                      .width = rs->border_width,
-                                     .radius = btn_radius,
+                                     .corner_radii = optics_gfx_corner_radii_uniform(btn_radius),
                                  });
     }
 

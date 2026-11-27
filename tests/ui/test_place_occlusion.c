@@ -24,7 +24,7 @@ static optics_ui_place_opts card_opts(optics_gfx_rect rect) {
                 .bg = 0xFA20202Cu,
                 .border = 0x12FFFFFFu,
                 .border_width = 1.0f,
-                .radius = 12.0f,
+                .corner_radii = optics_gfx_corner_radii_uniform(12.0f),
                 .cross = OPTICS_UI_STRETCH,
             },
     };

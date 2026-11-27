@@ -14,11 +14,12 @@ void optics_ui__skin_textedit(optics_ui *ui, optics_ui_node *n,
     optics_gfx_color resting_bg =
         (rs->border_width > 0.0f) ? rs->bg : ui->theme.color_surface_sunken;
     optics_gfx_color bg = (hovered && !disabled && c->multiline) ? rs->bg_hover : resting_bg;
-    optics_ui__drawlist_push(ui, n,
-                             (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_RECT,
-                                                  .rel = {0, 0, 0, 0},
-                                                  .color = bg,
-                                                  .radius = rs->corner_radius});
+    optics_ui__drawlist_push(
+        ui, n,
+        (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_RECT,
+                             .rel = {0, 0, 0, 0},
+                             .color = bg,
+                             .corner_radii = optics_gfx_corner_radii_uniform(rs->corner_radius)});
 
     /* Selection highlight (behind text) */
     for (int i = 0; i < c->sel_rect_count; i++) {
@@ -27,7 +28,7 @@ void optics_ui__skin_textedit(optics_ui *ui, optics_ui_node *n,
             (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_RECT,
                                  .rel = c->sel_rects[i],
                                  .color = optics_ui__color_alpha(rs->accent, 0x40),
-                                 .radius = 1.0f});
+                                 .corner_radii = optics_gfx_corner_radii_uniform(1.0f)});
     }
 
     /* Border: disabled / error / focused chain */
@@ -40,22 +41,26 @@ void optics_ui__skin_textedit(optics_ui *ui, optics_ui_node *n,
         border_color = rs->accent;
 
     if (rs->border_width > 0.0f && (border_color & 0xFF000000u) != 0) {
-        optics_ui__drawlist_push(ui, n,
-                                 (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_BORDER,
-                                                      .rel = {0, 0, 0, 0},
-                                                      .color = border_color,
-                                                      .width = rs->border_width,
-                                                      .radius = rs->corner_radius});
+        optics_ui__drawlist_push(
+            ui, n,
+            (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_BORDER,
+                                 .rel = {0, 0, 0, 0},
+                                 .color = border_color,
+                                 .width = rs->border_width,
+                                 .corner_radii =
+                                     optics_gfx_corner_radii_uniform(rs->corner_radius)});
     } else if (focused || c->error) {
         /* When default border is 0 (minimalist), focused or error state still provides
          * a crisp, accessible focus outline so typing affordance is unmistakable. */
         optics_gfx_color ring_col = c->error ? ui->theme.color_error : rs->accent;
-        optics_ui__drawlist_push(ui, n,
-                                 (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_BORDER,
-                                                      .rel = {0, 0, 0, 0},
-                                                      .color = ring_col,
-                                                      .width = 1.5f,
-                                                      .radius = rs->corner_radius});
+        optics_ui__drawlist_push(
+            ui, n,
+            (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_BORDER,
+                                 .rel = {0, 0, 0, 0},
+                                 .color = ring_col,
+                                 .width = 1.5f,
+                                 .corner_radii =
+                                     optics_gfx_corner_radii_uniform(rs->corner_radius)});
     }
 
     /* Text rendering */
@@ -104,7 +109,9 @@ void optics_ui__skin_textedit(optics_ui *ui, optics_ui_node *n,
     if (c->show_caret && ui->caret_visible) {
         optics_ui__drawlist_push(
             ui, n,
-            (optics_ui_draw_cmd){
-                .kind = OPTICS_UI_DRAW_RECT, .rel = c->caret, .color = rs->accent, .radius = 1.0f});
+            (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_RECT,
+                                 .rel = c->caret,
+                                 .color = rs->accent,
+                                 .corner_radii = optics_gfx_corner_radii_uniform(1.0f)});
     }
 }

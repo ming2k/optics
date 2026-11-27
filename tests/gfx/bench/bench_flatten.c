@@ -52,7 +52,8 @@ static void bench_flatten_round_rect(void *p) {
     flatten_ctx *c = p;
     optics_gfx_path *path = nullptr;
     (void)optics_gfx_path_create(&path, c->arena);
-    optics_gfx_path_add_round_rect(path, (optics_gfx_rect){0, 0, 100, 100}, 10.0f);
+    optics_gfx_path_add_rrect(path, (optics_gfx_rect){0, 0, 100, 100},
+                              optics_gfx_corner_radii_uniform(10.0f), 0.0f);
     flatten_multi r = flatten_path_to_contours(path, c->pixel_scale, c->pts, c->cap, c->cons,
                                                OPTICS_GFX_CANVAS_MAX_CONTOURS);
     c->result = r.point_count;

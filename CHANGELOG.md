@@ -13,6 +13,15 @@ pre-1.0 release may break source or binary compatibility, so the SONAME
 carries the full version and a mismatched binary fails to load instead of
 silently reading a different descriptor layout.
 
+## [Unreleased]
+
+### Changed — Per-corner analytic squircle SDF, unified RRect geometry, and API cleanup (ADR-0175, breaking)
+
+- **`liboptics_gfx`: first-class per-corner radii (`optics_gfx_corner_radii`).** `<optics/gfx/math.h>` adds `optics_gfx_corner_radii { tl, tr, br, bl }` (clockwise CSS/Skia order), `optics_gfx_corner_radii_uniform`, `optics_gfx_corner_radii_all`, and `optics_gfx_corner_radii_normalize` (with overflow protection for large pill sentinels and NaN/Inf clamping).
+- **`liboptics_gfx`: unified `OPTICS_GFX_GEOM_RRECT` and single path/SDF families.** `OPTICS_GFX_GEOM_SQUIRCLE` is removed; `OPTICS_GFX_GEOM_RRECT` carries `{ rect, radii, curvature }` inside one 64-byte cache line. `optics_gfx_brush_image_data` replaces `clip_radius` with `clip_radii` + `clip_curvature` (validated in `canvas_valid_brush`). Display list wire format bumps `DL_VERSION` from `1` to `2` (ADR-0157). Exported path builders converge to `optics_gfx_path_add_rrect`; exported SDF primitives converge to `optics_gfx_sdf_rrect`, `optics_gfx_sdf_rrect_gradient`, and `optics_gfx_sdf_rrect_sample` across C and `optics_gfx_sdf.slang`.
+- **`liboptics_ui`: single-representation corner radii.** `float radius` is replaced by `optics_gfx_corner_radii corner_radii` + `float corner_curvature` on `optics_ui_layout_opts`, `optics_ui_grid_opts`, `optics_ui_skin_rect_opts`, `optics_ui_skin_border_opts`, and internal draw commands. `drawlist.c` hashes finite floats via canonical bit patterns (`hash_f32`), eliminating `float` → `uint32_t` cast overflow UB.
+- **Rust bindings (`optics-gfx`, `optics-ui`):** `optics-gfx-sys` now binds `<optics/gfx/sdf.h>` and `<optics/gfx/curve.h>`. `optics_gfx::CornerRadii` is the single workspace type (re-exported by `optics-ui`). `Path::add_rrect`, `CanvasCommands::{fill_rrect, stroke_rrect, draw_image_with}` (`ImageDrawOpts`), and `optics_ui::Frame` (`LabelOpts`, `SliderOpts`, `TextEditOpts`, `button_with_variant`, unified `icon`/`icon_button`) eliminate combinatorial variant methods, `_ex` suffixes, and redundant builder aliases.
+
 ## [0.0.88] - 2026-11-27
 
 ### Removed — Pure graphics & UI core (ADR-0174, breaking)

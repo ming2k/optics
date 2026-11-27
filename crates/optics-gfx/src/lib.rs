@@ -27,7 +27,7 @@ use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 pub use optics_gfx_sys as sys;
 
 /// Library version string, from the linked library — the same value C's `OPTICS_GFX_VERSION_NUMBER` macros
-/// describe. Sibling crates (`ui`, `window`, `material`) carry matching
+/// describe. Sibling crates (`ui`, `window`, `text`, `app`) carry matching
 /// wrappers, so a mixed-version process can be detected at startup.
 pub fn version() -> &'static str {
     // SAFETY: optics_gfx_version_string returns a static NUL-terminated string.
@@ -55,6 +55,7 @@ pub fn version_check(major: u32, minor: u32, patch: u32) -> bool {
 mod canvas;
 mod canvas_commands;
 mod color;
+mod corner_radii;
 mod device;
 mod display_list;
 mod dmabuf;
@@ -71,7 +72,9 @@ mod target;
 mod tests;
 
 pub use canvas::*;
+pub use canvas_commands::ImageDrawOpts;
 pub use color::*;
+pub use corner_radii::*;
 pub use device::*;
 pub use display_list::*;
 pub use dmabuf::*;

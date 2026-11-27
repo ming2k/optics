@@ -1,8 +1,10 @@
 /*
- * sdf_parity.comp.slang — differential harness for the SDF derivative (ADR-0148) in Slang.
+ * sdf_parity.comp.slang — differential harness for the unified per-corner SDF
+ * and its derivatives (ADR-0148, ADR-0175) in Slang.
  *
- * Evaluates `optics_gfx_sdf.slang` on the GPU and writes its distance and normal into a storage
- * buffer, so test_sdf_parity can compare them against <optics/gfx/sdf.h> on the CPU.
+ * Evaluates `optics_gfx_sdf.slang` on the GPU and writes its distance and normal
+ * into a storage buffer, so test_sdf_parity can compare them against
+ * <optics/gfx/sdf.h> on the CPU.
  */
 
 #include "optics_gfx_sdf.slang"
@@ -10,13 +12,13 @@
 struct Params {
     uint64_t out_address;
     float2   half_extent;
-    float    radius;
+    float4   radii;      /* (tl, tr, br, bl) */
     float    curvature;
     float    aa;
+    float    union_r;
     uint32_t sample_count;
     uint32_t mode;
-    float    pad1;
-    float    pad2;
+    uint32_t _pad;
 };
 
 [[vk::push_constant]]
@@ -41,18 +43,19 @@ void main(uint3 dispatchThreadID : SV_DispatchThreadID)
     float3 s;
     if (pc.mode == 2u) {
         float2 p_b = p - float2(half_extent.x * 0.75f, 0.0f);
-        float3 a = optics_gfx_sdf_squircle_sample(p, half_extent, pc.radius * 0.25f, pc.curvature, pc.aa);
-        float3 b_ = optics_gfx_sdf_squircle_sample(p_b, half_extent * 0.7f, pc.radius * 0.25f, pc.curvature, pc.aa);
+        float4 sub_r = pc.radii * 0.25f;
+        float3 a = optics_gfx_sdf_rrect_sample(p, half_extent, sub_r, pc.curvature, pc.aa);
+        float3 b_ = optics_gfx_sdf_rrect_sample(p_b, half_extent * 0.7f, sub_r, pc.curvature, pc.aa);
         float h;
-        float d = optics_gfx_smooth_union(float2(a.x, b_.x), pc.radius, h);
-        float2 g = optics_gfx_smooth_union_gradient(a.yz, b_.yz, float2(a.x, b_.x), pc.radius);
+        float d = optics_gfx_smooth_union(float2(a.x, b_.x), pc.union_r, h);
+        float2 g = optics_gfx_smooth_union_gradient(a.yz, b_.yz, float2(a.x, b_.x), pc.union_r);
         s = float3(d, g.x, g.y);
     } else if (pc.mode == 1u) {
-        float d = optics_gfx_sdf_squircle(p, half_extent, pc.radius, pc.curvature);
-        float2 g = optics_gfx_sdf_squircle_gradient(p, half_extent, pc.radius, pc.curvature);
+        float d = optics_gfx_sdf_rrect(p, half_extent, pc.radii, pc.curvature);
+        float2 g = optics_gfx_sdf_rrect_gradient(p, half_extent, pc.radii, pc.curvature);
         s = float3(d, g.x, g.y);
     } else {
-        s = optics_gfx_sdf_squircle_sample(p, half_extent, pc.radius, pc.curvature, pc.aa);
+        s = optics_gfx_sdf_rrect_sample(p, half_extent, pc.radii, pc.curvature, pc.aa);
     }
 
     float4* dst = (float4*)pc.out_address;

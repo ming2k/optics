@@ -4,6 +4,7 @@
 
 #include "optics_test.h"
 #include "ui_test.h"
+#include <optics/gfx/canvas_cpu.h>
 #include <optics/ui.h>
 
 static const optics_ui_input ZERO_IN = {.display_size = {400, 300}, .dt_seconds = 0.016f};
@@ -306,6 +307,75 @@ static void test_placed_node_parents_into_tree(void) {
     optics_ui_release(ui);
 }
 
+static void test_placed_per_corner_radii_renders_and_damages(void) {
+    optics_ui *ui = nullptr;
+    OT_EXPECT(optics_ui_create(&(optics_ui_desc){}, &ui) == OPTICS_GFX_OK);
+
+    optics_gfx_canvas *canvas = nullptr;
+    OT_EXPECT(
+        optics_gfx_canvas_create(&(optics_gfx_canvas_desc){.type = OPTICS_GFX_TYPE_CANVAS_DESC,
+                                                           .backend = OPTICS_GFX_CANVAS_BACKEND_CPU,
+                                                           .scale = 1,
+                                                           .width = 64,
+                                                           .height = 64},
+                                 &canvas) == OPTICS_GFX_OK);
+
+    optics_ui_input in = {.display_size = {64, 64}, .dt_seconds = 0.016f};
+    optics_ui_place_opts opts = {
+        .box = {.id = "corner"},
+        .band = OPTICS_UI_BAND_CHROME,
+        .mode = OPTICS_UI_PLACE_EXACT,
+        .rect = {0, 0, 22, 22},
+        .transient = false,
+        .layout =
+            {
+                .bg = optics_gfx_color_rgba_premul(255, 255, 255, 255),
+                .corner_radii = optics_gfx_corner_radii_all(0, 0, 22, 0),
+                .corner_curvature = 0.6f,
+            },
+    };
+
+    optics_ui_begin(ui, &in);
+    if (optics_ui_place_begin(ui, &opts))
+        optics_ui_place_end(ui);
+    optics_ui_end(ui);
+
+    optics_ui_scene_snapshot *snap = nullptr;
+    OT_EXPECT(optics_ui_snapshot_create(ui, &snap) == OPTICS_GFX_OK);
+    optics_gfx_color clear = 0;
+    OT_EXPECT(optics_gfx_canvas_begin(
+                  canvas, &(optics_gfx_canvas_pass_desc){.type = OPTICS_GFX_TYPE_CANVAS_PASS_DESC,
+                                                         .clear_color = &clear}) == OPTICS_GFX_OK);
+    OT_EXPECT(optics_ui_snapshot_submit(snap, canvas) == OPTICS_GFX_OK);
+    OT_EXPECT(optics_gfx_canvas_end(canvas) == OPTICS_GFX_OK);
+    OT_EXPECT(optics_ui_snapshot_activate(ui, snap) == OPTICS_GFX_OK);
+    optics_ui_snapshot_release(snap);
+
+    uint32_t stride = 0;
+    const uint8_t *px = optics_gfx_canvas_read_pixels(canvas, nullptr, nullptr, &stride);
+    OT_EXPECT(px != nullptr);
+    /* Crisp 90° top-left vertex is opaque; interior is opaque; bottom-right
+     * outside the quarter-squircle is transparent; nothing leaks past 22x22. */
+    OT_EXPECT(px[0 * stride + 0 * 4 + 3] == 255);
+    OT_EXPECT(px[8 * stride + 8 * 4 + 3] == 255);
+    OT_EXPECT(px[21 * stride + 21 * 4 + 3] == 0);
+    OT_EXPECT(px[0 * stride + 24 * 4 + 3] == 0);
+    OT_EXPECT(px[24 * stride + 0 * 4 + 3] == 0);
+
+    /* Mutating corner_radii invalidates cmd_hash and emits UI damage. */
+    opts.layout.corner_radii = optics_gfx_corner_radii_all(0, 0, 12, 0);
+    optics_ui_begin(ui, &in);
+    if (optics_ui_place_begin(ui, &opts))
+        optics_ui_place_end(ui);
+    optics_ui_end(ui);
+    optics_gfx_rect dmg[4] = {};
+    OT_EXPECT(optics_ui_damage_rects(ui, &(optics_ui_damage_opts){.rects = dmg, .capacity = 4}) >
+              0);
+
+    optics_gfx_canvas_release(canvas);
+    optics_ui_release(ui);
+}
+
 int main(void) {
     test_open_close_persist();
     test_begin_gated_by_open_state();
@@ -316,5 +386,6 @@ int main(void) {
     test_escape_dismisses_top();
     test_centered_on_display();
     test_placed_node_parents_into_tree();
+    test_placed_per_corner_radii_renders_and_damages();
     return OT_REPORT();
 }

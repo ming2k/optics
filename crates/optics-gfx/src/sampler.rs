@@ -47,6 +47,7 @@ impl Default for SamplerDesc {
 }
 
 /// Refcounted bindless texture sampler.
+#[derive(Debug)]
 pub struct Sampler {
     pub(crate) raw: *mut sys::optics_gfx_sampler,
 }

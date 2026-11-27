@@ -35,7 +35,8 @@ int main(void) {
     };
     optics_gfx_geometry geoms[] = {
         optics_gfx_geom_rect((optics_gfx_rect){4, 4, 56, 56}),
-        optics_gfx_geom_rrect((optics_gfx_rect){4, 4, 56, 56}, 12),
+        optics_gfx_geom_rrect((optics_gfx_rect){4, 4, 56, 56},
+                              optics_gfx_corner_radii_uniform(12.0f), 0.0f),
         optics_gfx_geom_circle(32, 32, 28),
     };
     for (unsigned i = 0; i < 3; i++) {
@@ -105,6 +106,59 @@ int main(void) {
         c, &(optics_gfx_canvas_draw_geometry_opts){.geom = &geoms[1], .brush = &white});
     OT_EXPECT(optics_gfx_canvas_end(c) == OPTICS_GFX_OK);
     OT_EXPECT(pixel(c, 32, 32)[3] > 250);
+    /* Per-corner radii: quarter-circle [0, 0, 24, 0] in a 24x24 box at (0, 0),
+     * flush 90° against top and left bezels with an exact circular arc facing
+     * bottom-right. */
+    optics_gfx_arena arena;
+    OT_EXPECT(optics_gfx_arena_init(&arena, 4096, nullptr) == OPTICS_GFX_OK);
+    optics_gfx_path *quarter = nullptr;
+    OT_EXPECT(optics_gfx_path_create(&quarter, &arena) == OPTICS_GFX_OK);
+    optics_gfx_path_add_rrect(quarter, (optics_gfx_rect){0, 0, 24, 24},
+                              optics_gfx_corner_radii_all(0, 0, 24, 0), 0.0f);
+    optics_gfx_geometry q_geom = optics_gfx_geom_path(quarter);
+    OT_EXPECT(optics_gfx_canvas_begin(
+                  c, &(optics_gfx_canvas_pass_desc){.type = OPTICS_GFX_TYPE_CANVAS_PASS_DESC,
+                                                    .clear_color = &(optics_gfx_color){}}) ==
+              OPTICS_GFX_OK);
+    optics_gfx_canvas_draw_geometry(
+        c, &(optics_gfx_canvas_draw_geometry_opts){.geom = &q_geom, .brush = &white});
+    OT_EXPECT(optics_gfx_canvas_end(c) == OPTICS_GFX_OK);
+    /* Crisp 90° top-left vertex is solid; interior of quarter-circle is solid;
+     * bottom-right corner outside the radius-24 arc is completely transparent;
+     * pixels beyond x=24 or y=24 are completely transparent. */
+    OT_EXPECT(pixel(c, 0, 0)[3] == 255);
+    OT_EXPECT(pixel(c, 10, 10)[3] == 255);
+    OT_EXPECT(pixel(c, 22, 22)[3] == 0);
+    OT_EXPECT(pixel(c, 26, 2)[3] == 0);
+    OT_EXPECT(pixel(c, 2, 26)[3] == 0);
+
+    /* Per-corner squircle: bezel-flush top edge tab [0, 0, 8, 8] in a 48x8 box. */
+    optics_gfx_path *tab = nullptr;
+    OT_EXPECT(optics_gfx_path_create(&tab, &arena) == OPTICS_GFX_OK);
+    optics_gfx_path_add_rrect(tab, (optics_gfx_rect){8, 0, 48, 8},
+                              optics_gfx_corner_radii_all(0, 0, 8, 8), 0.6f);
+    optics_gfx_geometry t_geom = optics_gfx_geom_path(tab);
+    OT_EXPECT(optics_gfx_canvas_begin(
+                  c, &(optics_gfx_canvas_pass_desc){.type = OPTICS_GFX_TYPE_CANVAS_PASS_DESC,
+                                                    .clear_color = &(optics_gfx_color){}}) ==
+              OPTICS_GFX_OK);
+    optics_gfx_canvas_draw_geometry(
+        c, &(optics_gfx_canvas_draw_geometry_opts){.geom = &t_geom, .brush = &white});
+    OT_EXPECT(optics_gfx_canvas_end(c) == OPTICS_GFX_OK);
+    /* Top corners are crisp 90° (tangent pixel at x=8/55 curves slightly over
+     * y∈[0,1] for r=8, so analytic coverage is >240 there and 255 immediately
+     * inward); bottom-left/right corners outside the curve are transparent;
+     * middle bottom is solid; below y=8 is transparent. */
+    OT_EXPECT(pixel(c, 8, 0)[3] > 240);
+    OT_EXPECT(pixel(c, 9, 0)[3] == 255);
+    OT_EXPECT(pixel(c, 55, 0)[3] > 240);
+    OT_EXPECT(pixel(c, 54, 0)[3] == 255);
+    OT_EXPECT(pixel(c, 32, 7)[3] == 255);
+    OT_EXPECT(pixel(c, 8, 7)[3] == 0);
+    OT_EXPECT(pixel(c, 55, 7)[3] == 0);
+    OT_EXPECT(pixel(c, 32, 9)[3] == 0);
+
+    optics_gfx_arena_deinit(&arena);
     optics_gfx_canvas_release(c);
     return OT_REPORT();
 }

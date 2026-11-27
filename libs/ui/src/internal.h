@@ -74,7 +74,8 @@ typedef struct optics_ui_draw_cmd {
     float text_advance;
     optics_gfx_color color;
     optics_gfx_color outline_color; /* opt-in foreground contour */
-    float radius;
+    optics_gfx_corner_radii corner_radii;
+    float corner_curvature;
     float width; /* border width */
     float outline_width;
     const char *text; /* OPTICS_UI_DRAW_TEXT: arena-copied utf8 */

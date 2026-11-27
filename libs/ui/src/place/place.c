@@ -218,19 +218,23 @@ bool optics_ui_place_begin(optics_ui *ui, const optics_ui_place_opts *opts) {
 
     /* Surface fill + border, resolved at replay against final_rect. */
     if ((opts->layout.bg & 0xFF000000u) != 0) {
-        optics_ui__drawlist_push(ui, n,
-                                 (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_RECT,
-                                                      .rel = {0, 0, 0, 0},
-                                                      .color = opts->layout.bg,
-                                                      .radius = opts->layout.radius});
+        optics_ui__drawlist_push(
+            ui, n,
+            (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_RECT,
+                                 .rel = {0, 0, 0, 0},
+                                 .color = opts->layout.bg,
+                                 .corner_radii = opts->layout.corner_radii,
+                                 .corner_curvature = opts->layout.corner_curvature});
     }
     if ((opts->layout.border & 0xFF000000u) != 0 && opts->layout.border_width > 0.0f) {
-        optics_ui__drawlist_push(ui, n,
-                                 (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_BORDER,
-                                                      .rel = {0, 0, 0, 0},
-                                                      .color = opts->layout.border,
-                                                      .radius = opts->layout.radius,
-                                                      .width = opts->layout.border_width});
+        optics_ui__drawlist_push(
+            ui, n,
+            (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_BORDER,
+                                 .rel = {0, 0, 0, 0},
+                                 .color = opts->layout.border,
+                                 .corner_radii = opts->layout.corner_radii,
+                                 .corner_curvature = opts->layout.corner_curvature,
+                                 .width = opts->layout.border_width});
     }
 
     optics_ui__open_container_push(ui, n);

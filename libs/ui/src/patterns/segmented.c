@@ -36,7 +36,7 @@ bool optics_ui_segmented_control(optics_ui *ui, const optics_ui_segmented_opts *
         .gap = 2.0f,
         .pad = 2.0f,
         .cross = OPTICS_UI_STRETCH,
-        .radius = radius,
+        .corner_radii = optics_gfx_corner_radii_uniform(radius),
         .border_width = border_w,
         .bg = bg,
         .border = (border_w > 0.0f) ? border_color : 0,

@@ -121,7 +121,7 @@ static void test_slider_geometry_uses_theme_tokens(void) {
         const optics_ui_draw_cmd *knob = &slider->cmds[2];
         OT_EXPECT_NEAR(track->rel.h, 2.5f, 0.001f);
         OT_EXPECT_NEAR(fill->rel.h, 2.5f, 0.001f);
-        OT_EXPECT_NEAR(track->radius, 1.25f, 0.001f);
+        OT_EXPECT_NEAR(track->corner_radii.tl, 1.25f, 0.001f);
         OT_EXPECT_NEAR(knob->rel.w, 10.0f, 0.01f);
         OT_EXPECT_NEAR(knob->rel.h, 10.0f, 0.01f);
     }

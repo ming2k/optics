@@ -1,7 +1,10 @@
 //! Headless software-canvas smoke test: exercises the CPU backend end to end
 //! from the safe Rust API with no GPU, device, or window.
 
-use optics_gfx::{Canvas, CanvasPassOptions, Encoder, GradientStop, Target, rgba};
+use optics_gfx::{
+    Arena, Brush, Canvas, CanvasPassOptions, CornerRadii, Encoder, FillRule, GradientStop, Path,
+    Target, rgba,
+};
 
 #[test]
 fn cpu_canvas_renders_and_reads_back() {
@@ -19,7 +22,7 @@ fn cpu_canvas_renders_and_reads_back() {
             },
         )
         .expect("begin");
-    session.fill_rrect(8.0, 8.0, 48.0, 48.0, 12.0, red);
+    session.fill_rrect(8.0, 8.0, 48.0, 48.0, 12.0, 0.0, red);
     session.end().expect("end checked CPU pass");
 
     let (w, h, stride, px) = c.read_pixels().expect("CPU backend exposes pixels");
@@ -296,4 +299,60 @@ fn encoder_display_list_playback_to_target() {
 
     let pixels = target.cpu_pixels().expect("read CPU target pixels");
     assert_eq!(pixels.len(), 32 * 32 * 4);
+}
+
+#[test]
+fn per_corner_squircle_rrect_and_path_agree() {
+    // Quarter-squircle [0, 0, 24, 0] in a 24x24 box: crisp top-left, curved bottom-right.
+    let radii = CornerRadii::new(0.0, 0.0, 24.0, 0.0);
+    assert_eq!(radii.normalize(24.0, 24.0), radii);
+    assert_eq!(
+        CornerRadii::uniform(f32::MAX).normalize(100.0, 20.0),
+        CornerRadii::uniform(10.0)
+    );
+
+    let mut c_sdf = Canvas::new_cpu(32, 32, 1.0).unwrap();
+    let white = rgba(255, 255, 255, 255);
+    let session = c_sdf
+        .begin_session(
+            (),
+            CanvasPassOptions {
+                clear: Some(0),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    session.fill_rrect(0.0, 0.0, 24.0, 24.0, radii, 0.6, white);
+    session.end().unwrap();
+
+    let mut c_path = Canvas::new_cpu(32, 32, 1.0).unwrap();
+    let arena = Arena::with_capacity(8192).unwrap();
+    let path = Path::new(&arena).unwrap();
+    path.add_rrect(0.0, 0.0, 24.0, 24.0, radii, 0.6);
+    let session = c_path
+        .begin_session(
+            (),
+            CanvasPassOptions {
+                clear: Some(0),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    session.fill_path(&path, FillRule::NonZero, &Brush::solid(white));
+    session.end().unwrap();
+
+    let (_, _, s1, p1) = c_sdf.read_pixels().unwrap();
+    let (_, _, s2, p2) = c_path.read_pixels().unwrap();
+    assert_eq!(p1[3], 255);
+    assert_eq!(p1[22 * s1 as usize + 22 * 4 + 3], 0);
+    for y in 0..32usize {
+        for x in 0..32usize {
+            let a = p1[y * s1 as usize + x * 4 + 3];
+            let b = p2[y * s2 as usize + x * 4 + 3];
+            assert!(
+                !((a == 255 && b == 0) || (a == 0 && b == 255)),
+                "SDF/path disagreement at ({x}, {y}): sdf={a}, path={b}"
+            );
+        }
+    }
 }

@@ -43,19 +43,34 @@ const char *optics_ui__arena_strndup(optics_ui *ui, const char *s, size_t len) {
     return copy;
 }
 
+/* Hash a finite float without float->uint32 cast overflow UB (even for huge
+ * pill sentinels like 1e9f or FLT_MAX). Normalizes -0.0f to +0.0f so equal
+ * values always hash identically. */
+static uint32_t hash_f32(float v) {
+    if (v == 0.0f)
+        return 0u;
+    uint32_t bits = 0;
+    memcpy(&bits, &v, sizeof(bits));
+    return bits;
+}
+
 static uint32_t hash_cmd(const optics_ui_draw_cmd *c) {
     uint32_t h = (uint32_t)c->kind;
     h = h * 31 + c->color;
     h = h * 31 + c->outline_color;
-    h = h * 31 + (uint32_t)(c->rel.x * 1000.0f);
-    h = h * 31 + (uint32_t)(c->rel.y * 1000.0f);
-    h = h * 31 + (uint32_t)(c->rel.w * 1000.0f);
-    h = h * 31 + (uint32_t)(c->rel.h * 1000.0f);
-    h = h * 31 + (uint32_t)(c->radius * 1000.0f);
-    h = h * 31 + (uint32_t)(c->width * 1000.0f);
-    h = h * 31 + (uint32_t)(c->outline_width * 1000.0f);
-    h = h * 31 + (uint32_t)(c->text_size * 1000.0f);
-    h = h * 31 + (uint32_t)(c->text_weight * 1000.0f);
+    h = h * 31 + hash_f32(c->rel.x);
+    h = h * 31 + hash_f32(c->rel.y);
+    h = h * 31 + hash_f32(c->rel.w);
+    h = h * 31 + hash_f32(c->rel.h);
+    h = h * 31 + hash_f32(c->corner_radii.tl);
+    h = h * 31 + hash_f32(c->corner_radii.tr);
+    h = h * 31 + hash_f32(c->corner_radii.br);
+    h = h * 31 + hash_f32(c->corner_radii.bl);
+    h = h * 31 + hash_f32(c->corner_curvature);
+    h = h * 31 + hash_f32(c->width);
+    h = h * 31 + hash_f32(c->outline_width);
+    h = h * 31 + hash_f32(c->text_size);
+    h = h * 31 + hash_f32(c->text_weight);
     h = h * 31 + (uint32_t)c->text_family;
     if (c->text) {
         const char *p = c->text;
@@ -82,8 +97,10 @@ void optics_ui__drawlist_push(optics_ui *ui, optics_ui_node *n, optics_ui_draw_c
      * local: drop a non-finite command and clamp a negative extent/radius to
      * zero. */
     if (!isfinite(cmd.rel.x) || !isfinite(cmd.rel.y) || !isfinite(cmd.rel.w) ||
-        !isfinite(cmd.rel.h) || !isfinite(cmd.radius) || !isfinite(cmd.width) ||
-        !isfinite(cmd.text_size)) {
+        !isfinite(cmd.rel.h) || !isfinite(cmd.width) || !isfinite(cmd.text_size) ||
+        !isfinite(cmd.corner_curvature) || !isfinite(cmd.corner_radii.tl) ||
+        !isfinite(cmd.corner_radii.tr) || !isfinite(cmd.corner_radii.br) ||
+        !isfinite(cmd.corner_radii.bl)) {
         return;
     }
     if (cmd.kind != OPTICS_UI_DRAW_TEXT) {
@@ -92,8 +109,18 @@ void optics_ui__drawlist_push(optics_ui *ui, optics_ui_node *n, optics_ui_draw_c
         if (cmd.rel.h < 0.0f)
             cmd.rel.h = 0.0f;
     }
-    if (cmd.radius < 0.0f)
-        cmd.radius = 0.0f;
+    if (cmd.corner_radii.tl < 0.0f)
+        cmd.corner_radii.tl = 0.0f;
+    if (cmd.corner_radii.tr < 0.0f)
+        cmd.corner_radii.tr = 0.0f;
+    if (cmd.corner_radii.br < 0.0f)
+        cmd.corner_radii.br = 0.0f;
+    if (cmd.corner_radii.bl < 0.0f)
+        cmd.corner_radii.bl = 0.0f;
+    if (cmd.corner_curvature < 0.0f)
+        cmd.corner_curvature = 0.0f;
+    if (cmd.corner_curvature > 1.0f)
+        cmd.corner_curvature = 1.0f;
     if (cmd.width < 0.0f)
         cmd.width = 0.0f;
 

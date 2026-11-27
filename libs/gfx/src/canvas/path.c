@@ -133,44 +133,57 @@ void optics_gfx_path_add_rect(optics_gfx_path *p, optics_gfx_rect r) {
     optics_gfx_path_close(p);
 }
 
-void optics_gfx_path_add_round_rect(optics_gfx_path *p, optics_gfx_rect r, float radius) {
+static void path_add_round_rect_radii(optics_gfx_path *p, optics_gfx_rect r,
+                                      optics_gfx_corner_radii radii) {
     if (!p)
         return;
-    if (radius <= 0.0f) {
+    optics_gfx_corner_radii cr = optics_gfx_corner_radii_normalize(radii, r.w, r.h);
+    if (cr.tl <= 0.0f && cr.tr <= 0.0f && cr.br <= 0.0f && cr.bl <= 0.0f) {
         optics_gfx_path_add_rect(p, r);
         return;
     }
-    float rr = radius;
-    if (rr > r.w * 0.5f)
-        rr = r.w * 0.5f;
-    if (rr > r.h * 0.5f)
-        rr = r.h * 0.5f;
-
-    if (rr >= r.w * 0.5f - 1e-4f && rr >= r.h * 0.5f - 1e-4f) {
-        optics_gfx_path_add_circle(p, r.x + r.w * 0.5f, r.y + r.h * 0.5f, rr);
+    if (cr.tl == cr.tr && cr.tr == cr.br && cr.br == cr.bl && cr.tl >= r.w * 0.5f - 1e-4f &&
+        cr.tl >= r.h * 0.5f - 1e-4f) {
+        optics_gfx_path_add_circle(p, r.x + r.w * 0.5f, r.y + r.h * 0.5f, cr.tl);
         return;
     }
 
-    const float k = 0.5522847498f * rr;
+    const float kappa = 0.5522847498f;
     float x0 = r.x, y0 = r.y;
     float x1 = r.x + r.w, y1 = r.y + r.h;
 
-    optics_gfx_path_move_to(p, x0 + rr, y0);
-    optics_gfx_path_line_to(p, x1 - rr, y0);
-    optics_gfx_path_cubic_to(p, x1 - rr + k, y0, x1, y0 + rr - k, x1, y0 + rr);
-    optics_gfx_path_line_to(p, x1, y1 - rr);
-    optics_gfx_path_cubic_to(p, x1, y1 - rr + k, x1 - rr + k, y1, x1 - rr, y1);
-    optics_gfx_path_line_to(p, x0 + rr, y1);
-    optics_gfx_path_cubic_to(p, x0 + rr - k, y1, x0, y1 - rr + k, x0, y1 - rr);
-    optics_gfx_path_line_to(p, x0, y0 + rr);
-    optics_gfx_path_cubic_to(p, x0, y0 + rr - k, x0 + rr - k, y0, x0 + rr, y0);
+    optics_gfx_path_move_to(p, x0 + cr.tl, y0);
+    if (x1 - cr.tr > x0 + cr.tl + 1e-5f)
+        optics_gfx_path_line_to(p, x1 - cr.tr, y0);
+    if (cr.tr > 0.0f) {
+        float k = kappa * cr.tr;
+        optics_gfx_path_cubic_to(p, x1 - cr.tr + k, y0, x1, y0 + cr.tr - k, x1, y0 + cr.tr);
+    }
+    if (y1 - cr.br > y0 + cr.tr + 1e-5f)
+        optics_gfx_path_line_to(p, x1, y1 - cr.br);
+    if (cr.br > 0.0f) {
+        float k = kappa * cr.br;
+        optics_gfx_path_cubic_to(p, x1, y1 - cr.br + k, x1 - cr.br + k, y1, x1 - cr.br, y1);
+    }
+    if (x1 - cr.br > x0 + cr.bl + 1e-5f)
+        optics_gfx_path_line_to(p, x0 + cr.bl, y1);
+    if (cr.bl > 0.0f) {
+        float k = kappa * cr.bl;
+        optics_gfx_path_cubic_to(p, x0 + cr.bl - k, y1, x0, y1 - cr.bl + k, x0, y1 - cr.bl);
+    }
+    if (y1 - cr.bl > y0 + cr.tl + 1e-5f)
+        optics_gfx_path_line_to(p, x0, y0 + cr.tl);
+    if (cr.tl > 0.0f) {
+        float k = kappa * cr.tl;
+        optics_gfx_path_cubic_to(p, x0, y0 + cr.tl - k, x0 + cr.tl - k, y0, x0 + cr.tl, y0);
+    }
     optics_gfx_path_close(p);
 }
 
 /* ------------------------------------------------------------------ */
 /*  Squircle corner fit (ADR-0118 INV-SDF-06)                         */
 /*                                                                    */
-/*  optics_gfx_sdf_squircle (<optics/gfx/sdf.h>) defines the squircle corner as      */
+/*  optics_gfx_sdf_rrect (<optics/gfx/sdf.h>) defines the squircle    */
 /*  a blend of a circular arc (curvature 0) and an L4 superellipse      */
 /*  (curvature 1). Its zero set is a corner arc that a single cubic     */
 /*  cannot carry: one cubic per corner is 3.1% of the radius off at     */
@@ -264,30 +277,24 @@ static void squircle_corner(optics_gfx_path *p, optics_gfx_point centre, optics_
                              B.y);
 }
 
-void optics_gfx_path_add_squircle(optics_gfx_path *p, optics_gfx_rect r, float radius,
-                                  float curvature) {
+void optics_gfx_path_add_rrect(optics_gfx_path *p, optics_gfx_rect r, optics_gfx_corner_radii radii,
+                               float curvature) {
     if (!p)
         return;
-    if (radius <= 0.0f) {
+    optics_gfx_corner_radii cr = optics_gfx_corner_radii_normalize(radii, r.w, r.h);
+    if (cr.tl <= 0.0f && cr.tr <= 0.0f && cr.br <= 0.0f && cr.bl <= 0.0f) {
         optics_gfx_path_add_rect(p, r);
         return;
     }
     float c = curvature;
-    if (c < 0.0f)
+    if (!(c > 0.0f))
         c = 0.0f;
     if (c > 1.0f)
         c = 1.0f;
 
-    /* curvature 0 is a rounded rectangle: same corner radius, circular arc. */
+    /* curvature 0 is a rounded rectangle: same corner radii, circular arcs. */
     if (c <= 0.001f) {
-        optics_gfx_path_add_round_rect(p, r, radius);
-        return;
-    }
-
-    float max_r = fminf(r.w * 0.5f, r.h * 0.5f);
-    float rr = fminf(radius, max_r);
-    if (rr <= 0.0f) {
-        optics_gfx_path_add_rect(p, r);
+        path_add_round_rect_radii(p, r, cr);
         return;
     }
 
@@ -300,19 +307,35 @@ void optics_gfx_path_add_squircle(optics_gfx_path *p, optics_gfx_rect r, float r
     float x0 = r.x, y0 = r.y;
     float x1 = r.x + r.w, y1 = r.y + r.h;
 
-    optics_gfx_path_move_to(p, x0 + rr, y0);
-    optics_gfx_path_line_to(p, x1 - rr, y0);
-    squircle_corner(p, (optics_gfx_point){x1 - rr, y0 + rr}, (optics_gfx_point){0.0f, -1.0f},
-                    (optics_gfx_point){1.0f, 0.0f}, rr, d_edge, d_mid, k45);
-    optics_gfx_path_line_to(p, x1, y1 - rr);
-    squircle_corner(p, (optics_gfx_point){x1 - rr, y1 - rr}, (optics_gfx_point){1.0f, 0.0f},
-                    (optics_gfx_point){0.0f, 1.0f}, rr, d_edge, d_mid, k45);
-    optics_gfx_path_line_to(p, x0 + rr, y1);
-    squircle_corner(p, (optics_gfx_point){x0 + rr, y1 - rr}, (optics_gfx_point){0.0f, 1.0f},
-                    (optics_gfx_point){-1.0f, 0.0f}, rr, d_edge, d_mid, k45);
-    optics_gfx_path_line_to(p, x0, y0 + rr);
-    squircle_corner(p, (optics_gfx_point){x0 + rr, y0 + rr}, (optics_gfx_point){-1.0f, 0.0f},
-                    (optics_gfx_point){0.0f, -1.0f}, rr, d_edge, d_mid, k45);
+    optics_gfx_path_move_to(p, x0 + cr.tl, y0);
+    if (x1 - cr.tr > x0 + cr.tl + 1e-5f)
+        optics_gfx_path_line_to(p, x1 - cr.tr, y0);
+    if (cr.tr > 0.0f) {
+        squircle_corner(p, (optics_gfx_point){x1 - cr.tr, y0 + cr.tr},
+                        (optics_gfx_point){0.0f, -1.0f}, (optics_gfx_point){1.0f, 0.0f}, cr.tr,
+                        d_edge, d_mid, k45);
+    }
+    if (y1 - cr.br > y0 + cr.tr + 1e-5f)
+        optics_gfx_path_line_to(p, x1, y1 - cr.br);
+    if (cr.br > 0.0f) {
+        squircle_corner(p, (optics_gfx_point){x1 - cr.br, y1 - cr.br},
+                        (optics_gfx_point){1.0f, 0.0f}, (optics_gfx_point){0.0f, 1.0f}, cr.br,
+                        d_edge, d_mid, k45);
+    }
+    if (x1 - cr.br > x0 + cr.bl + 1e-5f)
+        optics_gfx_path_line_to(p, x0 + cr.bl, y1);
+    if (cr.bl > 0.0f) {
+        squircle_corner(p, (optics_gfx_point){x0 + cr.bl, y1 - cr.bl},
+                        (optics_gfx_point){0.0f, 1.0f}, (optics_gfx_point){-1.0f, 0.0f}, cr.bl,
+                        d_edge, d_mid, k45);
+    }
+    if (y1 - cr.bl > y0 + cr.tl + 1e-5f)
+        optics_gfx_path_line_to(p, x0, y0 + cr.tl);
+    if (cr.tl > 0.0f) {
+        squircle_corner(p, (optics_gfx_point){x0 + cr.tl, y0 + cr.tl},
+                        (optics_gfx_point){-1.0f, 0.0f}, (optics_gfx_point){0.0f, -1.0f}, cr.tl,
+                        d_edge, d_mid, k45);
+    }
     optics_gfx_path_close(p);
 }
 

@@ -611,32 +611,52 @@ typedef struct optics_gfx_canvas_push {
                                     * 0 = format-default content space (ADR-0069) */
     uint32_t kind;                 /* offset 24 (0 solid, 1 linear, 2 radial, 3 image) */
     uint32_t num_stops;            /* offset 28 */
-    float grad_from[2];            /* offset 32 */
-    float grad_to[2];              /* offset 40 */
-    float grad_radius;             /* offset 48 */
-    float _pad1;                   /* offset 52 */
-    optics_gfx_canvas_gradient_stop_pc
-        stops[OPTICS_GFX_GRADIENT_MAX_STOPS]; /* offset 56, size 64 */
-    /* Image and vector draw extension (read by image, SDF and vector fragment shaders).
-     * Image UVs are carried per vertex; image_dst remains shared storage for
-     * the SDF rounded-rectangle pipeline's screen-space box parameters. */
     union {
         struct {
-            uint32_t image_handle;   /* offset 120 */
-            uint32_t sampler_handle; /* offset 124 */
-            float image_dst[4];      /* offset 128 — SDF box / reserved for images */
-            float image_src[4];      /* offset 144 — u, v, du, dv (normalised) */
+            float grad_from[2]; /* offset 32 */
+            float grad_to[2];   /* offset 40 */
+            float grad_radius;  /* offset 48 */
+            float _pad1;        /* offset 52 */
+            optics_gfx_canvas_gradient_stop_pc
+                stops[OPTICS_GFX_GRADIENT_MAX_STOPS]; /* offset 56, size 64 */
+            /* Image and vector draw extension (read by image and vector fragment shaders). */
+            union {
+                struct {
+                    uint32_t image_handle;   /* offset 120 */
+                    uint32_t sampler_handle; /* offset 124 */
+                    float image_dst[4];      /* offset 128 */
+                    float image_src[4];      /* offset 144 — u, v, du, dv (normalised) */
+                };
+                struct {
+                    uint64_t tile_dispatch;  /* offset 120 — BDA to optics_gfx_gpu_tile_dispatch */
+                    uint32_t image_handle;   /* offset 128 — image pattern bindless handle */
+                    uint32_t sampler_handle; /* offset 132 — image pattern sampler handle */
+                    float uv_row0[2];        /* offset 136 — du/dx, du/dy */
+                    float uv_row1[2];        /* offset 144 — dv/dx, dv/dy */
+                    float uv_off[2];         /* offset 152 — u0, v0 */
+                } vector;
+            };
         };
         struct {
-            uint64_t tile_dispatch;  /* offset 120 — BDA to optics_gfx_gpu_tile_dispatch */
-            uint32_t image_handle;   /* offset 128 — image pattern bindless handle */
-            uint32_t sampler_handle; /* offset 132 — image pattern sampler handle */
-            float uv_row0[2];        /* offset 136 — du/dx, du/dy */
-            float uv_row1[2];        /* offset 144 — dv/dx, dv/dy */
-            float uv_off[2];         /* offset 152 — u0, v0 */
-        } vector;
+            float inv[4];    /* offset 32..48: inverse linear a, b, c, d (row-major) */
+            float _pad0[4];  /* offset 48..64 */
+            float radii[4];  /* offset 64..80: corner radii (tl, tr, br, bl) */
+            float _pad1[12]; /* offset 80..128 */
+            float box[4];    /* offset 128..144: cx, cy, hx, hy */
+            float stroke_hw; /* offset 144: ring half-width, shape units */
+            float curvature; /* offset 148: [0, 1] circular..L4 squircle */
+            float aa;        /* offset 152: shape units per screen pixel */
+            float _pad2;     /* offset 156 */
+        } sdf;
     };
 } optics_gfx_canvas_push;
+
+static_assert(sizeof(optics_gfx_canvas_push) == 160,
+              "optics_gfx_canvas_push must remain 160 bytes");
+static_assert(offsetof(optics_gfx_canvas_push, sdf.inv) == 32, "sdf.inv offset");
+static_assert(offsetof(optics_gfx_canvas_push, sdf.radii) == 64, "sdf.radii offset");
+static_assert(offsetof(optics_gfx_canvas_push, sdf.box) == 128, "sdf.box offset");
+static_assert(offsetof(optics_gfx_canvas_push, sdf.stroke_hw) == 144, "sdf.stroke_hw offset");
 
 /* Push constants for CANVAS_PIPE_OUTPUT (ADR-0069). Layout matches the
  * push block in shaders/canvas_output.frag and fits inside the shared
@@ -809,8 +829,7 @@ void draw_image_with_sampler_handle(optics_gfx_canvas *c, optics_gfx_image *img,
                                     uint32_t image_handle, optics_gfx_sampler *sampler,
                                     optics_gfx_bindless_handle sh, optics_gfx_rect dst,
                                     optics_gfx_rect src, optics_gfx_color tint,
-                                    optics_gfx_blend_mode blend, uint32_t kind,
-                                    const optics_gfx_rect *rounded_clip, float radius);
+                                    optics_gfx_blend_mode blend, uint32_t kind);
 
 /* ------------------------------------------------------------------ */
 /*  Display-list record/replay (record.c)                             */

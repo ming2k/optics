@@ -112,14 +112,16 @@ static optics_ui_node *open_flex(optics_ui *ui, optics_ui_axis axis, optics_ui_l
                                  (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_RECT,
                                                       .rel = {0, 0, 0, 0},
                                                       .color = opts.bg,
-                                                      .radius = opts.radius});
+                                                      .corner_radii = opts.corner_radii,
+                                                      .corner_curvature = opts.corner_curvature});
     }
     if ((opts.border >> 24) != 0 && opts.border_width > 0.0f) {
         optics_ui__drawlist_push(ui, n,
                                  (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_BORDER,
                                                       .rel = {0, 0, 0, 0},
                                                       .color = opts.border,
-                                                      .radius = opts.radius,
+                                                      .corner_radii = opts.corner_radii,
+                                                      .corner_curvature = opts.corner_curvature,
                                                       .width = opts.border_width});
     }
 
@@ -174,14 +176,16 @@ static optics_ui_node *open_stack(optics_ui *ui, optics_ui_layout_opts opts) {
                                  (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_RECT,
                                                       .rel = {0, 0, 0, 0},
                                                       .color = opts.bg,
-                                                      .radius = opts.radius});
+                                                      .corner_radii = opts.corner_radii,
+                                                      .corner_curvature = opts.corner_curvature});
     }
     if ((opts.border >> 24) != 0 && opts.border_width > 0.0f) {
         optics_ui__drawlist_push(ui, n,
                                  (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_BORDER,
                                                       .rel = {0, 0, 0, 0},
                                                       .color = opts.border,
-                                                      .radius = opts.radius,
+                                                      .corner_radii = opts.corner_radii,
+                                                      .corner_curvature = opts.corner_curvature,
                                                       .width = opts.border_width});
     }
 
@@ -220,14 +224,16 @@ static optics_ui_node *open_grid(optics_ui *ui, optics_ui_grid_opts opts) {
                                  (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_RECT,
                                                       .rel = {0, 0, 0, 0},
                                                       .color = opts.bg,
-                                                      .radius = opts.radius});
+                                                      .corner_radii = opts.corner_radii,
+                                                      .corner_curvature = opts.corner_curvature});
     }
     if ((opts.border >> 24) != 0 && opts.border_width > 0.0f) {
         optics_ui__drawlist_push(ui, n,
                                  (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_BORDER,
                                                       .rel = {0, 0, 0, 0},
                                                       .color = opts.border,
-                                                      .radius = opts.radius,
+                                                      .corner_radii = opts.corner_radii,
+                                                      .corner_curvature = opts.corner_curvature,
                                                       .width = opts.border_width});
     }
 
@@ -299,7 +305,8 @@ optics_ui_response optics_ui_pressable_begin(optics_ui *ui, const optics_ui_pres
             (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_RECT,
                                  .rel = {0, 0, 0, 0},
                                  .color = optics_ui__lerp_color(transparent, target, emphasis),
-                                 .radius = lopts.radius});
+                                 .corner_radii = lopts.corner_radii,
+                                 .corner_curvature = lopts.corner_curvature});
     }
     if (r.focused) {
         float bw = ui->theme.border_width > 0.0f ? ui->theme.border_width : 1.5f;
@@ -307,7 +314,8 @@ optics_ui_response optics_ui_pressable_begin(optics_ui *ui, const optics_ui_pres
                                  (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_BORDER,
                                                       .rel = {0, 0, 0, 0},
                                                       .color = ui->theme.color_accent,
-                                                      .radius = lopts.radius,
+                                                      .corner_radii = lopts.corner_radii,
+                                                      .corner_curvature = lopts.corner_curvature,
                                                       .width = bw});
     }
 

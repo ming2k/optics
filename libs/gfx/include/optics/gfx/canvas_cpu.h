@@ -20,8 +20,9 @@
  *   optics_gfx_canvas_create(&(optics_gfx_canvas_desc){.type = OPTICS_GFX_TYPE_CANVAS_DESC,
  * .backend = OPTICS_GFX_CANVAS_BACKEND_CPU, .scale = 1.0f, .width = 256, .height = 256}, &c);
  * optics_gfx_color bg = optics_gfx_color_rgba_premul(0, 0, 0, 255); optics_gfx_canvas_begin(c,
- * &bg); optics_gfx_canvas_fill_rrect(c, (optics_gfx_rect){32, 32, 192, 192}, 24.0f,
- * optics_gfx_color_rgba_premul(255, 80, 40, 255)); optics_gfx_canvas_end(c); uint32_t w, h, stride;
+ * &bg); optics_gfx_canvas_fill_rrect(c, (optics_gfx_rect){32, 32, 192, 192},
+ * optics_gfx_corner_radii_uniform(24.0f), 0.0f, optics_gfx_color_rgba_premul(255, 80, 40, 255));
+ * optics_gfx_canvas_end(c); uint32_t w, h, stride;
  *   const uint8_t *px = optics_gfx_canvas_cpu_pixels(c, &w, &h, &stride); // RGBA8
  *   ... write px ...
  *   optics_gfx_canvas_release(c);

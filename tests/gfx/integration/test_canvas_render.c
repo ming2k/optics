@@ -215,15 +215,15 @@ static void draw_rotated_image(optics_gfx_canvas *canvas, void *user) {
 
 static void draw_round_image(optics_gfx_canvas *canvas, void *user) {
     image_transform_case *tc = user;
-    optics_gfx_canvas_draw_image_rrect(canvas, tc->image, (optics_gfx_rect){32, 32, 64, 64}, 32.0f,
-                                       nullptr);
+    optics_gfx_canvas_draw_image_rrect(canvas, tc->image, (optics_gfx_rect){32, 32, 64, 64},
+                                       optics_gfx_corner_radii_uniform(32.0f), 0.0f, nullptr);
 }
 
 static void draw_image_through_independent_round_clip(optics_gfx_canvas *canvas, void *user) {
     image_transform_case *tc = user;
-    optics_gfx_canvas_draw_image_clipped_rrect(canvas, tc->image, (optics_gfx_rect){16, 16, 96, 96},
-                                               (optics_gfx_rect){32, 32, 64, 64}, 16.0f,
-                                               &tc->paint);
+    optics_gfx_canvas_draw_image_clipped_rrect(
+        canvas, tc->image, (optics_gfx_rect){16, 16, 96, 96}, (optics_gfx_rect){32, 32, 64, 64},
+        optics_gfx_corner_radii_uniform(16.0f), 0.0f, &tc->paint);
 }
 
 static void draw_combined_image(optics_gfx_canvas *canvas, void *user) {
@@ -239,7 +239,7 @@ static void draw_combined_image(optics_gfx_canvas *canvas, void *user) {
                 .sampler = tc->sampler,
                 .src_rect = {0, 0, 0.5f, 0.5f},
                 .clip_rect = {32, 32, 64, 64},
-                .clip_radius = 16,
+                .clip_radii = optics_gfx_corner_radii_uniform(16.0f),
                 .opaque_only = true,
                 .tint = 0xFFFFFFFF,
             },

@@ -275,19 +275,12 @@ static void encoder_draw_geometry_impl(optics_gfx_encoder *enc, const optics_gfx
         case OPTICS_GFX_GEOM_RRECT:
             OPTICS_GFX_FAILF(
                 OPTICS_GFX_ERROR_INVALID_ARGUMENT,
-                "optics_gfx_encoder_draw_geometry: non-finite/negative rrect [%.2f, %.2f, %.2f, "
-                "%.2f], radius=%.2f",
+                "optics_gfx_encoder_draw_geometry: invalid rrect [%.2f, %.2f, %.2f, %.2f], "
+                "radii=[%.2f, %.2f, %.2f, %.2f], c=%.2f",
                 (double)geom->rrect.rect.x, (double)geom->rrect.rect.y, (double)geom->rrect.rect.w,
-                (double)geom->rrect.rect.h, (double)geom->rrect.radius);
-            break;
-        case OPTICS_GFX_GEOM_SQUIRCLE:
-            OPTICS_GFX_FAILF(
-                OPTICS_GFX_ERROR_INVALID_ARGUMENT,
-                "optics_gfx_encoder_draw_geometry: invalid squircle [%.2f, %.2f, %.2f, %.2f], "
-                "r=%.2f, c=%.2f",
-                (double)geom->squircle.rect.x, (double)geom->squircle.rect.y,
-                (double)geom->squircle.rect.w, (double)geom->squircle.rect.h,
-                (double)geom->squircle.radius, (double)geom->squircle.curvature);
+                (double)geom->rrect.rect.h, (double)geom->rrect.radii.tl,
+                (double)geom->rrect.radii.tr, (double)geom->rrect.radii.br,
+                (double)geom->rrect.radii.bl, (double)geom->rrect.curvature);
             break;
         case OPTICS_GFX_GEOM_CIRCLE:
             OPTICS_GFX_FAILF(
@@ -899,7 +892,7 @@ optics_gfx_result optics_gfx_encoder_draw_display_list(optics_gfx_encoder *enc,
 /* ================================================================== */
 
 #define DL_MAGIC 0x4C445846u /* "FLXD" */
-#define DL_VERSION 1u
+#define DL_VERSION 2u
 #define DL_HEADER_BYTES 24u
 #define DL_RESOURCE_BYTES 8u
 
@@ -1043,7 +1036,9 @@ static bool dl_write_brush(dl_serializer *s, const optics_gfx_brush *brush, bool
             !dl_u8(b, 0) || !dl_u8(b, 0) || !dl_u8(b, 0) || !dl_u32(b, brush->image.tint) ||
             !dl_f32(b, brush->image.clip_rect.x) || !dl_f32(b, brush->image.clip_rect.y) ||
             !dl_f32(b, brush->image.clip_rect.w) || !dl_f32(b, brush->image.clip_rect.h) ||
-            !dl_f32(b, brush->image.clip_radius))
+            !dl_f32(b, brush->image.clip_radii.tl) || !dl_f32(b, brush->image.clip_radii.tr) ||
+            !dl_f32(b, brush->image.clip_radii.br) || !dl_f32(b, brush->image.clip_radii.bl) ||
+            !dl_f32(b, brush->image.clip_curvature))
             return false;
         return true;
     }
@@ -1073,13 +1068,9 @@ static bool dl_write_geometry(dl_serializer *s, const optics_gfx_cmd_draw_geom *
     case OPTICS_GFX_GEOM_RRECT:
         if (!dl_f32(b, g->rrect.rect.x) || !dl_f32(b, g->rrect.rect.y) ||
             !dl_f32(b, g->rrect.rect.w) || !dl_f32(b, g->rrect.rect.h) ||
-            !dl_f32(b, g->rrect.radius))
-            return false;
-        break;
-    case OPTICS_GFX_GEOM_SQUIRCLE:
-        if (!dl_f32(b, g->squircle.rect.x) || !dl_f32(b, g->squircle.rect.y) ||
-            !dl_f32(b, g->squircle.rect.w) || !dl_f32(b, g->squircle.rect.h) ||
-            !dl_f32(b, g->squircle.radius) || !dl_f32(b, g->squircle.curvature))
+            !dl_f32(b, g->rrect.radii.tl) || !dl_f32(b, g->rrect.radii.tr) ||
+            !dl_f32(b, g->rrect.radii.br) || !dl_f32(b, g->rrect.radii.bl) ||
+            !dl_f32(b, g->rrect.curvature))
             return false;
         break;
     case OPTICS_GFX_GEOM_CIRCLE:
@@ -1407,7 +1398,9 @@ static optics_gfx_result dl_read_brush(dl_reader *r, optics_gfx_brush *b,
         b->image.clip_rect.y = dl_read_f32(r);
         b->image.clip_rect.w = dl_read_f32(r);
         b->image.clip_rect.h = dl_read_f32(r);
-        b->image.clip_radius = dl_read_f32(r);
+        b->image.clip_radii = (optics_gfx_corner_radii){dl_read_f32(r), dl_read_f32(r),
+                                                        dl_read_f32(r), dl_read_f32(r)};
+        b->image.clip_curvature = dl_read_f32(r);
         return r->bad ? OPTICS_GFX_ERROR_INVALID_ARGUMENT : OPTICS_GFX_OK;
     }
     if (b->kind != OPTICS_GFX_BRUSH_LINEAR_GRADIENT && b->kind != OPTICS_GFX_BRUSH_RADIAL_GRADIENT)
@@ -1556,13 +1549,9 @@ optics_gfx_display_list_deserialize(const optics_gfx_display_list_deserialize_op
             case OPTICS_GFX_GEOM_RRECT:
                 g.rrect.rect = (optics_gfx_rect){dl_read_f32(&r), dl_read_f32(&r), dl_read_f32(&r),
                                                  dl_read_f32(&r)};
-                g.rrect.radius = dl_read_f32(&r);
-                break;
-            case OPTICS_GFX_GEOM_SQUIRCLE:
-                g.squircle.rect = (optics_gfx_rect){dl_read_f32(&r), dl_read_f32(&r),
-                                                    dl_read_f32(&r), dl_read_f32(&r)};
-                g.squircle.radius = dl_read_f32(&r);
-                g.squircle.curvature = dl_read_f32(&r);
+                g.rrect.radii = (optics_gfx_corner_radii){dl_read_f32(&r), dl_read_f32(&r),
+                                                          dl_read_f32(&r), dl_read_f32(&r)};
+                g.rrect.curvature = dl_read_f32(&r);
                 break;
             case OPTICS_GFX_GEOM_CIRCLE:
                 g.circle.cx = dl_read_f32(&r);

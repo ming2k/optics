@@ -52,11 +52,13 @@ static void draw_scene(optics_gfx_canvas *canvas, optics_gfx_arena *arena) {
     optics_gfx_canvas_fill_rect(canvas, (optics_gfx_rect){8, 72, 48, 48}, &radial);
 
     /* Solid rounded rect (SDF path) bottom-right. */
-    optics_gfx_canvas_fill_rrect(canvas, (optics_gfx_rect){72, 72, 48, 40}, 10.0f,
+    optics_gfx_canvas_fill_rrect(canvas, (optics_gfx_rect){72, 72, 48, 40},
+                                 optics_gfx_corner_radii_uniform(10.0f), 0.0f,
                                  optics_gfx_color_rgba(240, 220, 40, 255));
 
     /* Stroked rounded rect overlapping both. */
-    optics_gfx_canvas_stroke_rrect(canvas, (optics_gfx_rect){40, 64, 48, 48}, 8.0f,
+    optics_gfx_canvas_stroke_rrect(canvas, (optics_gfx_rect){40, 64, 48, 48},
+                                   optics_gfx_corner_radii_uniform(8.0f), 0.0f,
                                    optics_gfx_color_rgba(255, 255, 255, 255), 3.0f);
 
     /* Checkerboard strip of solid rects (vertex-colour batching path). */
@@ -87,14 +89,32 @@ static void draw_scene(optics_gfx_canvas *canvas, optics_gfx_arena *arena) {
     optics_gfx_canvas_rotate(canvas, 0.5235988f); /* 30 degrees */
     optics_gfx_canvas_translate(canvas,
                                 &(optics_gfx_canvas_translate_opts){.x = -28.0f, .y = -104.0f});
-    optics_gfx_canvas_fill_rrect(canvas, (optics_gfx_rect){12, 88, 32, 32}, 9.0f,
+    optics_gfx_canvas_fill_rrect(canvas, (optics_gfx_rect){12, 88, 32, 32},
+                                 optics_gfx_corner_radii_uniform(9.0f), 0.0f,
                                  optics_gfx_color_rgba(250, 160, 60, 255));
-    optics_gfx_geometry sq =
-        optics_gfx_geom_squircle((optics_gfx_rect){48, 92, 30, 26}, 11.0f, 0.85f);
+    optics_gfx_geometry sq = optics_gfx_geom_rrect((optics_gfx_rect){48, 92, 30, 26},
+                                                   optics_gfx_corner_radii_uniform(11.0f), 0.85f);
     optics_gfx_brush sq_brush = optics_gfx_brush_solid(optics_gfx_color_rgba(90, 240, 160, 255));
     optics_gfx_canvas_draw_geometry(
         canvas, &(optics_gfx_canvas_draw_geometry_opts){.geom = &sq, .brush = &sq_brush});
     optics_gfx_canvas_restore(canvas);
+
+    /* Per-corner analytic SDF shapes (ADR-0175): bezel-flush quarter-squircle
+     * [0, 0, 22, 0] at the top-left corner and bottom-edge tab [6, 6, 0, 0]. */
+    optics_gfx_geometry corner_q =
+        optics_gfx_geom_rrect((optics_gfx_rect){0.0f, 0.0f, 22.0f, 22.0f},
+                              optics_gfx_corner_radii_all(0.0f, 0.0f, 22.0f, 0.0f), 0.6f);
+    optics_gfx_brush corner_brush =
+        optics_gfx_brush_solid(optics_gfx_color_rgba(255, 255, 255, 255));
+    optics_gfx_canvas_draw_geometry(
+        canvas, &(optics_gfx_canvas_draw_geometry_opts){.geom = &corner_q, .brush = &corner_brush});
+
+    optics_gfx_geometry edge_tab =
+        optics_gfx_geom_rrect((optics_gfx_rect){44.0f, 122.0f, 40.0f, 6.0f},
+                              optics_gfx_corner_radii_all(6.0f, 6.0f, 0.0f, 0.0f), 0.6f);
+    optics_gfx_brush tab_brush = optics_gfx_brush_solid(optics_gfx_color_rgba(80, 180, 255, 255));
+    optics_gfx_canvas_draw_geometry(
+        canvas, &(optics_gfx_canvas_draw_geometry_opts){.geom = &edge_tab, .brush = &tab_brush});
 }
 
 /* Tight per-channel probes at flat interiors / exact gradient stops. */

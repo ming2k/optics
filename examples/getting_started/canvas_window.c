@@ -48,11 +48,11 @@ static void on_record(optics_gfx_encoder *enc, float scale, void *user) {
                   optics_gfx_color_rgba_premul(shade, 158, 255 - shade, 255));
     }
 
-    fill_geom(
-        enc,
-        optics_gfx_geom_rrect(
-            (optics_gfx_rect){app->pointer_x - 18.0f, app->pointer_y - 18.0f, 36.0f, 36.0f}, 10.0f),
-        optics_gfx_color_rgba_premul(255, 200, 84, 224));
+    fill_geom(enc,
+              optics_gfx_geom_rrect(
+                  (optics_gfx_rect){app->pointer_x - 18.0f, app->pointer_y - 18.0f, 36.0f, 36.0f},
+                  optics_gfx_corner_radii_uniform(10.0f), 0.0f),
+              optics_gfx_color_rgba_premul(255, 200, 84, 224));
 
     optics_gfx_encoder_restore(enc);
     optics_window_request_animation_frame();

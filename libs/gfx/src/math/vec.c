@@ -116,3 +116,38 @@ optics_gfx_vec4 optics_gfx_vec4_normalize(optics_gfx_vec4 v) {
     float inv = 1.0f / len;
     return (optics_gfx_vec4){v.x * inv, v.y * inv, v.z * inv, v.w * inv};
 }
+
+/* ================================================================== */
+/*  corner_radii                                                      */
+/* ================================================================== */
+
+optics_gfx_corner_radii optics_gfx_corner_radii_normalize(optics_gfx_corner_radii radii,
+                                                          float width, float height) {
+    if (!isfinite(width) || !isfinite(height) || !(width > 0.0f) || !(height > 0.0f))
+        return (optics_gfx_corner_radii){};
+    float tl = (isfinite(radii.tl) && radii.tl > 0.0f) ? radii.tl : 0.0f;
+    float tr = (isfinite(radii.tr) && radii.tr > 0.0f) ? radii.tr : 0.0f;
+    float br = (isfinite(radii.br) && radii.br > 0.0f) ? radii.br : 0.0f;
+    float bl = (isfinite(radii.bl) && radii.bl > 0.0f) ? radii.bl : 0.0f;
+
+    /* Guard against sum overflow when callers pass huge pill sentinels (e.g. FLT_MAX). */
+    float max_r = fmaxf(fmaxf(tl, tr), fmaxf(br, bl));
+    float max_dim = fmaxf(width, height);
+    if (max_r > 1e30f && max_r > max_dim) {
+        tl = (tl / max_r) * max_dim;
+        tr = (tr / max_r) * max_dim;
+        br = (br / max_r) * max_dim;
+        bl = (bl / max_r) * max_dim;
+    }
+
+    float s = 1.0f;
+    if (tl + tr > width)
+        s = fminf(s, width / (tl + tr));
+    if (bl + br > width)
+        s = fminf(s, width / (bl + br));
+    if (tl + bl > height)
+        s = fminf(s, height / (tl + bl));
+    if (tr + br > height)
+        s = fminf(s, height / (tr + br));
+    return (optics_gfx_corner_radii){tl * s, tr * s, br * s, bl * s};
+}

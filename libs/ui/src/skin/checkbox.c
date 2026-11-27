@@ -31,7 +31,8 @@ void optics_ui__skin_checkbox(optics_ui *ui, optics_ui_node *n,
                                          .kind = OPTICS_UI_DRAW_RECT,
                                          .rel = {0, 0, 0, 0},
                                          .color = wash,
-                                         .radius = rs->corner_radius > 0 ? rs->corner_radius : 4.0f,
+                                         .corner_radii = optics_gfx_corner_radii_uniform(
+                                             rs->corner_radius > 0 ? rs->corner_radius : 4.0f),
                                      });
         }
 
@@ -57,13 +58,14 @@ void optics_ui__skin_checkbox(optics_ui *ui, optics_ui_node *n,
                 ? rs->disabled
                 : (on ? track_on : optics_ui__lerp_color(track_off, rs->bg_hover, rec->hover_t));
 
-        optics_ui__drawlist_push(ui, n,
-                                 (optics_ui_draw_cmd){
-                                     .kind = OPTICS_UI_DRAW_RECT,
-                                     .rel = {track_x, track_y, track_w, track_h},
-                                     .color = track_col,
-                                     .radius = track_h * 0.5f,
-                                 });
+        optics_ui__drawlist_push(
+            ui, n,
+            (optics_ui_draw_cmd){
+                .kind = OPTICS_UI_DRAW_RECT,
+                .rel = {track_x, track_y, track_w, track_h},
+                .color = track_col,
+                .corner_radii = optics_gfx_corner_radii_uniform(track_h * 0.5f),
+            });
 
         /* Knob */
         float knob_x = track_x + 3.0f + (on ? travel : 0.0f);
@@ -75,7 +77,7 @@ void optics_ui__skin_checkbox(optics_ui *ui, optics_ui_node *n,
                                      .kind = OPTICS_UI_DRAW_RECT,
                                      .rel = {knob_x, knob_y, knob_d, knob_d},
                                      .color = knob_col,
-                                     .radius = knob_d * 0.5f,
+                                     .corner_radii = optics_gfx_corner_radii_uniform(knob_d * 0.5f),
                                  });
         return;
     }
@@ -94,17 +96,18 @@ void optics_ui__skin_checkbox(optics_ui *ui, optics_ui_node *n,
                                      .kind = OPTICS_UI_DRAW_RECT,
                                      .rel = {rs->padding, circle_y, circle, circle},
                                      .color = radio_bg,
-                                     .radius = circle * 0.5f,
+                                     .corner_radii = optics_gfx_corner_radii_uniform(circle * 0.5f),
                                  });
         if (rs->border_width > 0.0f && (ring & 0xFF000000u) != 0) {
-            optics_ui__drawlist_push(ui, n,
-                                     (optics_ui_draw_cmd){
-                                         .kind = OPTICS_UI_DRAW_BORDER,
-                                         .rel = {rs->padding, circle_y, circle, circle},
-                                         .color = ring,
-                                         .width = rs->border_width,
-                                         .radius = circle * 0.5f,
-                                     });
+            optics_ui__drawlist_push(
+                ui, n,
+                (optics_ui_draw_cmd){
+                    .kind = OPTICS_UI_DRAW_BORDER,
+                    .rel = {rs->padding, circle_y, circle, circle},
+                    .color = ring,
+                    .width = rs->border_width,
+                    .corner_radii = optics_gfx_corner_radii_uniform(circle * 0.5f),
+                });
         }
 
         if (on) {
@@ -112,13 +115,14 @@ void optics_ui__skin_checkbox(optics_ui *ui, optics_ui_node *n,
             float dot_x = rs->padding + roundf((circle - dot) * 0.5f);
             float dot_y = circle_y + roundf((circle - dot) * 0.5f);
             optics_gfx_color dot_col = disabled ? rs->disabled : rs->accent;
-            optics_ui__drawlist_push(ui, n,
-                                     (optics_ui_draw_cmd){
-                                         .kind = OPTICS_UI_DRAW_RECT,
-                                         .rel = {dot_x, dot_y, dot, dot},
-                                         .color = dot_col,
-                                         .radius = dot * 0.5f,
-                                     });
+            optics_ui__drawlist_push(
+                ui, n,
+                (optics_ui_draw_cmd){
+                    .kind = OPTICS_UI_DRAW_RECT,
+                    .rel = {dot_x, dot_y, dot, dot},
+                    .color = dot_col,
+                    .corner_radii = optics_gfx_corner_radii_uniform(dot * 0.5f),
+                });
         }
 
         if (rec->content.label && rec->content.label[0]) {
@@ -151,7 +155,7 @@ void optics_ui__skin_checkbox(optics_ui *ui, optics_ui_node *n,
                                  .kind = OPTICS_UI_DRAW_RECT,
                                  .rel = {rs->padding, box_y, box, box},
                                  .color = box_bg,
-                                 .radius = radius,
+                                 .corner_radii = optics_gfx_corner_radii_uniform(radius),
                              });
 
     optics_gfx_color border_col = disabled ? rs->border : rs->fg;
@@ -162,7 +166,7 @@ void optics_ui__skin_checkbox(optics_ui *ui, optics_ui_node *n,
                                      .rel = {rs->padding, box_y, box, box},
                                      .color = border_col,
                                      .width = rs->border_width,
-                                     .radius = radius,
+                                     .corner_radii = optics_gfx_corner_radii_uniform(radius),
                                  });
     }
 
@@ -177,7 +181,7 @@ void optics_ui__skin_checkbox(optics_ui *ui, optics_ui_node *n,
                                      .kind = OPTICS_UI_DRAW_RECT,
                                      .rel = {mark_x, mark_y, mark, mark},
                                      .color = mark_col,
-                                     .radius = 1.0f,
+                                     .corner_radii = optics_gfx_corner_radii_uniform(1.0f),
                                  });
     }
 

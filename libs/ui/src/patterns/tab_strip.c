@@ -199,13 +199,14 @@ optics_ui_tab_action optics_ui_tab_strip(optics_ui *ui, const optics_ui_tab_stri
                 if (close_hovered) {
                     ui->cursor_hint = OPTICS_UI_CURSOR_POINTER;
                     optics_gfx_color hover_bg = ui->theme.color_hover;
-                    optics_ui__drawlist_push(ui, n,
-                                             (optics_ui_draw_cmd){
-                                                 .kind = OPTICS_UI_DRAW_RECT,
-                                                 .rel = rel_close,
-                                                 .color = hover_bg,
-                                                 .radius = close_size * 0.5f,
-                                             });
+                    optics_ui__drawlist_push(
+                        ui, n,
+                        (optics_ui_draw_cmd){
+                            .kind = OPTICS_UI_DRAW_RECT,
+                            .rel = rel_close,
+                            .color = hover_bg,
+                            .corner_radii = optics_gfx_corner_radii_uniform(close_size * 0.5f),
+                        });
                 }
 
                 optics_gfx_color close_fg =

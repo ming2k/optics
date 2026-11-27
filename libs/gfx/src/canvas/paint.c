@@ -21,6 +21,12 @@ bool canvas_finite_rect(optics_gfx_rect r) {
            r.h >= 0 && isfinite(r.x + r.w) && isfinite(r.y + r.h);
 }
 
+static bool canvas_valid_corner_radii(optics_gfx_corner_radii cr, float curvature) {
+    return isfinite(cr.tl) && cr.tl >= 0 && isfinite(cr.tr) && cr.tr >= 0 && isfinite(cr.br) &&
+           cr.br >= 0 && isfinite(cr.bl) && cr.bl >= 0 && isfinite(curvature) && curvature >= 0 &&
+           curvature <= 1;
+}
+
 bool canvas_valid_geometry(const optics_gfx_geometry *g) {
     if (!g || !isfinite(g->stroke.width) || g->stroke.width < 0 ||
         !isfinite(g->stroke.miter_limit) || g->stroke.miter_limit < 0 ||
@@ -31,12 +37,8 @@ bool canvas_valid_geometry(const optics_gfx_geometry *g) {
     case OPTICS_GFX_GEOM_RECT:
         return canvas_finite_rect(g->rect.rect);
     case OPTICS_GFX_GEOM_RRECT:
-        return canvas_finite_rect(g->rrect.rect) && isfinite(g->rrect.radius) &&
-               g->rrect.radius >= 0;
-    case OPTICS_GFX_GEOM_SQUIRCLE:
-        return canvas_finite_rect(g->squircle.rect) && isfinite(g->squircle.radius) &&
-               g->squircle.radius >= 0 && isfinite(g->squircle.curvature) &&
-               g->squircle.curvature >= 0 && g->squircle.curvature <= 1;
+        return canvas_finite_rect(g->rrect.rect) &&
+               canvas_valid_corner_radii(g->rrect.radii, g->rrect.curvature);
     case OPTICS_GFX_GEOM_CIRCLE:
         return isfinite(g->circle.cx) && isfinite(g->circle.cy) && isfinite(g->circle.radius) &&
                g->circle.radius >= 0;
@@ -72,9 +74,14 @@ static bool brush_common_valid(const optics_gfx_brush *b) {
            b->blend >= OPTICS_GFX_BLEND_SRC_OVER && b->blend <= OPTICS_GFX_BLEND_MULTIPLY;
 }
 
+static bool brush_image_clip_valid(const optics_gfx_brush_image_data *im) {
+    return canvas_finite_rect(im->src_rect) && canvas_finite_rect(im->clip_rect) &&
+           canvas_valid_corner_radii(im->clip_radii, im->clip_curvature);
+}
+
 bool canvas_valid_brush_slot(const optics_gfx_brush *b) {
     return brush_common_valid(b) && b->kind == OPTICS_GFX_BRUSH_IMAGE_PATTERN &&
-           canvas_finite_rect(b->image.src_rect);
+           brush_image_clip_valid(&b->image);
 }
 
 bool canvas_valid_brush(const optics_gfx_brush *b) {
@@ -83,7 +90,7 @@ bool canvas_valid_brush(const optics_gfx_brush *b) {
     if (b->kind == OPTICS_GFX_BRUSH_SOLID)
         return true;
     if (b->kind == OPTICS_GFX_BRUSH_IMAGE_PATTERN)
-        return b->image.image && canvas_finite_rect(b->image.src_rect);
+        return b->image.image && brush_image_clip_valid(&b->image);
     if (b->kind != OPTICS_GFX_BRUSH_LINEAR_GRADIENT && b->kind != OPTICS_GFX_BRUSH_RADIAL_GRADIENT)
         return false;
     const optics_gfx_brush_gradient_data *g = &b->gradient;

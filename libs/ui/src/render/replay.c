@@ -223,8 +223,12 @@ optics_gfx_result optics_ui__compile_commands(optics_ui *ui, optics_gfx_encoder 
         if (!is_clip_cmd && !rect_overlaps(r, command_clip))
             continue;
 
-        if (c->radius > 0.5f && c->radius >= fminf(r.w, r.h) * 0.5f - 0.001f && c->rel.w > 0.0f &&
-            c->rel.h > 0.0f && fabsf(c->rel.w - c->rel.h) < 0.5f) {
+        optics_gfx_corner_radii cr_init = c->corner_radii;
+        bool uniform_circle = cr_init.tl == cr_init.tr && cr_init.tr == cr_init.br &&
+                              cr_init.br == cr_init.bl && cr_init.tl > 0.5f &&
+                              cr_init.tl >= fminf(r.w, r.h) * 0.5f - 0.001f;
+        if (uniform_circle && c->rel.w > 0.0f && c->rel.h > 0.0f &&
+            fabsf(c->rel.w - c->rel.h) < 0.5f) {
             float side = fminf(r.w, r.h);
             r.x += (r.w - side) * 0.5f;
             r.y += (r.h - side) * 0.5f;
@@ -241,21 +245,16 @@ optics_gfx_result optics_ui__compile_commands(optics_ui *ui, optics_gfx_encoder 
         }
 
         switch (c->kind) {
-        case OPTICS_UI_DRAW_RECT: {
-            optics_gfx_geometry g =
-                (c->radius > 0.5f) ? optics_gfx_geom_rrect(r, c->radius) : optics_gfx_geom_rect(r);
-            optics_gfx_brush b = optics_gfx_brush_solid(c->color);
-            optics_gfx_encoder_draw_geometry(
-                enc, &(optics_gfx_encoder_draw_geometry_opts){.geom = &g, .brush = &b});
-            break;
-        }
+        case OPTICS_UI_DRAW_RECT:
         case OPTICS_UI_DRAW_BORDER: {
-            if (c->width <= 0.0f || (c->color >> 24) == 0)
+            if (c->kind == OPTICS_UI_DRAW_BORDER && (c->width <= 0.0f || (c->color >> 24) == 0))
                 break;
-            float bw = c->width;
-            optics_gfx_geometry g =
-                (c->radius > 0.5f) ? optics_gfx_geom_rrect(r, c->radius) : optics_gfx_geom_rect(r);
-            g.stroke.width = bw;
+            optics_gfx_corner_radii cr = c->corner_radii;
+            bool has_radius = cr.tl > 0.0f || cr.tr > 0.0f || cr.br > 0.0f || cr.bl > 0.0f;
+            optics_gfx_geometry g = has_radius ? optics_gfx_geom_rrect(r, cr, c->corner_curvature)
+                                               : optics_gfx_geom_rect(r);
+            if (c->kind == OPTICS_UI_DRAW_BORDER)
+                g.stroke.width = c->width;
             optics_gfx_brush b = optics_gfx_brush_solid(c->color);
             optics_gfx_encoder_draw_geometry(
                 enc, &(optics_gfx_encoder_draw_geometry_opts){.geom = &g, .brush = &b});

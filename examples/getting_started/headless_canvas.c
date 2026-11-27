@@ -41,7 +41,8 @@ int main(int argc, char **argv) {
     }
 
     /* Card backdrop */
-    optics_gfx_geometry card = optics_gfx_geom_rrect((optics_gfx_rect){48, 40, 416, 240}, 20.0f);
+    optics_gfx_geometry card = optics_gfx_geom_rrect((optics_gfx_rect){48, 40, 416, 240},
+                                                     optics_gfx_corner_radii_uniform(20.0f), 0.0f);
     optics_gfx_brush card_fill =
         optics_gfx_brush_solid(optics_gfx_color_rgba_premul(30, 36, 52, 255));
     optics_gfx_canvas_draw_geometry(
@@ -61,17 +62,20 @@ int main(int argc, char **argv) {
     /* Accent bars */
     optics_gfx_brush bar_brush =
         optics_gfx_brush_solid(optics_gfx_color_rgba_premul(226, 232, 240, 220));
-    optics_gfx_geometry bar1 = optics_gfx_geom_rrect((optics_gfx_rect){264, 118, 160, 18}, 9.0f);
+    optics_gfx_geometry bar1 = optics_gfx_geom_rrect((optics_gfx_rect){264, 118, 160, 18},
+                                                     optics_gfx_corner_radii_uniform(9.0f), 0.0f);
     optics_gfx_canvas_draw_geometry(
         canvas, &(optics_gfx_canvas_draw_geometry_opts){.geom = &bar1, .brush = &bar_brush});
 
     optics_gfx_brush sub_brush =
         optics_gfx_brush_solid(optics_gfx_color_rgba_premul(148, 163, 184, 180));
-    optics_gfx_geometry bar2 = optics_gfx_geom_rrect((optics_gfx_rect){264, 152, 124, 14}, 7.0f);
+    optics_gfx_geometry bar2 = optics_gfx_geom_rrect((optics_gfx_rect){264, 152, 124, 14},
+                                                     optics_gfx_corner_radii_uniform(7.0f), 0.0f);
     optics_gfx_canvas_draw_geometry(
         canvas, &(optics_gfx_canvas_draw_geometry_opts){.geom = &bar2, .brush = &sub_brush});
 
-    optics_gfx_geometry bar3 = optics_gfx_geom_rrect((optics_gfx_rect){264, 182, 92, 14}, 7.0f);
+    optics_gfx_geometry bar3 = optics_gfx_geom_rrect((optics_gfx_rect){264, 182, 92, 14},
+                                                     optics_gfx_corner_radii_uniform(7.0f), 0.0f);
     optics_gfx_canvas_draw_geometry(
         canvas, &(optics_gfx_canvas_draw_geometry_opts){.geom = &bar3, .brush = &sub_brush});
 

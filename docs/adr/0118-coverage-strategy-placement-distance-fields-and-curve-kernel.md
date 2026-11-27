@@ -11,6 +11,7 @@ negative_knowledge: true
 # ADR-0118: Coverage strategy placement — closed-form distance fields as a peer of the curve kernel
 
 - Status: Accepted
+- Amended by: [ADR-0175](0175-per-corner-analytic-squircle-sdf-and-unified-corner-radii.md) (per-corner analytic squircle SDF, unified `OPTICS_GFX_GEOM_RRECT`, and `DL_VERSION = 2`)
 - Date: 2026-10-25
 - Scope: new public surface `libs/flux/include/flux/sdf.h` and implementation
   `libs/flux/src/sdf/`; consumers `libs/flux/src/canvas/` (dispatch, SDF

@@ -82,21 +82,23 @@ static void optics_ui__skin_scrollbar(optics_ui *ui, optics_ui_node *n) {
         /* track: drawn only when its colour is non-transparent, so a
          * consumer can opt out of the range hint entirely. */
         if (t->color_scrollbar_track & 0xff000000u) {
-            optics_ui__drawlist_push(ui, n,
-                                     (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_RECT,
-                                                          .rel = {sb_x, 0.0f, sb_w, viewport_h},
-                                                          .color = t->color_scrollbar_track,
-                                                          .radius = radius});
+            optics_ui__drawlist_push(
+                ui, n,
+                (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_RECT,
+                                     .rel = {sb_x, 0.0f, sb_w, viewport_h},
+                                     .color = t->color_scrollbar_track,
+                                     .corner_radii = optics_gfx_corner_radii_uniform(radius)});
         }
         /* thumb: rest / hover / drag colour picked by interaction state */
         optics_gfx_color thumb_color = dragging   ? t->color_scrollbar_thumb_active
                                        : hovering ? t->color_scrollbar_thumb_hover
                                                   : t->color_scrollbar_thumb;
-        optics_ui__drawlist_push(ui, n,
-                                 (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_RECT,
-                                                      .rel = {sb_x, sb_y, sb_w, thumb_h},
-                                                      .color = thumb_color,
-                                                      .radius = radius});
+        optics_ui__drawlist_push(
+            ui, n,
+            (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_RECT,
+                                 .rel = {sb_x, sb_y, sb_w, thumb_h},
+                                 .color = thumb_color,
+                                 .corner_radii = optics_gfx_corner_radii_uniform(radius)});
     }
 
     /* Store pending thumb geometry for snapshot capture (the clamped

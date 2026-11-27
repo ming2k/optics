@@ -81,6 +81,27 @@ int main(void) {
     OT_EXPECT(frame_with_cmd(ui, text) == true);
     OT_EXPECT(frame_with_cmd(ui, text) == false);
 
+    /* Per-corner radii, curvature, and huge pill sentinels (FLT_MAX) must hash
+     * cleanly without float->uint32 cast UB and trigger damage on any change. */
+    optics_ui_draw_cmd rect = {
+        .kind = OPTICS_UI_DRAW_RECT,
+        .rel = {0.0f, 0.0f, 40.0f, 20.0f},
+        .color = 0xffffffffu,
+        .corner_radii = optics_gfx_corner_radii_all(4.0f, 0.0f, 8.0f, 0.0f),
+        .corner_curvature = 0.0f,
+    };
+    OT_EXPECT(frame_with_cmd(ui, rect) == true);
+    OT_EXPECT(frame_with_cmd(ui, rect) == false);
+    rect.corner_radii.tr = 6.0f;
+    OT_EXPECT(frame_with_cmd(ui, rect) == true);
+    OT_EXPECT(frame_with_cmd(ui, rect) == false);
+    rect.corner_curvature = 0.6f;
+    OT_EXPECT(frame_with_cmd(ui, rect) == true);
+    OT_EXPECT(frame_with_cmd(ui, rect) == false);
+    rect.corner_radii = optics_gfx_corner_radii_uniform(1e20f);
+    OT_EXPECT(frame_with_cmd(ui, rect) == true);
+    OT_EXPECT(frame_with_cmd(ui, rect) == false);
+
     optics_ui_release(ui);
     return OT_REPORT();
 }

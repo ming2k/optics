@@ -12,6 +12,8 @@ fn main() {
         headers: &[
             "gfx/core.h",
             "gfx/math.h",
+            "gfx/curve.h",
+            "gfx/sdf.h",
             "gfx/canvas.h",
             "gfx/canvas_cpu.h",
             "gfx/vulkan.h",

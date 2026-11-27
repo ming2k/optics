@@ -38,20 +38,12 @@ static inline optics_gfx_geometry optics_gfx_geom_rect(optics_gfx_rect r) {
     };
 }
 
-static inline optics_gfx_geometry optics_gfx_geom_rrect(optics_gfx_rect r, float radius) {
+static inline optics_gfx_geometry
+optics_gfx_geom_rrect(optics_gfx_rect r, optics_gfx_corner_radii radii, float curvature) {
     return (optics_gfx_geometry){
         .kind = OPTICS_GFX_GEOM_RRECT,
         .stroke.width = 0.0f,
-        .rrect = {.rect = r, .radius = radius},
-    };
-}
-
-static inline optics_gfx_geometry optics_gfx_geom_squircle(optics_gfx_rect r, float radius,
-                                                           float curvature) {
-    return (optics_gfx_geometry){
-        .kind = OPTICS_GFX_GEOM_SQUIRCLE,
-        .stroke.width = 0.0f,
-        .squircle = {.rect = r, .radius = radius, .curvature = curvature},
+        .rrect = {.rect = r, .radii = radii, .curvature = curvature},
     };
 }
 
@@ -128,17 +120,18 @@ static inline void optics_gfx_canvas_fill_rect_color(optics_gfx_canvas *c, optic
 }
 
 static inline void optics_gfx_canvas_fill_rrect(optics_gfx_canvas *c, optics_gfx_rect r,
-                                                float radius, optics_gfx_color color) {
-    optics_gfx_geometry g = optics_gfx_geom_rrect(r, radius);
+                                                optics_gfx_corner_radii radii, float curvature,
+                                                optics_gfx_color color) {
+    optics_gfx_geometry g = optics_gfx_geom_rrect(r, radii, curvature);
     optics_gfx_brush b = optics_gfx_brush_solid(color);
     optics_gfx_canvas_draw_geometry(
         c, &(optics_gfx_canvas_draw_geometry_opts){.geom = &g, .brush = &b});
 }
 
 static inline void optics_gfx_canvas_stroke_rrect(optics_gfx_canvas *c, optics_gfx_rect r,
-                                                  float radius, optics_gfx_color color,
-                                                  float width) {
-    optics_gfx_geometry g = optics_gfx_geom_rrect(r, radius);
+                                                  optics_gfx_corner_radii radii, float curvature,
+                                                  optics_gfx_color color, float width) {
+    optics_gfx_geometry g = optics_gfx_geom_rrect(r, radii, curvature);
     g.stroke.width = width;
     optics_gfx_brush b = optics_gfx_brush_solid(color);
     optics_gfx_canvas_draw_geometry(
@@ -218,9 +211,11 @@ static inline void optics_gfx_canvas_draw_image_opaque(optics_gfx_canvas *c,
 }
 
 static inline void optics_gfx_canvas_draw_image_rrect(optics_gfx_canvas *c, optics_gfx_image *image,
-                                                      optics_gfx_rect dst, float radius,
+                                                      optics_gfx_rect dst,
+                                                      optics_gfx_corner_radii radii,
+                                                      float curvature,
                                                       const optics_gfx_image_style *style) {
-    optics_gfx_geometry g = optics_gfx_geom_rrect(dst, radius);
+    optics_gfx_geometry g = optics_gfx_geom_rrect(dst, radii, curvature);
     optics_gfx_brush b = {
         .kind = OPTICS_GFX_BRUSH_IMAGE_PATTERN,
         .blend = style ? style->blend : OPTICS_GFX_BLEND_SRC_OVER,
@@ -231,11 +226,9 @@ static inline void optics_gfx_canvas_draw_image_rrect(optics_gfx_canvas *c, opti
         c, &(optics_gfx_canvas_draw_geometry_opts){.geom = &g, .brush = &b});
 }
 
-static inline void optics_gfx_canvas_draw_image_clipped_rrect(optics_gfx_canvas *c,
-                                                              optics_gfx_image *image,
-                                                              optics_gfx_rect dst,
-                                                              optics_gfx_rect clip, float radius,
-                                                              const optics_gfx_image_style *style) {
+static inline void optics_gfx_canvas_draw_image_clipped_rrect(
+    optics_gfx_canvas *c, optics_gfx_image *image, optics_gfx_rect dst, optics_gfx_rect clip,
+    optics_gfx_corner_radii radii, float curvature, const optics_gfx_image_style *style) {
     optics_gfx_geometry g = optics_gfx_geom_rect(dst);
     optics_gfx_brush b = {
         .kind = OPTICS_GFX_BRUSH_IMAGE_PATTERN,
@@ -245,7 +238,8 @@ static inline void optics_gfx_canvas_draw_image_clipped_rrect(optics_gfx_canvas 
             {
                 .image = image,
                 .clip_rect = clip,
-                .clip_radius = radius,
+                .clip_radii = radii,
+                .clip_curvature = curvature,
                 .tint = style ? style->tint : 0xFFFFFFFFu,
             },
     };

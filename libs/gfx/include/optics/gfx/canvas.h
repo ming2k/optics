@@ -85,10 +85,11 @@ OPTICS_GFX_API void optics_gfx_path_cubic_to(optics_gfx_path *p, float c1x, floa
                                              float c2y, float x, float y);
 OPTICS_GFX_API void optics_gfx_path_close(optics_gfx_path *p);
 OPTICS_GFX_API void optics_gfx_path_add_rect(optics_gfx_path *p, optics_gfx_rect r);
-OPTICS_GFX_API void optics_gfx_path_add_round_rect(optics_gfx_path *p, optics_gfx_rect r,
-                                                   float radius);
-OPTICS_GFX_API void optics_gfx_path_add_squircle(optics_gfx_path *p, optics_gfx_rect r,
-                                                 float radius, float curvature);
+/* Orthogonal rounded-rectangle / continuous-curvature squircle path builder
+ * (ADR-0175). `curvature == 0` emits circular arcs; `curvature == 1` emits
+ * L4 G2 squircle arcs. */
+OPTICS_GFX_API void optics_gfx_path_add_rrect(optics_gfx_path *p, optics_gfx_rect r,
+                                              optics_gfx_corner_radii radii, float curvature);
 OPTICS_GFX_API void optics_gfx_path_add_circle(optics_gfx_path *p, float cx, float cy,
                                                float radius);
 
@@ -272,26 +273,22 @@ typedef struct optics_gfx_glyph_run_desc optics_gfx_glyph_run_desc;
 typedef enum optics_gfx_geom_kind : uint8_t {
     OPTICS_GFX_GEOM_RECT = 0,
     OPTICS_GFX_GEOM_RRECT = 1,
-    OPTICS_GFX_GEOM_SQUIRCLE = 2,
-    OPTICS_GFX_GEOM_CIRCLE = 3,
-    OPTICS_GFX_GEOM_LINE = 4,
-    OPTICS_GFX_GEOM_PATH = 5,
+    OPTICS_GFX_GEOM_CIRCLE = 2,
+    OPTICS_GFX_GEOM_LINE = 3,
+    OPTICS_GFX_GEOM_PATH = 4,
 } optics_gfx_geom_kind;
 
 typedef struct optics_gfx_geom_rect_data {
     optics_gfx_rect rect;
 } optics_gfx_geom_rect_data;
 
+/* Unified rounded-rectangle / continuous-curvature squircle geometry (ADR-0175).
+ * `curvature == 0.0f` selects circular arcs; `1.0f` selects L4 G2 squircle arcs. */
 typedef struct optics_gfx_geom_rrect_data {
     optics_gfx_rect rect;
-    float radius;
+    optics_gfx_corner_radii radii;
+    float curvature;
 } optics_gfx_geom_rrect_data;
-
-typedef struct optics_gfx_geom_squircle_data {
-    optics_gfx_rect rect;
-    float radius;
-    float curvature; /* 0.0f = standard rrect, 1.0f = G2 continuous superellipse */
-} optics_gfx_geom_squircle_data;
 
 typedef struct optics_gfx_geom_circle_data {
     float cx, cy, radius;
@@ -322,7 +319,6 @@ typedef struct optics_gfx_geometry {
     union {
         optics_gfx_geom_rect_data rect;
         optics_gfx_geom_rrect_data rrect;
-        optics_gfx_geom_squircle_data squircle;
         optics_gfx_geom_circle_data circle;
         optics_gfx_geom_line_data line;
         optics_gfx_geom_path_data path;
@@ -354,7 +350,8 @@ typedef struct optics_gfx_brush_image_data {
     bool opaque_only;
     optics_gfx_color tint;
     optics_gfx_rect clip_rect;
-    float clip_radius;
+    optics_gfx_corner_radii clip_radii;
+    float clip_curvature;
 } optics_gfx_brush_image_data;
 
 typedef struct optics_gfx_brush {

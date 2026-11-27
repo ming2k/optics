@@ -47,13 +47,13 @@ typedef struct push_constants {
     uint64_t out_address;
     float half_x;
     float half_y;
-    float radius;
+    float radii[4]; /* tl, tr, br, bl */
     float curvature;
     float aa;
+    float union_r;
     uint32_t sample_count;
-    uint32_t mode; /* 0 = shading normal, 1 = continuum gradient */
-    float pad1;
-    float pad2;
+    uint32_t mode; /* 0 = shading normal, 1 = continuum gradient, 2 = smooth union */
+    uint32_t _pad;
 } push_constants;
 
 /* Mirrors the lattice sdf_parity.comp builds, so the host evaluates the same
@@ -73,9 +73,10 @@ typedef struct case_desc {
     const char *name;
     float half_x;
     float half_y;
-    float radius;
+    optics_gfx_corner_radii radii;
     float curvature;
     float aa;
+    float union_r;
 } case_desc;
 
 int main(void) {
@@ -154,16 +155,21 @@ int main(void) {
         }
     }
 
-    /* A sweep rather than one shape: a box, a circle-ish rrect, a G2 squircle,
-     * a wide pill, and a degenerate half extent. Between them they exercise the
-     * L2 branch, the L4 branch, the blend, and the interior crease. */
+    /* Sweep both uniform and asymmetric per-corner shapes (ADR-0175): box,
+     * uniform rrect, G2 squircle, pill, tiny, subpixel AA, quarter-arc
+     * [0, 0, 22, 0], bezel-flush tab [0, 0, 12, 12], 4-corner asymmetric, and
+     * diagonal leaf [20, 0, 20, 0]. */
     const case_desc cases[] = {
-        {"box", 40.0f, 24.0f, 0.0f, 0.0f, 1.0f},
-        {"rrect", 32.0f, 32.0f, 12.0f, 0.0f, 1.0f},
-        {"squircle_g2", 36.0f, 28.0f, 10.0f, 1.0f, 1.0f},
-        {"pill", 60.0f, 8.0f, 8.0f, 0.5f, 1.0f},
-        {"tiny", 4.0f, 3.0f, 1.0f, 0.75f, 1.0f},
-        {"subpixel_aa", 20.0f, 20.0f, 6.0f, 1.0f, 1e-3f},
+        {"box", 40.0f, 24.0f, {0.0f, 0.0f, 0.0f, 0.0f}, 0.0f, 1.0f, 0.0f},
+        {"rrect", 32.0f, 32.0f, {12.0f, 12.0f, 12.0f, 12.0f}, 0.0f, 1.0f, 12.0f},
+        {"squircle_g2", 36.0f, 28.0f, {10.0f, 10.0f, 10.0f, 10.0f}, 1.0f, 1.0f, 10.0f},
+        {"pill", 60.0f, 8.0f, {8.0f, 8.0f, 8.0f, 8.0f}, 0.5f, 1.0f, 8.0f},
+        {"tiny", 4.0f, 3.0f, {1.0f, 1.0f, 1.0f, 1.0f}, 0.75f, 1.0f, 1.0f},
+        {"subpixel_aa", 20.0f, 20.0f, {6.0f, 6.0f, 6.0f, 6.0f}, 1.0f, 1e-3f, 6.0f},
+        {"quarter_arc", 11.0f, 11.0f, {0.0f, 0.0f, 22.0f, 0.0f}, 0.6f, 1.0f, 6.0f},
+        {"bezel_tab", 32.0f, 6.0f, {0.0f, 0.0f, 12.0f, 12.0f}, 0.8f, 1.0f, 4.0f},
+        {"asymmetric", 40.0f, 25.0f, {4.0f, 14.0f, 24.0f, 0.0f}, 0.7f, 1.0f, 8.0f},
+        {"leaf", 10.0f, 10.0f, {20.0f, 0.0f, 20.0f, 0.0f}, 0.5f, 1.0f, 4.0f},
     };
     const size_t case_count = sizeof(cases) / sizeof(cases[0]);
 
@@ -205,9 +211,10 @@ int main(void) {
                 .out_address = buffer_address,
                 .half_x = cs->half_x,
                 .half_y = cs->half_y,
-                .radius = cs->radius,
+                .radii = {cs->radii.tl, cs->radii.tr, cs->radii.br, cs->radii.bl},
                 .curvature = cs->curvature,
                 .aa = cs->aa,
+                .union_r = cs->union_r,
                 .sample_count = SAMPLE_COUNT,
                 .mode = mode,
             };
@@ -308,39 +315,37 @@ int main(void) {
                  * exclusion is visible in the output rather than silent. Everywhere
                  * else the comparison is exact in intent. */
                 if (mode == 1u) {
-                    float qx = fabsf(p.x) - (cs->half_x - cs->radius);
-                    float qy = fabsf(p.y) - (cs->half_y - cs->radius);
-                    if (qx <= 0.0f && qy <= 0.0f && fabsf(qx - qy) < 1e-3f) {
+                    float bx = fabsf(p.x) - cs->half_x;
+                    float by = fabsf(p.y) - cs->half_y;
+                    if (bx <= 0.0f && by <= 0.0f && fabsf(bx - by) < 1e-3f) {
                         skipped_discontinuity++;
                         continue;
                     }
                 }
 
-                /* Compare like with like. mode 1 is the continuum gradient on both
-                 * sides; comparing the GPU's gradient against the host's *shading*
-                 * normal would report the interior crease rule as a defect, which
-                 * is the one difference the two entry points exist to express. */
                 optics_gfx_sdf_sample host;
                 if (mode == 2u) {
-                    /* The fused-body composition: two shapes and their smooth
-                     * union, which is the only path a metaball merge takes and
-                     * the one a differenced normal had to guess at. */
                     optics_gfx_point p_b = {p.x - cs->half_x * 0.75f, p.y};
-                    optics_gfx_sdf_sample a_s = optics_gfx_sdf_squircle_sample(
-                        p, cs->half_x, cs->half_y, cs->radius * 0.25f, cs->curvature, cs->aa);
-                    optics_gfx_sdf_sample b_s =
-                        optics_gfx_sdf_squircle_sample(p_b, cs->half_x * 0.7f, cs->half_y * 0.7f,
-                                                       cs->radius * 0.25f, cs->curvature, cs->aa);
+                    optics_gfx_corner_radii sub_r = {
+                        cs->radii.tl * 0.25f,
+                        cs->radii.tr * 0.25f,
+                        cs->radii.br * 0.25f,
+                        cs->radii.bl * 0.25f,
+                    };
+                    optics_gfx_sdf_sample a_s = optics_gfx_sdf_rrect_sample(
+                        p, cs->half_x, cs->half_y, sub_r, cs->curvature, cs->aa);
+                    optics_gfx_sdf_sample b_s = optics_gfx_sdf_rrect_sample(
+                        p_b, cs->half_x * 0.7f, cs->half_y * 0.7f, sub_r, cs->curvature, cs->aa);
                     host.distance =
-                        optics_gfx_sdf_smooth_union(a_s.distance, b_s.distance, cs->radius);
+                        optics_gfx_sdf_smooth_union(a_s.distance, b_s.distance, cs->union_r);
                     host.normal = optics_gfx_sdf_smooth_union_gradient(
-                        a_s.normal, b_s.normal, a_s.distance, b_s.distance, cs->radius);
+                        a_s.normal, b_s.normal, a_s.distance, b_s.distance, cs->union_r);
                 } else if (mode == 1u) {
-                    host = optics_gfx_sdf_squircle_gradient(p, cs->half_x, cs->half_y, cs->radius,
-                                                            cs->curvature);
+                    host = optics_gfx_sdf_rrect_gradient(p, cs->half_x, cs->half_y, cs->radii,
+                                                         cs->curvature);
                 } else {
-                    host = optics_gfx_sdf_squircle_sample(p, cs->half_x, cs->half_y, cs->radius,
-                                                          cs->curvature, cs->aa);
+                    host = optics_gfx_sdf_rrect_sample(p, cs->half_x, cs->half_y, cs->radii,
+                                                       cs->curvature, cs->aa);
                 }
                 const float *g = &gpu[i * FLOATS_PER_SAMPLE];
                 float gpu_d = g[0], gpu_nx = g[1], gpu_ny = g[2];

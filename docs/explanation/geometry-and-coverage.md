@@ -34,8 +34,8 @@ from an exact path.
 | Analytic coverage (host) | Exact per-pixel area by sub-band integration over an active edge table | `libs/gfx/src/canvas/coverage_raster.c`, `backend_cpu.c` |
 | Analytic coverage (device) | 16×16 tile binning, prefix scan, per-row winding backdrop, per-pixel area | `libs/gfx/src/canvas/canvas_tile.c`, `shaders/canvas_tile_*.slang`, `backend_vk.c` |
 | Stroke expansion | Per-vertex mitre frames; inner offset clamped at the local radius of curvature; miter/bevel/round joins; butt/square/round caps; each body, join and cap emitted as one positively oriented convex contour | `libs/gfx/src/canvas/geometry_stroke.c` |
-| Path building | `MOVE`/`LINE`/`QUAD`/`CUBIC`/`CLOSE` verbs; rect / round-rect / circle constructors; squircle constructed as two cubics per corner fitted to `optics_gfx_sdf_squircle`'s zero set | `libs/gfx/src/canvas/path.c` |
-| Distance fields (primitives) | Circle, rounded rect, squircle (circular↔L4 corner blend), border ring, analytic coverage | `libs/gfx/include/optics/gfx/sdf.h`, `libs/gfx/src/sdf/sdf.c` |
+| Path building | `MOVE`/`LINE`/`QUAD`/`CUBIC`/`CLOSE` verbs; rect / circle / per-corner rrect & squircle constructors (`optics_gfx_path_add_rrect`, two cubics per corner fitted to `optics_gfx_sdf_rrect`'s zero set) | `libs/gfx/src/canvas/path.c` |
+| Distance fields (primitives) | Circle, per-corner rrect/squircle (circular↔L4 corner blend) + analytic derivatives, border ring, analytic coverage | `libs/gfx/include/optics/gfx/sdf.h`, `libs/gfx/src/sdf/sdf.c` |
 | Distance field (device) | Rounded-rect field, border ring adjustment, one-pixel analytic coverage | `libs/gfx/src/canvas/shaders/canvas_sdf.frag.slang` |
 | Distance field (host) | The same field via the shared primitive | `libs/gfx/src/canvas/backend_cpu.c` (`frag_sdf`) |
 | Strategy dispatch | Which geometry class takes the analytic path and under which paint/blend/transform. Rounded rect, circle and squircle are analytic when solid + SRC_OVER + axis-uniform | `libs/gfx/src/canvas/canvas.c` (`canvas_draw_geometry`, `draw_sdf_shape`) |
@@ -47,10 +47,9 @@ from an exact path.
 ## The curve pipeline, in order
 
 1. **Build.** A caller appends `MOVE`/`LINE`/`QUAD`/`CUBIC`/`CLOSE` verbs, or a
-   constructor emits them: `optics_gfx_path_add_round_rect` and
-   `optics_gfx_path_add_circle` use the standard `k ≈ 0.5522847498` circular-arc
-   control offset; `optics_gfx_path_add_squircle` uses a continuous-curvature
-   approximation.
+   constructor emits them: `optics_gfx_path_add_circle` and `optics_gfx_path_add_rrect`
+   (at `curvature == 0`) use the standard `k ≈ 0.5522847498` circular-arc control offset;
+   `optics_gfx_path_add_rrect` (at `curvature > 0`) emits two fitted cubics per corner.
 2. **Flatten.** `curve_flatten.c` computes each curve's segment count from the
    kernel's Wang formula and samples uniformly, in object space, against a
    screen-space tolerance divided by the transform's operator norm.
@@ -91,9 +90,10 @@ primitive against the shader's expression so the two cannot drift.
 
 Recorded so the gaps are visible rather than inferred:
 
-- **Squircle.** One shape, one path, one dispatch: the field defines the corner
-  arc, `optics_gfx_path_add_squircle` fits it, and `OPTICS_GFX_GEOM_SQUIRCLE` (solid,
-  SRC_OVER, similarity transform) evaluates the field instead of the path route.
+- **Unified RRect / Squircle.** One shape, one path, one dispatch: `optics_gfx_sdf_rrect`
+  defines the per-corner circular↔L4 corner arc, `optics_gfx_path_add_rrect` fits it,
+  and `OPTICS_GFX_GEOM_RRECT` (solid, SRC_OVER, similarity transform) evaluates the
+  field directly instead of taking the path route (ADR-0175).
 - **Shear and anisotropic scale.** The field is evaluated in shape space, which
   is exact for rotation and uniform scale (a similarity preserves distance).
   Shear and anisotropic scale distort distance, so those take the

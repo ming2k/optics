@@ -3,7 +3,6 @@
  * Bindless textures + sampler.
  */
 
-#include "optics_gfx_sdf.slang"
 #include "canvas_image_common.slang"
 
 struct GradStop {
@@ -47,7 +46,7 @@ float4 main(FragmentInput input) : SV_Target {
     float4 texel =
         u_textures[NonUniformResourceIndex(ih)].Sample(u_samplers[NonUniformResourceIndex(sh)], uv);
 
-    if (kind == 6u || kind == 7u)
+    if (kind == 6u)
         texel.a = 1.0f;
 
     texel = optics_gfx_canvas_decode_texel(texel, pc.kind, sh, pc.color_params);
@@ -56,14 +55,8 @@ float4 main(FragmentInput input) : SV_Target {
         return input.v_color * texel.r;
     } else {
         float4 out_col = texel * input.v_color;
-        if (kind == 6u || kind == 7u)
+        if (kind == 6u)
             out_col.a = 1.0f;
-        if (kind == 5u || kind == 7u) {
-            float dist =
-                optics_gfx_sdf_round_rect(input.v_pos - pc.image_dst.xy, pc.image_dst.zw, pc.grad_radius);
-            float coverage = clamp(0.5f - dist / max(fwidth(dist), 1e-4f), 0.0f, 1.0f);
-            out_col *= coverage;
-        }
         return out_col;
     }
 }

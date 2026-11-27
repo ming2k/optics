@@ -138,7 +138,8 @@ static void render_composed_frame(compose_env *env, float card_x,
 
     /* Animated rounded card on the right half driven by optics_motion_spring. */
     optics_gfx_geometry card_geom =
-        optics_gfx_geom_rrect((optics_gfx_rect){card_x, 56.0f, 96.0f, 96.0f}, 20.0f);
+        optics_gfx_geom_rrect((optics_gfx_rect){card_x, 56.0f, 96.0f, 96.0f},
+                              optics_gfx_corner_radii_uniform(20.0f), 0.0f);
     optics_gfx_brush card_brush =
         optics_gfx_brush_solid(optics_gfx_color_rgba_premul(32, 72, 160, 220));
     optics_gfx_canvas_draw_geometry(env->canvas, &(optics_gfx_canvas_draw_geometry_opts){

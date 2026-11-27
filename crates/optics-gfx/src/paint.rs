@@ -235,13 +235,26 @@ impl<'arena> Path<'arena> {
         self
     }
 
-    /// Append a rounded-rectangle subpath.
-    pub fn add_round_rect(&self, x: f32, y: f32, w: f32, h: f32, radius: f32) -> &Self {
+    /// Append a rounded-rectangle / continuous-curvature squircle subpath with
+    /// independent per-corner radii `(tl, tr, br, bl)`.
+    ///
+    /// `curvature == 0.0` emits circular arcs; `curvature == 1.0` emits L4 G2
+    /// squircle arcs. Accepts `f32` (uniform), `[f32; 4]`, or [`CornerRadii`].
+    pub fn add_rrect(
+        &self,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        radii: impl Into<CornerRadii>,
+        curvature: f32,
+    ) -> &Self {
         unsafe {
-            sys::optics_gfx_path_add_round_rect(
+            sys::optics_gfx_path_add_rrect(
                 self.raw,
                 sys::optics_gfx_rect { x, y, w, h },
-                radius,
+                radii.into().to_raw(),
+                clamp_curvature(curvature),
             )
         };
         self

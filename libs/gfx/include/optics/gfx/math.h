@@ -71,6 +71,29 @@ OPTICS_GFX_API optics_gfx_vec4 optics_gfx_vec4_normalize(optics_gfx_vec4 v);
 typedef struct optics_gfx_point {
     float x, y;
 } optics_gfx_point;
+
+/* Per-corner radii in clockwise order: top-left, top-right, bottom-right,
+ * bottom-left (CSS border-radius / Skia SkRRect convention). */
+typedef struct optics_gfx_corner_radii {
+    float tl, tr, br, bl;
+} optics_gfx_corner_radii;
+
+static inline optics_gfx_corner_radii optics_gfx_corner_radii_uniform(float r) {
+    return (optics_gfx_corner_radii){r, r, r, r};
+}
+
+static inline optics_gfx_corner_radii optics_gfx_corner_radii_all(float tl, float tr, float br,
+                                                                  float bl) {
+    return (optics_gfx_corner_radii){tl, tr, br, bl};
+}
+
+/* CSS Backgrounds & Borders Level 3 / Skia proportional radius normalization:
+ * clamps negative/non-finite entries to zero and, when adjacent corners exceed
+ * their shared edge, scales all four radii by the smallest factor that makes
+ * every edge fit. A single corner may claim up to min(width, height). */
+OPTICS_GFX_API optics_gfx_corner_radii
+optics_gfx_corner_radii_normalize(optics_gfx_corner_radii radii, float width, float height);
+
 /* optics_gfx_rect is a core value type (gfx/core.h): damage is a frame-native
  * concept and every layer that names a dirty region needs the same struct. */
 

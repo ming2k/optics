@@ -108,11 +108,13 @@ mod types;
 pub mod view;
 
 pub use input::{Input, MouseButton, key, mods};
+pub use optics_gfx::CornerRadii;
 pub use patterns::{SegmentedControl, SegmentedItem};
 pub use types::{
     Align, Band, ButtonVariant, CheckboxAppearance, Color, CursorHint, DndDropInfo, FontFamily,
-    Icon, LayoutOpts, PlaceMode, PlaceOpts, Rect, Response, SkinFn, Style, StyleResolved, TextLine,
-    TextMetrics, Theme, WidgetContent, WidgetKind, WidgetRecord, WidgetState,
+    Icon, LabelOpts, LayoutOpts, PlaceMode, PlaceOpts, Rect, Response, SkinFn, SliderOpts, Style,
+    StyleResolved, TextEditOpts, TextLine, TextMetrics, Theme, WidgetContent, WidgetKind,
+    WidgetRecord, WidgetState,
 };
 
 /// The retained UI context. Owns the persistent tree, layout, and draw list.
@@ -810,46 +812,10 @@ impl<'frame> Frame<'frame> {
         FlexBuilder::new(self, false)
     }
 
-    /// Start a horizontal flex container (row) with preconfigured options.
-    #[inline]
-    pub fn row_ex<R>(
-        &mut self,
-        opts: &LayoutOpts,
-        body: impl FnOnce(&mut Frame) -> R,
-    ) -> (Response, R) {
-        self.row().with_opts(opts).show(body)
-    }
-
     /// Start a vertical flex container (column) with a fluent builder.
-    #[inline]
-    pub fn col(&mut self) -> FlexBuilder<'_, 'frame> {
-        FlexBuilder::new(self, true)
-    }
-
-    /// Start a vertical flex container (column) with preconfigured options.
-    #[inline]
-    pub fn col_ex<R>(
-        &mut self,
-        opts: &LayoutOpts,
-        body: impl FnOnce(&mut Frame) -> R,
-    ) -> (Response, R) {
-        self.col().with_opts(opts).show(body)
-    }
-
-    /// Start a vertical flex container (column) with a fluent builder (alias for [`Self::col`]).
     #[inline]
     pub fn column(&mut self) -> FlexBuilder<'_, 'frame> {
         FlexBuilder::new(self, true)
-    }
-
-    /// Start a vertical flex container (column) with preconfigured options (alias for [`Self::col_ex`]).
-    #[inline]
-    pub fn column_ex<R>(
-        &mut self,
-        opts: &LayoutOpts,
-        body: impl FnOnce(&mut Frame) -> R,
-    ) -> (Response, R) {
-        self.col().with_opts(opts).show(body)
     }
 
     /// Start a 2D grid container with a fluent builder (ADR-0104).
@@ -960,31 +926,6 @@ impl<'frame> Frame<'frame> {
         }
     }
 
-    pub fn pressable_row<R>(
-        &mut self,
-        id: &str,
-        label: &str,
-        opts: &LayoutOpts,
-        body: impl FnOnce(&mut Frame, Response) -> R,
-    ) -> (Response, R) {
-        let id_c = cstr(id);
-        let label_c = cstr(label);
-        let raw_opts = sys::optics_ui_pressable_opts {
-            box_: sys::optics_ui_box {
-                id: id_c.as_ptr(),
-                ..Default::default()
-            },
-            label: label_c.as_ptr(),
-            layout: opts.to_raw(),
-            ..Default::default()
-        };
-        let response =
-            Response::from_raw(unsafe { sys::optics_ui_pressable_begin(self.ui, &raw_opts) });
-        let result = body(self, response);
-        unsafe { sys::optics_ui_pressable_end(self.ui) };
-        (response, result)
-    }
-
     /// A fixed empty gap along the main axis.
     pub fn spacer(&mut self, size: f32) {
         // SAFETY: ui is live for the frame.
@@ -1022,17 +963,11 @@ impl<'frame> Frame<'frame> {
         unsafe { sys::optics_ui_pop_style(self.ui) };
     }
 
-    /// Draw an icon glyph at `size` logical pixels. A contour behind the
-    /// glyph is a style atom now (ADR-0061): wrap the call in
-    /// [`Frame::push_style`] with [`Style::with_outline_color`] /
-    /// [`Style::with_outline_width`].
-    pub fn icon(&mut self, id: Icon, size: f32) {
-        self.icon_raw(id.raw(), size);
-    }
-
-    pub fn icon_raw(&mut self, id: sys::optics_ui_icon_id, size: f32) {
+    /// Draw an icon glyph at `size` logical pixels. Accepts built-in [`Icon`]
+    /// or any custom ID returned by [`Ui::register_icon`].
+    pub fn icon(&mut self, id: impl Into<sys::optics_ui_icon_id>, size: f32) {
         let opts = sys::optics_ui_icon_opts {
-            id,
+            id: id.into(),
             size,
             ..Default::default()
         };
@@ -1086,55 +1021,26 @@ impl<'frame> Frame<'frame> {
         }
     }
 
-    pub fn icon_button_raw(&mut self, id: sys::optics_ui_icon_id) -> bool {
+    /// Draw an icon-only button. Accepts built-in [`Icon`] or any registered
+    /// `optics_ui_icon_id`; `active` highlights the selected/toggled state.
+    pub fn icon_button(&mut self, id: impl Into<sys::optics_ui_icon_id>, active: bool) -> bool {
         let opts = sys::optics_ui_button_opts {
-            icon: id,
-            ..Default::default()
-        };
-        unsafe { sys::optics_ui_button(self.ui, &opts).clicked }
-    }
-
-    pub fn icon_button_raw_active(&mut self, id: sys::optics_ui_icon_id, active: bool) -> bool {
-        let opts = sys::optics_ui_button_opts {
-            icon: id,
+            icon: id.into(),
             active,
             ..Default::default()
         };
         unsafe { sys::optics_ui_button(self.ui, &opts).clicked }
     }
 
-    pub fn icon_button(&mut self, id: Icon) -> bool {
-        self.icon_button_raw(id.raw())
-    }
-
-    pub fn icon_button_active(&mut self, id: Icon, active: bool) -> bool {
-        self.icon_button_raw_active(id.raw(), active)
-    }
-
-    pub fn button_primary(&mut self, label: &str) -> bool {
-        let c = cstr(label);
-        let opts = sys::optics_ui_button_opts {
-            label: c.as_ptr(),
-            variant: sys::optics_ui_button_variant::OPTICS_UI_BUTTON_PRIMARY,
-            ..Default::default()
-        };
-        unsafe { sys::optics_ui_button(self.ui, &opts).clicked }
-    }
-
-    pub fn button_subtle(&mut self, label: &str) -> bool {
-        let c = cstr(label);
-        let opts = sys::optics_ui_button_opts {
-            label: c.as_ptr(),
-            variant: sys::optics_ui_button_variant::OPTICS_UI_BUTTON_SUBTLE,
-            ..Default::default()
-        };
-        unsafe { sys::optics_ui_button(self.ui, &opts).clicked }
-    }
-
     pub fn button(&mut self, label: &str) -> bool {
+        self.button_with_variant(label, ButtonVariant::Default)
+    }
+
+    pub fn button_with_variant(&mut self, label: &str, variant: ButtonVariant) -> bool {
         let c = cstr(label);
         let opts = sys::optics_ui_button_opts {
             label: c.as_ptr(),
+            variant: variant.raw(),
             ..Default::default()
         };
         unsafe { sys::optics_ui_button(self.ui, &opts).clicked }
@@ -1180,36 +1086,36 @@ impl<'frame> Frame<'frame> {
     }
 
     pub fn slider(&mut self, label: &str, value: &mut f32, min: f32, max: f32) -> bool {
-        let c = cstr(label);
-        let opts = sys::optics_ui_slider_opts {
-            label: c.as_ptr(),
-            value: value as *mut f32,
-            min,
-            max,
-            ..Default::default()
-        };
-        unsafe { sys::optics_ui_slider(self.ui, &opts).changed }
+        self.slider_with(label, value, min, max, &SliderOpts::default())
     }
 
-    pub fn slider_vertical(
+    pub fn slider_with(
         &mut self,
         label: &str,
         value: &mut f32,
         min: f32,
         max: f32,
-        step: f32,
+        opts: &SliderOpts,
     ) -> bool {
         let c = cstr(label);
-        let opts = sys::optics_ui_slider_opts {
+        let raw = sys::optics_ui_slider_opts {
             label: c.as_ptr(),
             value: value as *mut f32,
             min,
             max,
-            step,
-            axis: sys::optics_ui_axis::OPTICS_UI_COLUMN,
+            step: if opts.step.is_finite() && opts.step > 0.0 {
+                opts.step
+            } else {
+                0.0
+            },
+            axis: if opts.vertical {
+                sys::optics_ui_axis::OPTICS_UI_COLUMN
+            } else {
+                sys::optics_ui_axis::OPTICS_UI_ROW
+            },
             ..Default::default()
         };
-        unsafe { sys::optics_ui_slider(self.ui, &opts).changed }
+        unsafe { sys::optics_ui_slider(self.ui, &raw).changed }
     }
 
     pub fn dropdown(&mut self, label: &str, selected: &mut i32, items: &[&str]) -> bool {
@@ -1259,12 +1165,18 @@ impl<'frame> Frame<'frame> {
         disabled: bool,
     ) -> Response {
         let (resp, _) = self.row().id(id).cross(Align::Center).show(|frame| {
-            frame.col().flex(1.0).show(|frame| {
+            frame.column().flex(1.0).show(|frame| {
                 frame.label(label);
                 if !description.is_empty() {
                     let muted_color = frame.theme().fg().with_alpha(160);
                     frame.push_style(Style::new().with_fg(muted_color));
-                    frame.label_sized(description, frame.theme().font_size_sm());
+                    frame.label_with(
+                        description,
+                        &LabelOpts {
+                            size: frame.theme().font_size_sm(),
+                            ..Default::default()
+                        },
+                    );
                     frame.pop_style();
                 }
             });
@@ -1295,12 +1207,18 @@ impl<'frame> Frame<'frame> {
     ) -> bool {
         let mut changed = false;
         self.row().id(id).cross(Align::Center).show(|frame| {
-            frame.col().flex(1.0).show(|frame| {
+            frame.column().flex(1.0).show(|frame| {
                 frame.label(label);
                 if !description.is_empty() {
                     let muted_color = frame.theme().fg().with_alpha(160);
                     frame.push_style(Style::new().with_fg(muted_color));
-                    frame.label_sized(description, frame.theme().font_size_sm());
+                    frame.label_with(
+                        description,
+                        &LabelOpts {
+                            size: frame.theme().font_size_sm(),
+                            ..Default::default()
+                        },
+                    );
                     frame.pop_style();
                 }
             });
@@ -1310,46 +1228,36 @@ impl<'frame> Frame<'frame> {
     }
 
     pub fn label(&mut self, text: &str) {
+        self.label_with(text, &LabelOpts::default());
+    }
+
+    pub fn label_with(&mut self, text: &str, opts: &LabelOpts) {
         let c = cstr(text);
-        let opts = sys::optics_ui_label_opts {
+        let raw = sys::optics_ui_label_opts {
+            box_: sys::optics_ui_box {
+                max_width: if opts.max_width.is_finite() && opts.max_width > 0.0 {
+                    opts.max_width
+                } else {
+                    0.0
+                },
+                ..Default::default()
+            },
             text: c.as_ptr(),
-            ..Default::default()
+            size: if opts.size.is_finite() && opts.size > 0.0 {
+                opts.size
+            } else {
+                0.0
+            },
+            weight: if opts.weight.is_finite() && opts.weight > 0.0 {
+                opts.weight
+            } else {
+                0.0
+            },
+            wrap: opts.wrap,
+            align: opts.align.raw(),
         };
         unsafe {
-            sys::optics_ui_label(self.ui, &opts);
-        }
-    }
-
-    pub fn label_sized(&mut self, text: &str, size: f32) {
-        let c = cstr(text);
-        let opts = sys::optics_ui_label_opts {
-            text: c.as_ptr(),
-            size,
-            ..Default::default()
-        };
-        unsafe {
-            sys::optics_ui_label(self.ui, &opts);
-        }
-    }
-
-    pub fn label_compact(&mut self, text: &str) {
-        self.label(text);
-    }
-
-    pub fn label_compact_sized(&mut self, text: &str, size: f32) {
-        self.label_sized(text, size);
-    }
-
-    pub fn label_compact_weighted(&mut self, text: &str, size: f32, weight: f32) {
-        let c = cstr(text);
-        let opts = sys::optics_ui_label_opts {
-            text: c.as_ptr(),
-            size,
-            weight,
-            ..Default::default()
-        };
-        unsafe {
-            sys::optics_ui_label(self.ui, &opts);
+            sys::optics_ui_label(self.ui, &raw);
         }
     }
 
@@ -1361,49 +1269,14 @@ impl<'frame> Frame<'frame> {
             3 => theme.0.font_size_h3,
             _ => theme.0.font_size_h3,
         };
-        let c = cstr(text);
-        let opts = sys::optics_ui_label_opts {
-            text: c.as_ptr(),
-            size,
-            weight: theme.0.font_weight_bold,
-            ..Default::default()
-        };
-        unsafe {
-            sys::optics_ui_label(self.ui, &opts);
-        }
-    }
-
-    pub fn label_wrapped(&mut self, text: &str, max_width: f32) {
-        let c = cstr(text);
-        let opts = sys::optics_ui_label_opts {
-            box_: sys::optics_ui_box {
-                max_width: max_width.max(0.0),
+        self.label_with(
+            text,
+            &LabelOpts {
+                size,
+                weight: theme.0.font_weight_bold,
                 ..Default::default()
             },
-            text: c.as_ptr(),
-            wrap: true,
-            ..Default::default()
-        };
-        unsafe {
-            sys::optics_ui_label(self.ui, &opts);
-        }
-    }
-
-    pub fn label_wrapped_sized(&mut self, text: &str, size: f32, max_width: f32) {
-        let c = cstr(text);
-        let opts = sys::optics_ui_label_opts {
-            box_: sys::optics_ui_box {
-                max_width: max_width.max(0.0),
-                ..Default::default()
-            },
-            text: c.as_ptr(),
-            size,
-            wrap: true,
-            ..Default::default()
-        };
-        unsafe {
-            sys::optics_ui_label(self.ui, &opts);
-        }
+        );
     }
 
     pub fn selectable(&mut self, label: &str, selected: bool) -> bool {
@@ -1416,23 +1289,7 @@ impl<'frame> Frame<'frame> {
         unsafe { sys::optics_ui_selectable(self.ui, &opts).clicked }
     }
 
-    pub fn selectable_icon(
-        &mut self,
-        label: &str,
-        icon: impl Into<sys::optics_ui_icon_id>,
-        selected: bool,
-    ) -> bool {
-        let c = cstr(label);
-        let opts = sys::optics_ui_selectable_opts {
-            label: c.as_ptr(),
-            icon: icon.into(),
-            selected,
-            ..Default::default()
-        };
-        unsafe { sys::optics_ui_selectable(self.ui, &opts).clicked }
-    }
-
-    pub fn selectable_icon_sized(
+    pub fn selectable_with_icon(
         &mut self,
         label: &str,
         icon: impl Into<sys::optics_ui_icon_id>,
@@ -1451,60 +1308,11 @@ impl<'frame> Frame<'frame> {
     }
 
     pub fn textfield(&mut self, label: &str, buf: &mut TextBuf) -> bool {
-        self.textedit(label, buf, false)
-    }
-
-    pub fn textfield_set_caret(&mut self, label: &str, caret: u32) {
-        self.textedit_set_caret(label, caret);
+        self.textedit(label, buf, &TextEditOpts::default()).changed
     }
 
     pub fn response(&self) -> Response {
         Response::from_raw(unsafe { sys::optics_ui_get_response(self.ui as *const sys::optics_ui) })
-    }
-
-    pub fn textfield_placeholder(
-        &mut self,
-        label: &str,
-        buf: &mut TextBuf,
-        placeholder: &str,
-    ) -> bool {
-        let c = cstr(label);
-        let p = cstr(placeholder);
-        let opts = sys::optics_ui_textedit_opts {
-            box_: sys::optics_ui_box {
-                id: c.as_ptr(),
-                ..Default::default()
-            },
-            buf: buf.as_mut_ptr(),
-            cap: buf.cap(),
-            multiline: false,
-            placeholder: p.as_ptr(),
-            ..Default::default()
-        };
-        unsafe { sys::optics_ui_textedit(self.ui, &opts).changed }
-    }
-
-    pub fn textfield_password(
-        &mut self,
-        label: &str,
-        buf: &mut TextBuf,
-        placeholder: &str,
-    ) -> bool {
-        let c = cstr(label);
-        let p = cstr(placeholder);
-        let opts = sys::optics_ui_textedit_opts {
-            box_: sys::optics_ui_box {
-                id: c.as_ptr(),
-                ..Default::default()
-            },
-            buf: buf.as_mut_ptr(),
-            cap: buf.cap(),
-            multiline: false,
-            placeholder: p.as_ptr(),
-            password: true,
-            ..Default::default()
-        };
-        unsafe { sys::optics_ui_textedit(self.ui, &opts).changed }
     }
 
     pub fn scroll<R>(&mut self, id: &str, body: impl FnOnce(&mut Frame) -> R) -> R {
@@ -1643,47 +1451,33 @@ impl<'frame> Frame<'frame> {
         }
     }
 
-    pub fn textedit(&mut self, label: &str, buf: &mut TextBuf, multiline: bool) -> bool {
-        let c = cstr(label);
-        let opts = sys::optics_ui_textedit_opts {
-            box_: sys::optics_ui_box {
-                id: c.as_ptr(),
-                ..Default::default()
-            },
-            buf: buf.as_mut_ptr(),
-            cap: buf.cap(),
-            multiline,
-            ..Default::default()
-        };
-        unsafe { sys::optics_ui_textedit(self.ui, &opts).changed }
-    }
-
-    pub fn textedit_ex(
+    pub fn textedit(
         &mut self,
         label: &str,
         buf: &mut TextBuf,
-        multiline: bool,
-        accept_tab: bool,
-        select_all_on_focus: bool,
+        opts: &TextEditOpts<'_>,
     ) -> Response {
         let c = cstr(label);
-        let opts = sys::optics_ui_textedit_opts {
+        let placeholder_c = opts.placeholder.map(cstr);
+        let raw = sys::optics_ui_textedit_opts {
             box_: sys::optics_ui_box {
                 id: c.as_ptr(),
                 ..Default::default()
             },
             buf: buf.as_mut_ptr(),
             cap: buf.cap(),
-            multiline,
-            accept_tab,
-            select_all_on_focus,
-            ..Default::default()
+            placeholder: placeholder_c
+                .as_ref()
+                .map_or(std::ptr::null(), |s| s.as_ptr()),
+            multiline: opts.multiline,
+            rows: opts.rows,
+            password: opts.password,
+            select_all_on_focus: opts.select_all_on_focus,
+            readonly: opts.readonly,
+            accept_tab: opts.accept_tab,
+            submit_on_enter: opts.submit_on_enter,
         };
-        Response::from_raw(unsafe { sys::optics_ui_textedit(self.ui, &opts) })
-    }
-
-    pub fn textfield_ex(&mut self, label: &str, buf: &mut TextBuf, accept_tab: bool) -> Response {
-        self.textedit_ex(label, buf, false, accept_tab, true)
+        Response::from_raw(unsafe { sys::optics_ui_textedit(self.ui, &raw) })
     }
 
     pub fn set_cursor_hint(&mut self, hint: CursorHint) {
@@ -1743,7 +1537,7 @@ impl TextBuf {
     /// Truncated to `capacity - 1` bytes (room for the NUL terminator). Use to
     /// reset a persistent buffer the host owns alongside a textfield — ui
     /// keeps its cursor clamped to the new length on the next frame. Follow
-    /// with [`Frame::textfield_set_caret`] when the caret should land
+    /// with [`Frame::textedit_set_caret`] when the caret should land
     /// somewhere specific instead (e.g. the end of a Tab completion).
     pub fn set(&mut self, text: &str) {
         let cap = self.bytes.len();
@@ -1934,13 +1728,15 @@ pub unsafe fn skin_rect(
     node: *mut sys::optics_ui_node,
     rel: Rect,
     color: Color,
-    radius: f32,
+    corner_radii: impl Into<CornerRadii>,
+    corner_curvature: f32,
 ) {
     let opts = sys::optics_ui_skin_rect_opts {
         node,
         rel: rel.to_raw(),
         color: color.raw(),
-        radius,
+        corner_radii: types::raw_corner_radii(corner_radii.into()),
+        corner_curvature: types::clamp_curvature(corner_curvature),
     };
     // SAFETY: forwarded contract from the caller.
     unsafe { sys::optics_ui_skin_rect(ui, &opts) };
@@ -1956,14 +1752,16 @@ pub unsafe fn skin_border(
     node: *mut sys::optics_ui_node,
     rel: Rect,
     color: Color,
-    radius: f32,
+    corner_radii: impl Into<CornerRadii>,
+    corner_curvature: f32,
     width: f32,
 ) {
     let opts = sys::optics_ui_skin_border_opts {
         node,
         rel: rel.to_raw(),
         color: color.raw(),
-        radius,
+        corner_radii: types::raw_corner_radii(corner_radii.into()),
+        corner_curvature: types::clamp_curvature(corner_curvature),
         width,
     };
     // SAFETY: forwarded contract from the caller.
@@ -2139,17 +1937,19 @@ impl<'a, 'frame> FlexBuilder<'a, 'frame> {
         self
     }
 
-    /// Set corner radius in logical px.
+    /// Set independent per-corner radii `(tl, tr, br, bl)` in logical px.
+    /// Accepts `f32` (uniform), `[f32; 4]`, or [`CornerRadii`].
     #[inline]
-    pub fn radius(mut self, r: f32) -> Self {
-        self.opts.radius = r;
+    pub fn corner_radii(mut self, radii: impl Into<CornerRadii>) -> Self {
+        self.opts.corner_radii = radii.into();
         self
     }
 
-    /// Set corner radius in logical px (alias for [`Self::radius`]).
+    /// Set continuous corner curvature (`0.0` = circular arc, `1.0` = G2 squircle).
     #[inline]
-    pub fn rounded(self, r: f32) -> Self {
-        self.radius(r)
+    pub fn corner_curvature(mut self, curvature: f32) -> Self {
+        self.opts.corner_curvature = curvature;
+        self
     }
 
     /// Set border stroke color.
@@ -2206,48 +2006,6 @@ impl<'a, 'frame> FlexBuilder<'a, 'frame> {
     pub fn max_height(mut self, h: f32) -> Self {
         self.opts.max_height = h;
         self
-    }
-
-    /// Center children along the cross-axis (alias for [`Self::items_center`]).
-    #[inline]
-    pub fn center(self) -> Self {
-        self.items_center()
-    }
-
-    /// Set explicit width in logical px (alias for [`Self::width`]).
-    #[inline]
-    pub fn w(self, w: f32) -> Self {
-        self.width(w)
-    }
-
-    /// Set explicit height in logical px (alias for [`Self::height`]).
-    #[inline]
-    pub fn h(self, h: f32) -> Self {
-        self.height(h)
-    }
-
-    /// Set minimum resolved width in logical px (alias for [`Self::min_width`]).
-    #[inline]
-    pub fn min_w(self, w: f32) -> Self {
-        self.min_width(w)
-    }
-
-    /// Set minimum resolved height in logical px (alias for [`Self::min_height`]).
-    #[inline]
-    pub fn min_h(self, h: f32) -> Self {
-        self.min_height(h)
-    }
-
-    /// Set maximum resolved width in logical px (alias for [`Self::max_width`]).
-    #[inline]
-    pub fn max_w(self, w: f32) -> Self {
-        self.max_width(w)
-    }
-
-    /// Set maximum resolved height in logical px (alias for [`Self::max_height`]).
-    #[inline]
-    pub fn max_h(self, h: f32) -> Self {
-        self.max_height(h)
     }
 
     /// Set columns spanned in an enclosing 2D grid.
@@ -2355,8 +2113,14 @@ impl<'a, 'frame> StackBuilder<'a, 'frame> {
     }
 
     #[inline]
-    pub fn radius(mut self, r: f32) -> Self {
-        self.opts.radius = r;
+    pub fn corner_radii(mut self, radii: impl Into<CornerRadii>) -> Self {
+        self.opts.corner_radii = radii.into();
+        self
+    }
+
+    #[inline]
+    pub fn corner_curvature(mut self, curvature: f32) -> Self {
+        self.opts.corner_curvature = curvature;
         self
     }
 
@@ -2397,11 +2161,6 @@ impl<'a, 'frame> StackBuilder<'a, 'frame> {
         unsafe { sys::optics_ui_stack_end(self.frame.ui) };
         r
     }
-
-    #[inline]
-    pub fn show_flat<R>(self, body: impl FnOnce(&mut Frame) -> R) -> R {
-        self.show(body)
-    }
 }
 
 /// Fluent builder for 2D grid containers (ADR-0104).
@@ -2411,6 +2170,11 @@ pub struct GridBuilder<'a, 'frame> {
 }
 
 impl<'a, 'frame> GridBuilder<'a, 'frame> {
+    #[inline]
+    fn finite_pos(v: f32) -> f32 {
+        if v.is_finite() && v > 0.0 { v } else { 0.0 }
+    }
+
     pub(crate) fn new(frame: &'a mut Frame<'frame>, columns: u32) -> Self {
         let mut opts: sys::optics_ui_grid_opts = unsafe { std::mem::zeroed() };
         opts.columns = columns.max(1) as std::os::raw::c_int;
@@ -2421,36 +2185,37 @@ impl<'a, 'frame> GridBuilder<'a, 'frame> {
     /// Set horizontal gap between columns in logical px.
     #[inline]
     pub fn col_gap(mut self, px: f32) -> Self {
-        self.opts.col_gap = px;
+        self.opts.col_gap = Self::finite_pos(px);
         self
     }
 
     /// Set vertical gap between rows in logical px.
     #[inline]
     pub fn row_gap(mut self, px: f32) -> Self {
-        self.opts.row_gap = px;
+        self.opts.row_gap = Self::finite_pos(px);
         self
     }
 
     /// Set both column and row gaps to the same value.
     #[inline]
     pub fn gap(mut self, px: f32) -> Self {
-        self.opts.col_gap = px;
-        self.opts.row_gap = px;
+        let g = Self::finite_pos(px);
+        self.opts.col_gap = g;
+        self.opts.row_gap = g;
         self
     }
 
     /// Set uniform container padding in logical px.
     #[inline]
     pub fn pad(mut self, px: f32) -> Self {
-        self.opts.pad = px;
+        self.opts.pad = Self::finite_pos(px);
         self
     }
 
     /// Set uniform row height (0 = content-measured).
     #[inline]
     pub fn row_height(mut self, px: f32) -> Self {
-        self.opts.row_height = px;
+        self.opts.row_height = Self::finite_pos(px);
         self
     }
 
@@ -2471,43 +2236,43 @@ impl<'a, 'frame> GridBuilder<'a, 'frame> {
     /// Set columns spanned in an enclosing grid.
     #[inline]
     pub fn col_span(mut self, span: i32) -> Self {
-        self.opts.box_.col_span = span;
+        self.opts.box_.col_span = span.max(0);
         self
     }
 
     /// Set rows spanned in an enclosing grid.
     #[inline]
     pub fn row_span(mut self, span: i32) -> Self {
-        self.opts.box_.row_span = span;
+        self.opts.box_.row_span = span.max(0);
         self
     }
 
     /// Set explicit 1-based grid position (col, row).
     #[inline]
     pub fn grid_at(mut self, col: i32, row: i32) -> Self {
-        self.opts.box_.grid_col = col;
-        self.opts.box_.grid_row = row;
+        self.opts.box_.grid_col = col.max(0);
+        self.opts.box_.grid_row = row.max(0);
         self
     }
 
     /// Set explicit width in logical px.
     #[inline]
     pub fn width(mut self, w: f32) -> Self {
-        self.opts.box_.width = w;
+        self.opts.box_.width = Self::finite_pos(w);
         self
     }
 
     /// Set explicit height in logical px.
     #[inline]
     pub fn height(mut self, h: f32) -> Self {
-        self.opts.box_.height = h;
+        self.opts.box_.height = Self::finite_pos(h);
         self
     }
 
     /// Set flex grow factor.
     #[inline]
     pub fn flex(mut self, factor: f32) -> Self {
-        self.opts.box_.flex = factor;
+        self.opts.box_.flex = Self::finite_pos(factor);
         self
     }
 
@@ -2518,17 +2283,19 @@ impl<'a, 'frame> GridBuilder<'a, 'frame> {
         self
     }
 
-    /// Set corner radius in logical px.
+    /// Set independent per-corner radii `(tl, tr, br, bl)` in logical px.
+    /// Accepts `f32` (uniform), `[f32; 4]`, or [`CornerRadii`].
     #[inline]
-    pub fn radius(mut self, r: f32) -> Self {
-        self.opts.radius = r;
+    pub fn corner_radii(mut self, radii: impl Into<CornerRadii>) -> Self {
+        self.opts.corner_radii = types::raw_corner_radii(radii.into());
         self
     }
 
-    /// Set corner radius in logical px (alias for [`Self::radius`]).
+    /// Set continuous corner curvature (`0.0` = circular arc, `1.0` = G2 squircle).
     #[inline]
-    pub fn rounded(self, r: f32) -> Self {
-        self.radius(r)
+    pub fn corner_curvature(mut self, curvature: f32) -> Self {
+        self.opts.corner_curvature = types::clamp_curvature(curvature);
+        self
     }
 
     /// Set border stroke color.
@@ -2541,7 +2308,7 @@ impl<'a, 'frame> GridBuilder<'a, 'frame> {
     /// Set border stroke width in logical px.
     #[inline]
     pub fn border_width(mut self, width: f32) -> Self {
-        self.opts.border_width = width;
+        self.opts.border_width = Self::finite_pos(width);
         self
     }
 

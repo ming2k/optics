@@ -24,6 +24,7 @@ fn main() {
         // derives for those outer structs.
         .allowlist_type("optics_gfx_color")
         .allowlist_type("optics_gfx_point")
+        .allowlist_type("optics_gfx_corner_radii")
         .allowlist_type("optics_gfx_rect")
         .blocklist_type("optics_gfx_canvas")
         .blocklist_type("optics_gfx_device")

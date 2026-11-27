@@ -1051,8 +1051,7 @@ void draw_image_with_sampler_handle(optics_gfx_canvas *c, optics_gfx_image *img,
                                     uint32_t image_handle, optics_gfx_sampler *sampler,
                                     optics_gfx_bindless_handle sh, optics_gfx_rect dst,
                                     optics_gfx_rect src, optics_gfx_color tint,
-                                    optics_gfx_blend_mode blend, uint32_t kind,
-                                    const optics_gfx_rect *rounded_clip, float radius) {
+                                    optics_gfx_blend_mode blend, uint32_t kind) {
     /* Image draws need a GPU-resident texture (img->bindless or image_handle): unsupported on
      * a headless CPU canvas. */
     if (!c->device || sh == OPTICS_GFX_BINDLESS_INVALID)
@@ -1123,18 +1122,6 @@ void draw_image_with_sampler_handle(optics_gfx_canvas *c, optics_gfx_image *img,
     pc.image_src[1] = src.y;
     pc.image_src[2] = src.w;
     pc.image_src[3] = src.h;
-    if (rounded_clip) {
-        float scale = optics_gfx_canvas_mat3x2_pixel_scale(tx);
-        optics_gfx_point center = {rounded_clip->x + rounded_clip->w * 0.5f,
-                                   rounded_clip->y + rounded_clip->h * 0.5f};
-        optics_gfx_point transformed = optics_gfx_mat3x2_transform_point(tx, center);
-        pc.image_dst[0] = transformed.x;
-        pc.image_dst[1] = transformed.y;
-        pc.image_dst[2] = rounded_clip->w * 0.5f * scale;
-        pc.image_dst[3] = rounded_clip->h * 0.5f * scale;
-        pc.grad_radius =
-            fminf(fmaxf(radius * scale, 0.0f), fminf(pc.image_dst[2], pc.image_dst[3]));
-    }
 
     if (img)
         canvas_record_retain_image(c, img);
@@ -1178,8 +1165,8 @@ static bool canvas_sdf_similarity(const optics_gfx_canvas *c) {
  * otherwise-unused `grad_from`/`grad_to` slots and the shape-unit pixel size
  * rides `image_src[3]`, so adding the squircle variant and rotation support
  * costs no ABI change and no extra pipeline. */
-static void draw_sdf_shape(optics_gfx_canvas *c, optics_gfx_rect r, float radius, float curvature,
-                           optics_gfx_color color, float stroke_hw) {
+static void draw_sdf_shape(optics_gfx_canvas *c, optics_gfx_rect r, optics_gfx_corner_radii radii,
+                           float curvature, optics_gfx_color color, float stroke_hw) {
     if (!c || !c->recording || r.w <= 0.0f || r.h <= 0.0f)
         return;
 
@@ -1188,16 +1175,12 @@ static void draw_sdf_shape(optics_gfx_canvas *c, optics_gfx_rect r, float radius
     if (fabsf(det) < 1e-20f)
         return;
 
-    /* Shape-space half extents and corner radius stay in canvas units: the
-     * field is evaluated before the transform is applied. */
+    /* Shape-space half extents and per-corner radii stay in canvas units: the
+     * field is evaluated before the transform is applied. CSS/Skia proportional
+     * normalisation ensures adjacent radii never exceed their shared edge. */
     float hx = r.w * 0.5f;
     float hy = r.h * 0.5f;
-    float rad = radius;
-    float max_r = fminf(hx, hy);
-    if (rad > max_r)
-        rad = max_r;
-    if (rad < 0.0f)
-        rad = 0.0f;
+    optics_gfx_corner_radii cr = optics_gfx_corner_radii_normalize(radii, r.w, r.h);
     float hw = stroke_hw > 0.0f ? stroke_hw : 0.0f;
     float curv = curvature;
     if (!(curv > 0.0f))
@@ -1242,26 +1225,23 @@ static void draw_sdf_shape(optics_gfx_canvas *c, optics_gfx_rect r, float radius
 
     optics_gfx_canvas_push pc;
     build_push(c, nullptr, &pc);
-    /* SDF params share the image_dst / image_src push slots. */
-    pc.image_dst[0] = cs.x; /* transformed shape centre, screen space */
-    pc.image_dst[1] = cs.y;
-    pc.image_dst[2] = hx; /* half extents in shape units */
-    pc.image_dst[3] = hy;
-    pc.image_src[0] = rad; /* corner radius, shape units */
-    pc.image_src[1] = hw;  /* ring half-width, shape units */
-    pc.image_src[2] = curv;
-    /* One screen pixel spans 1/s shape units: the coverage ramp width. */
-    pc.image_src[3] = s > 0.0f ? 1.0f / s : 1.0f;
-    /* Inverse of the transform's linear part, row-major [[m3,-m2],[-m1,m0]]/det.
-     * The SDF shaders map a fragment back into shape space with it; no other
-     * pipeline reads these slots. */
-    pc.grad_from[0] = tx.m[3] / det;
-    pc.grad_from[1] = -tx.m[2] / det;
-    pc.grad_to[0] = -tx.m[1] / det;
-    pc.grad_to[1] = tx.m[0] / det;
+    pc.sdf.inv[0] = tx.m[3] / det;
+    pc.sdf.inv[1] = -tx.m[2] / det;
+    pc.sdf.inv[2] = -tx.m[1] / det;
+    pc.sdf.inv[3] = tx.m[0] / det;
+    pc.sdf.radii[0] = cr.tl;
+    pc.sdf.radii[1] = cr.tr;
+    pc.sdf.radii[2] = cr.br;
+    pc.sdf.radii[3] = cr.bl;
+    pc.sdf.box[0] = cs.x;
+    pc.sdf.box[1] = cs.y;
+    pc.sdf.box[2] = hx;
+    pc.sdf.box[3] = hy;
+    pc.sdf.stroke_hw = hw;
+    pc.sdf.curvature = curv;
+    pc.sdf.aa = s > 0.0f ? 1.0f / s : 1.0f;
 
-    /* Rounded-rect helpers do not take a paint, so their documented blend
-     * mode is always SRC_OVER. Do not inherit an image/path draw's mode. */
+    /* Solid SRC_OVER analytical draws always blend with SRC_OVER. */
     c->pending_blend = OPTICS_GFX_BLEND_SRC_OVER;
     canvas_emit(c, CANVAS_PIPE_SDF, &pc, v, 6);
 }
@@ -1508,9 +1488,6 @@ void optics_gfx_canvas_draw_geometry(optics_gfx_canvas *c,
         case OPTICS_GFX_GEOM_RRECT:
             uv_dst = geom->rrect.rect;
             break;
-        case OPTICS_GFX_GEOM_SQUIRCLE:
-            uv_dst = geom->squircle.rect;
-            break;
         case OPTICS_GFX_GEOM_CIRCLE:
             uv_dst = (optics_gfx_rect){geom->circle.cx - geom->circle.radius,
                                        geom->circle.cy - geom->circle.radius,
@@ -1539,10 +1516,9 @@ void optics_gfx_canvas_draw_geometry(optics_gfx_canvas *c,
         if (geom->kind == OPTICS_GFX_GEOM_RECT && geom->stroke.width <= 0.0f && !clipped &&
             canvas_rect_is_pixel_aligned(c, geom->rect.rect)) {
             uint32_t kind = b.image.opaque_only ? 6u : 3u;
-            draw_image_with_sampler_handle(c, b.image.image, b.image.image->bindless,
-                                           b.image.sampler, sh, geom->rect.rect, src, tint_color,
-                                           b.image.opaque_only ? OPTICS_GFX_BLEND_SRC : b.blend,
-                                           kind, nullptr, 0.0f);
+            draw_image_with_sampler_handle(
+                c, b.image.image, b.image.image->bindless, b.image.sampler, sh, geom->rect.rect,
+                src, tint_color, b.image.opaque_only ? OPTICS_GFX_BLEND_SRC : b.blend, kind);
             return;
         }
 
@@ -1557,9 +1533,10 @@ void optics_gfx_canvas_draw_geometry(optics_gfx_canvas *c,
 
         if (clipped && geom->stroke.width <= 0.0f &&
             (geom->kind == OPTICS_GFX_GEOM_RECT || geom->kind == OPTICS_GFX_GEOM_RRECT)) {
-            optics_gfx_path_segment segs[16];
-            optics_gfx_path path = {.segments = segs, .capacity = 16};
-            optics_gfx_path_add_round_rect(&path, b.image.clip_rect, b.image.clip_radius);
+            optics_gfx_path_segment segs[24];
+            optics_gfx_path path = {.segments = segs, .capacity = 24};
+            optics_gfx_path_add_rrect(&path, b.image.clip_rect, b.image.clip_radii,
+                                      b.image.clip_curvature);
             canvas_fill_path_internal(c, &path, &p);
             return;
         }
@@ -1620,37 +1597,19 @@ void optics_gfx_canvas_draw_geometry(optics_gfx_canvas *c,
         break;
     case OPTICS_GFX_GEOM_RRECT: {
         optics_gfx_rect r = geom->rrect.rect;
-        float radius = geom->rrect.radius;
+        /* Every rounded rectangle and continuous-curvature squircle (uniform or
+         * per-corner) has an exact distance field (`optics_gfx_sdf_rrect`,
+         * ADR-0118 / ADR-0175), so solid SRC_OVER draws under similarity
+         * transforms evaluate analytically without flattening or tessellation. */
         if (p.kind == CANVAS_PAINT_SOLID && p.blend == OPTICS_GFX_BLEND_SRC_OVER &&
             canvas_sdf_similarity(c)) {
-            draw_sdf_shape(c, r, radius, 0.0f, p.color, geom->stroke.width * 0.5f);
-            return;
-        }
-        optics_gfx_path_segment segs[16];
-        optics_gfx_path path = {.segments = segs, .capacity = 16};
-        optics_gfx_path_add_round_rect(&path, r, radius);
-        if (geom->stroke.width <= 0.0f) {
-            canvas_fill_path_internal(c, &path, &p);
-        } else {
-            canvas_stroke_path_internal(c, &path, &p);
-        }
-        break;
-    }
-    case OPTICS_GFX_GEOM_SQUIRCLE: {
-        optics_gfx_rect r = geom->squircle.rect;
-        /* A continuous-curvature corner has an exact distance field
-         * (optics_gfx_sdf_squircle), so it takes the analytic path on the same
-         * terms as a rounded rectangle: no flattening, no coverage pass, and
-         * resolution-independent coverage (ADR-0118 INV-SDF-03). */
-        if (p.kind == CANVAS_PAINT_SOLID && p.blend == OPTICS_GFX_BLEND_SRC_OVER &&
-            canvas_sdf_similarity(c)) {
-            draw_sdf_shape(c, r, geom->squircle.radius, geom->squircle.curvature, p.color,
+            draw_sdf_shape(c, r, geom->rrect.radii, geom->rrect.curvature, p.color,
                            geom->stroke.width * 0.5f);
             return;
         }
-        optics_gfx_path_segment segs[40];
-        optics_gfx_path path = {.segments = segs, .capacity = 40};
-        optics_gfx_path_add_squircle(&path, r, geom->squircle.radius, geom->squircle.curvature);
+        optics_gfx_path_segment segs[24];
+        optics_gfx_path path = {.segments = segs, .capacity = 24};
+        optics_gfx_path_add_rrect(&path, r, geom->rrect.radii, geom->rrect.curvature);
         if (geom->stroke.width <= 0.0f) {
             canvas_fill_path_internal(c, &path, &p);
         } else {
@@ -1665,7 +1624,8 @@ void optics_gfx_canvas_draw_geometry(optics_gfx_canvas *c,
         optics_gfx_rect r = {cx - rad, cy - rad, rad * 2.0f, rad * 2.0f};
         if (p.kind == CANVAS_PAINT_SOLID && p.blend == OPTICS_GFX_BLEND_SRC_OVER &&
             canvas_sdf_similarity(c)) {
-            draw_sdf_shape(c, r, rad, 0.0f, p.color, geom->stroke.width * 0.5f);
+            draw_sdf_shape(c, r, optics_gfx_corner_radii_uniform(rad), 0.0f, p.color,
+                           geom->stroke.width * 0.5f);
             return;
         }
         optics_gfx_path_segment segs[16];

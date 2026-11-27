@@ -186,9 +186,8 @@ test_canvas_stroke_region = executable('test_canvas_stroke_region',
 )
 test('canvas_stroke_region', test_canvas_stroke_region, suite : 'unit')
 
-# Squircle path <-> field agreement (ADR-0118 INV-SDF-06): the fitted corner
-# cubics must lie on optics_gfx_sdf_squircle's zero set, so the canvas and the material
-# materials describe one shape rather than two.
+# Squircle path <-> field agreement (ADR-0118 INV-SDF-06, ADR-0175): the fitted
+# corner cubics must lie on optics_gfx_sdf_rrect's zero set.
 test_canvas_squircle = executable('test_canvas_squircle',
   'test_canvas_squircle.c',
   dependencies : [optics_gfx_unit_support_dep],

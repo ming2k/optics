@@ -61,7 +61,8 @@ int main(void) {
                                                     .clear_color = &(optics_gfx_color){}}) ==
               OPTICS_GFX_OK);
     optics_gfx_color white = optics_gfx_color_rgba_premul(255, 255, 255, 255);
-    optics_gfx_canvas_fill_rrect(c, (optics_gfx_rect){0, 0, 64, 64}, 20.0f, white);
+    optics_gfx_canvas_fill_rrect(c, (optics_gfx_rect){0, 0, 64, 64},
+                                 optics_gfx_corner_radii_uniform(20.0f), 0.0f, white);
     OT_EXPECT(optics_gfx_canvas_end(c) == OPTICS_GFX_OK);
     fb = optics_gfx_canvas_cpu_pixels(c, &w, &h, &stride);
     px(fb, stride, 32, 32, p); /* centre → opaque white */
@@ -106,7 +107,8 @@ int main(void) {
     replace_red.blend = OPTICS_GFX_BLEND_SRC;
     optics_gfx_canvas_fill_rect(c, (optics_gfx_rect){0, 0, W, H}, &replace_red);
     optics_gfx_color half_black = optics_gfx_color_rgba_premul(0, 0, 0, 128);
-    optics_gfx_canvas_stroke_rrect(c, (optics_gfx_rect){16, 16, 32, 32}, 0.0f, half_black, 2.0f);
+    optics_gfx_canvas_stroke_rrect(c, (optics_gfx_rect){16, 16, 32, 32},
+                                   optics_gfx_corner_radii_uniform(0.0f), 0.0f, half_black, 2.0f);
     OT_EXPECT(optics_gfx_canvas_end(c) == OPTICS_GFX_OK);
     fb = optics_gfx_canvas_cpu_pixels(c, &w, &h, &stride);
     px(fb, stride, 16, 32, p); /* antialiased point on the left stroke */

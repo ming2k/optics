@@ -88,11 +88,12 @@ static float path_field_deviation(const optics_gfx_path *p, optics_gfx_point cen
                                   optics_gfx_rect r, float radius, float curvature) {
     uint32_t n = sample_path(p, g_pts, PATH_POINTS);
     float hw = r.w * 0.5f, hh = r.h * 0.5f;
+    optics_gfx_corner_radii cr = optics_gfx_corner_radii_uniform(radius);
     float worst = 0.0f;
     for (uint32_t i = 0; i < n; ++i) {
-        float d = optics_gfx_sdf_squircle(
-            (optics_gfx_point){g_pts[i].x - centre.x, g_pts[i].y - centre.y}, hw, hh, radius,
-            curvature);
+        float d =
+            optics_gfx_sdf_rrect((optics_gfx_point){g_pts[i].x - centre.x, g_pts[i].y - centre.y},
+                                 hw, hh, cr, curvature);
         if (fabsf(d) > worst)
             worst = fabsf(d);
     }
@@ -161,7 +162,8 @@ static void test_analytic_dispatch_matches_path(void) {
         optics_gfx_color clear = optics_gfx_color_rgba_premul(0, 0, 0, 255);
         optics_gfx_brush brush =
             optics_gfx_brush_solid(optics_gfx_color_rgba_premul(255, 255, 255, 255));
-        optics_gfx_geometry geom = optics_gfx_geom_squircle(box, radius, curv);
+        optics_gfx_geometry geom =
+            optics_gfx_geom_rrect(box, optics_gfx_corner_radii_uniform(radius), curv);
 
         /* Analytic: the geometry takes the SDF pipeline. */
         OT_EXPECT(optics_gfx_canvas_begin(analytic, &(optics_gfx_canvas_pass_desc){
@@ -178,7 +180,7 @@ static void test_analytic_dispatch_matches_path(void) {
         OT_EXPECT(optics_gfx_arena_init(&local, 1u << 16, nullptr) == OPTICS_GFX_OK);
         optics_gfx_path *p = nullptr;
         OT_EXPECT(optics_gfx_path_create(&p, &local) == OPTICS_GFX_OK);
-        optics_gfx_path_add_squircle(p, box, radius, curv);
+        optics_gfx_path_add_rrect(p, box, optics_gfx_corner_radii_uniform(radius), curv);
         OT_EXPECT(optics_gfx_canvas_begin(
                       tessellated,
                       &(optics_gfx_canvas_pass_desc){.type = OPTICS_GFX_TYPE_CANVAS_PASS_DESC,
@@ -266,7 +268,8 @@ static void run_dispatch_case(optics_gfx_mat3x2 tx, float curvature, bool expect
     optics_gfx_color clear = optics_gfx_color_rgba_premul(0, 0, 0, 255);
     optics_gfx_brush brush =
         optics_gfx_brush_solid(optics_gfx_color_rgba_premul(255, 255, 255, 255));
-    optics_gfx_geometry geom = optics_gfx_geom_squircle(box, radius, curvature);
+    optics_gfx_geometry geom =
+        optics_gfx_geom_rrect(box, optics_gfx_corner_radii_uniform(radius), curvature);
 
     OT_EXPECT(optics_gfx_canvas_begin(analytic, &(optics_gfx_canvas_pass_desc){
                                                     .type = OPTICS_GFX_TYPE_CANVAS_PASS_DESC,
@@ -280,7 +283,7 @@ static void run_dispatch_case(optics_gfx_mat3x2 tx, float curvature, bool expect
     OT_EXPECT(optics_gfx_arena_init(&local, 1u << 16, nullptr) == OPTICS_GFX_OK);
     optics_gfx_path *p = nullptr;
     OT_EXPECT(optics_gfx_path_create(&p, &local) == OPTICS_GFX_OK);
-    optics_gfx_path_add_squircle(p, box, radius, curvature);
+    optics_gfx_path_add_rrect(p, box, optics_gfx_corner_radii_uniform(radius), curvature);
     OT_EXPECT(optics_gfx_canvas_begin(tessellated, &(optics_gfx_canvas_pass_desc){
                                                        .type = OPTICS_GFX_TYPE_CANVAS_PASS_DESC,
                                                        .clear_color = &clear}) == OPTICS_GFX_OK);
@@ -368,7 +371,7 @@ int main(void) {
         float c = curvatures[i];
         optics_gfx_path *p = nullptr;
         OT_EXPECT(optics_gfx_path_create(&p, &arena) == OPTICS_GFX_OK);
-        optics_gfx_path_add_squircle(p, box, radius, c);
+        optics_gfx_path_add_rrect(p, box, optics_gfx_corner_radii_uniform(radius), c);
         uint32_t n = sample_path(p, g_pts, PATH_POINTS);
         OT_EXPECT(n > 100);
         float dev = path_field_deviation(p, centre, box, radius, c);
@@ -376,16 +379,12 @@ int main(void) {
         optics_gfx_arena_reset(&arena);
     }
 
-    /* --- Endpoint continuity: curvature 0 IS the rounded rectangle. --- */
+    /* --- Endpoint continuity: curvature 0 IS the circular rounded rectangle. --- */
     {
-        optics_gfx_path *sq = nullptr;
         optics_gfx_path *rr = nullptr;
-        OT_EXPECT(optics_gfx_path_create(&sq, &arena) == OPTICS_GFX_OK);
         OT_EXPECT(optics_gfx_path_create(&rr, &arena) == OPTICS_GFX_OK);
-        optics_gfx_path_add_squircle(sq, box, radius, 0.0f);
-        optics_gfx_path_add_round_rect(rr, box, radius);
-        OT_EXPECT(sq->count == rr->count);
-        OT_EXPECT(path_field_deviation(sq, centre, box, radius, 0.0f) <= 0.01f * radius);
+        optics_gfx_path_add_rrect(rr, box, optics_gfx_corner_radii_uniform(radius), 0.0f);
+        OT_EXPECT(path_field_deviation(rr, centre, box, radius, 0.0f) <= 0.01f * radius);
         optics_gfx_arena_reset(&arena);
     }
 
@@ -401,7 +400,7 @@ int main(void) {
                 c = 0.005f; /* the <= 0.001 case is the round rectangle */
             optics_gfx_path *p = nullptr;
             OT_EXPECT(optics_gfx_path_create(&p, &arena) == OPTICS_GFX_OK);
-            optics_gfx_path_add_squircle(p, box, radius, c);
+            optics_gfx_path_add_rrect(p, box, optics_gfx_corner_radii_uniform(radius), c);
             float bulge = diagonal_bulge(p, tr_centre);
             float expect = radius * (1.0f + (k45_max - 1.0f) * c);
             OT_EXPECT_NEAR(bulge, expect, radius * 0.01f); /* 1% */
@@ -420,7 +419,7 @@ int main(void) {
             c = 0.005f;
         optics_gfx_path *p = nullptr;
         OT_EXPECT(optics_gfx_path_create(&p, &arena) == OPTICS_GFX_OK);
-        optics_gfx_path_add_squircle(p, box, radius, c);
+        optics_gfx_path_add_rrect(p, box, optics_gfx_corner_radii_uniform(radius), c);
         uint32_t n = sample_path(p, g_pts, PATH_POINTS);
         bool inside = true;
         float top_y = 1e9f;
@@ -447,5 +446,99 @@ int main(void) {
 
     test_analytic_dispatch_matches_path();
     test_rotation_and_shear_dispatch();
+
+    /* Per-corner analytic SDF ↔ fitted path agreement (ADR-0175): quarter-arc
+     * [0, 0, 22, 0], bezel-flush tab [0, 0, 8, 8], and asymmetric 4-corner
+     * squircle [4, 14, 24, 0]. Both zero-set deviation and analytic-vs-path
+     * rasterisation parity must hold with zero wrong-side pixels. */
+    {
+        static const struct {
+            optics_gfx_rect box;
+            optics_gfx_corner_radii radii;
+            float curv;
+        } cases[] = {
+            {{0.0f, 0.0f, 22.0f, 22.0f}, {0.0f, 0.0f, 22.0f, 0.0f}, 0.0f},
+            {{0.0f, 0.0f, 22.0f, 22.0f}, {0.0f, 0.0f, 22.0f, 0.0f}, 0.6f},
+            {{0.0f, 0.0f, 22.0f, 22.0f}, {0.0f, 0.0f, 22.0f, 0.0f}, 1.0f},
+            {{8.0f, 0.0f, 64.0f, 8.0f}, {0.0f, 0.0f, 8.0f, 8.0f}, 0.6f},
+            {{4.0f, 4.0f, 80.0f, 50.0f}, {4.0f, 14.0f, 24.0f, 0.0f}, 0.7f},
+            {{10.0f, 10.0f, 22.0f, 22.0f}, {22.0f, 0.0f, 22.0f, 0.0f}, 0.5f},
+        };
+        optics_gfx_arena local_arena;
+        OT_EXPECT(optics_gfx_arena_init(&local_arena, 65536, nullptr) == OPTICS_GFX_OK);
+        for (size_t ci = 0; ci < sizeof(cases) / sizeof(cases[0]); ++ci) {
+            optics_gfx_path *p = nullptr;
+            OT_EXPECT(optics_gfx_path_create(&p, &local_arena) == OPTICS_GFX_OK);
+            optics_gfx_path_add_rrect(p, cases[ci].box, cases[ci].radii, cases[ci].curv);
+            uint32_t n = sample_path(p, g_pts, PATH_POINTS);
+            OT_EXPECT(n > 8);
+            float cx = cases[ci].box.x + cases[ci].box.w * 0.5f;
+            float cy = cases[ci].box.y + cases[ci].box.h * 0.5f;
+            float hx = cases[ci].box.w * 0.5f;
+            float hy = cases[ci].box.h * 0.5f;
+            float worst = 0.0f;
+            for (uint32_t i = 0; i < n; ++i) {
+                optics_gfx_point rel = {g_pts[i].x - cx, g_pts[i].y - cy};
+                float d = fabsf(optics_gfx_sdf_rrect(rel, hx, hy, cases[ci].radii, cases[ci].curv));
+                if (d > worst)
+                    worst = d;
+            }
+            OT_EXPECT(worst <= 0.25f);
+            optics_gfx_arena_reset(&local_arena);
+        }
+
+        /* Raster parity: analytic SDF vs tessellated path on CPU canvas. */
+        optics_gfx_canvas *c_sdf = nullptr, *c_path = nullptr;
+        optics_gfx_canvas_desc desc = {.type = OPTICS_GFX_TYPE_CANVAS_DESC,
+                                       .backend = OPTICS_GFX_CANVAS_BACKEND_CPU,
+                                       .scale = 1,
+                                       .width = 96,
+                                       .height = 64};
+        OT_EXPECT(optics_gfx_canvas_create(&desc, &c_sdf) == OPTICS_GFX_OK);
+        OT_EXPECT(optics_gfx_canvas_create(&desc, &c_path) == OPTICS_GFX_OK);
+        optics_gfx_color clear = 0;
+        optics_gfx_brush white = optics_gfx_brush_solid(0xFFFFFFFFu);
+        for (size_t ci = 0; ci < sizeof(cases) / sizeof(cases[0]); ++ci) {
+            optics_gfx_geometry g_sdf =
+                optics_gfx_geom_rrect(cases[ci].box, cases[ci].radii, cases[ci].curv);
+            optics_gfx_path *p = nullptr;
+            OT_EXPECT(optics_gfx_path_create(&p, &local_arena) == OPTICS_GFX_OK);
+            optics_gfx_path_add_rrect(p, cases[ci].box, cases[ci].radii, cases[ci].curv);
+            optics_gfx_geometry g_path = optics_gfx_geom_path(p);
+
+            OT_EXPECT(optics_gfx_canvas_begin(c_sdf, &(optics_gfx_canvas_pass_desc){
+                                                         .type = OPTICS_GFX_TYPE_CANVAS_PASS_DESC,
+                                                         .clear_color = &clear}) == OPTICS_GFX_OK);
+            optics_gfx_canvas_draw_geometry(
+                c_sdf, &(optics_gfx_canvas_draw_geometry_opts){.geom = &g_sdf, .brush = &white});
+            OT_EXPECT(optics_gfx_canvas_end(c_sdf) == OPTICS_GFX_OK);
+
+            OT_EXPECT(optics_gfx_canvas_begin(c_path, &(optics_gfx_canvas_pass_desc){
+                                                          .type = OPTICS_GFX_TYPE_CANVAS_PASS_DESC,
+                                                          .clear_color = &clear}) == OPTICS_GFX_OK);
+            optics_gfx_canvas_draw_geometry(
+                c_path, &(optics_gfx_canvas_draw_geometry_opts){.geom = &g_path, .brush = &white});
+            OT_EXPECT(optics_gfx_canvas_end(c_path) == OPTICS_GFX_OK);
+
+            uint32_t s_a = 0, s_b = 0;
+            const uint8_t *pa = optics_gfx_canvas_read_pixels(c_sdf, nullptr, nullptr, &s_a);
+            const uint8_t *pb = optics_gfx_canvas_read_pixels(c_path, nullptr, nullptr, &s_b);
+            uint32_t wrong_side = 0;
+            for (uint32_t y = 0; y < 64; ++y) {
+                for (uint32_t x = 0; x < 96; ++x) {
+                    uint8_t aa = pa[y * s_a + x * 4 + 3];
+                    uint8_t ab = pb[y * s_b + x * 4 + 3];
+                    if ((aa == 255 && ab == 0) || (aa == 0 && ab == 255))
+                        wrong_side++;
+                }
+            }
+            OT_EXPECT(wrong_side == 0);
+            optics_gfx_arena_reset(&local_arena);
+        }
+        optics_gfx_canvas_release(c_sdf);
+        optics_gfx_canvas_release(c_path);
+        optics_gfx_arena_deinit(&local_arena);
+    }
+
     return OT_REPORT();
 }

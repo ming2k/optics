@@ -40,7 +40,8 @@ int32_t optics_ui_popup_menu(optics_ui *ui, const optics_ui_menu_opts *opts) {
                 .bg = ui->theme.color_surface_elevated,
                 .border = ui->theme.color_border,
                 .border_width = 1.0f,
-                .radius = ui->theme.corner_radius > 0.0f ? ui->theme.corner_radius : 6.0f,
+                .corner_radii = optics_gfx_corner_radii_uniform(
+                    ui->theme.corner_radius > 0.0f ? ui->theme.corner_radius : 6.0f),
                 .pad = 4.0f,
                 .gap = 2.0f,
             },
@@ -122,25 +123,26 @@ int32_t optics_ui_popup_menu(optics_ui *ui, const optics_ui_menu_opts *opts) {
         optics_gfx_color item_bg =
             (is_focused && !it->disabled) ? ui->theme.color_hover : (optics_gfx_color){};
 
-        optics_ui_response r =
-            optics_ui_pressable_begin(ui, &(optics_ui_pressable_opts){
-                                              .box =
-                                                  {
-                                                      .id = item_id,
-                                                      .width = menu_w - 8.0f,
-                                                      .height = item_h,
-                                                      .disabled = it->disabled,
-                                                  },
-                                              .label = it->label ? it->label : item_id,
-                                              .layout =
-                                                  {
-                                                      .gap = 6.0f,
-                                                      .pad = 4.0f,
-                                                      .bg = item_bg,
-                                                      .radius = ui->theme.corner_radius,
-                                                      .cross = OPTICS_UI_CENTER,
-                                                  },
-                                          });
+        optics_ui_response r = optics_ui_pressable_begin(
+            ui,
+            &(optics_ui_pressable_opts){
+                .box =
+                    {
+                        .id = item_id,
+                        .width = menu_w - 8.0f,
+                        .height = item_h,
+                        .disabled = it->disabled,
+                    },
+                .label = it->label ? it->label : item_id,
+                .layout =
+                    {
+                        .gap = 6.0f,
+                        .pad = 4.0f,
+                        .bg = item_bg,
+                        .corner_radii = optics_gfx_corner_radii_uniform(ui->theme.corner_radius),
+                        .cross = OPTICS_UI_CENTER,
+                    },
+            });
 
         if (r.hovered && state && !it->disabled) {
             state->focused_index = (int32_t)i;

@@ -16,7 +16,7 @@ static optics_ui_response build_pressable(optics_ui *ui) {
                         .gap = 8.0f,
                         .pad = 8.0f,
                         .cross = OPTICS_UI_CENTER,
-                        .radius = 12.0f,
+                        .corner_radii = optics_gfx_corner_radii_uniform(12.0f),
                     },
             });
     optics_ui_icon(ui, &(optics_ui_icon_opts){.id = OPTICS_UI_ICON_CHEVRON_RIGHT, .size = 24.0f});

@@ -11,6 +11,7 @@ negative_knowledge: true
 # ADR-0157: DisplayList serialization is a versioned byte protocol with caller-owned resource IDs
 
 - Status: Accepted
+- Amended by: [ADR-0175](0175-per-corner-analytic-squircle-sdf-and-unified-corner-radii.md) (per-corner analytic squircle SDF, unified `OPTICS_GFX_GEOM_RRECT`, and `DL_VERSION = 2`)
 - Date: 2026-11-11
 - Deciders: Optics Architecture Working Group
 - Scope: `libs/flux/include/flux/canvas.h`, `libs/flux/src/canvas/encoder.c`, `bindings/flux-rs`, display-list tests.

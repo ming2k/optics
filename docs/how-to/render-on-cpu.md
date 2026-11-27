@@ -29,9 +29,13 @@ Bracket the drawing with `optics_gfx_canvas_begin` / `optics_gfx_canvas_end`
 `optics_gfx_canvas_begin(c, NULL, clear)` works too:
 
     optics_gfx_color bg = optics_gfx_color_rgba_premul(20, 20, 30, 255);
-    optics_gfx_canvas_begin(c, &bg);
-    optics_gfx_canvas_fill_rrect(c, (optics_gfx_rect){16, 16, 224, 224}, 24.0f,
-                           optics_gfx_color_rgba_premul(255, 90, 40, 255));
+    optics_gfx_canvas_begin(c, &(optics_gfx_canvas_pass_desc){
+                                   .type = OPTICS_GFX_TYPE_CANVAS_PASS_DESC,
+                                   .clear_color = &bg,
+                               });
+    optics_gfx_canvas_fill_rrect(c, (optics_gfx_rect){16, 16, 224, 224},
+                                 optics_gfx_corner_radii_uniform(24.0f), 0.0f,
+                                 optics_gfx_color_rgba_premul(255, 90, 40, 255));
     optics_gfx_canvas_end(c);
 
 Supported: solid fills, path fills/strokes (all blend modes), rounded rects/circles/squircles

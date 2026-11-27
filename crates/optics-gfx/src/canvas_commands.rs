@@ -2,6 +2,52 @@
 
 use super::*;
 
+/// Orthogonal configuration for [`CanvasCommands::draw_image_with`].
+///
+/// Any combination of sampler override, normalized source sub-rectangle,
+/// destination rounded/squircle geometry, independent rounded/squircle clip,
+/// tint, blend mode, and opaque-alpha override composes cleanly in one call.
+#[derive(Clone, Copy, Debug)]
+pub struct ImageDrawOpts<'a> {
+    /// Custom sampler; `None` uses the canvas default (linear).
+    pub sampler: Option<&'a Sampler>,
+    /// Normalized source UV sub-rectangle `(u, v, du, dv)`; `None` samples the whole image.
+    pub src: Option<(f32, f32, f32, f32)>,
+    /// Independent clip rectangle `(x, y, w, h)` in canvas units; `None` disables independent clip.
+    pub clip: Option<(f32, f32, f32, f32)>,
+    /// Per-corner radii for `clip` when `clip.is_some()`.
+    pub clip_radii: CornerRadii,
+    /// Corner curvature (`0.0` = circular, `1.0` = G2 squircle) for `clip`.
+    pub clip_curvature: f32,
+    /// Per-corner radii for the destination rectangle.
+    pub radii: CornerRadii,
+    /// Corner curvature (`0.0` = circular, `1.0` = G2 squircle) for the destination rectangle.
+    pub curvature: f32,
+    /// Premultiplied tint color (default: opaque white `0xFFFFFFFF`).
+    pub tint: u32,
+    /// Fixed-function blend mode (default: [`BlendMode::SrcOver`]).
+    pub blend: BlendMode,
+    /// Force alpha to opaque (`1.0`), replacing destination with `Src` when drawing alpha-free RGB images.
+    pub opaque_only: bool,
+}
+
+impl Default for ImageDrawOpts<'_> {
+    fn default() -> Self {
+        Self {
+            sampler: None,
+            src: None,
+            clip: None,
+            clip_radii: CornerRadii::ZERO,
+            clip_curvature: 0.0,
+            radii: CornerRadii::ZERO,
+            curvature: 0.0,
+            tint: 0xFFFFFFFF,
+            blend: BlendMode::SrcOver,
+            opaque_only: false,
+        }
+    }
+}
+
 impl CanvasCommands<'_> {
     /// Submit a compiled DisplayList for hardware execution (ADR-0088 / ADR-0090).
     pub fn submit_display_list(&self, list: &DisplayList) -> Result<(), Error> {
@@ -46,13 +92,15 @@ impl CanvasCommands<'_> {
         dst: sys::optics_gfx_rect,
         src: sys::optics_gfx_rect,
         clip: sys::optics_gfx_rect,
-        clip_radius: f32,
-        rrect_radius: f32,
+        clip_radii: CornerRadii,
+        clip_curvature: f32,
+        rrect_radii: CornerRadii,
+        rrect_curvature: f32,
         tint: u32,
         blend: sys::optics_gfx_blend_mode,
         opaque_only: bool,
     ) {
-        let is_rrect = rrect_radius > 0.0;
+        let is_rrect = !rrect_radii.is_zero();
         let geom = sys::optics_gfx_geometry {
             kind: if is_rrect {
                 sys::optics_gfx_geom_kind::OPTICS_GFX_GEOM_RRECT
@@ -68,7 +116,8 @@ impl CanvasCommands<'_> {
                 sys::optics_gfx_geometry__bindgen_ty_1 {
                     rrect: sys::optics_gfx_geom_rrect_data {
                         rect: dst,
-                        radius: rrect_radius,
+                        radii: rrect_radii.to_raw(),
+                        curvature: clamp_curvature(rrect_curvature),
                     },
                 }
             } else {
@@ -89,7 +138,8 @@ impl CanvasCommands<'_> {
                     opaque_only,
                     tint,
                     clip_rect: clip,
-                    clip_radius,
+                    clip_radii: clip_radii.to_raw(),
+                    clip_curvature: clamp_curvature(clip_curvature),
                 },
             },
         };
@@ -165,9 +215,20 @@ impl CanvasCommands<'_> {
         unsafe { sys::optics_gfx_canvas_draw_geometry(self.raw, &opts) };
     }
 
-    /// Fill a rounded rectangle with a packed solid color (analytic-AA SDF).
-    /// Works on both backends.
-    pub fn fill_rrect(&self, x: f32, y: f32, w: f32, h: f32, radius: f32, color: u32) {
+    /// Fill a rounded rectangle or continuous-curvature squircle with a packed
+    /// solid color (analytic-AA SDF). Accepts `f32` (uniform), `[f32; 4]`, or
+    /// [`CornerRadii`]; `curvature == 0.0` is circular, `1.0` is G2 squircle.
+    #[allow(clippy::too_many_arguments)]
+    pub fn fill_rrect(
+        &self,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        radii: impl Into<CornerRadii>,
+        curvature: f32,
+        color: u32,
+    ) {
         let geom = sys::optics_gfx_geometry {
             kind: sys::optics_gfx_geom_kind::OPTICS_GFX_GEOM_RRECT,
             _pad: [0; 3],
@@ -178,7 +239,8 @@ impl CanvasCommands<'_> {
             __bindgen_anon_1: sys::optics_gfx_geometry__bindgen_ty_1 {
                 rrect: sys::optics_gfx_geom_rrect_data {
                     rect: sys::optics_gfx_rect { x, y, w, h },
-                    radius,
+                    radii: radii.into().to_raw(),
+                    curvature: clamp_curvature(curvature),
                 },
             },
         };
@@ -197,7 +259,8 @@ impl CanvasCommands<'_> {
         unsafe { sys::optics_gfx_canvas_draw_geometry(self.raw, &opts) };
     }
 
-    /// Stroke an analytic rounded rectangle with a premultiplied colour.
+    /// Stroke an analytic rounded rectangle or continuous-curvature squircle
+    /// with a premultiplied colour.
     #[allow(clippy::too_many_arguments)]
     pub fn stroke_rrect(
         &self,
@@ -205,7 +268,8 @@ impl CanvasCommands<'_> {
         y: f32,
         w: f32,
         h: f32,
-        radius: f32,
+        radii: impl Into<CornerRadii>,
+        curvature: f32,
         color: u32,
         width: f32,
     ) {
@@ -219,7 +283,8 @@ impl CanvasCommands<'_> {
             __bindgen_anon_1: sys::optics_gfx_geometry__bindgen_ty_1 {
                 rrect: sys::optics_gfx_geom_rrect_data {
                     rect: sys::optics_gfx_rect { x, y, w, h },
-                    radius,
+                    radii: radii.into().to_raw(),
+                    curvature: clamp_curvature(curvature),
                 },
             },
         };
@@ -399,315 +464,54 @@ impl CanvasCommands<'_> {
         unsafe { sys::optics_gfx_canvas_draw_geometry(self.raw, &opts) };
     }
 
-    /// Draw an image into the destination rectangle (pixel space).
+    /// Draw an image into the destination rectangle (pixel space) with default options.
     pub fn draw_image(&self, image: &Image, x: f32, y: f32, w: f32, h: f32) {
-        self.draw_image_rect_internal(
-            image.raw,
-            std::ptr::null_mut(),
-            sys::optics_gfx_rect { x, y, w, h },
-            sys::optics_gfx_rect {
-                x: 0.0,
-                y: 0.0,
-                w: 0.0,
-                h: 0.0,
-            },
-            sys::optics_gfx_rect {
-                x: 0.0,
-                y: 0.0,
-                w: 0.0,
-                h: 0.0,
-            },
-            0.0,
-            0.0,
-            0xFFFFFFFF,
-            sys::optics_gfx_blend_mode::OPTICS_GFX_BLEND_SRC_OVER,
-            false,
-        );
+        self.draw_image_with(image, (x, y, w, h), &ImageDrawOpts::default());
     }
 
-    /// Draw an image sampled with `sampler` instead of the canvas default.
-    pub fn draw_image_sampled(
+    /// Draw an image into `dst = (x, y, w, h)` with orthogonal sampling,
+    /// sub-rectangle, rounded/squircle geometry or clip, tint, and blend options.
+    pub fn draw_image_with(
         &self,
         image: &Image,
-        sampler: &Sampler,
-        x: f32,
-        y: f32,
-        w: f32,
-        h: f32,
+        dst: (f32, f32, f32, f32),
+        opts: &ImageDrawOpts<'_>,
     ) {
+        let src = opts.src.unwrap_or((0.0, 0.0, 0.0, 0.0));
+        let clip = opts.clip.unwrap_or((0.0, 0.0, 0.0, 0.0));
+        let blend = if opts.opaque_only {
+            sys::optics_gfx_blend_mode::OPTICS_GFX_BLEND_SRC
+        } else {
+            opts.blend.raw()
+        };
         self.draw_image_rect_internal(
             image.raw,
-            sampler.raw,
-            sys::optics_gfx_rect { x, y, w, h },
+            opts.sampler.map(|s| s.raw).unwrap_or(std::ptr::null_mut()),
             sys::optics_gfx_rect {
-                x: 0.0,
-                y: 0.0,
-                w: 0.0,
-                h: 0.0,
+                x: dst.0,
+                y: dst.1,
+                w: dst.2,
+                h: dst.3,
             },
             sys::optics_gfx_rect {
-                x: 0.0,
-                y: 0.0,
-                w: 0.0,
-                h: 0.0,
-            },
-            0.0,
-            0.0,
-            0xFFFFFFFF,
-            sys::optics_gfx_blend_mode::OPTICS_GFX_BLEND_SRC_OVER,
-            false,
-        );
-    }
-
-    /// [`Self::draw_image_sampled`] with a tint / fixed-function blend
-    /// mode from `paint`.
-    #[allow(clippy::too_many_arguments)]
-    pub fn draw_image_sampled_with_style(
-        &self,
-        image: &Image,
-        sampler: &Sampler,
-        x: f32,
-        y: f32,
-        w: f32,
-        h: f32,
-        style: &ImageStyle,
-    ) {
-        self.draw_image_rect_internal(
-            image.raw,
-            sampler.raw,
-            sys::optics_gfx_rect { x, y, w, h },
-            sys::optics_gfx_rect {
-                x: 0.0,
-                y: 0.0,
-                w: 0.0,
-                h: 0.0,
+                x: src.0,
+                y: src.1,
+                w: src.2,
+                h: src.3,
             },
             sys::optics_gfx_rect {
-                x: 0.0,
-                y: 0.0,
-                w: 0.0,
-                h: 0.0,
+                x: clip.0,
+                y: clip.1,
+                w: clip.2,
+                h: clip.3,
             },
-            0.0,
-            0.0,
-            style.tint,
-            style.blend.raw(),
-            false,
-        );
-    }
-
-    /// Draw an alpha-free RGB image, forcing opaque output and replacing the
-    /// destination.
-    pub fn draw_image_opaque(&self, image: &Image, x: f32, y: f32, w: f32, h: f32) {
-        self.draw_image_rect_internal(
-            image.raw,
-            std::ptr::null_mut(),
-            sys::optics_gfx_rect { x, y, w, h },
-            sys::optics_gfx_rect {
-                x: 0.0,
-                y: 0.0,
-                w: 0.0,
-                h: 0.0,
-            },
-            sys::optics_gfx_rect {
-                x: 0.0,
-                y: 0.0,
-                w: 0.0,
-                h: 0.0,
-            },
-            0.0,
-            0.0,
-            0xFFFFFFFF,
-            sys::optics_gfx_blend_mode::OPTICS_GFX_BLEND_SRC,
-            true,
-        );
-    }
-
-    /// Draw an image using the tint and fixed-function blend mode in `paint`.
-    pub fn draw_image_with_style(
-        &self,
-        image: &Image,
-        x: f32,
-        y: f32,
-        w: f32,
-        h: f32,
-        style: &ImageStyle,
-    ) {
-        self.draw_image_rect_internal(
-            image.raw,
-            std::ptr::null_mut(),
-            sys::optics_gfx_rect { x, y, w, h },
-            sys::optics_gfx_rect {
-                x: 0.0,
-                y: 0.0,
-                w: 0.0,
-                h: 0.0,
-            },
-            sys::optics_gfx_rect {
-                x: 0.0,
-                y: 0.0,
-                w: 0.0,
-                h: 0.0,
-            },
-            0.0,
-            0.0,
-            style.tint,
-            style.blend.raw(),
-            false,
-        );
-    }
-
-    /// Draw an image clipped to an antialiased rounded rectangle.
-    pub fn draw_image_rrect(&self, image: &Image, x: f32, y: f32, w: f32, h: f32, radius: f32) {
-        self.draw_image_rect_internal(
-            image.raw,
-            std::ptr::null_mut(),
-            sys::optics_gfx_rect { x, y, w, h },
-            sys::optics_gfx_rect {
-                x: 0.0,
-                y: 0.0,
-                w: 0.0,
-                h: 0.0,
-            },
-            sys::optics_gfx_rect {
-                x: 0.0,
-                y: 0.0,
-                w: 0.0,
-                h: 0.0,
-            },
-            0.0,
-            radius,
-            0xFFFFFFFF,
-            sys::optics_gfx_blend_mode::OPTICS_GFX_BLEND_SRC_OVER,
-            false,
-        );
-    }
-
-    /// Draw an image through one antialiased rounded clip independent of its
-    /// destination.
-    #[allow(clippy::too_many_arguments)]
-    pub fn draw_image_clipped_rrect_with_style(
-        &self,
-        image: &Image,
-        x: f32,
-        y: f32,
-        w: f32,
-        h: f32,
-        clip_x: f32,
-        clip_y: f32,
-        clip_w: f32,
-        clip_h: f32,
-        radius: f32,
-        style: &ImageStyle,
-    ) {
-        self.draw_image_rect_internal(
-            image.raw,
-            std::ptr::null_mut(),
-            sys::optics_gfx_rect { x, y, w, h },
-            sys::optics_gfx_rect {
-                x: 0.0,
-                y: 0.0,
-                w: 0.0,
-                h: 0.0,
-            },
-            sys::optics_gfx_rect {
-                x: clip_x,
-                y: clip_y,
-                w: clip_w,
-                h: clip_h,
-            },
-            radius,
-            0.0,
-            style.tint,
-            style.blend.raw(),
-            false,
-        );
-    }
-
-    /// Draw a sub-rectangle of `image` into `dst`.
-    #[allow(clippy::too_many_arguments)]
-    pub fn draw_image_sub(
-        &self,
-        image: &Image,
-        dst_x: f32,
-        dst_y: f32,
-        dst_w: f32,
-        dst_h: f32,
-        src_u: f32,
-        src_v: f32,
-        src_du: f32,
-        src_dv: f32,
-    ) {
-        self.draw_image_rect_internal(
-            image.raw,
-            std::ptr::null_mut(),
-            sys::optics_gfx_rect {
-                x: dst_x,
-                y: dst_y,
-                w: dst_w,
-                h: dst_h,
-            },
-            sys::optics_gfx_rect {
-                x: src_u,
-                y: src_v,
-                w: src_du,
-                h: src_dv,
-            },
-            sys::optics_gfx_rect {
-                x: 0.0,
-                y: 0.0,
-                w: 0.0,
-                h: 0.0,
-            },
-            0.0,
-            0.0,
-            0xFFFFFFFF,
-            sys::optics_gfx_blend_mode::OPTICS_GFX_BLEND_SRC_OVER,
-            false,
-        );
-    }
-
-    /// Draw a sub-rectangle of an alpha-free RGB image, SRC-replace with
-    /// alpha forced opaque.
-    #[allow(clippy::too_many_arguments)]
-    pub fn draw_image_opaque_sub(
-        &self,
-        image: &Image,
-        dst_x: f32,
-        dst_y: f32,
-        dst_w: f32,
-        dst_h: f32,
-        src_u: f32,
-        src_v: f32,
-        src_du: f32,
-        src_dv: f32,
-    ) {
-        self.draw_image_rect_internal(
-            image.raw,
-            std::ptr::null_mut(),
-            sys::optics_gfx_rect {
-                x: dst_x,
-                y: dst_y,
-                w: dst_w,
-                h: dst_h,
-            },
-            sys::optics_gfx_rect {
-                x: src_u,
-                y: src_v,
-                w: src_du,
-                h: src_dv,
-            },
-            sys::optics_gfx_rect {
-                x: 0.0,
-                y: 0.0,
-                w: 0.0,
-                h: 0.0,
-            },
-            0.0,
-            0.0,
-            0xFFFFFFFF,
-            sys::optics_gfx_blend_mode::OPTICS_GFX_BLEND_SRC,
-            true,
+            opts.clip_radii,
+            opts.clip_curvature,
+            opts.radii,
+            opts.curvature,
+            opts.tint,
+            blend,
+            opts.opaque_only,
         );
     }
 

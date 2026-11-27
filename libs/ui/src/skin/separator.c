@@ -16,7 +16,7 @@ void optics_ui__skin_separator(optics_ui *ui, optics_ui_node *n,
                                  .rel = {0, rs->padding, 1.0f,
                                          h > 2.0f * rs->padding ? h - 2.0f * rs->padding : 1.0f},
                                  .color = rs->border,
-                                 .radius = 0.5f});
+                                 .corner_radii = optics_gfx_corner_radii_uniform(0.5f)});
     } else {
         optics_ui__drawlist_push(
             ui, n,
@@ -25,6 +25,6 @@ void optics_ui__skin_separator(optics_ui *ui, optics_ui_node *n,
                                          w > 2.0f * rs->padding ? w - 2.0f * rs->padding : 1.0f,
                                          1.0f},
                                  .color = rs->border,
-                                 .radius = 0.5f});
+                                 .corner_radii = optics_gfx_corner_radii_uniform(0.5f)});
     }
 }

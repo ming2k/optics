@@ -449,6 +449,12 @@ static void serialized_round_trip(void) {
     optics_gfx_encoder_translate(enc, &(optics_gfx_encoder_translate_opts){.x = 20, .y = 0});
     optics_gfx_encoder_draw_geometry(
         enc, &(optics_gfx_encoder_draw_geometry_opts){.geom = &g, .brush = &white});
+    /* Asymmetric per-corner squircle RRECT survives DL_VERSION=2 round-trip. */
+    optics_gfx_geometry q_rrect = optics_gfx_geom_rrect(
+        (optics_gfx_rect){0, 32, 24, 24}, optics_gfx_corner_radii_all(0, 0, 24, 0), 0.7f);
+    optics_gfx_encoder_translate(enc, &(optics_gfx_encoder_translate_opts){.x = -20, .y = 0});
+    optics_gfx_encoder_draw_geometry(
+        enc, &(optics_gfx_encoder_draw_geometry_opts){.geom = &q_rrect, .brush = &white});
     optics_gfx_display_list *list = nullptr;
     OT_EXPECT(optics_gfx_encoder_finish(enc, &list) == OPTICS_GFX_OK);
     optics_gfx_encoder_destroy(enc);
@@ -480,13 +486,24 @@ static void serialized_round_trip(void) {
     OT_EXPECT(alpha(c, 4, 4) == 255);
     OT_EXPECT(alpha(c, 24, 4) == 255);
     OT_EXPECT(alpha(c, 44, 4) == 0);
+    /* Quarter-squircle at (0, 32, 24, 24) with [0, 0, 24, 0]: crisp top-left,
+     * transparent bottom-right outside the arc. */
+    OT_EXPECT(alpha(c, 0, 32) == 255);
+    OT_EXPECT(alpha(c, 8, 40) == 255);
+    OT_EXPECT(alpha(c, 22, 54) == 0);
     optics_gfx_canvas_release(c);
 
-    /* Malformed streams fail closed and publish nothing. */
+    /* Malformed streams and legacy DL_VERSION=1 fail closed and publish nothing. */
     optics_gfx_display_list *bad = nullptr;
+    dopts.out_list = &bad;
+    uint8_t saved_ver = data[4];
+    data[4] = 1u; /* DL_VERSION 1 must be rejected by v2 loader */
+    OT_EXPECT(optics_gfx_display_list_deserialize(&dopts) == OPTICS_GFX_ERROR_INVALID_ARGUMENT);
+    OT_EXPECT(bad == nullptr);
+    data[4] = saved_ver;
+
     uint8_t saved = data[0];
     data[0] ^= 0xFFu;
-    dopts.out_list = &bad;
     OT_EXPECT(optics_gfx_display_list_deserialize(&dopts) == OPTICS_GFX_ERROR_INVALID_ARGUMENT);
     OT_EXPECT(bad == nullptr);
     data[0] = saved;

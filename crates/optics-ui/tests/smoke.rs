@@ -70,9 +70,15 @@ fn headless_frame_drives_widgets() {
             f.checkbox("Wrap", &mut wrap);
             f.switch("Compact mode", &mut wrap);
             f.row().items_center().show_flat(|f| {
-                f.col().show_flat(|f| {
+                f.column().show_flat(|f| {
                     f.label("Tap to click");
-                    f.label_sized("Tap with one finger", 11.0);
+                    f.label_with(
+                        "Tap with one finger",
+                        &optics_ui::LabelOpts {
+                            size: 11.0,
+                            ..Default::default()
+                        },
+                    );
                 });
                 f.flex(1.0);
                 f.spacer(0.0);
@@ -194,7 +200,7 @@ fn headless_frame_drives_wrap_and_stack_containers() {
         });
 
         // Layering stack layout
-        f.stack().pad(4.0).show_flat(|f| {
+        f.stack().pad(4.0).show(|f| {
             f.label("Base Background");
             f.button("Overlay Action");
         });
@@ -416,4 +422,42 @@ fn a_disabled_blink_is_solid_and_reports_nothing() {
         ui.caret_clock_live(),
         "restoring the default period must bring the clock back"
     );
+}
+
+#[test]
+fn unified_corner_radii_across_gfx_and_ui_builders() {
+    // optics_ui::CornerRadii is re-exported directly from optics_gfx (one type).
+    let tab: optics_gfx::CornerRadii = optics_ui::CornerRadii::bottom(8.0);
+    assert_eq!(tab, optics_ui::CornerRadii::new(0.0, 0.0, 8.0, 8.0));
+    assert_eq!(tab.max_radius(), 8.0);
+
+    let mut ui = Ui::headless().expect("create headless ui");
+    let input = Input::new((320.0, 200.0), 1.0 / 60.0);
+    let bg = optics_ui::Color::rgba(40, 80, 160, 255);
+    ui.frame(&input, |f| {
+        f.column()
+            .bg(bg)
+            .corner_radii(tab)
+            .corner_curvature(0.6)
+            .show_flat(|f| {
+                f.row()
+                    .bg(bg)
+                    .corner_radii(12.0)
+                    .corner_curvature(1.0)
+                    .show_flat(|f| f.label("uniform via Into<CornerRadii>"));
+                f.stack()
+                    .bg(bg)
+                    .corner_radii([0.0, 0.0, 16.0, 0.0])
+                    .corner_curvature(0.5)
+                    .show(|f| f.label("quarter-arc"));
+                f.grid(2)
+                    .bg(bg)
+                    .corner_radii(optics_ui::CornerRadii::top(10.0))
+                    .corner_curvature(0.7)
+                    .show(|f| {
+                        f.label("a");
+                        f.label("b");
+                    });
+            });
+    });
 }

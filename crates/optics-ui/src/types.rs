@@ -800,6 +800,24 @@ impl PlaceMode {
     }
 }
 
+pub(crate) fn raw_corner_radii(r: optics_gfx::CornerRadii) -> sys::optics_gfx_corner_radii {
+    let raw = r.to_raw();
+    sys::optics_gfx_corner_radii {
+        tl: raw.tl,
+        tr: raw.tr,
+        br: raw.br,
+        bl: raw.bl,
+    }
+}
+
+pub(crate) fn clamp_curvature(curvature: f32) -> f32 {
+    if curvature.is_finite() {
+        curvature.clamp(0.0, 1.0)
+    } else {
+        0.0
+    }
+}
+
 /// General layout configuration for flex containers.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct LayoutOpts {
@@ -810,7 +828,10 @@ pub struct LayoutOpts {
     pub pad: f32,
     pub cross: Align,
     pub bg: Color,
-    pub radius: f32,
+    /// Per-corner radii in clockwise order (`tl, tr, br, bl`). Zero means sharp corners.
+    pub corner_radii: optics_gfx::CornerRadii,
+    /// Corner curvature blend: `0.0` = circular arc (default), `1.0` = G2 squircle.
+    pub corner_curvature: f32,
     pub border: Color,
     pub border_width: f32,
     pub min_width: f32,
@@ -851,7 +872,8 @@ impl LayoutOpts {
             align: sys::optics_ui_align::OPTICS_UI_START,
             cross: self.cross.raw(),
             bg: self.bg.raw(),
-            radius: finite_pos(self.radius),
+            corner_radii: raw_corner_radii(self.corner_radii),
+            corner_curvature: clamp_curvature(self.corner_curvature),
             border: self.border.raw(),
             border_width: finite_pos(self.border_width),
             wrap: self.wrap,
@@ -885,4 +907,49 @@ impl PlaceOpts {
             box_: unsafe { std::mem::zeroed() },
         }
     }
+}
+
+/// Orthogonal options for [`crate::Frame::label_with`].
+#[derive(Debug, Clone, Copy, Default)]
+pub struct LabelOpts {
+    /// Font size in logical px (`0.0` = theme default).
+    pub size: f32,
+    /// Font weight (`0.0` = regular, `>= 500.0` = bold).
+    pub weight: f32,
+    /// Enable word wrapping within `max_width`.
+    pub wrap: bool,
+    /// Maximum wrapped width in logical px (`0.0` = container constraint).
+    pub max_width: f32,
+    /// Horizontal alignment of wrapped lines.
+    pub align: Align,
+}
+
+/// Orthogonal options for [`crate::Frame::slider_with`].
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SliderOpts {
+    /// Discrete step size (`0.0` = continuous).
+    pub step: f32,
+    /// Vertical slider orientation when `true`; horizontal when `false`.
+    pub vertical: bool,
+}
+
+/// Orthogonal options for [`crate::Frame::textedit`].
+#[derive(Debug, Clone, Copy, Default)]
+pub struct TextEditOpts<'a> {
+    /// Optional placeholder hint shown when the buffer is empty.
+    pub placeholder: Option<&'a str>,
+    /// Multi-line editor when `true`; single-line field when `false`.
+    pub multiline: bool,
+    /// Visible row count for multi-line editors (`0` = default).
+    pub rows: u32,
+    /// Mask characters for secret input.
+    pub password: bool,
+    /// Select the entire buffer when focused.
+    pub select_all_on_focus: bool,
+    /// Prevent edits while allowing selection and copy.
+    pub readonly: bool,
+    /// Intercept Tab (`Response::tabbed` set, Tab key consumed).
+    pub accept_tab: bool,
+    /// Single-line: Return sets `Response::submitted` and consumes Return.
+    pub submit_on_enter: bool,
 }

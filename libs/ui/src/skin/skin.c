@@ -150,7 +150,8 @@ void optics_ui_skin_rect(optics_ui *ui, const optics_ui_skin_rect_opts *opts) {
                              (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_RECT,
                                                   .rel = opts->rel,
                                                   .color = opts->color,
-                                                  .radius = opts->radius});
+                                                  .corner_radii = opts->corner_radii,
+                                                  .corner_curvature = opts->corner_curvature});
 }
 
 void optics_ui_skin_border(optics_ui *ui, const optics_ui_skin_border_opts *opts) {
@@ -160,7 +161,8 @@ void optics_ui_skin_border(optics_ui *ui, const optics_ui_skin_border_opts *opts
                              (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_BORDER,
                                                   .rel = opts->rel,
                                                   .color = opts->color,
-                                                  .radius = opts->radius,
+                                                  .corner_radii = opts->corner_radii,
+                                                  .corner_curvature = opts->corner_curvature,
                                                   .width = opts->width});
 }
 

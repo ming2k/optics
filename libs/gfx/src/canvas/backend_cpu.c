@@ -120,27 +120,23 @@ static vec4f frag_gradient(const optics_gfx_canvas_push *pc, float px, float py)
 }
 
 static vec4f frag_sdf(const optics_gfx_canvas_push *pc, vec4f vcol, float px, float py) {
-    float cx = pc->image_dst[0], cy = pc->image_dst[1];
-    float hx = pc->image_dst[2], hy = pc->image_dst[3];
-    float radius = pc->image_src[0], stroke_hw = pc->image_src[1];
-    float curvature = pc->image_src[2];
-    float aa = pc->image_src[3]; /* shape units per screen pixel */
+    float cx = pc->sdf.box[0], cy = pc->sdf.box[1];
+    float hx = pc->sdf.box[2], hy = pc->sdf.box[3];
+    optics_gfx_corner_radii radii = {pc->sdf.radii[0], pc->sdf.radii[1], pc->sdf.radii[2],
+                                     pc->sdf.radii[3]};
 
     /* Map the fragment back into shape space with the inverse linear part,
-     * then evaluate the shared field there (ADR-0118). The mapping is exact
-     * for any similarity, which is all `canvas_sdf_similarity` admits. */
+     * then evaluate the shared field there (ADR-0118 / ADR-0175). The mapping
+     * is exact for any similarity, which is all `canvas_sdf_similarity` admits. */
     float rx = px - cx, ry = py - cy;
-    float i00 = pc->grad_from[0], i01 = pc->grad_from[1];
-    float i10 = pc->grad_to[0], i11 = pc->grad_to[1];
-    optics_gfx_point p = {i00 * rx + i01 * ry, i10 * rx + i11 * ry};
+    optics_gfx_point p = {pc->sdf.inv[0] * rx + pc->sdf.inv[1] * ry,
+                          pc->sdf.inv[2] * rx + pc->sdf.inv[3] * ry};
 
     /* The *same* primitives the canvas_sdf.frag pipeline evaluates, so host and
-     * device coverage agree by construction rather than by tolerance. This host
-     * port once carried its own copy of the formula; test_canvas_squircle's
-     * dispatch test now compares the two pipelines end to end. */
-    float d = optics_gfx_sdf_squircle(p, hx, hy, radius, curvature);
-    d = optics_gfx_sdf_ring(d, stroke_hw);
-    float cov = optics_gfx_sdf_coverage(d, aa);
+     * device coverage agree by construction rather than by tolerance. */
+    float d = optics_gfx_sdf_rrect(p, hx, hy, radii, pc->sdf.curvature);
+    d = optics_gfx_sdf_ring(d, pc->sdf.stroke_hw);
+    float cov = optics_gfx_sdf_coverage(d, pc->sdf.aa);
     return (vec4f){vcol.r * cov, vcol.g * cov, vcol.b * cov, vcol.a * cov};
 }
 

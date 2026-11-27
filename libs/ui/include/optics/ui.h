@@ -768,14 +768,16 @@ typedef struct optics_ui_skin_rect_opts {
     optics_ui_node *node;
     optics_gfx_rect rel;
     optics_gfx_color color;
-    float radius;
+    optics_gfx_corner_radii corner_radii;
+    float corner_curvature;
 } optics_ui_skin_rect_opts;
 
 typedef struct optics_ui_skin_border_opts {
     optics_ui_node *node;
     optics_gfx_rect rel;
     optics_gfx_color color;
-    float radius;
+    optics_gfx_corner_radii corner_radii;
+    float corner_curvature;
     float width;
 } optics_ui_skin_border_opts;
 
@@ -1118,17 +1120,18 @@ typedef struct optics_ui_box {
 /* ================================================================== */
 
 typedef struct optics_ui_layout_opts {
-    optics_ui_box box;       /* sole source of geometry, constraints, identity, style */
-    float gap;               /* between children, main axis                  */
-    float pad;               /* inside the container, all sides              */
-    optics_ui_align align;   /* main-axis distribution                       */
-    optics_ui_align cross;   /* cross-axis alignment; OPTICS_UI_STRETCH fills    */
-    optics_gfx_color bg;     /* background fill; alpha 0 = transparent       */
-    float radius;            /* corner radius                                */
-    optics_gfx_color border; /* border stroke                                */
-    float border_width;      /* border width                                 */
-    bool wrap;               /* multi-line wrapping (ADR-0105)               */
-    float row_gap;           /* vertical gap between wrapped lines (0 = gap) */
+    optics_ui_box box;     /* sole source of geometry, constraints, identity, style */
+    float gap;             /* between children, main axis                  */
+    float pad;             /* inside the container, all sides              */
+    optics_ui_align align; /* main-axis distribution                       */
+    optics_ui_align cross; /* cross-axis alignment; OPTICS_UI_STRETCH fills */
+    optics_gfx_color bg;   /* background fill; alpha 0 = transparent       */
+    optics_gfx_corner_radii corner_radii; /* per-corner radii (tl, tr, br, bl); zero = sharp */
+    float corner_curvature;               /* 0 = circular arc, 1 = G2 squircle            */
+    optics_gfx_color border;              /* border stroke                                */
+    float border_width;                   /* border width                                 */
+    bool wrap;                            /* multi-line wrapping (ADR-0105)               */
+    float row_gap;                        /* vertical gap between wrapped lines (0 = gap) */
 } optics_ui_layout_opts;
 
 OPTICS_UI_API void optics_ui_row_begin(optics_ui *ui, const optics_ui_layout_opts *opts);
@@ -1147,13 +1150,14 @@ typedef struct optics_ui_grid_opts {
     float col_gap;
     float row_gap;
     float pad;
-    float row_height;        /* fixed uniform row height; 0 = content height */
-    optics_ui_align align;   /* cell horizontal alignment (default OPTICS_UI_START) */
-    optics_ui_align cross;   /* cell vertical alignment (default OPTICS_UI_STRETCH) */
-    optics_gfx_color bg;     /* background fill; alpha 0 = transparent       */
-    float radius;            /* corner radius                                */
-    optics_gfx_color border; /* border stroke                                */
-    float border_width;      /* border width                                 */
+    float row_height;                     /* fixed uniform row height; 0 = content height */
+    optics_ui_align align;                /* cell horizontal alignment (default OPTICS_UI_START) */
+    optics_ui_align cross;                /* cell vertical alignment (default OPTICS_UI_STRETCH) */
+    optics_gfx_color bg;                  /* background fill; alpha 0 = transparent       */
+    optics_gfx_corner_radii corner_radii; /* per-corner radii (tl, tr, br, bl); zero = sharp */
+    float corner_curvature;               /* 0 = circular arc, 1 = G2 squircle            */
+    optics_gfx_color border;              /* border stroke                                */
+    float border_width;                   /* border width                                 */
 } optics_ui_grid_opts;
 
 OPTICS_UI_API void optics_ui_grid_begin(optics_ui *ui, const optics_ui_grid_opts *opts);

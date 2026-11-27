@@ -39,7 +39,8 @@ int main(void) {
         optics_gfx_path *p = nullptr;
         OT_EXPECT(optics_gfx_path_create(&p, &arena) == OPTICS_GFX_OK);
         OT_EXPECT(p != nullptr);
-        optics_gfx_path_add_round_rect(p, (optics_gfx_rect){0.0f, 0.0f, 10.0f, 10.0f}, 2.0f);
+        optics_gfx_path_add_rrect(p, (optics_gfx_rect){0.0f, 0.0f, 10.0f, 10.0f},
+                                  optics_gfx_corner_radii_uniform(2.0f), 0.0f);
         OT_EXPECT(p->count > 0);
         optics_gfx_arena_reset(&arena);
     }
@@ -49,7 +50,8 @@ int main(void) {
         optics_gfx_path *p = nullptr;
         OT_EXPECT(optics_gfx_path_create(&p, &arena) == OPTICS_GFX_OK);
         OT_EXPECT(p != nullptr);
-        optics_gfx_path_add_round_rect(p, (optics_gfx_rect){0.0f, 0.0f, 10.0f, 10.0f}, 0.0f);
+        optics_gfx_path_add_rrect(p, (optics_gfx_rect){0.0f, 0.0f, 10.0f, 10.0f},
+                                  optics_gfx_corner_radii_uniform(0.0f), 0.0f);
         OT_EXPECT(p->count == 5);
         optics_gfx_arena_reset(&arena);
     }

@@ -27,11 +27,13 @@ void optics_ui__skin_selectable(optics_ui *ui, optics_ui_node *n,
         optics_gfx_color bg =
             selected ? rs->bg_pressed : optics_ui__lerp_color(0, rs->bg_hover, fill);
         if ((bg & 0xFF000000u) != 0) {
-            optics_ui__drawlist_push(ui, n,
-                                     (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_RECT,
-                                                          .rel = {0, 0, 0, 0},
-                                                          .color = bg,
-                                                          .radius = rs->corner_radius});
+            optics_ui__drawlist_push(
+                ui, n,
+                (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_RECT,
+                                     .rel = {0, 0, 0, 0},
+                                     .color = bg,
+                                     .corner_radii =
+                                         optics_gfx_corner_radii_uniform(rs->corner_radius)});
         }
     }
 

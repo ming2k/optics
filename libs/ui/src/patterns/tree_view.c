@@ -116,19 +116,20 @@ optics_ui_tree_action optics_ui_tree_view(optics_ui *ui, const optics_ui_tree_op
         optics_gfx_color row_bg =
             (item->selected || is_focused) ? ui->theme.color_active : (optics_gfx_color){};
 
-        optics_ui_response row_resp =
-            optics_ui_pressable_begin(ui, &(optics_ui_pressable_opts){
-                                              .box = {.id = row_id, .height = row_h},
-                                              .label = row_id,
-                                              .layout =
-                                                  {
-                                                      .gap = 4.0f,
-                                                      .pad = 2.0f,
-                                                      .bg = row_bg,
-                                                      .radius = ui->theme.corner_radius,
-                                                      .cross = OPTICS_UI_CENTER,
-                                                  },
-                                          });
+        optics_ui_response row_resp = optics_ui_pressable_begin(
+            ui,
+            &(optics_ui_pressable_opts){
+                .box = {.id = row_id, .height = row_h},
+                .label = row_id,
+                .layout =
+                    {
+                        .gap = 4.0f,
+                        .pad = 2.0f,
+                        .bg = row_bg,
+                        .corner_radii = optics_gfx_corner_radii_uniform(ui->theme.corner_radius),
+                        .cross = OPTICS_UI_CENTER,
+                    },
+            });
 
         /* Row selection on click */
         if (row_resp.clicked && action.kind == OPTICS_UI_TREE_ACTION_NONE) {

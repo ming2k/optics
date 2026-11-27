@@ -115,7 +115,8 @@ static void test_cpu_target_and_canvas_polymorphism(void) {
 
     optics_gfx_rect rrect = {32.0f, 4.0f, 24.0f, 24.0f};
     optics_gfx_color rrect_color = optics_gfx_color_rgba_premul(0, 255, 0, 255);
-    optics_gfx_canvas_fill_rrect(canvas, rrect, 4.0f, rrect_color);
+    optics_gfx_canvas_fill_rrect(canvas, rrect, optics_gfx_corner_radii_uniform(4.0f), 0.0f,
+                                 rrect_color);
 
     r = optics_gfx_canvas_end(canvas);
     OT_EXPECT(r == OPTICS_GFX_OK);
@@ -158,8 +159,8 @@ static void test_text_lifecycle_and_atlas_sync(void) {
 }
 
 static void test_adr0088_clean_break(void) {
-    /* 1. Geometry Tagged Union size check */
-    OT_EXPECT(sizeof(optics_gfx_geometry) <= 48);
+    /* 1. Geometry Tagged Union fits inside one 64-byte cache line (ADR-0175) */
+    OT_EXPECT(sizeof(optics_gfx_geometry) <= 64);
 
     /* 2. Brush and geometry construction */
     optics_gfx_brush solid_b = optics_gfx_brush_solid(optics_gfx_color_rgba_premul(255, 0, 0, 255));
@@ -171,9 +172,10 @@ static void test_adr0088_clean_break(void) {
     OT_EXPECT(r_geom.kind == OPTICS_GFX_GEOM_RECT);
 
     optics_gfx_geometry sq_geom =
-        optics_gfx_geom_squircle((optics_gfx_rect){0.0f, 0.0f, 100.0f, 100.0f}, 16.0f, 0.8f);
-    OT_EXPECT(sq_geom.kind == OPTICS_GFX_GEOM_SQUIRCLE);
-    OT_EXPECT(sq_geom.squircle.curvature == 0.8f);
+        optics_gfx_geom_rrect((optics_gfx_rect){0.0f, 0.0f, 100.0f, 100.0f},
+                              optics_gfx_corner_radii_uniform(16.0f), 0.8f);
+    OT_EXPECT(sq_geom.kind == OPTICS_GFX_GEOM_RRECT);
+    OT_EXPECT(sq_geom.rrect.curvature == 0.8f);
 
     /* 3. Encoder and DisplayList pure CPU recording */
     optics_gfx_arena arena;
@@ -382,7 +384,8 @@ static void test_adr0091_squircle_distinct_geometry(void) {
                                        .clear_color = &clear,
                                        .attachment = {.kind = OPTICS_GFX_CANVAS_ATTACHMENT_TARGET,
                                                       .target = t_sq}}) == OPTICS_GFX_OK);
-    optics_gfx_geometry g_sq = optics_gfx_geom_squircle(box, 16.0f, 1.0f);
+    optics_gfx_geometry g_sq =
+        optics_gfx_geom_rrect(box, optics_gfx_corner_radii_uniform(16.0f), 1.0f);
     optics_gfx_brush b = optics_gfx_brush_solid(white);
     optics_gfx_canvas_draw_geometry(
         c, &(optics_gfx_canvas_draw_geometry_opts){.geom = &g_sq, .brush = &b});
@@ -395,7 +398,8 @@ static void test_adr0091_squircle_distinct_geometry(void) {
                                        .clear_color = &clear,
                                        .attachment = {.kind = OPTICS_GFX_CANVAS_ATTACHMENT_TARGET,
                                                       .target = t_rr}}) == OPTICS_GFX_OK);
-    optics_gfx_geometry g_rr = optics_gfx_geom_rrect(box, 16.0f);
+    optics_gfx_geometry g_rr =
+        optics_gfx_geom_rrect(box, optics_gfx_corner_radii_uniform(16.0f), 0.0f);
     optics_gfx_canvas_draw_geometry(
         c, &(optics_gfx_canvas_draw_geometry_opts){.geom = &g_rr, .brush = &b});
     OT_EXPECT(optics_gfx_canvas_end(c) == OPTICS_GFX_OK);

@@ -10,7 +10,9 @@ lookup surfaces for this checkout.
 |-----------------------|------------------|-----------------------------------------------------------------------|
 | `<optics/gfx.h>`       | Yes              | Umbrella; pulls in every gfx module.                                 |
 | `<optics/gfx/core.h>`       | Yes              | Device, surface, frame, buffer, sampled image, allocator, logger, results, version. |
-| `<optics/gfx/math.h>`       | Yes              | Vector, matrix, quaternion, colour, arena. No Vulkan dependency.      |
+| `<optics/gfx/math.h>`       | Yes              | Vector, matrix, quaternion, colour, corner radii, arena. No Vulkan dependency. |
+| `<optics/gfx/curve.h>`      | Yes              | Analytic Bézier curve kernel (reduction, inflections, offset, winding). |
+| `<optics/gfx/sdf.h>`        | Yes              | Analytic signed distance fields (`circle`, per-corner `rrect`/squircle) and derivatives. |
 | `<optics/gfx/vulkan.h>`     | Yes              | Raw Vulkan handle accessors, sampler, graphics pipeline, pass.        |
 | `<optics/gfx/canvas.h>`     | Yes              | 2D drawing: path, paint, image drawing, canvas.                    |
 | `<optics/gfx/canvas_cpu.h>` | Yes              | Headless software (CPU) canvas: `optics_gfx_canvas_create (CPU backend)`, pixel readback. No Vulkan. |
@@ -27,9 +29,9 @@ lookup surfaces for this checkout.
 matching `-DOPTICS_HAVE_<MODULE>=1` compile definition. Header presence on the
 host is not feature detection; see [ADR-0164](../adr/0164-umbrella-feature-detection-flags.md).
 
-`ui` and `app` require both `text` and `svg`. Disabling either removes the UI
-stack from the build rather than leaving unresolved symbols behind. `window`
-depends on `gfx` only and is always built.
+`ui` and `app` require `text`. Disabling `text` removes the UI stack from the
+build rather than leaving unresolved symbols behind. `window` depends on `gfx`
+only and is always built.
 
 `<optics/gfx/core.h>` and `<optics/gfx/math.h>` do **not** include `<vulkan/vulkan.h>`.
 Include `<optics/gfx/vulkan.h>` at the seam where you hand gfx a `VkSurfaceKHR`
@@ -41,7 +43,7 @@ or pull a raw `VkCommandBuffer` back.
 |----------------------|---------------------------------------------------------------------------------------------|
 | Opaque pointer       | `optics_gfx_device`, `optics_gfx_surface`, `optics_gfx_frame`, `optics_gfx_buffer`, `optics_gfx_target`, `optics_gfx_image`, `optics_gfx_canvas`, `optics_gfx_path`, `optics_gfx_sampler`, `optics_gfx_graphics_pipeline`, `optics_gfx_compute_pipeline`. Never dereferenced by the caller. |
 | Atomic refcount      | Every heavy resource above. `_retain` is `[[nodiscard]]` and returns the same pointer; `_release` is null-safe.  |
-| Value type           | `optics_gfx_vec2/3/4`, `optics_gfx_mat3x2`, `optics_gfx_mat4`, `optics_gfx_quat`, `optics_gfx_color`, `optics_gfx_point`, `optics_gfx_rect`. Pass by value; live on the stack or in a `optics_gfx_arena`. |
+| Value type           | `optics_gfx_vec2/3/4`, `optics_gfx_mat3x2`, `optics_gfx_mat4`, `optics_gfx_quat`, `optics_gfx_color`, `optics_gfx_point`, `optics_gfx_corner_radii`, `optics_gfx_rect`. Pass by value; live on the stack or in a `optics_gfx_arena`. |
 | Arena-owned          | `optics_gfx_path`, `optics_gfx_brush`. Reset/destroy the arena to free; no per-element release.         |
 
 ## Resource lifecycle
@@ -122,11 +124,11 @@ encoding with immutable publication (ADR-0089 through ADR-0094):
    references. Destroying or resetting the encoder leaves published display lists
    fully intact. `optics_gfx_canvas_submit_display_list` submits a published list to
    the active canvas pass.
-3. **Algebraic Geometry x Brush Model** (ADR-0091): Primitives are expressed
+3. **Algebraic Geometry x Brush Model** (ADR-0091, ADR-0175): Primitives are expressed
    strictly as the orthogonal product `optics_gfx_geometry` $\times$ `optics_gfx_brush`
-   dispatched via `optics_gfx_canvas_draw_geometry`. Geometries support Rect, RRect,
-   G2 continuous curvature Squircle (`optics_gfx_path_add_squircle`), Circle, Line,
-   and Path.
+   dispatched via `optics_gfx_canvas_draw_geometry`. Geometries support Rect, unified
+   per-corner RRect / G2 continuous-curvature squircle (`optics_gfx_path_add_rrect`),
+   Circle, Line, and Path.
 4. **Opacity Groups (`save_layer`)** (ADR-0091): `optics_gfx_canvas_save_layer` and
    `optics_gfx_encoder_save_layer` allocate isolated compositing layers. Subtree draws
    render in isolation and are composed back into parent targets with layer

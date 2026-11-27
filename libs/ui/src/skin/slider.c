@@ -48,24 +48,26 @@ void optics_ui__skin_slider(optics_ui *ui, optics_ui_node *n, const optics_ui_wi
             track_w = 1.0f;
 
         /* track */
-        optics_ui__drawlist_push(ui, n,
-                                 (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_RECT,
-                                                      .rel = {track_x0, h * 0.5f - track_radius,
-                                                              track_w, track_thickness},
-                                                      .color = track_color,
-                                                      .radius = track_radius});
+        optics_ui__drawlist_push(
+            ui, n,
+            (optics_ui_draw_cmd){
+                .kind = OPTICS_UI_DRAW_RECT,
+                .rel = {track_x0, h * 0.5f - track_radius, track_w, track_thickness},
+                .color = track_color,
+                .corner_radii = optics_gfx_corner_radii_uniform(track_radius)});
 
         /* Filled portion ends at the exact value. The knob is an interaction
          * affordance, not part of the value geometry, so it must not move
          * or lengthen the fill. */
         float fill_w = frac * track_w;
         if (fill_w > 0.001f)
-            optics_ui__drawlist_push(ui, n,
-                                     (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_RECT,
-                                                          .rel = {track_x0, h * 0.5f - track_radius,
-                                                                  fill_w, track_thickness},
-                                                          .color = fill_color,
-                                                          .radius = track_radius});
+            optics_ui__drawlist_push(
+                ui, n,
+                (optics_ui_draw_cmd){
+                    .kind = OPTICS_UI_DRAW_RECT,
+                    .rel = {track_x0, h * 0.5f - track_radius, fill_w, track_thickness},
+                    .color = fill_color,
+                    .corner_radii = optics_gfx_corner_radii_uniform(track_radius)});
 
         float knob_x = track_x0 + frac * track_w - knob_extent * 0.5f;
         float knob_y = h * 0.5f - knob_extent * 0.5f;
@@ -74,7 +76,8 @@ void optics_ui__skin_slider(optics_ui *ui, optics_ui_node *n, const optics_ui_wi
             (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_RECT,
                                  .rel = {knob_x, knob_y, knob_extent, knob_extent},
                                  .color = knob_color,
-                                 .radius = knob_extent * 0.5f});
+                                 .corner_radii =
+                                     optics_gfx_corner_radii_uniform(knob_extent * 0.5f)});
         return;
     }
 
@@ -89,21 +92,24 @@ void optics_ui__skin_slider(optics_ui *ui, optics_ui_node *n, const optics_ui_wi
         (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_RECT,
                              .rel = {track_x, track_y0, track_thickness, track_h},
                              .color = track_color,
-                             .radius = track_thickness * 0.5f});
+                             .corner_radii =
+                                 optics_gfx_corner_radii_uniform(track_thickness * 0.5f)});
     float fill_h = frac * track_h;
     if (fill_h > 0.001f)
-        optics_ui__drawlist_push(ui, n,
-                                 (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_RECT,
-                                                      .rel = {track_x, track_y0 + track_h - fill_h,
-                                                              track_thickness, fill_h},
-                                                      .color = fill_color,
-                                                      .radius = track_thickness * 0.5f});
+        optics_ui__drawlist_push(
+            ui, n,
+            (optics_ui_draw_cmd){
+                .kind = OPTICS_UI_DRAW_RECT,
+                .rel = {track_x, track_y0 + track_h - fill_h, track_thickness, fill_h},
+                .color = fill_color,
+                .corner_radii = optics_gfx_corner_radii_uniform(track_thickness * 0.5f)});
 
     float knob_x = w * 0.5f - knob_extent * 0.5f;
     float knob_y = track_y0 + (1.0f - frac) * track_h - knob_extent * 0.5f;
-    optics_ui__drawlist_push(ui, n,
-                             (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_RECT,
-                                                  .rel = {knob_x, knob_y, knob_extent, knob_extent},
-                                                  .color = knob_color,
-                                                  .radius = knob_extent * 0.5f});
+    optics_ui__drawlist_push(
+        ui, n,
+        (optics_ui_draw_cmd){.kind = OPTICS_UI_DRAW_RECT,
+                             .rel = {knob_x, knob_y, knob_extent, knob_extent},
+                             .color = knob_color,
+                             .corner_radii = optics_gfx_corner_radii_uniform(knob_extent * 0.5f)});
 }

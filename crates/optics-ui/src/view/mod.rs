@@ -62,7 +62,7 @@ impl View for VStack {
             pad: self.pad,
             ..Default::default()
         };
-        frame.column_ex(&opts, |frame| {
+        frame.column().with_opts(&opts).show(|frame| {
             for child in &self.children {
                 child.render(frame);
             }
@@ -115,7 +115,7 @@ impl View for HStack {
             pad: self.pad,
             ..Default::default()
         };
-        frame.row_ex(&opts, |frame| {
+        frame.row().with_opts(&opts).show(|frame| {
             for child in &self.children {
                 child.render(frame);
             }

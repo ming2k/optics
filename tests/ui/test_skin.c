@@ -14,10 +14,12 @@ static bool cmds_equal(const optics_ui_node *a, const optics_ui_node *b) {
     for (uint32_t i = 0; i < a->cmd_count; i++) {
         const optics_ui_draw_cmd *x = &a->cmds[i];
         const optics_ui_draw_cmd *y = &b->cmds[i];
-        if (x->kind != y->kind || x->color != y->color || x->radius != y->radius ||
-            x->width != y->width || x->text_size != y->text_size ||
-            x->text_weight != y->text_weight || x->icon_id != y->icon_id ||
-            memcmp(&x->rel, &y->rel, sizeof x->rel) != 0)
+        if (x->kind != y->kind || x->color != y->color ||
+            x->corner_radii.tl != y->corner_radii.tl || x->corner_radii.tr != y->corner_radii.tr ||
+            x->corner_radii.br != y->corner_radii.br || x->corner_radii.bl != y->corner_radii.bl ||
+            x->corner_curvature != y->corner_curvature || x->width != y->width ||
+            x->text_size != y->text_size || x->text_weight != y->text_weight ||
+            x->icon_id != y->icon_id || memcmp(&x->rel, &y->rel, sizeof x->rel) != 0)
             return false;
     }
     return true;

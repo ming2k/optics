@@ -417,7 +417,7 @@ static void test_cover_coverage_agrees_with_field(void) {
                 float centre_y = -0.5f + (float)j * 0.125f;
                 float px = centre_x - 0.5f, py = centre_y - 0.5f;
                 optics_gfx_point centre = {centre_x, centre_y};
-                float d = optics_gfx_sdf_round_rect(centre, he, he, 0.0f);
+                float d = optics_gfx_sdf_rrect(centre, he, he, (optics_gfx_corner_radii){}, 0.0f);
                 float w16 = optics_gfx_curve_cover_coverage(cover, OPTICS_GFX_CURVE_FILL_NONZERO,
                                                             px, py, 16);
                 float w32 = optics_gfx_curve_cover_coverage(cover, OPTICS_GFX_CURVE_FILL_NONZERO,
