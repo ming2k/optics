@@ -21,7 +21,7 @@
 
 #define OPTICS_VERSION_MAJOR 0
 #define OPTICS_VERSION_MINOR 0
-#define OPTICS_VERSION_PATCH 88
+#define OPTICS_VERSION_PATCH 89
 
 #define OPTICS_VERSION_NUMBER                                                                      \
     (((uint32_t)OPTICS_VERSION_MAJOR << 16) | ((uint32_t)OPTICS_VERSION_MINOR << 8) |              \

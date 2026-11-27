@@ -227,9 +227,9 @@ differently:
 
 Pre-1.0, fields can be appended directly to a base desc when it makes
 sense. The pre-1.0 SONAME is the **full version string**
-(`liboptics_gfx.so.0.0.88`), not `major.minor`: releases in this line have
+(`liboptics_gfx.so.0.0.89`), not `major.minor`: releases in this line have
 appended descriptor fields and changed pass behavior on patch bumps, so
-`0.0.88` and `0.0.88` do not share a binary contract. A binary built against
+`0.0.88` and `0.0.89` do not share a binary contract. A binary built against
 one release fails to load the other instead of silently reading a smaller
 struct. Recompile against the matching headers when you upgrade.
 

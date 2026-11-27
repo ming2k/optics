@@ -13,7 +13,7 @@ pre-1.0 release may break source or binary compatibility, so the SONAME
 carries the full version and a mismatched binary fails to load instead of
 silently reading a different descriptor layout.
 
-## [Unreleased]
+## [0.0.89] - 2026-11-27
 
 ### Changed — Per-corner analytic squircle SDF, unified RRect geometry, and API cleanup (ADR-0175, breaking)
 
