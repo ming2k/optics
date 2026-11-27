@@ -3,9 +3,9 @@
 
 The symbol reference used to be maintained by hand and drifted until every row
 named a function that no longer existed. It is now derived: every exported
-function of every library (`OPTICS_<MOD>_API`; motion's expands to
-`static inline`), grouped by library and header, with the first
-sentence of the comment directly above its declaration.
+function of every library (`OPTICS_<MOD>_API` or `OPTICS_<MOD>_INLINE`),
+grouped by library and header, with the first sentence of the comment directly
+above its declaration.
 
 Usage:
   tools/gen_symbols.py            rewrite docs/reference/symbols.md
@@ -24,7 +24,6 @@ OUT = ROOT / "docs" / "reference" / "symbols.md"
 LIBRARIES = [
     ("gfx", "rendering foundation: Vulkan 1.3 RHI, 2D canvas, compute, image effects"),
     ("text", "text shaping, layout and glyph runs"),
-    ("motion", "springs and easing (header-only)"),
     ("window", "native window, event pump and platform services"),
     ("ui", "immediate-mode UI engine"),
     ("app", "application shell"),
@@ -90,7 +89,9 @@ def doc_before(text: str, pos: int) -> str:
 def symbols(mod: str, header: Path) -> list[tuple[str, str]]:
     text = header.read_text(encoding="utf-8")
     code = blank_comments(text)
-    decl = re.compile(rf"\bOPTICS_{mod.upper()}_API\b[^;{{]*?\b(optics_{mod}_[a-z0-9_]+)\s*\(")
+    decl = re.compile(
+        rf"\bOPTICS_{mod.upper()}_(?:API|INLINE)\b[^;{{]*?\b(optics_{mod}_(?!_)[a-z0-9_]+)\s*\("
+    )
     out, seen = [], set()
     for m in decl.finditer(code):
         name = m.group(1)

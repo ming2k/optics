@@ -45,8 +45,8 @@ Prior to creating a release tag:
 
 1. **Formatting**: Run `./tools/format.sh --check` to ensure clean code style.
 2. **Layer Test Matrix**: Run each layer explicitly and verify 100% pass/skip on its own gate:
-   `meson test -C build --suite unit`, `--suite integration`, and `--suite e2e`.
-   The `test_layers` lint gate must also pass; it rejects unclassified tests and private harnesses.
+   `meson test -C build --suite unit`, `--suite integration`, `--suite e2e`, and `--suite lint`
+   (`wayland_listeners`, `version_lockstep_tree`, `library_purity`, `symbol_reference`).
 3. **Rust Bindings Verification**: Run `cargo test --workspace` from the repository root to verify safe bindings.
 4. **Changelog Integrity**: Ensure user-facing features, breaking changes, and migrations are recorded in `CHANGELOG.md`.
 5. **Clean Git State**: Verify no untracked experimental files or temporary debug assets remain in the tree (`git status --porcelain` is clean).

@@ -1,10 +1,10 @@
 ---
 id: ADR-0077
 title: "The `anim` motion vocabulary library — provable math, host-owned clocks"
-status: accepted
+status: superseded
 date: 2026-08-23
 scope: new sibling library libs/anim (+ anim-rs binding)
-superseded_by: null
+superseded_by: ADR-0177
 negative_knowledge: true
 ---
 

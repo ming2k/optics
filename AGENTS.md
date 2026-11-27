@@ -6,12 +6,11 @@
 - **Clean Git State**: Do not leave scratch files, temporary binaries, or untracked test logs in the working tree.
 
 ## 2. Core Mental Model & Subsystem Boundaries
-- **Topology**: Optics is a pure C23 2D graphics and UI stack of six orthogonal libraries under `libs/` with unified `<optics/...>` headers and `optics_<mod>_` symbols (ADR-0170, ADR-0174). Dependencies point one way; the build graph is the authority (`meson.build` per library):
+- **Topology**: Optics is a pure C23 2D graphics and UI stack of five orthogonal libraries under `libs/` with unified `<optics/...>` headers and `optics_<mod>_` symbols (ADR-0170, ADR-0174, ADR-0177). Dependencies point one way; the build graph is the authority (`meson.build` per library):
   - `gfx` (`liboptics_gfx`, Vulkan only): Vulkan 1.3 RHI, 2D vector canvas (GPU & CPU backend `<optics/gfx/canvas_cpu.h>`), compute pipelines, image effects, analytic curve kernel, analytic SDF, color management. One library, one ABI, no optional modules.
   - `text` (`liboptics_text`, → gfx): HarfBuzz-backed text shaping, layout metrics, and dynamic texture atlas caching.
-  - `motion` (`<optics/motion.h>`, header-only, libm): Closed-form analytic spring integration and parametric easing.
   - `window` (`liboptics_window`, → gfx): Native OS windowing, event pump, display pacing (Wayland, Win32, Cocoa), event seam (ADR-0107), dual-thread pipeline (ADR-0124), and the UI-host seam `<optics/window/host.h>`. Must never include a UI header.
-  - `ui` (`liboptics_ui`, → gfx, text): Immediate-mode UI engine, layout (Grid/Flex/Flow), retained store, per-context format-agnostic vector icon registry, accessibility tree. Headless: must never include a windowing header.
+  - `ui` (`liboptics_ui`, → gfx, text): Immediate-mode UI engine, layout (Grid/Flex/Flow), retained store, per-context format-agnostic vector icon registry, header-only closed-form motion vocabulary (`<optics/ui/motion.h>`), accessibility tree. Headless: must never include a windowing header.
   - `app` (`liboptics_app`, → window, ui): Application shell. The only library that links both `window` and `ui`; implements `optics_window_ui_host` over an `optics_ui` context.
 - **Pure C23 Baseline**: Idiomatic modern C (`-std=c23`) across all modules:
   - Pointers: Always use `nullptr` (never `NULL` or `0`).

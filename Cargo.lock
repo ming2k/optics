@@ -129,19 +129,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "optics"
-version = "0.0.90"
-dependencies = [
- "optics-app",
- "optics-build",
- "optics-gfx",
- "optics-motion",
- "optics-text",
- "optics-ui",
- "optics-window",
-]
-
-[[package]]
 name = "optics-app"
 version = "0.0.90"
 dependencies = [
@@ -184,10 +171,6 @@ version = "0.0.90"
 dependencies = [
  "optics-build",
 ]
-
-[[package]]
-name = "optics-motion"
-version = "0.0.90"
 
 [[package]]
 name = "optics-text"

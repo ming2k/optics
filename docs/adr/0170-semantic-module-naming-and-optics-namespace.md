@@ -15,6 +15,7 @@ negative_knowledge: true
 - Deciders: Optics Architecture Working Group
 - Consulted: All library owners (`gfx`, `text`, `svg`, `material`, `scene`, `motion`, `window`, `ui`, `app`)
 - Informed: Core Engineering
+- Amended: 2026-11-27 — the Rust `optics` facade crate is retired in favor of direct `optics-*` crates by [ADR-0176](0176-retire-rust-optics-facade-crate.md).
 - Amends: [ADR-0106](0106-monorepo-identity-unification-glyph-vista-transit.md), [ADR-0166](0166-one-way-library-graph-and-enforced-invariants.md), [ADR-0169](0169-root-crates-layout-optics-namespace-and-shared-build.md)
 
 ---

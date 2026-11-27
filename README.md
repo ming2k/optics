@@ -2,7 +2,7 @@
 
 A pure C23 2D graphics and UI stack on Vulkan 1.3.
 
-Optics is a restrained, orthogonal set of six libraries for desktop applications and creative tools: a GPU and CPU 2D vector canvas, text shaping, an immediate-mode UI engine, closed-form analytic motion, native windowing, and an application shell. External asset/document format parsers (PNG/JPEG/SVG/glTF) and branded OS shader packs are deliberately out of scope (ADR-0174). It is pre-1.0: there is no API or ABI stability promise yet.
+Optics is a restrained, orthogonal set of five libraries for desktop applications and creative tools: a GPU and CPU 2D vector canvas, text shaping, an immediate-mode UI engine with closed-form analytic motion, native windowing, and an application shell. External asset/document format parsers (PNG/JPEG/SVG/glTF) and branded OS shader packs are deliberately out of scope (ADR-0174). It is pre-1.0: there is no API or ABI stability promise yet.
 
 ---
 
@@ -11,31 +11,28 @@ Optics is a restrained, orthogonal set of six libraries for desktop applications
 - **C23 throughout**: `-std=c23` with `nullptr`, `{}` zero-initialization, fixed-underlying-type enums, `[[nodiscard]]`, and `#embed` for shaders.
 - **Vulkan 1.3, no RHI abstraction**: dynamic rendering, timeline semaphores, buffer device addresses, and bindless descriptors, used directly.
 - **CPU canvas backend**: a software rasterizer (`<optics/gfx/canvas_cpu.h>`) behind the same canvas API, for headless rendering, pixel tests, and CI. It is also the reference the GPU path is measured against.
-- **Immediate-mode UI over a retained core**: Flex and Grid layout, overlay z-bands, damage tracking, per-context format-agnostic vector icons, zero steady-state frame allocations, and an accessibility tree (`ui`).
-- **Closed-form motion**: analytic spring integration and parametric easing (`motion`, header-only).
+- **Immediate-mode UI over a retained core**: Flex and Grid layout, overlay z-bands, damage tracking, per-context format-agnostic vector icons, zero steady-state frame allocations, an accessibility tree, and header-only closed-form analytic motion (`ui`, `<optics/ui/motion.h>`).
 - **Native windowing**: Wayland, Win32, and Cocoa (via MoltenVK) backends (`window`); see [Platforms](#platforms) for how each is verified.
 - **Use what you need**: `window` + `gfx` is a window with a canvas and no UI toolkit; `ui` runs headless with no window system; `app` joins them.
-- **Rust ecosystem**: `optics` facade crate, `optics-*-sys` bindgen crates, and safe `optics-*` wrappers under `crates/`, symmetric with `libs/` under a single repository-root Cargo workspace.
+- **Rust ecosystem**: orthogonal `optics-*` safe wrappers and `optics-*-sys` bindgen crates under `crates/`, symmetric 1:1 with `libs/` under a single repository-root Cargo workspace (ADR-0169, ADR-0176).
 
 ---
 
 ## Architecture
 
-One foundation library, four orthogonal libraries that build on it, and one shell that joins the UI engine to the window. All libraries use canonical semantic names under the unified `optics` namespace (ADR-0170, ADR-0174). Dependencies point one way:
+One foundation library, three orthogonal libraries that build on it, and one shell that joins the UI engine to the window. All libraries use canonical semantic names under the unified `optics` namespace (ADR-0170, ADR-0174, ADR-0177). Dependencies point one way:
 
 | Library | Depends on | Role |
 | :--- | :--- | :--- |
 | **`gfx`** (`liboptics_gfx`) | Vulkan | Rendering foundation: Vulkan 1.3 RHI, 2D canvas (GPU and CPU backends), compute, image effects, analytic curve kernel, SDF, color management. One library, one ABI, no optional modules. |
 | **`text`** (`liboptics_text`) | gfx | Text: HarfBuzz shaping, layout metrics, glyph atlas. |
-| **`motion`** (`<optics/motion.h>`) | libm | Motion vocabulary: springs, easing, smoothing. Header-only. |
 | **`window`** (`liboptics_window`) | gfx | Platform shell: native window, event pump, frame cadence, clipboard, IME, dialogs, accessibility bridge. |
-| **`ui`** (`liboptics_ui`) | gfx, text | UI engine: immediate-mode API, layout, widgets, per-context vector icons, snapshots, semantic tree. Headless. |
+| **`ui`** (`liboptics_ui`) | gfx, text | UI engine: immediate-mode API, layout, widgets, per-context vector icons, header-only motion vocabulary (`<optics/ui/motion.h>`), snapshots, semantic tree. Headless. |
 | **`app`** (`liboptics_app`) | window, ui | Application shell: runs an `optics_ui` context in an `optics_window`. |
 
 ```text
 app ──┬──► window ───────────────► gfx
       └──► ui ────► text ────────► gfx
-motion   (header-only; libm only)
 ```
 
 `window` never includes a UI header and `ui` never includes a windowing header. The UI layer plugs into the frame loop through one interface, [`<optics/window/host.h>`](libs/window/include/optics/window/host.h), which `app` implements for `ui`.

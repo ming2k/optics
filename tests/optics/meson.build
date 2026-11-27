@@ -61,9 +61,9 @@ test(
 )
 
 # Umbrella Facade and Integrated Dependencies (ADR-0160). The facade test
-# exercises ui/window/motion through the umbrella, so it is meaningless when
-# the selected distribution omits any of them.
-if opt_ui and opt_motion
+# exercises ui/window through the umbrella, so it is meaningless when
+# the selected distribution omits ui.
+if opt_ui
   test_optics_facade_bin = executable(
     'test_optics_facade',
     files('test_optics_facade.c'),

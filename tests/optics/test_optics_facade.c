@@ -45,13 +45,13 @@ int main(void) {
     optics_gfx_rect r = {.x = 0.0f, .y = 0.0f, .w = 1920.0f, .h = 1080.0f};
     OT_EXPECT(r.w == 1920.0f && r.h == 1080.0f);
 
-    /* 3. Verify the header-only motion vocabulary */
-    optics_motion_spring spring = {.value = 0.0f, .velocity = 0.0f};
-    optics_motion_spring_params params = {.stiffness = 180.0f, .damping = 12.0f};
-    float next_val = optics_motion_spring_advance(&spring, 1.0f, params, 0.016f, false);
+    /* 3. Verify the header-only UI motion vocabulary */
+    optics_ui_spring spring = {.value = 0.0f, .velocity = 0.0f};
+    optics_ui_spring_params params = {.stiffness = 180.0f, .damping = 1.0f};
+    float next_val = optics_ui_spring_advance(&spring, 1.0f, params, 0.016f, false);
     OT_EXPECT(next_val > 0.0f && next_val <= 1.0f);
 
-    float eased = optics_motion_ease_in_out_cubic(0.5f);
+    float eased = optics_ui_ease_in_out_cubic(0.5f);
     OT_EXPECT(eased == 0.5f);
 
     /* 4. Verify Layer 3 (ui & window) definitions and versions */

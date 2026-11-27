@@ -22,53 +22,61 @@ extern "C" {
  * ============================================================================= */
 
 static inline optics_gfx_brush optics_gfx_brush_solid(optics_gfx_color color) {
-    return (optics_gfx_brush){
-        .kind = OPTICS_GFX_BRUSH_SOLID,
-        .blend = OPTICS_GFX_BLEND_SRC_OVER,
-        .opacity = 1.0f,
-        .solid = {.color = color},
-    };
+    optics_gfx_brush b = {};
+    b.kind = OPTICS_GFX_BRUSH_SOLID;
+    b.blend = OPTICS_GFX_BLEND_SRC_OVER;
+    b.opacity = 1.0f;
+    b.solid.color = color;
+    return b;
 }
 
 static inline optics_gfx_geometry optics_gfx_geom_rect(optics_gfx_rect r) {
-    return (optics_gfx_geometry){
-        .kind = OPTICS_GFX_GEOM_RECT,
-        .stroke.width = 0.0f,
-        .rect = {.rect = r},
-    };
+    optics_gfx_geometry g = {};
+    g.kind = OPTICS_GFX_GEOM_RECT;
+    g.stroke.width = 0.0f;
+    g.rect.rect = r;
+    return g;
 }
 
 static inline optics_gfx_geometry
 optics_gfx_geom_rrect(optics_gfx_rect r, optics_gfx_corner_radii radii, float curvature) {
-    return (optics_gfx_geometry){
-        .kind = OPTICS_GFX_GEOM_RRECT,
-        .stroke.width = 0.0f,
-        .rrect = {.rect = r, .radii = radii, .curvature = curvature},
-    };
+    optics_gfx_geometry g = {};
+    g.kind = OPTICS_GFX_GEOM_RRECT;
+    g.stroke.width = 0.0f;
+    g.rrect.rect = r;
+    g.rrect.radii = radii;
+    g.rrect.curvature = curvature;
+    return g;
 }
 
 static inline optics_gfx_geometry optics_gfx_geom_circle(float cx, float cy, float radius) {
-    return (optics_gfx_geometry){
-        .kind = OPTICS_GFX_GEOM_CIRCLE,
-        .stroke.width = 0.0f,
-        .circle = {.cx = cx, .cy = cy, .radius = radius},
-    };
+    optics_gfx_geometry g = {};
+    g.kind = OPTICS_GFX_GEOM_CIRCLE;
+    g.stroke.width = 0.0f;
+    g.circle.cx = cx;
+    g.circle.cy = cy;
+    g.circle.radius = radius;
+    return g;
 }
 
 static inline optics_gfx_geometry optics_gfx_geom_line(float x0, float y0, float x1, float y1) {
-    return (optics_gfx_geometry){
-        .kind = OPTICS_GFX_GEOM_LINE,
-        .stroke.width = 1.0f,
-        .line = {.x0 = x0, .y0 = y0, .x1 = x1, .y1 = y1},
-    };
+    optics_gfx_geometry g = {};
+    g.kind = OPTICS_GFX_GEOM_LINE;
+    g.stroke.width = 1.0f;
+    g.line.x0 = x0;
+    g.line.y0 = y0;
+    g.line.x1 = x1;
+    g.line.y1 = y1;
+    return g;
 }
 
 static inline optics_gfx_geometry optics_gfx_geom_path(const optics_gfx_path *path) {
-    return (optics_gfx_geometry){
-        .kind = OPTICS_GFX_GEOM_PATH,
-        .stroke.width = 0.0f,
-        .path = {.path = path, .fill_rule = OPTICS_GFX_FILL_NON_ZERO},
-    };
+    optics_gfx_geometry g = {};
+    g.kind = OPTICS_GFX_GEOM_PATH;
+    g.stroke.width = 0.0f;
+    g.path.path = path;
+    g.path.fill_rule = OPTICS_GFX_FILL_NON_ZERO;
+    return g;
 }
 
 /* =============================================================================
@@ -83,9 +91,12 @@ static inline optics_gfx_geometry optics_gfx_geom_path(const optics_gfx_path *pa
 static inline optics_gfx_brush
 optics_gfx_brush_linear_gradient(optics_gfx_point start, optics_gfx_point end,
                                  const optics_gfx_gradient_stop *stops, uint32_t count) {
-    optics_gfx_brush b = {.kind = OPTICS_GFX_BRUSH_LINEAR_GRADIENT,
-                          .opacity = 1.0f,
-                          .gradient = {.start = start, .end = end, .stops.count = count}};
+    optics_gfx_brush b = {};
+    b.kind = OPTICS_GFX_BRUSH_LINEAR_GRADIENT;
+    b.opacity = 1.0f;
+    b.gradient.start = start;
+    b.gradient.end = end;
+    b.gradient.stops.count = count;
     if (stops && count <= OPTICS_GFX_GRADIENT_MAX_STOPS)
         for (uint32_t i = 0; i < count; ++i)
             b.gradient.stops.stops[i] = stops[i];
@@ -93,11 +104,12 @@ optics_gfx_brush_linear_gradient(optics_gfx_point start, optics_gfx_point end,
         b.gradient.stops.count = UINT32_MAX;
     return b;
 }
+
 static inline optics_gfx_brush
 optics_gfx_brush_radial_gradient(optics_gfx_point center, float radius,
                                  const optics_gfx_gradient_stop *stops, uint32_t count) {
-    optics_gfx_brush b =
-        optics_gfx_brush_linear_gradient(center, (optics_gfx_point){}, stops, count);
+    optics_gfx_point zero = {};
+    optics_gfx_brush b = optics_gfx_brush_linear_gradient(center, zero, stops, count);
     b.kind = OPTICS_GFX_BRUSH_RADIAL_GRADIENT;
     b.gradient.radius = radius;
     return b;
@@ -107,16 +119,16 @@ static inline void optics_gfx_canvas_fill_rect(optics_gfx_canvas *c, optics_gfx_
                                                const optics_gfx_brush *brush) {
     optics_gfx_geometry g = optics_gfx_geom_rect(r);
     optics_gfx_brush b = brush ? *brush : optics_gfx_brush_solid(0xFF000000u);
-    optics_gfx_canvas_draw_geometry(
-        c, &(optics_gfx_canvas_draw_geometry_opts){.geom = &g, .brush = &b});
+    optics_gfx_canvas_draw_geometry_opts opts = {.geom = &g, .brush = &b};
+    optics_gfx_canvas_draw_geometry(c, &opts);
 }
 
 static inline void optics_gfx_canvas_fill_rect_color(optics_gfx_canvas *c, optics_gfx_rect r,
                                                      optics_gfx_color color) {
     optics_gfx_geometry g = optics_gfx_geom_rect(r);
     optics_gfx_brush b = optics_gfx_brush_solid(color);
-    optics_gfx_canvas_draw_geometry(
-        c, &(optics_gfx_canvas_draw_geometry_opts){.geom = &g, .brush = &b});
+    optics_gfx_canvas_draw_geometry_opts opts = {.geom = &g, .brush = &b};
+    optics_gfx_canvas_draw_geometry(c, &opts);
 }
 
 static inline void optics_gfx_canvas_fill_rrect(optics_gfx_canvas *c, optics_gfx_rect r,
@@ -124,8 +136,8 @@ static inline void optics_gfx_canvas_fill_rrect(optics_gfx_canvas *c, optics_gfx
                                                 optics_gfx_color color) {
     optics_gfx_geometry g = optics_gfx_geom_rrect(r, radii, curvature);
     optics_gfx_brush b = optics_gfx_brush_solid(color);
-    optics_gfx_canvas_draw_geometry(
-        c, &(optics_gfx_canvas_draw_geometry_opts){.geom = &g, .brush = &b});
+    optics_gfx_canvas_draw_geometry_opts opts = {.geom = &g, .brush = &b};
+    optics_gfx_canvas_draw_geometry(c, &opts);
 }
 
 static inline void optics_gfx_canvas_stroke_rrect(optics_gfx_canvas *c, optics_gfx_rect r,
@@ -134,16 +146,16 @@ static inline void optics_gfx_canvas_stroke_rrect(optics_gfx_canvas *c, optics_g
     optics_gfx_geometry g = optics_gfx_geom_rrect(r, radii, curvature);
     g.stroke.width = width;
     optics_gfx_brush b = optics_gfx_brush_solid(color);
-    optics_gfx_canvas_draw_geometry(
-        c, &(optics_gfx_canvas_draw_geometry_opts){.geom = &g, .brush = &b});
+    optics_gfx_canvas_draw_geometry_opts opts = {.geom = &g, .brush = &b};
+    optics_gfx_canvas_draw_geometry(c, &opts);
 }
 
 static inline void optics_gfx_canvas_fill_circle(optics_gfx_canvas *c, float cx, float cy,
                                                  float radius, optics_gfx_color color) {
     optics_gfx_geometry g = optics_gfx_geom_circle(cx, cy, radius);
     optics_gfx_brush b = optics_gfx_brush_solid(color);
-    optics_gfx_canvas_draw_geometry(
-        c, &(optics_gfx_canvas_draw_geometry_opts){.geom = &g, .brush = &b});
+    optics_gfx_canvas_draw_geometry_opts opts = {.geom = &g, .brush = &b};
+    optics_gfx_canvas_draw_geometry(c, &opts);
 }
 
 static inline void optics_gfx_canvas_stroke_circle(optics_gfx_canvas *c, float cx, float cy,
@@ -152,8 +164,8 @@ static inline void optics_gfx_canvas_stroke_circle(optics_gfx_canvas *c, float c
     optics_gfx_geometry g = optics_gfx_geom_circle(cx, cy, radius);
     g.stroke.width = width;
     optics_gfx_brush b = optics_gfx_brush_solid(color);
-    optics_gfx_canvas_draw_geometry(
-        c, &(optics_gfx_canvas_draw_geometry_opts){.geom = &g, .brush = &b});
+    optics_gfx_canvas_draw_geometry_opts opts = {.geom = &g, .brush = &b};
+    optics_gfx_canvas_draw_geometry(c, &opts);
 }
 
 static inline void optics_gfx_canvas_fill_path(optics_gfx_canvas *c, const optics_gfx_path *path,
@@ -161,16 +173,23 @@ static inline void optics_gfx_canvas_fill_path(optics_gfx_canvas *c, const optic
                                                const optics_gfx_brush *brush) {
     optics_gfx_geometry geom = optics_gfx_geom_path(path);
     geom.path.fill_rule = rule;
-    optics_gfx_canvas_draw_geometry(
-        c, &(optics_gfx_canvas_draw_geometry_opts){.geom = &geom, .brush = brush});
+    optics_gfx_canvas_draw_geometry_opts opts = {.geom = &geom, .brush = brush};
+    optics_gfx_canvas_draw_geometry(c, &opts);
 }
+
 static inline void optics_gfx_canvas_stroke_path(optics_gfx_canvas *c, const optics_gfx_path *path,
                                                  const optics_gfx_stroke_style *stroke,
                                                  const optics_gfx_brush *brush) {
     optics_gfx_geometry geom = optics_gfx_geom_path(path);
-    geom.stroke = stroke ? *stroke : (optics_gfx_stroke_style){.width = 1.0f};
-    optics_gfx_canvas_draw_geometry(
-        c, &(optics_gfx_canvas_draw_geometry_opts){.geom = &geom, .brush = brush});
+    if (stroke) {
+        geom.stroke = *stroke;
+    } else {
+        optics_gfx_stroke_style def = {};
+        def.width = 1.0f;
+        geom.stroke = def;
+    }
+    optics_gfx_canvas_draw_geometry_opts opts = {.geom = &geom, .brush = brush};
+    optics_gfx_canvas_draw_geometry(c, &opts);
 }
 
 /* Image modulation is explicit; a null style selects white, full opacity,
@@ -186,28 +205,29 @@ static inline void optics_gfx_canvas_draw_image(optics_gfx_canvas *c, optics_gfx
                                                 optics_gfx_rect dst,
                                                 const optics_gfx_image_style *style) {
     optics_gfx_geometry g = optics_gfx_geom_rect(dst);
-    optics_gfx_brush b = {
-        .kind = OPTICS_GFX_BRUSH_IMAGE_PATTERN,
-        .blend = style ? style->blend : OPTICS_GFX_BLEND_SRC_OVER,
-        .opacity = style ? style->opacity : 1.0f,
-        .image = {.image = image, .tint = style ? style->tint : 0xFFFFFFFFu},
-    };
-    optics_gfx_canvas_draw_geometry(
-        c, &(optics_gfx_canvas_draw_geometry_opts){.geom = &g, .brush = &b});
+    optics_gfx_brush b = {};
+    b.kind = OPTICS_GFX_BRUSH_IMAGE_PATTERN;
+    b.blend = style ? style->blend : OPTICS_GFX_BLEND_SRC_OVER;
+    b.opacity = style ? style->opacity : 1.0f;
+    b.image.image = image;
+    b.image.tint = style ? style->tint : 0xFFFFFFFFu;
+    optics_gfx_canvas_draw_geometry_opts opts = {.geom = &g, .brush = &b};
+    optics_gfx_canvas_draw_geometry(c, &opts);
 }
 
 static inline void optics_gfx_canvas_draw_image_opaque(optics_gfx_canvas *c,
                                                        optics_gfx_image *image,
                                                        optics_gfx_rect dst) {
     optics_gfx_geometry g = optics_gfx_geom_rect(dst);
-    optics_gfx_brush b = {
-        .kind = OPTICS_GFX_BRUSH_IMAGE_PATTERN,
-        .blend = OPTICS_GFX_BLEND_SRC_OVER,
-        .opacity = 1.0f,
-        .image = {.image = image, .opaque_only = true, .tint = 0xFFFFFFFFu},
-    };
-    optics_gfx_canvas_draw_geometry(
-        c, &(optics_gfx_canvas_draw_geometry_opts){.geom = &g, .brush = &b});
+    optics_gfx_brush b = {};
+    b.kind = OPTICS_GFX_BRUSH_IMAGE_PATTERN;
+    b.blend = OPTICS_GFX_BLEND_SRC_OVER;
+    b.opacity = 1.0f;
+    b.image.image = image;
+    b.image.opaque_only = true;
+    b.image.tint = 0xFFFFFFFFu;
+    optics_gfx_canvas_draw_geometry_opts opts = {.geom = &g, .brush = &b};
+    optics_gfx_canvas_draw_geometry(c, &opts);
 }
 
 static inline void optics_gfx_canvas_draw_image_rrect(optics_gfx_canvas *c, optics_gfx_image *image,
@@ -216,48 +236,45 @@ static inline void optics_gfx_canvas_draw_image_rrect(optics_gfx_canvas *c, opti
                                                       float curvature,
                                                       const optics_gfx_image_style *style) {
     optics_gfx_geometry g = optics_gfx_geom_rrect(dst, radii, curvature);
-    optics_gfx_brush b = {
-        .kind = OPTICS_GFX_BRUSH_IMAGE_PATTERN,
-        .blend = style ? style->blend : OPTICS_GFX_BLEND_SRC_OVER,
-        .opacity = style ? style->opacity : 1.0f,
-        .image = {.image = image, .tint = style ? style->tint : 0xFFFFFFFFu},
-    };
-    optics_gfx_canvas_draw_geometry(
-        c, &(optics_gfx_canvas_draw_geometry_opts){.geom = &g, .brush = &b});
+    optics_gfx_brush b = {};
+    b.kind = OPTICS_GFX_BRUSH_IMAGE_PATTERN;
+    b.blend = style ? style->blend : OPTICS_GFX_BLEND_SRC_OVER;
+    b.opacity = style ? style->opacity : 1.0f;
+    b.image.image = image;
+    b.image.tint = style ? style->tint : 0xFFFFFFFFu;
+    optics_gfx_canvas_draw_geometry_opts opts = {.geom = &g, .brush = &b};
+    optics_gfx_canvas_draw_geometry(c, &opts);
 }
 
 static inline void optics_gfx_canvas_draw_image_clipped_rrect(
     optics_gfx_canvas *c, optics_gfx_image *image, optics_gfx_rect dst, optics_gfx_rect clip,
     optics_gfx_corner_radii radii, float curvature, const optics_gfx_image_style *style) {
     optics_gfx_geometry g = optics_gfx_geom_rect(dst);
-    optics_gfx_brush b = {
-        .kind = OPTICS_GFX_BRUSH_IMAGE_PATTERN,
-        .blend = style ? style->blend : OPTICS_GFX_BLEND_SRC_OVER,
-        .opacity = style ? style->opacity : 1.0f,
-        .image =
-            {
-                .image = image,
-                .clip_rect = clip,
-                .clip_radii = radii,
-                .clip_curvature = curvature,
-                .tint = style ? style->tint : 0xFFFFFFFFu,
-            },
-    };
-    optics_gfx_canvas_draw_geometry(
-        c, &(optics_gfx_canvas_draw_geometry_opts){.geom = &g, .brush = &b});
+    optics_gfx_brush b = {};
+    b.kind = OPTICS_GFX_BRUSH_IMAGE_PATTERN;
+    b.blend = style ? style->blend : OPTICS_GFX_BLEND_SRC_OVER;
+    b.opacity = style ? style->opacity : 1.0f;
+    b.image.image = image;
+    b.image.tint = style ? style->tint : 0xFFFFFFFFu;
+    b.image.clip_rect = clip;
+    b.image.clip_radii = radii;
+    b.image.clip_curvature = curvature;
+    optics_gfx_canvas_draw_geometry_opts opts = {.geom = &g, .brush = &b};
+    optics_gfx_canvas_draw_geometry(c, &opts);
 }
 
 static inline void optics_gfx_canvas_draw_image_sub(optics_gfx_canvas *c, optics_gfx_image *image,
                                                     optics_gfx_rect dst, optics_gfx_rect src) {
     optics_gfx_geometry g = optics_gfx_geom_rect(dst);
-    optics_gfx_brush b = {
-        .kind = OPTICS_GFX_BRUSH_IMAGE_PATTERN,
-        .blend = OPTICS_GFX_BLEND_SRC_OVER,
-        .opacity = 1.0f,
-        .image = {.image = image, .src_rect = src, .tint = 0xFFFFFFFFu},
-    };
-    optics_gfx_canvas_draw_geometry(
-        c, &(optics_gfx_canvas_draw_geometry_opts){.geom = &g, .brush = &b});
+    optics_gfx_brush b = {};
+    b.kind = OPTICS_GFX_BRUSH_IMAGE_PATTERN;
+    b.blend = OPTICS_GFX_BLEND_SRC_OVER;
+    b.opacity = 1.0f;
+    b.image.image = image;
+    b.image.src_rect = src;
+    b.image.tint = 0xFFFFFFFFu;
+    optics_gfx_canvas_draw_geometry_opts opts = {.geom = &g, .brush = &b};
+    optics_gfx_canvas_draw_geometry(c, &opts);
 }
 
 static inline void optics_gfx_canvas_draw_image_opaque_sub(optics_gfx_canvas *c,
@@ -265,14 +282,16 @@ static inline void optics_gfx_canvas_draw_image_opaque_sub(optics_gfx_canvas *c,
                                                            optics_gfx_rect dst,
                                                            optics_gfx_rect src) {
     optics_gfx_geometry g = optics_gfx_geom_rect(dst);
-    optics_gfx_brush b = {
-        .kind = OPTICS_GFX_BRUSH_IMAGE_PATTERN,
-        .blend = OPTICS_GFX_BLEND_SRC_OVER,
-        .opacity = 1.0f,
-        .image = {.image = image, .src_rect = src, .opaque_only = true, .tint = 0xFFFFFFFFu},
-    };
-    optics_gfx_canvas_draw_geometry(
-        c, &(optics_gfx_canvas_draw_geometry_opts){.geom = &g, .brush = &b});
+    optics_gfx_brush b = {};
+    b.kind = OPTICS_GFX_BRUSH_IMAGE_PATTERN;
+    b.blend = OPTICS_GFX_BLEND_SRC_OVER;
+    b.opacity = 1.0f;
+    b.image.image = image;
+    b.image.src_rect = src;
+    b.image.opaque_only = true;
+    b.image.tint = 0xFFFFFFFFu;
+    optics_gfx_canvas_draw_geometry_opts opts = {.geom = &g, .brush = &b};
+    optics_gfx_canvas_draw_geometry(c, &opts);
 }
 
 static inline void optics_gfx_canvas_draw_image_sampled(optics_gfx_canvas *c,
@@ -281,19 +300,15 @@ static inline void optics_gfx_canvas_draw_image_sampled(optics_gfx_canvas *c,
                                                         optics_gfx_rect dst,
                                                         const optics_gfx_image_style *style) {
     optics_gfx_geometry g = optics_gfx_geom_rect(dst);
-    optics_gfx_brush b = {
-        .kind = OPTICS_GFX_BRUSH_IMAGE_PATTERN,
-        .blend = style ? style->blend : OPTICS_GFX_BLEND_SRC_OVER,
-        .opacity = style ? style->opacity : 1.0f,
-        .image =
-            {
-                .image = image,
-                .sampler = sampler,
-                .tint = style ? style->tint : 0xFFFFFFFFu,
-            },
-    };
-    optics_gfx_canvas_draw_geometry(
-        c, &(optics_gfx_canvas_draw_geometry_opts){.geom = &g, .brush = &b});
+    optics_gfx_brush b = {};
+    b.kind = OPTICS_GFX_BRUSH_IMAGE_PATTERN;
+    b.blend = style ? style->blend : OPTICS_GFX_BLEND_SRC_OVER;
+    b.opacity = style ? style->opacity : 1.0f;
+    b.image.image = image;
+    b.image.sampler = sampler;
+    b.image.tint = style ? style->tint : 0xFFFFFFFFu;
+    optics_gfx_canvas_draw_geometry_opts opts = {.geom = &g, .brush = &b};
+    optics_gfx_canvas_draw_geometry(c, &opts);
 }
 
 #ifdef __cplusplus

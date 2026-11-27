@@ -77,8 +77,9 @@ ui_lib = library('optics_ui',
 
 install_headers('include/optics/ui.h', subdir : 'optics')
 install_headers(
-    'include/optics/ui/patterns.h',
+  'include/optics/ui/patterns.h',
   'include/optics/ui/icon.h',
+  'include/optics/ui/motion.h',
   'include/optics/ui/export.h',
   subdir : 'optics/ui',
 )
@@ -86,11 +87,11 @@ install_headers(
 ui_dep = declare_dependency(
   link_with           : ui_lib,
   include_directories : ui_inc,
-  dependencies        : [gfx_dep, text_dep],
+  dependencies        : [gfx_dep, text_dep, m_dep],
 )
 
 pkg.generate(
-  libraries   : ui_lib,
+  libraries   : [ui_lib, m_dep],
   name        : 'optics-ui',
   filebase    : 'optics-ui',
   description : 'Immediate-mode UI over a retained core, built on gfx',

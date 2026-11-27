@@ -48,6 +48,7 @@ fn version_links_and_runs() {
     let v = optics_ui::version();
     assert!(!v.is_empty(), "version string should be non-empty");
     assert!(v.starts_with("0."), "unexpected version: {v}");
+    assert!(!optics_ui::gfx::version().is_empty());
 }
 
 #[test]
@@ -460,4 +461,27 @@ fn unified_corner_radii_across_gfx_and_ui_builders() {
                     });
             });
     });
+}
+
+#[test]
+fn motion_primitives_integrate_with_ui_reduced_motion() {
+    use optics_ui::motion::{Hysteresis, Spring, SpringParams};
+
+    let mut ui = Ui::headless().expect("create headless ui");
+    assert!(!ui.reduced_motion());
+
+    let mut spring = Spring::new(0.0);
+    let mut badge = Hysteresis::new(false);
+    let params = SpringParams::snappy();
+
+    let mid = spring.advance(1.0, params, 1.0 / 60.0, ui.reduced_motion());
+    assert!(mid > 0.0 && mid < 1.0);
+    assert!(!badge.step(true, 0.0, 0.0, 0.0, 0.5, 1.0 / 60.0, ui.reduced_motion()));
+
+    ui.set_reduced_motion(true);
+    assert_eq!(
+        spring.advance(1.0, params, 1.0 / 60.0, ui.reduced_motion()),
+        1.0
+    );
+    assert!(badge.step(true, 0.0, 0.0, 0.0, 0.5, 1.0 / 60.0, ui.reduced_motion()));
 }

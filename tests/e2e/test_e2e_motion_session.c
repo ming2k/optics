@@ -1,9 +1,9 @@
 /*
- * e2e_motion_session — public-API multi-frame animation E2E (motion + ui + svg + gfx CPU).
+ * e2e_motion_session — public-API multi-frame animation E2E (ui + motion + gfx CPU).
  *
  * Drives a realistic animated application through <optics/optics.h> only:
- *   - optics_motion_spring animates a slider and indicator bar from 0.0 -> 1.0;
- *   - optics_motion_hysteresis latches a binary status badge once past threshold;
+ *   - optics_ui_spring animates a slider and indicator bar from 0.0 -> 1.0;
+ *   - optics_ui_hysteresis latches a binary status badge once past threshold;
  *   - optics_ui builds each frame, publishes an immutable snapshot, and replays
  *     to CPU Canvas pixels;
  *   - verifies monotonic intermediate motion, distinct start/mid/end pixels,
@@ -107,9 +107,9 @@ int main(void) {
     OT_REQUIRE(px_start && px_mid && px_end && px_reduced);
 
     /* Critically-damped spring: smooth monotonic approach with no overshoot. */
-    optics_motion_spring spring = optics_motion_spring_at(0.0f);
-    optics_motion_spring_params params = {.stiffness = 320.0f, .damping = 1.0f};
-    optics_motion_hysteresis badge = optics_motion_hysteresis_init(false);
+    optics_ui_spring spring = optics_ui_spring_at(0.0f);
+    optics_ui_spring_params params = {.stiffness = 320.0f, .damping = 1.0f};
+    optics_ui_hysteresis badge = optics_ui_hysteresis_init(false);
 
     /* Warm layout frame at value = 0.0. */
     (void)render_ui_frame(ui_anim, 0.0f, false, px_start);
@@ -121,18 +121,18 @@ int main(void) {
     bool settled = false;
     for (int f = 1; f <= 90; ++f) {
         float dt = 1.0f / 60.0f;
-        float v = optics_motion_spring_advance(&spring, 1.0f, params, dt, false);
+        float v = optics_ui_spring_advance(&spring, 1.0f, params, dt, false);
         OT_EXPECT(v >= prev_val - 1e-5f);
         OT_EXPECT(v <= 1.0001f);
         prev_val = v;
 
-        bool high = optics_motion_hysteresis_step(&badge, false, 0.65f, 0.85f, v, 0.05f, dt, false);
+        bool high = optics_ui_hysteresis_step(&badge, false, 0.65f, 0.85f, v, 0.05f, dt, false);
         if (f == 8) {
             OT_EXPECT(v > 0.2f && v < 0.9f);
             (void)render_ui_frame(ui_anim, v, high, px_mid);
             captured_mid = true;
         }
-        if (optics_motion_spring_settled(&spring, 1.0f, 1e-3f, 1e-2f) && high) {
+        if (optics_ui_spring_settled(&spring, 1.0f, 1e-3f, 1e-2f) && high) {
             settled = true;
             break;
         }
@@ -142,7 +142,7 @@ int main(void) {
     OT_EXPECT(badge.high == true);
 
     /* Snap settled frame to exact 1.0 and render twice so layout/animations settle. */
-    (void)optics_motion_spring_snap_to(&spring, 1.0f);
+    (void)optics_ui_spring_snap_to(&spring, 1.0f);
     (void)render_ui_frame(ui_anim, spring.value, badge.high, px_end);
     (void)render_ui_frame(ui_anim, spring.value, badge.high, px_end);
 
@@ -153,11 +153,11 @@ int main(void) {
 
     /* Reduced-motion path resolves spring & hysteresis in a single step and
      * renders byte-identically to the settled animated UI. */
-    optics_motion_spring r_spring = optics_motion_spring_at(0.0f);
-    optics_motion_hysteresis r_badge = optics_motion_hysteresis_init(false);
-    float rv = optics_motion_spring_advance(&r_spring, 1.0f, params, 1.0f / 60.0f, true);
+    optics_ui_spring r_spring = optics_ui_spring_at(0.0f);
+    optics_ui_hysteresis r_badge = optics_ui_hysteresis_init(false);
+    float rv = optics_ui_spring_advance(&r_spring, 1.0f, params, 1.0f / 60.0f, true);
     bool rhigh =
-        optics_motion_hysteresis_step(&r_badge, false, 0.65f, 0.85f, rv, 0.05f, 1.0f / 60.0f, true);
+        optics_ui_hysteresis_step(&r_badge, false, 0.65f, 0.85f, rv, 0.05f, 1.0f / 60.0f, true);
     OT_EXPECT_NEAR(rv, 1.0f, 1e-6);
     OT_EXPECT(rhigh == true);
 

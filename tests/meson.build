@@ -17,7 +17,6 @@ subdir('gfx')
 if get_option('text')
   subdir('text')
 endif
-subdir('motion')
 subdir('window')
 if opt_ui
   subdir('ui')

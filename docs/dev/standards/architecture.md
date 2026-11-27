@@ -7,23 +7,21 @@ each one. A rule without a mechanism is not listed here.
 
 ## 1. Library Graph
 
-Six libraries under `libs/`, plus Rust crates under `crates/`.
+Five libraries under `libs/`, plus Rust crates under `crates/`.
 Dependencies point one way. The Meson dependency declarations are the
 authority; this diagram is a rendering of them.
 
 ```text
 app ──┬──► window ───────────────► gfx
       └──► ui ────► text ────────► gfx
-motion   (header-only; libm only)
 ```
 
 | Library | Depends on | Owns |
 |---|---|---|
 | `gfx` (`liboptics_gfx`) | Vulkan | RHI, 2D canvas (GPU and CPU backends), compute, image effects, curve kernel, distance fields, color management, math. One library, one ABI: no optional modules. |
 | `text` (`liboptics_text`) | gfx | Text shaping, layout metrics, glyph atlas. |
-| `motion` (`<optics/motion.h>`) | libm | Motion vocabulary. Header-only (ADR-0158). |
 | `window` (`liboptics_window`) | gfx | Window, event pump, frame cadence, clipboard, IME, dialogs, accessibility bridge, and the UI-host seam `<optics/window/host.h>`. |
-| `ui` (`liboptics_ui`) | gfx, text | UI engine, per-context vector icon registry. Headless. |
+| `ui` (`liboptics_ui`) | gfx, text | UI engine, per-context vector icon registry, header-only motion vocabulary (`<optics/ui/motion.h>`, ADR-0177). Headless. |
 | `app` (`liboptics_app`) | window, ui | Application shell: implements `optics_window_ui_host` over an `optics_ui` context. |
 
 There are no numbered layers. The earlier "Layer 0–3" model implied edges that
@@ -61,7 +59,7 @@ alone.
 
 ### 3.1 Core Purity — No Format Parsers or Branded OS Materials (ADR-0174)
 - **Red-Line**: The core stack must NEVER embed external asset/document format parsers (PNG, JPEG, WebP, SVG, JSON, glTF, VRM) or branded OS aesthetic shader packs (`liquid_glass`, `frosted_glass`, `acrylic`, `mica`). Callers decode assets externally and feed `optics_gfx_image`, `optics_gfx_path`, or `optics_ui_icon_desc`.
-- **Enforcement**: `tools/check_library_purity.py` (`meson test --suite lint`) rejects retired non-core library directories (`libs/svg`, `libs/scene`, `libs/material`) and rejects branded OS material references in `libs/gfx` and `libs/ui`.
+- **Enforcement**: `tools/check_library_purity.py` (`meson test --suite lint`) rejects retired top-level library directories (`libs/svg`, `libs/scene`, `libs/material`, `libs/motion`) and rejects branded OS material references in `libs/gfx` and `libs/ui`.
 
 ### 3.2 Vulkan RHI Purity & Headless Software Fallback (ADR-0006, ADR-0019)
 - **Red-Line**: Optics maintains no runtime RHI abstraction layer. Vulkan 1.3 is the primary GPU backend.

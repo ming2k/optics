@@ -2,7 +2,7 @@
 
 Flagship desktop application built on Optics. Unlike the minimal starters under
 `examples/getting_started/`, this showcase combines all layers of the core stack
-(`gfx` rendering + `text` + `motion` + `ui` + `window` + `app`) into a complete
+(`gfx` rendering + `text` + `ui` + `window` + `app`) into a complete
 program with native Wayland cursor-shape and fractional HiDPI support
 ([ADR-0171](../../docs/adr/0171-curated-examples-taxonomy-and-showcase-design-system.md)).
 
@@ -33,7 +33,7 @@ pages:
 4. **Overlays & DnD** — anchored popup menu, centered modal dialog, and native
    drag-and-drop source and drop zone.
 5. **Motion** — interactive closed-form spring physics playground
-   (`<optics/motion.h>`).
+   (`<optics/ui/motion.h>`).
 
 ### Interactive Hotkeys
 

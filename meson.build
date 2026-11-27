@@ -63,7 +63,6 @@ else
 endif
 
 opt_text = get_option('text')
-opt_motion = get_option('motion')
 # ui consumes text. The feature graph is explicit here so a
 # disabled dependency cannot turn into a late undefined reference.
 opt_ui = opt_text
@@ -74,12 +73,6 @@ if opt_text
   subdir('libs/text')
 else
   text_dep = declare_dependency()
-endif
-
-if opt_motion
-  subdir('libs/motion')
-else
-  motion_dep = declare_dependency()
 endif
 
 # window is the platform shell and needs gfx only. ui is the UI engine and
@@ -102,12 +95,6 @@ optics_inc = include_directories('include')
 optics_deps = [gfx_dep, window_dep]
 optics_requires = ['optics-gfx = ' + meson.project_version(), 'optics-window = ' + meson.project_version()]
 optics_compile_args = []
-
-if opt_motion
-  optics_deps += [motion_dep]
-  optics_requires += ['optics-motion = ' + meson.project_version()]
-  optics_compile_args += '-DOPTICS_HAVE_MOTION=1'
-endif
 
 if opt_text
   optics_deps += [text_dep]

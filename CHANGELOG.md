@@ -1,8 +1,8 @@
 # Changelog
 
-All notable, user-visible changes to the C libraries in this monorepo
-(`liboptics_gfx`, `liboptics_text`, `liboptics_ui`, `liboptics_window`,
-`liboptics_app`, and the header-only `<optics/motion.h>`) are documented in this file. The Rust binding
+All notable, user-visible changes to the five C libraries in this monorepo
+(`liboptics_gfx`, `liboptics_text`, `liboptics_ui`, `liboptics_window`, and
+`liboptics_app`) are documented in this file. The Rust binding
 crates under `crates/` share the repository-root Cargo workspace and its
 version.
 
@@ -12,6 +12,27 @@ documented in [docs/reference/api.md](docs/reference/api.md) — **any**
 pre-1.0 release may break source or binary compatibility, so the SONAME
 carries the full version and a mismatched binary fails to load instead of
 silently reading a different descriptor layout.
+
+## [Unreleased]
+
+### Changed — Retire Rust `optics` facade crate (ADR-0176, breaking)
+
+- **`crates/optics` is removed.** Consumers depend directly on the orthogonal `optics-*` crate matching the layer they need (`optics-app`, `optics-window`, `optics-ui`, `optics-text`, `optics-gfx`), enforced mechanically by `tools/check_versions.py`.
+- **Upper wrapper crates re-export their public dependencies:** `optics-app` exposes `optics_app::{gfx, ui, window}` (and narrows its root `optics_ui` re-exports to the signature types `CursorHint`, `Frame`, `Input`, `Ui`, removing arbitrary cherry-picked symbols); `optics-ui` and `optics-text` expose `::gfx`.
+
+### Changed — Absorb `motion` into `ui` (ADR-0177, breaking)
+
+Optics is now five libraries in a single connected one-way DAG: `gfx`, `text`, `window`, `ui`, `app`. No compatibility shims are kept.
+
+- **`libs/motion` is removed**, along with `-Dmotion`, `OPTICS_HAVE_MOTION`, `optics-motion.pc`, `<optics/motion.h>`, `optics_motion_*`, and the `no-motion` CI matrix leg.
+- **`liboptics_ui`: header-only motion vocabulary at `<optics/ui/motion.h>`.** Included automatically by `<optics/ui.h>` and also standalone-includable with only `libm`. Exposes `OPTICS_UI_MOTION_DT_MAX`, `optics_ui_motion_dt_clamp`, `optics_ui_spring*` (closed-form analytic oscillator, presets, `advance_substep`), `optics_ui_motion_approach`, `optics_ui_motion_decay`, `optics_ui_ease_*`, `optics_ui_smoothstep`, and `optics_ui_hysteresis*`. The retired `prism` backdrop-lag `smoother` and redundant `optics_motion_version*` accessors are removed.
+- **`liboptics_ui`: built-in widget transitions now dogfood `<optics/ui/motion.h>`.** `optics_ui__approach` delegates to `optics_ui_motion_approach` (`1 - exp(-rate * dt)`) with terminal snap (`OPTICS_UI_ARRIVE_EPS`), making built-in hover/active eases genuinely frame-rate independent.
+- **Rust:** `crates/optics-motion` is removed; pure Safe Rust motion primitives now live at `optics_ui::motion`.
+
+### Fixed
+
+- **`liboptics_gfx`: `meson install` now installs `<optics/gfx/observe_sites.h>`.** `<optics/gfx/observe.h>` unconditionally included `<optics/gfx/observe_sites.h>`, which was omitted from `libs/gfx/meson.build`'s `install_headers(...)`, breaking compilation of any external C/C++ consumer against an installed prefix. `tools/check_library_purity.py` now mechanically requires every public header/shader under `include/` and `libs/*/include/` to appear in `install_headers(...)`, and CI verifies `meson install --destdir=...` with `pkg-config --validate` plus C23/C++23 consumer builds.
+- **Public headers: strict ISO C++23 compatibility across all 35 headers.** Added missing `extern "C"` linkage guards to `<optics/gfx/observe_sites.h>`, eliminated C99 compound literals, address-of-temporary, and nested/out-of-order designators from `<optics/gfx/canvas_helpers.h>`, `<optics/gfx/math.h>`, `<optics/ui.h>`, and `<optics/ui/motion.h>`, and gave `optics_window_event`'s union payload structs canonical named types in `<optics/window/event.h>`. Enforced mechanically by `tools/check_library_purity.py` and the CI C++23 consumer gate.
 
 ## [0.0.90] - 2026-11-27
 

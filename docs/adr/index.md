@@ -118,7 +118,7 @@ them; the current names are:
 | 0074 | [Effect intake path — new visual operators and where choreography never enters](0074-effect-intake-path.md) | Accepted |
 | 0075 | [System accessibility preferences — lens executes, iris observes, the OS owns](0075-system-accessibility-preferences.md) | Accepted |
 | 0076 | [Per-shape paint runs for runtime SVG icons](0076-lens-icon-paint-runs.md) | Accepted |
-| 0077 | [The `anim` motion vocabulary library — provable math, host-owned clocks](0077-anim-motion-vocabulary-library.md) | Accepted |
+| 0077 | [The `anim` motion vocabulary library — provable math, host-owned clocks](0077-anim-motion-vocabulary-library.md) | Superseded by [0177](0177-absorb-motion-into-ui.md) |
 | 0078 | [Ghost replay — the render surface for leave animations](0078-lens-ghost-replay-leave-surface.md) | Accepted |
 | 0079 | [Layered backdrop material — frost beneath glass in one dispatch](0079-layered-backdrop-material.md) | Accepted (glass-over-glass scope superseded by [0080](0080-explicit-offscreen-composition-graph.md)) |
 | 0080 | [Explicit offscreen composition graph above flux](0080-explicit-offscreen-composition-graph.md) | Accepted |
@@ -200,7 +200,7 @@ them; the current names are:
 | 0155 | [Frame damage is a native epoch ledger, not a caller-side per-image history](0155-frame-damage-is-a-native-epoch-ledger.md) | Accepted |
 | 0156 | [Slang-first shader architecture — retiring GLSL, modular device code, and clean-break SPIR-V compilation](0156-slang-first-shader-architecture.md) | Accepted |
 | 0157 | [DisplayList serialization is a versioned byte protocol with caller-owned resource IDs](0157-display-list-serialization-protocol.md) | Accepted |
-| 0158 | [Transit is a header-only vocabulary — zero shared object, pure inline math, and FFI elimination](0158-transit-header-only-and-zero-so-motion-vocabulary.md) | Accepted |
+| 0158 | [Transit is a header-only vocabulary — zero shared object, pure inline math, and FFI elimination](0158-transit-header-only-and-zero-so-motion-vocabulary.md) | Superseded by [0177](0177-absorb-motion-into-ui.md) |
 | 0159 | [Unified Cargo Workspace and Optics Facade Bindings](0159-unified-cargo-workspace-and-optics-facade-bindings.md) | Accepted |
 | 0160 | [Unified Optics C Facade and Umbrella Distribution](0160-unified-optics-c-facade-and-umbrella-distribution.md) | Accepted |
 | 0161 | [Reticle Vector Compiler and Vista Subsystem Boundary](0161-reticle-vector-compiler-and-vista-boundary.md) | Accepted |
@@ -218,3 +218,5 @@ them; the current names are:
 | 0173 | [Retire the algorithm vault and compatibility scaffolding; strokes as coverage contours](0173-retire-vault-and-compat-scaffolding-strokes-as-contours.md) | Accepted |
 | 0174 | [Pure Graphics & UI Core — Retire Format Parsers, 3D Scene, Branded Materials, and Bundled Icon Packs](0174-pure-graphics-ui-core-retire-format-parsers-3d-and-materials.md) | Accepted |
 | 0175 | [Per-Corner Analytic Squircle SDF, Unified RRect Geometry, and Single-Representation UI Corner Radii](0175-per-corner-analytic-squircle-sdf-and-unified-corner-radii.md) | Accepted |
+| 0176 | [Retire the Rust `optics` Facade Crate in Favor of Direct `optics-*` Crates](0176-retire-rust-optics-facade-crate.md) | Accepted |
+| 0177 | [Absorb Motion Vocabulary into `ui` — Five-Library Stack, Unified Easing, and Zero-Ceremony Header](0177-absorb-motion-into-ui.md) | Accepted |

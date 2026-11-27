@@ -1,7 +1,8 @@
 /*
  * optics/optics.h — umbrella header for the Optics C23 stack (ADR-0160,
- * ADR-0164). It includes every installed library's entry header: gfx (Vulkan
- * RHI and 2D canvas), text, motion, window, ui and app.
+ * ADR-0164, ADR-0177). It includes every installed library's entry header:
+ * gfx (Vulkan RHI and 2D canvas), text, window, ui (including header-only
+ * <optics/ui/motion.h>), and app.
  * The library graph is in docs/dev/standards/architecture.md (ADR-0166).
  *
  * Optional libraries are exposed only when the distribution's compile flags say
@@ -33,11 +34,6 @@
 /* Typography & text shaping */
 #if defined(OPTICS_HAVE_TEXT)
 #include <optics/text.h>
-#endif
-
-/* Analytic motion vocabulary (header-only, ADR-0158) */
-#if defined(OPTICS_HAVE_MOTION)
-#include <optics/motion.h>
 #endif
 
 /* Platform shell: window, events, frame cadence (gfx only) */

@@ -14,6 +14,7 @@ negative_knowledge: true
 - Date: 2026-11-20
 - Deciders: Optics Architecture Working Group
 - Scope: `Cargo.toml`, `crates/`, `tools/check_versions.py`, `.github/workflows/ci.yml`, `docs/`
+- Amended: 2026-11-27 — the Rust `optics` facade crate is retired in favor of direct `optics-*` crates by [ADR-0176](0176-retire-rust-optics-facade-crate.md).
 - Amends: [ADR-0159](0159-unified-cargo-workspace-and-optics-facade-bindings.md), [ADR-0163](0163-repository-root-cargo-workspace.md)
 
 ---

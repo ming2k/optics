@@ -33,4 +33,7 @@
 #define OPTICS_UI_NODISCARD
 #endif
 
+/* OPTICS_UI_INLINE: header-only inline helpers (never combined with dllexport/dllimport). */
+#define OPTICS_UI_INLINE static inline
+
 #endif /* OPTICS_UI_EXPORT_H */

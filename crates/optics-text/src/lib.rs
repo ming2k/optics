@@ -1,9 +1,10 @@
-//! Safe Rust bindings for **glyph** — text shaping, layout, and dynamic glyph atlas runtime (ADR-0016, ADR-0106).
+//! Safe Rust bindings for **text** — HarfBuzz text shaping, layout metrics, and dynamic glyph atlas runtime (ADR-0016, ADR-0170).
 
 #![deny(rust_2018_idioms)]
 
 use optics_gfx::{Arena, CanvasCommands, Device};
 
+pub use optics_gfx as gfx;
 pub use optics_gfx::Error;
 pub use optics_text_sys as sys;
 

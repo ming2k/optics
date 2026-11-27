@@ -24,13 +24,10 @@ optics-text-sys = { path = "crates/optics-text-sys", version = "0.0.90" }
 optics-window-sys = { path = "crates/optics-window-sys", version = "0.0.90" }
 optics-ui-sys = { path = "crates/optics-ui-sys", version = "0.0.90" }
 
-# Safe wrapper crates & pure-Rust motion crate
-optics-app = { path = "crates/optics-app", version = "0.0.90" }
+# Safe wrapper crates consumed by higher-layer workspace crates
 optics-gfx = { path = "crates/optics-gfx", version = "0.0.90" }
-optics-text = { path = "crates/optics-text", version = "0.0.90" }
 optics-window = { path = "crates/optics-window", version = "0.0.90" }
 optics-ui = { path = "crates/optics-ui", version = "0.0.90" }
-optics-motion = { path = "crates/optics-motion", version = "0.0.90" }
 
 [profile.dev]
 opt-level = 0

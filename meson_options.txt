@@ -8,8 +8,7 @@ option('observe_attribution', type : 'boolean', value : false,
 option('tracy', type : 'boolean', value : false,
        description : 'Compile Tracy profiler instrumentation into the libraries (ADR-0138)')
 
-option('text',   type : 'boolean', value : true,  description : 'Build the text shaping library (ADR-0106)')
-option('motion', type : 'boolean', value : true,  description : 'Build the header-only motion vocabulary library (ADR-0077, ADR-0106)')
+option('text', type : 'boolean', value : true, description : 'Build the text shaping library (ADR-0106)')
 
 option('examples', type : 'boolean', value : false, description : 'Build all C examples across all modules')
 option('tests',    type : 'boolean', value : false, description : 'Build all C tests across all modules')

@@ -1,6 +1,6 @@
 # Optics Documentation
 
-Optics is a pure, high-performance C23 2D graphics and UI stack powered by Vulkan 1.3. The six core C libraries (`gfx`, `text`, `motion`, `window`, `ui`, `app`), interactive examples, tests, and Rust bindings live in this repository.
+Optics is a pure, high-performance C23 2D graphics and UI stack powered by Vulkan 1.3. The five core C libraries (`gfx`, `text`, `window`, `ui`, `app`), interactive examples, tests, and Rust bindings live in this repository.
 
 ---
 

@@ -1,32 +1,34 @@
 # Rust Bindings
 
-The Rust crates live under repository-root `crates/`, symmetric with the C23
+The Rust crates live under repository-root `crates/`, symmetric 1:1 with the C23
 libraries under `libs/`. They are organized as a single Cargo workspace whose
 manifest is at the repository root
 ([ADR-0159](../adr/0159-unified-cargo-workspace-and-optics-facade-bindings.md),
 [ADR-0163](../adr/0163-repository-root-cargo-workspace.md),
-[ADR-0169](../adr/0169-root-crates-layout-optics-namespace-and-shared-build.md)),
-anchored by the canonical `optics` facade crate. The root manifest is what makes
-Git dependencies and repository-root `cargo`/Rust Analyzer work.
+[ADR-0169](../adr/0169-root-crates-layout-optics-namespace-and-shared-build.md),
+[ADR-0176](../adr/0176-retire-rust-optics-facade-crate.md)). The root manifest
+is what makes Git dependencies and repository-root `cargo`/Rust Analyzer work.
 
 The root Meson build does not invoke Cargo. C-only consumers therefore do not
 need a Rust toolchain.
 
-## The Canonical Facade: `optics`
+## Direct Orthogonal Crates
 
-External consumers depend on a single crate: `optics`. Architectural layers and
-capabilities are guarded by additive Cargo feature flags:
+External consumers depend directly on the `optics-*` crate that matches the
+layer they need; upper crates re-export the safe crates whose types appear in
+their public API (`optics_app::{gfx, ui, window}`, `optics_ui::gfx`,
+`optics_text::gfx`):
 
 ```toml
 [dependencies]
-# Full desktop application (defaults to app + motion)
-optics = { git = "https://github.com/ming2k/optics" }
+# Full desktop application (window + UI + canvas recording)
+optics-app = { git = "https://github.com/ming2k/optics" }
 
 # Headless rendering foundation only (zero Wayland/windowing/UI dependencies)
-optics = { git = "https://github.com/ming2k/optics", default-features = false, features = ["gfx"] }
+optics-gfx = { git = "https://github.com/ming2k/optics" }
 
 # Headless UI layout and state machine (no OS window system)
-optics = { git = "https://github.com/ming2k/optics", default-features = false, features = ["ui"] }
+optics-ui = { git = "https://github.com/ming2k/optics" }
 ```
 
 The Git form works because the Cargo workspace manifest is at the repository
@@ -36,25 +38,23 @@ and running the result. A registry version will be documented once the publicati
 met; do not assume a crates.io release exists because a version number appears
 in the workspace manifest.
 
-### Feature Flags & Subsystem Mapping
+### Crate & Subsystem Mapping
 
-| Feature | Subsystem | Re-exported Module | Internal Crate | Underlying C Library |
-| :--- | :--- | :--- | :--- | :--- |
-| `gfx` | Rendering & RHI | `optics::gfx` | `optics-gfx` | `liboptics_gfx` |
-| `text` | HarfBuzz Text Shaping | `optics::text` | `optics-text` | `liboptics_text` |
-| `ui` | Headless Immediate UI | `optics::ui` | `optics-ui` | `liboptics_ui` |
-| `window` | Native OS Window Shell | `optics::window` | `optics-window` | `liboptics_window` |
-| `app` | Application Shell | `optics::app` | `optics-app` | `liboptics_app` |
-| `motion` | Closed-Form Motion Math | `optics::motion` | `optics-motion` | Pure Safe Rust ([ADR-0158](../adr/0158-transit-header-only-and-zero-so-motion-vocabulary.md)) |
+| Crate | Subsystem | Re-exports | Underlying C Library |
+| :--- | :--- | :--- | :--- |
+| `optics-gfx` | Rendering & RHI | `sys` | `liboptics_gfx` |
+| `optics-text` | HarfBuzz Text Shaping | `gfx`, `sys` | `liboptics_text` |
+| `optics-ui` | Headless Immediate UI & Motion (`optics_ui::motion`) | `gfx`, `sys` | `liboptics_ui` |
+| `optics-window` | Native OS Window Shell | `sys` | `liboptics_window` |
+| `optics-app` | Application Shell | `gfx`, `ui`, `window`, `sys` | `liboptics_app` |
 
 ## Workspace Structure
 
 The root `Cargo.toml` declares `members = ["crates/*"]`, centralizes internal
 and build dependencies in `[workspace.dependencies]`, and owns `Cargo.lock`.
-Under `crates/`, every sub-crate carries the collision-free `optics-*` prefix
+Under `crates/`, every crate carries the collision-free `optics-*` prefix
 and mirrors the one-way dependency graph of `libs/`:
 
-- `optics`: The top-level canonical facade crate.
 - `optics-build`: Internal build-script library shared by all `optics-*-sys`
   and wrapper crates (Meson probing, shared linking by default or static linking
   with the `static` feature, `OPTICS_STATIC` / `OPTICS_DYNAMIC` overrides, rpath
@@ -62,10 +62,9 @@ and mirrors the one-way dependency graph of `libs/`:
   [Choose a Static or Shared Link](../how-to/choose-a-static-or-shared-link.md).
 - `optics-gfx-sys` / `optics-gfx`: Vulkan 1.3 RHI, 2D vector canvas, CPU fallback.
 - `optics-text-sys` / `optics-text`: HarfBuzz text layout and glyph atlas.
-- `optics-ui-sys` / `optics-ui`: Declarative immediate-mode UI, Flex/Grid layout, retained state machine.
+- `optics-ui-sys` / `optics-ui`: Declarative immediate-mode UI, Flex/Grid layout, retained state machine, and pure Safe Rust closed-form motion (`optics_ui::motion`, [ADR-0177](../adr/0177-absorb-motion-into-ui.md)).
 - `optics-window-sys` / `optics-window`: Native Wayland, Win32, and Cocoa windowing and display pacing.
 - `optics-app-sys` / `optics-app`: Application shell joining `window` and `ui`.
-- `optics-motion`: Pure Safe Rust closed-form harmonic springs, smoothing, and easing formulas (no C FFI, no `build.rs`).
 
 ## Version Lockstep
 

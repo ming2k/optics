@@ -23,8 +23,10 @@
 //! ).unwrap();
 //! ```
 //!
-//! Window control, cursors, dialogs and the colour-scheme query are window's
-//! and live in the re-exported [`window`] crate.
+//! Window control, cursors, dialogs and the colour-scheme query live in the
+//! re-exported [`window`] crate; the UI toolkit lives in [`ui`] (with the
+//! signature types [`Frame`], [`Input`], [`Ui`], and [`CursorHint`] also
+//! re-exported at the crate root); and canvas recording types live in [`gfx`].
 
 #![deny(rust_2018_idioms)]
 
@@ -34,19 +36,17 @@ use std::ffi::CString;
 /// deliberately as the one documented unsafe escape hatch.
 pub use optics_app_sys as sys;
 
+/// The 2D vector canvas and Vulkan rendering foundation (`RecordHost::encoder`).
+pub use optics_gfx as gfx;
+
+/// The immediate-mode UI toolkit driven inside each frame.
+pub use optics_ui as ui;
+
 /// The platform shell this crate runs on: window, cursor, dialogs, pacing.
 pub use optics_window as window;
 
-pub use optics_ui::key;
-pub use optics_ui::mods;
-pub use optics_ui::patterns::{
-    self, DataGrid, DataGridAction, DataGridCol, MenuItem, MenubarItem, SegmentedControl,
-    SegmentedItem, SortDir, TreeAction, TreeItem, TreeView, menubar, popup_menu,
-};
-pub use optics_ui::{
-    Align, Band, Color, CursorHint, DndDropInfo, Frame, Icon, Input, LayoutOpts, MouseButton,
-    PlaceMode, PlaceOpts, Rect, Response, Style, TextBuf, Theme, Ui,
-};
+/// UI types that appear directly in `optics-app` function signatures.
+pub use optics_ui::{CursorHint, Frame, Input, Ui};
 
 /// Borrowed handles passed to [`Application::run_with_record`] for decoupled host canvas recording (ADR-0127).
 pub struct RecordHost {
@@ -524,6 +524,18 @@ mod tests {
             Config::new("Demo").unwrap().app_id("io.example\0Demo"),
             Err(RunError::BadAppId)
         ));
+    }
+
+    #[test]
+    fn reexported_motion_module_is_reachable() {
+        let mut s = crate::ui::motion::Spring::new(0.0);
+        let v = s.advance(
+            1.0,
+            crate::ui::motion::SpringParams::snappy(),
+            1.0 / 60.0,
+            true,
+        );
+        assert_eq!(v, 1.0);
     }
 
     /// Compile-only check that the full-lifecycle entry point keeps its

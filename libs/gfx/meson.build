@@ -82,8 +82,8 @@ if get_option('observe_attribution')
   gfx_c_args += '-DOPTICS_GFX_OBSERVE_ATTRIBUTION=1'
 endif
 
-# C23 #embed bakes each compiled .spv into the binary (renderer.c, effect.c,
-# scene.c). --embed-dir points the compiler at the build directory.
+# C23 #embed bakes each compiled .spv into the binary (renderer.c, effect.c).
+# --embed-dir points the compiler at the build directory.
 gfx_c_args += '--embed-dir=' + meson.current_build_dir()
 
 # ---------------------------------------------------------------------------
@@ -165,12 +165,13 @@ gfx_lib = library('optics_gfx',
 
 install_headers('include/optics/gfx.h', subdir : 'optics')
 install_headers(
-    'include/optics/gfx/core.h',
+  'include/optics/gfx/core.h',
   'include/optics/gfx/math.h',
   'include/optics/gfx/curve.h',
   'include/optics/gfx/sdf.h',
   'include/optics/gfx/vulkan.h',
   'include/optics/gfx/observe.h',
+  'include/optics/gfx/observe_sites.h',
   'include/optics/gfx/profile.h',
   'include/optics/gfx/dmabuf.h',
   'include/optics/gfx/canvas.h',
@@ -181,8 +182,8 @@ install_headers(
   subdir : 'optics/gfx',
 )
 
-# The analytic distance field is defined once for Slang consumers too
-# (ADR-0118, ADR-0156); material's materials include it rather than keeping copies.
+# The analytic distance field and curve evaluation kernels are installed for
+# external Slang shader consumers too (ADR-0118, ADR-0156).
 install_headers('include/optics/gfx/shaders/optics_gfx_sdf.slang',
                 'include/optics/gfx/shaders/optics_gfx_vector_eval.slang',
                 subdir : 'optics/gfx/shaders')

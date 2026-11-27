@@ -9,7 +9,13 @@ fn main() {
         dep_env_prefixes: &["OPTICS_TEXT", "OPTICS_GFX"],
         include_libs: &["ui", "text", "gfx"],
         extra_pkg_config_includes: &[],
-        headers: &["ui.h", "ui/icon.h"],
+        headers: &[
+            "ui.h",
+            "ui/export.h",
+            "ui/icon.h",
+            "ui/motion.h",
+            "ui/patterns.h",
+        ],
     });
 
     let bindings = probed
@@ -18,6 +24,17 @@ fn main() {
         .allowlist_type("optics_ui")
         .allowlist_type("optics_ui_.*")
         .allowlist_var("OPTICS_UI_.*")
+        // Header-only motion primitives (<optics/ui/motion.h>) live in pure Safe Rust
+        // under `optics_ui::motion` (ADR-0177); exclude them from FFI bindings.
+        .blocklist_type("optics_ui_spring")
+        .blocklist_type("optics_ui_spring_params")
+        .blocklist_type("optics_ui_hysteresis")
+        .blocklist_function("optics_ui_spring_.*")
+        .blocklist_function("optics_ui_hysteresis_.*")
+        .blocklist_function("optics_ui_motion_.*")
+        .blocklist_function("optics_ui_ease_.*")
+        .blocklist_function("optics_ui_smoothstep")
+        .blocklist_var("OPTICS_UI_MOTION_.*")
         // Opaque handle types and optics_gfx_result are blocklisted and
         // re-exported from optics-gfx-sys; POD value types embedded by-value in
         // ui structs are bound locally so bindgen can emit Copy/Clone/Debug

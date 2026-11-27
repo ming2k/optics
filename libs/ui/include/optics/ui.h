@@ -33,6 +33,7 @@
 #include <optics/gfx/math.h>
 #include <optics/ui/export.h> /* OPTICS_UI_API — single source of truth */
 #include <optics/ui/icon.h>
+#include <optics/ui/motion.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -499,7 +500,8 @@ typedef struct optics_ui_style {
 #define OPTICS_UI_STYLE_INIT {.fields = 0}
 
 static inline optics_ui_style optics_ui_style_init(void) {
-    return (optics_ui_style)OPTICS_UI_STYLE_INIT;
+    optics_ui_style s = OPTICS_UI_STYLE_INIT;
+    return s;
 }
 
 /* The output of style resolution (ADR-0058/0061): optics_ui_style with every
@@ -754,7 +756,7 @@ OPTICS_UI_API optics_ui_skin_fn optics_ui_default_skin(optics_ui_widget_kind kin
  * scale+opacity+rotation bundle? Graduate to optics_ui_node_state(node, bytes):
  * arbitrary size, same zero-on-first-touch, same GC lifetime, no external
  * hashtable required. This is mechanism, not animation: the library stores
- * state; it never integrates anything. See libs/motion (ADR-0077, ADR-0106) for the
+ * state; it never integrates anything. See <optics/ui/motion.h> (ADR-0177) for the
  * math to run on it. */
 #define OPTICS_UI_SKIN_SCRATCH_FLOATS 4
 OPTICS_UI_API float *optics_ui_skin_scratch(optics_ui *ui, optics_ui_node *node);

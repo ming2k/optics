@@ -46,9 +46,12 @@ meson test -C build-release-asan --no-suite bench --no-suite fuzz
 ```
 
 Point the binding build scripts at `build-release` and run the repository-root
-Cargo workspace as described in [Testing](testing.md#rust-workspaces). Follow the
+Cargo workspace as described in [Testing](testing.md#rust-workspaces). Verify
+that `meson install -C build-release --destdir=<stage>` produces a self-contained
+prefix whose `optics.pc` validates via `pkg-config --validate` and compiles C23
+and C++23 umbrella consumers. Follow the
 [Pre-release smoke verification checklist](manual-testing.md#6-pre-release-smoke-verification-checklist)
-to manually verify interactive `gfx`, `material`, and `window` applications.
+to manually verify interactive `gfx`, `ui`, and `window` applications.
 
 ## Create the Source Artifact
 

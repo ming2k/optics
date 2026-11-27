@@ -1,4 +1,4 @@
-# glyph — HarfBuzz shaping and dynamic glyph atlas runtime (ADR-0016, ADR-0106).
+# liboptics_text — HarfBuzz shaping and dynamic glyph atlas runtime (ADR-0016, ADR-0106, ADR-0170).
 #
 # A separate shared library that links liboptics_gfx and feeds the
 # optics_gfx_canvas_draw_glyph_run primitive. It owns FreeType + HarfBuzz +
@@ -29,7 +29,7 @@ elif text_host_system == 'darwin'
   text_backend_deps += apple_dep
   text_platform_sources = files('src/txt_platform_font_coretext.c')
 else
-  error('glyph: no font-discovery backend for host system "@0@"'.format(text_host_system))
+  error('optics-text: no font-discovery backend for host system "@0@"'.format(text_host_system))
 endif
 
 text_inc = include_directories('include')

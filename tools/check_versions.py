@@ -127,6 +127,15 @@ def main() -> int:
         errors.append("bindings/crates exists: Rust crates must live under repository-root crates/")
     if (ROOT / "crates" / "Cargo.toml").exists():
         errors.append("crates/Cargo.toml exists: the workspace root must be the repository root")
+    if (ROOT / "crates" / "optics").exists():
+        errors.append(
+            "crates/optics exists: the Rust facade crate is retired (ADR-0176); "
+            "depend on optics-* crates directly"
+        )
+    if (ROOT / "crates" / "optics-motion").exists():
+        errors.append(
+            "crates/optics-motion exists: motion was absorbed into optics-ui::motion (ADR-0177)"
+        )
 
     if errors:
         sys.stderr.write("version lockstep failed:\n")

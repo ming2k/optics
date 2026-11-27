@@ -1,6 +1,6 @@
 [package]
 name = "optics-text"
-description = "Safe Rust bindings for glyph — text shaping, metrics, and dynamic glyph atlas runtime"
+description = "Safe Rust bindings for text — HarfBuzz text shaping, layout metrics, and dynamic glyph atlas runtime"
 publish = false
 links = "optics_text_rs"
 version.workspace = true

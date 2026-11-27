@@ -14,6 +14,7 @@ negative_knowledge: true
 - Date: 2026-11-15
 - Scope: `Cargo.toml`, `bindings/`, `.github/workflows/ci.yml`, `docs/`
 - Amended: 2026-11-20 — crates elevated from `bindings/crates/` to repository-root `crates/`, prefixed `optics-*`, and build scripts unified via `optics-build` by [ADR-0169](0169-root-crates-layout-optics-namespace-and-shared-build.md).
+- Amended: 2026-11-27 — the Rust `optics` facade crate is retired in favor of direct `optics-*` crates by [ADR-0176](0176-retire-rust-optics-facade-crate.md).
 - Amends: [ADR-0159](0159-unified-cargo-workspace-and-optics-facade-bindings.md)
 
 ## Context

@@ -8,7 +8,6 @@
 #include "../common/design.h"
 
 #include <optics/app.h>
-#include <optics/motion.h>
 #include <optics/ui.h>
 #include <optics/ui/patterns.h>
 
@@ -61,7 +60,7 @@ typedef struct wg_app {
     float stiffness;
     float damping;
     float target;
-    optics_motion_spring spring;
+    optics_ui_spring spring;
 } wg_app;
 
 void wg_page_typography(optics_ui *ui, const ds_palette *p, wg_app *app);

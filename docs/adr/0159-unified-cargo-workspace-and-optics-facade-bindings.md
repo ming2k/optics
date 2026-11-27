@@ -14,6 +14,7 @@ negative_knowledge: true
 - Date: 2026-11-12
 - Scope: `bindings/`, `.github/workflows/ci.yml`
 - Amended: 2026-11-15 — workspace root moved to the repository root by [ADR-0163](0163-repository-root-cargo-workspace.md); the crate namespace remains `bindings/crates/`.
+- Amended: 2026-11-27 — the Rust `optics` facade crate is retired in favor of direct `optics-*` crates by [ADR-0176](0176-retire-rust-optics-facade-crate.md).
 - Amends: [ADR-0023](0023-unified-monorepo-build.md), [ADR-0106](0106-monorepo-identity-unification-glyph-vista-transit.md)
 
 ## Context

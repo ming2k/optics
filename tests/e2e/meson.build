@@ -34,20 +34,18 @@ if opt_ui
   )
   test('e2e_interaction_session', test_e2e_interaction_session, suite : 'e2e')
 
-  if opt_motion
-    test_e2e_motion_session = executable('test_e2e_motion_session',
-      'test_e2e_motion_session.c',
-      dependencies : e2e_common_deps,
-    )
-    test('e2e_motion_session', test_e2e_motion_session, suite : 'e2e')
+  test_e2e_motion_session = executable('test_e2e_motion_session',
+    'test_e2e_motion_session.c',
+    dependencies : e2e_common_deps,
+  )
+  test('e2e_motion_session', test_e2e_motion_session, suite : 'e2e')
 
-    # Full-stack public-API GPU composition scenario (gfx + text + ui + motion).
-    # Uses public headers only, registered under `integration` so GPU-less hosts
-    # skip it while Lavapipe CI runs it.
-    test_e2e_gpu_stack = executable('test_e2e_gpu_stack',
-      'test_e2e_gpu_stack.c',
-      dependencies : [optics_dep, optics_gfx_test_support_dep, m_dep],
-    )
-    test('e2e_gpu_stack', test_e2e_gpu_stack, suite : 'integration')
-  endif
+  # Full-stack public-API GPU composition scenario (gfx + text + ui).
+  # Uses public headers only, registered under `integration` so GPU-less hosts
+  # skip it while Lavapipe CI runs it.
+  test_e2e_gpu_stack = executable('test_e2e_gpu_stack',
+    'test_e2e_gpu_stack.c',
+    dependencies : [optics_dep, optics_gfx_test_support_dep, m_dep],
+  )
+  test('e2e_gpu_stack', test_e2e_gpu_stack, suite : 'integration')
 endif

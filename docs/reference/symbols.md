@@ -457,37 +457,6 @@ For the shape of the API (object model, lifecycle, error model), see
 | `optics_text_selection_rects` |  |
 | `optics_text_visual_move` |  |
 
-## motion — springs and easing (header-only)
-
-### `<optics/motion.h>`
-
-| Symbol | Description |
-|--------|-------------|
-| `optics_motion_version` | Version accessors. |
-| `optics_motion_version_number` |  |
-| `optics_motion_version_check` |  |
-| `optics_motion_version_string` |  |
-| `optics_motion_dt_clamp` | Clamp `dt` into the integrable range. |
-| `optics_motion_spring_snappy` | Named presets. |
-| `optics_motion_spring_gentle` |  |
-| `optics_motion_spring_bouncy` |  |
-| `optics_motion_spring_at` |  |
-| `optics_motion_spring_settled` | True when the spring rests on `target` within the given tolerances. |
-| `optics_motion_spring_snap_to` | One-step resolve (reduced motion, or an animation that must end now). |
-| `optics_motion_spring_advance` | Advance toward `target` by clamped `dt_seconds`; returns the new value. |
-| `optics_motion_spring_advance_substep` | Advance toward `target` using bounded sub-steps (each <= max_substep_dt) to prevent discrete jumps under irregular frame delivery; returns the new value. |
-| `optics_motion_approach` | Move `current` toward `target` by rate per second. |
-| `optics_motion_decay` | Exponential decay toward zero (opacity tails, trailing values). |
-| `optics_motion_ease_out_cubic` |  |
-| `optics_motion_ease_in_cubic` |  |
-| `optics_motion_ease_in_out_cubic` |  |
-| `optics_motion_ease_out_back` |  |
-| `optics_motion_smoothstep` |  |
-| `optics_motion_hysteresis_init` |  |
-| `optics_motion_hysteresis_step` | Advance the latch. |
-| `optics_motion_smoother_init` |  |
-| `optics_motion_smoother_step` | Advance toward `target`. |
-
 ## window — native window, event pump and platform services
 
 ### `<optics/window/a11y.h>`
@@ -734,6 +703,29 @@ For the shape of the API (object model, lifecycle, error model), see
 | `optics_ui_icon_register` | Register a vector icon on `ui`. |
 | `optics_ui_icon_unregister` | Unregister a runtime icon previously returned by `optics_ui_icon_register`, reclaiming its storage and invalidating cached coverage masks. |
 | `optics_ui_icon_info` | Resolve an icon id (built-in or registered on `ui`) to its descriptor, or nullptr if unknown. |
+
+### `<optics/ui/motion.h>`
+
+| Symbol | Description |
+|--------|-------------|
+| `optics_ui_motion_dt_clamp` | Clamp `dt_seconds` into the integrable range [0, 1/30] s. |
+| `optics_ui_spring_snappy` | Crisp, fast UI response spring preset (stiffness 480, damping 0.90). |
+| `optics_ui_spring_gentle` | Soft, low-overshoot UI spring preset (stiffness 220, damping 0.80). |
+| `optics_ui_spring_bouncy` | Playful, under-damped spring preset (stiffness 480, damping 0.55). |
+| `optics_ui_spring_at` | Construct a spring at rest holding `value`. |
+| `optics_ui_spring_settled` | True when the spring rests on `target` within the given tolerances. |
+| `optics_ui_spring_snap_to` | One-step resolve (reduced motion, or an animation that must end now). |
+| `optics_ui_spring_advance` | Advance toward `target` by clamped `dt_seconds`; returns the new value. |
+| `optics_ui_spring_advance_substep` | Advance toward `target` using bounded sub-steps (each <= max_substep_dt) to prevent discrete jumps under irregular frame delivery; returns the new value. |
+| `optics_ui_motion_approach` | Move `current` toward `target` by `rate` per second (frame-rate independent). |
+| `optics_ui_motion_decay` | Exponential decay toward zero (opacity tails, trailing values). |
+| `optics_ui_ease_out_cubic` | Cubic ease-out over normalized t in [0, 1]. |
+| `optics_ui_ease_in_cubic` | Cubic ease-in over normalized t in [0, 1]. |
+| `optics_ui_ease_in_out_cubic` | Symmetric cubic ease-in-out over normalized t in [0, 1]. |
+| `optics_ui_ease_out_back` | Slight overshoot ease-out over normalized t in [0, 1]. |
+| `optics_ui_smoothstep` | Hermite smoothstep over normalized t in [0, 1]. |
+| `optics_ui_hysteresis_init` | Construct a hysteresis latch initialized to `initial_high`. |
+| `optics_ui_hysteresis_step` | Advance the latch. |
 
 ### `<optics/ui/patterns.h>`
 

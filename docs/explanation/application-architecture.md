@@ -10,11 +10,10 @@ application
   ├── app ── UI in a native window
   │     ├── window ── window, event loop, frame cadence, desktop integration
   │     │     └── gfx
-  │     └── ui ── UI state, layout, input, snapshots
+  │     └── ui ── UI state, layout, input, motion, snapshots
   │           ├── text ── text shaping and dynamic atlas
   │           └── gfx canvas
   └── direct rendering
-        ├── motion ── motion vocabulary (header-only)
         └── gfx canvas / compute / effect / custom pipelines
                     └── device, frame, memory, sync
                                       └── Vulkan 1.3
@@ -74,8 +73,8 @@ records into the same `VkCommandBuffer` returned by
 ### Content and Domain Libraries Feed Draw Primitives
 
 `text` shapes text and feeds `optics_gfx_canvas_draw_glyph_run`;
-`motion` provides closed-form non-divergent motion dynamics. They link
-through public `gfx` APIs and remain separately consumable libraries.
+`<optics/ui/motion.h>` provides closed-form non-divergent motion dynamics inside `ui`
+(ADR-0177). `text` links through public `gfx` APIs and remains separately consumable.
 
 ### Events Are Reified, Intercepted, Then Folded
 

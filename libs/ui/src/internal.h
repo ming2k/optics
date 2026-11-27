@@ -1272,10 +1272,8 @@ static inline float optics_ui__approach(optics_ui *ui, float cur, float target, 
     /* Arrived is arrived: the threshold is shared with the `anim_pending` test
      * below so the two can never disagree about whether motion is over. */
     const float OPTICS_UI_ARRIVE_EPS = 0.0015f;
-    if (ui && ui->reduced_motion)
-        return target;
-    float k = dt * rate;
-    float next = (k >= 1.0f) ? target : cur + (target - cur) * k;
+    const bool reduced = ui && ui->reduced_motion;
+    float next = optics_ui_motion_approach(cur, target, rate, dt, reduced);
     if (fabsf(next - target) <= OPTICS_UI_ARRIVE_EPS)
         next = target;
     if (ui && next != target) {

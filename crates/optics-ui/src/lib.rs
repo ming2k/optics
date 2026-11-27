@@ -7,8 +7,8 @@
 //! 2. **Embedded** ([`Ui::with_device`] + [`Snapshot::submit`]) — you own a gfx
 //!    device and canvas; ui draws the UI into your frame. This is the
 //!    seam for putting UI inside an existing gfx/Vulkan app.
-//! 3. **Windowed** — use the `ui-shell-wayland` crate, which owns the window,
-//!    device, and event loop and just hands you a [`Frame`] each frame.
+//! 3. **Windowed** — use the `optics-app` crate, which owns the window,
+//!    device, and event loop and hands you a [`Frame`] each frame.
 //!
 //! ```no_run
 //! let mut ui = optics_ui::Ui::headless().unwrap();
@@ -27,8 +27,9 @@ use std::ffi::CString;
 use std::os::raw::c_char;
 use std::ptr;
 
-/// Raw-bindings escape hatch (see the `gfx` crate's note). Kept `pub`
-/// deliberately as the one documented unsafe escape hatch.
+/// The 2D vector canvas and Vulkan rendering foundation (`CornerRadii`, etc.).
+pub use optics_gfx as gfx;
+
 /// Raw-bindings escape hatch (see the `gfx` crate's note). Kept `pub`
 /// deliberately as the one documented unsafe escape hatch.
 pub use optics_ui_sys as sys;
@@ -102,6 +103,7 @@ unsafe impl Send for Snapshot {}
 unsafe impl Sync for Snapshot {}
 
 mod input;
+pub mod motion;
 pub mod patterns;
 pub mod reactive;
 mod types;

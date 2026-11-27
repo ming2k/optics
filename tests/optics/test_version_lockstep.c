@@ -44,9 +44,6 @@ CHECK_PROJECT_VERSION(OPTICS_UI);
 #if defined(OPTICS_HAVE_TEXT)
 CHECK_PROJECT_VERSION(OPTICS_TEXT);
 #endif
-#if defined(OPTICS_HAVE_MOTION)
-CHECK_PROJECT_VERSION(OPTICS_MOTION);
-#endif
 
 #define CHECK_VERSION_SUITE(prefix, PREFIX)                                                        \
     do {                                                                                           \
@@ -91,10 +88,6 @@ int main(void) {
 #if defined(OPTICS_HAVE_TEXT)
     CHECK_VERSION_SUITE(optics_text, OPTICS_TEXT);
     OT_EXPECT(OPTICS_TEXT_VERSION_NUMBER == OPTICS_VERSION_NUMBER);
-#endif
-#if defined(OPTICS_HAVE_MOTION)
-    CHECK_VERSION_SUITE(optics_motion, OPTICS_MOTION);
-    OT_EXPECT(OPTICS_MOTION_VERSION_NUMBER == OPTICS_VERSION_NUMBER);
 #endif
 
     return OT_REPORT();

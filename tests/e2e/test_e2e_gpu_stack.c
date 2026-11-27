@@ -6,15 +6,14 @@
  * composes the core stack in one live Vulkan frame pipeline:
  *
  *   1. gfx (Vulkan offscreen surface, GPU Canvas, Dual-Kawase blur filter)
- *   2. ui + text (interactive UI widgets + per-context registered vector icon,
- *      laid out, snapshotted, and composited over the blurred panel)
- *   3. motion (analytic spring advancing a canvas card across frames)
+ *   2. ui + text (interactive UI widgets, per-context registered vector icon,
+ *      and header-only <optics/ui/motion.h> spring advancing a canvas card)
  *
  * Verifies real readback pixels:
  *   - raw backdrop band retains expected high-contrast colors;
  *   - blurred backdrop panel visibly softens stripe contrast;
  *   - foreground UI button & registered vector icon render crisply;
- *   - animating a card with optics_motion_spring visibly moves pixels
+ *   - animating a card with optics_ui_spring visibly moves pixels
  *     between frame 0 and settled frames with zero leaks.
  */
 
@@ -136,7 +135,7 @@ static void render_composed_frame(compose_env *env, float card_x,
                                  (optics_gfx_rect){0.0f, 0.0f, (float)W, (float)H}, nullptr);
     optics_gfx_canvas_restore(env->canvas);
 
-    /* Animated rounded card on the right half driven by optics_motion_spring. */
+    /* Animated rounded card on the right half driven by optics_ui_spring. */
     optics_gfx_geometry card_geom =
         optics_gfx_geom_rrect((optics_gfx_rect){card_x, 56.0f, 96.0f, 96.0f},
                               optics_gfx_corner_radii_uniform(20.0f), 0.0f);
@@ -247,11 +246,11 @@ int main(void) {
     /* 3. Foreground UI button visibly modifies pixels inside its exact layout rect. */
     OT_EXPECT(diff_in_rect(px_no_ui, px_frame0, btn_rect) > 100);
 
-    /* 4. Advance the card along X from 156 -> 208 using optics_motion_spring. */
-    optics_motion_spring spring = optics_motion_spring_at(156.0f);
-    optics_motion_spring_params params = optics_motion_spring_snappy();
+    /* 4. Advance the card along X from 156 -> 208 using optics_ui_spring. */
+    optics_ui_spring spring = optics_ui_spring_at(156.0f);
+    optics_ui_spring_params params = optics_ui_spring_snappy();
     for (int step = 0; step < 30; ++step)
-        (void)optics_motion_spring_advance(&spring, 208.0f, params, 1.0f / 60.0f, false);
+        (void)optics_ui_spring_advance(&spring, 208.0f, params, 1.0f / 60.0f, false);
     OT_EXPECT(spring.value > 195.0f);
 
     render_composed_frame(&env, spring.value, ui_snap, px_frame_end);

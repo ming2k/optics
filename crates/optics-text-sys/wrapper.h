@@ -1,4 +1,4 @@
 /*
- * Bindgen translation unit for the glyph bindings.
+ * Bindgen translation unit for the text bindings.
  */
 #include <optics/text.h>

@@ -26,6 +26,10 @@
 
 #include <optics/gfx/core.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 typedef enum optics_gfx_site : uint16_t {
     OPTICS_GFX_SITE_NONE = 0,
     /* gfx core — host objects */
@@ -44,5 +48,9 @@ typedef enum optics_gfx_site : uint16_t {
  * Reached through a function, not a static table, so the compiler emits
  * exactly the literals that are referenced. */
 OPTICS_GFX_API const char *optics_gfx_site_label(optics_gfx_site site);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* OPTICS_GFX_OBSERVE_SITES_H */

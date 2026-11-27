@@ -1,9 +1,9 @@
 # Use Optics from a Rust Project
 
 This guide adds Optics to a Rust project that lives outside the Optics
-repository: it builds the C libraries, adds the `optics` crate, points the
-build at those libraries, and runs the result. The Optics crates are not on
-crates.io yet (see the
+repository: it builds the C libraries, adds the matching `optics-*` crate,
+points the build at those libraries, and runs the result. The Optics crates are
+not on crates.io yet (see the
 [publication gate](../explanation/rust-bindings.md#publication-gate)), so the
 supported form is a Git dependency.
 
@@ -54,28 +54,29 @@ static archives, so either link mode in step 4 works.
 
 ## 3. Add the dependency
 
-Pin the Git dependency to the tag or revision that matches the C build:
+Pin the Git dependency to the tag or revision that matches the C build, picking
+the `optics-*` crate for the layer you need:
 
 ```toml
 [dependencies]
-# Full desktop application: window + UI + app shell (default features).
-optics = { git = "https://github.com/ming2k/optics", tag = "v0.0.90" }
+# Full desktop application: window + UI + app shell (re-exports gfx, ui, window).
+optics-app = { git = "https://github.com/ming2k/optics", tag = "v0.0.90" }
 ```
 
-Pick a narrower set of modules with `default-features = false`:
+For narrower layers, depend directly on the lower crate:
 
 ```toml
 # Headless rendering only: no window system, no UI toolkit.
-optics = { git = "https://github.com/ming2k/optics", tag = "v0.0.90", default-features = false, features = ["gfx"] }
+optics-gfx = { git = "https://github.com/ming2k/optics", tag = "v0.0.90" }
 ```
 
-The [feature table](../explanation/rust-bindings.md#feature-flags--subsystem-mapping)
-maps each feature to its module. Each module is re-exported under its feature
-name (`optics::gfx`, `optics::ui`, `optics::app`, ...):
+The [crate table](../explanation/rust-bindings.md#crate--subsystem-mapping)
+lists every crate and the lower crates it re-exports (`optics_app::ui`,
+`optics_app::window`, `optics_app::gfx`, ...). With `optics-app`:
 
 ```rust
 fn main() {
-    println!("optics {}", optics::gfx::version());
+    println!("optics {}", optics_app::gfx::version());
 }
 ```
 
@@ -104,7 +105,7 @@ Then choose the link mode. The default links the shared objects; the `static`
 feature embeds the Optics archives instead:
 
 ```toml
-optics = { git = "https://github.com/ming2k/optics", tag = "v0.0.90", features = ["static"] }
+optics-app = { git = "https://github.com/ming2k/optics", tag = "v0.0.90", features = ["static"] }
 ```
 
 [Choose a Static or Shared Link](choose-a-static-or-shared-link.md) explains
@@ -132,10 +133,37 @@ Use one of:
 | :--- | :--- |
 | Install Optics into `/usr` or `/usr/local` (and run `ldconfig` if your distribution needs it) | Deployed binaries, distribution packages |
 | `LD_LIBRARY_PATH=<libdir>` (Linux), `DYLD_LIBRARY_PATH=<libdir>` (macOS) | One-off runs |
-| An rpath baked in via `.cargo/config.toml` | Development against a local build or prefix |
+| Relay `DEP_OPTICS_<MOD>_RS_RPATHS` in your crate's `build.rs` | Development and CI against an uninstalled Meson build tree (no hardcoded paths) |
+| An rpath baked in via `.cargo/config.toml` | Development against an installed prefix |
 | The `static` feature | Self-contained binaries |
 
-The rpath option for an installed prefix on Linux:
+Each native `optics-*` wrapper crate declares `links = "optics_<mod>_rs"` and
+publishes the non-system library directories it linked against as a
+semicolon-separated `DEP_OPTICS_<MOD>_RS_RPATHS` environment variable (empty
+during a static link). A binary crate depending directly on `optics-app` can
+bake those directories in automatically from its `build.rs` with zero extra
+build dependencies:
+
+```rust
+// build.rs
+fn main() {
+    println!("cargo:rerun-if-changed=build.rs");
+    if let Ok(rpaths) = std::env::var("DEP_OPTICS_APP_RS_RPATHS") {
+        let dirs: Vec<&str> = rpaths.split(';').filter(|d| !d.is_empty()).collect();
+        if !dirs.is_empty() {
+            if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("macos") {
+                println!("cargo:rustc-link-arg=-Wl,--disable-new-dtags");
+            }
+            for dir in dirs {
+                println!("cargo:rustc-link-arg=-Wl,-rpath,{dir}");
+            }
+        }
+    }
+}
+```
+
+Alternatively, for an installed prefix on Linux, bake one rpath in
+`.cargo/config.toml`:
 
 ```toml
 [target.'cfg(target_os = "linux")']
@@ -143,8 +171,9 @@ rustflags = ["-C", "link-arg=-Wl,-rpath,/home/me/.local/optics/lib"]
 ```
 
 An uninstalled tree keeps each module in its own directory
-(`build/libs/gfx`, `build/libs/ui`, ...), so it needs one `-rpath` per enabled
-module. An installed prefix needs only one.
+(`build/libs/gfx`, `build/libs/ui`, ...), so `.cargo/config.toml` needs one
+`-rpath` per enabled module, whereas `DEP_OPTICS_<MOD>_RS_RPATHS` (or an
+installed prefix) handles all of them automatically.
 
 On Windows, the `-sys` build scripts copy the Optics DLLs next to the binaries in
 Cargo's target directory, so `cargo run` and `cargo test` work without extra
@@ -180,7 +209,7 @@ ldd target/debug/<binary> | grep liboptics   # no output: static link
 
 ## See also
 
-- [Rust Bindings](../explanation/rust-bindings.md): the facade, the crate
-  layout, and the publication gate.
+- [Rust Bindings](../explanation/rust-bindings.md): the crate layout,
+  re-exports, and the publication gate.
 - [Choose a Static or Shared Link](choose-a-static-or-shared-link.md): link
   modes in detail.

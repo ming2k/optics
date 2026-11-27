@@ -35,3 +35,18 @@ fn config_roundtrip_is_panic_free() {
     let cfg = optics_app::Config::new("noop").unwrap();
     drop(cfg); // no panic on drop
 }
+
+#[test]
+fn reexported_crates_are_reachable() {
+    assert!(!optics_app::gfx::version().is_empty());
+    assert!(!optics_app::ui::version().is_empty());
+    assert!(!optics_app::window::version().is_empty());
+    let mut spring = optics_app::ui::motion::Spring::new(0.0);
+    spring.advance(
+        100.0,
+        optics_app::ui::motion::SpringParams::snappy(),
+        1.0 / 60.0,
+        false,
+    );
+    assert!(spring.value > 0.0);
+}

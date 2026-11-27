@@ -24,13 +24,13 @@ Binaries are placed under `./build/examples/getting_started/` and `./build/examp
 
 ### `widget_gallery` — Multi-Page Desktop UI Showcase
 
-Demonstrates `optics_ui`, `optics_app`, `optics_window`, `optics_text`, and `optics_motion` in a cohesive desktop shell with a resizable sidebar (`optics_ui_split_handle_v`), dark/light theme polarity toggle, text-scale selector, and reduced-motion toggle:
+Demonstrates `optics_ui`, `optics_app`, `optics_window`, and `optics_text` in a cohesive desktop shell with a resizable sidebar (`optics_ui_split_handle_v`), dark/light theme polarity toggle, text-scale selector, and reduced-motion toggle:
 
 1. **Typography** — optical type scale, Sans/Serif/Mono switching, CJK + Latin + BiDi shaping.
 2. **Controls** — button variants, checkboxes, segmented controls, sliders, IME-aware text editing.
 3. **Layout & Data** — closable TabStrip, responsive 3-column Grid cards, TreeView, sortable/resizable DataGrid.
 4. **Overlays & DnD** — anchored popup menu, centered modal dialog, native drag-and-drop source and drop zone.
-5. **Motion** — interactive closed-form spring physics playground (`<optics/motion.h>`).
+5. **Motion** — interactive closed-form spring physics playground (`<optics/ui/motion.h>`).
 
 ```bash
 ./build/examples/showcase/widget_gallery

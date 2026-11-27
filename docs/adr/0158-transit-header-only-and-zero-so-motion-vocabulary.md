@@ -1,16 +1,16 @@
 ---
 id: ADR-0158
 title: "Transit is a header-only vocabulary — zero shared object, pure inline math, and FFI elimination"
-status: accepted
+status: superseded
 date: 2026-11-12
 scope: libs/motion, bindings/transit-rs, examples/motion, tests/motion
-superseded_by: null
+superseded_by: ADR-0177
 negative_knowledge: true
 ---
 
 # ADR-0158: Transit is a header-only vocabulary — zero shared object, pure inline math, and FFI elimination
 
-- Status: Accepted
+- Status: Superseded by [ADR-0177](0177-absorb-motion-into-ui.md)
 - Date: 2026-11-12
 - Scope: `libs/transit`, `bindings/transit-rs`, `examples/transit`, `tests/transit`
 - Amends: [ADR-0077](0077-anim-motion-vocabulary-library.md), [ADR-0106](0106-monorepo-identity-unification-glyph-vista-transit.md)
@@ -38,7 +38,7 @@ However, packaging ~490 lines of stateless scalar math as an independent dynamic
 Transform `libs/transit` from a dynamic shared library into a **pure C23 single-header vocabulary** with zero backward-compatibility shims:
 
 1. **Header-Only Inlining**:
-   All public functions in [`include/transit/transit.h`](../../libs/motion/include/optics/motion.h) are declared and defined `static inline` via `TRANSIT_API`. Calling translation units compile the closed-form math directly into their own binary.
+   All public functions in `include/transit/transit.h` (later renamed to `<optics/motion.h>` and subsequently absorbed into [`<optics/ui/motion.h>`](../../libs/ui/include/optics/ui/motion.h) by [ADR-0177](0177-absorb-motion-into-ui.md)) are declared and defined `static inline` via `TRANSIT_API`. Calling translation units compile the closed-form math directly into their own binary.
 2. **Elimination of `libtransit.so`**:
    Excise `libs/transit/src/transit.c` and remove `library('transit', ...)` from `libs/transit/meson.build`. `transit_dep` is re-declared as a pure header-only interface dependency (`declare_dependency(include_directories: transit_inc, dependencies: [m_dep])`). The build graph produces no `libtransit.so`.
 3. **Rust Motion Implementation**:

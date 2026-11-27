@@ -140,14 +140,10 @@ tests/
 ├── support/             optics_test + gfx_test + ui_test
 ├── gfx/                 unit/, integration/, bench/, fuzz/
 ├── text/                unit/, integration/
-├── material/            unit/, integration/
-├── motion/
-├── scene/
-├── svg/
-├── ui/
+├── ui/                  unit, integration, fuzz/ (including header-only motion)
 ├── window/
 ├── app/
-├── optics/              façade, version lockstep, lint, tooling
+├── optics/              façade, version lockstep, lint
 └── e2e/                 public-API scenarios
 ```
 
@@ -162,7 +158,7 @@ The `lint` lane runs essential tree-level gates that no single test binary can o
 |------|----------------|
 | `wayland_listeners` | Every Wayland listener event has a non-NULL slot (prevents `libwayland` aborts). |
 | `version_lockstep_tree` | Meson, the umbrella header, every library header, and the Cargo workspace name one version. |
-| `library_purity` | Shared libraries do not write to stdout; `gfx` does not reference named materials. |
+| `library_purity` | Shared libraries do not write to stdout; no retired top-level libraries or branded materials; every public header is installed with an `extern "C"` guard. |
 | `symbol_reference` | `docs/reference/symbols.md` matches the exported public headers. |
 
 ## Running Tests
@@ -216,7 +212,7 @@ On Windows and macOS without a GPU driver, run `unit`, `e2e`, and `lint`; the
 | Vulkan validation error | The integration test's frame/resource lifetime and `libs/gfx/src/`. |
 | `ui` widget or layout failure | The same-named test in `tests/ui/` and `libs/ui/src/`. |
 | `window` theme or API failure | `libs/window/src/theme_linux.c` or `libs/window/src/app.c`. |
-| E2E pixel mismatch | Start at the first failing layer in the chain: svg raster, ui snapshot, display-list serialization, or replay. |
+| E2E pixel mismatch | Start at the first failing layer in the chain: vector/icon raster, ui snapshot, display-list serialization, or replay. |
 | Window is blank or examples fail to start | Wayland/Vulkan setup and the relevant example; this path is not covered by headless tests. |
 
 ## Sanitizers
@@ -306,8 +302,8 @@ Build examples with `-Dexamples=true`, then run the smallest relevant program:
 ```
 
 Record the compositor, driver, and GPU when reporting a visual or
-platform-specific result. For the complete interactive inspection protocol,
-material test cases, and cross-platform matrix, see [Manual testing](manual-testing.md).
+platform-specific result. For the complete interactive inspection protocol and
+cross-platform matrix, see [Manual testing](manual-testing.md).
 
 ## See Also
 

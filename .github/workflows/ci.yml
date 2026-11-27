@@ -129,6 +129,83 @@ jobs:
           # that binds LSAN_OPTIONS (tools/config/lsan.supp), abort behaviors, and timeouts.
         run: meson test -C build --suite integration --print-errorlogs
 
+      - name: "Verify installed prefix (pkg-config + C23 & C++23 consumer smoke)"
+        if: matrix.config == 'release'
+        run: |
+          set -euo pipefail
+          STAGE="$(mktemp -d)"
+          trap 'rm -rf "$STAGE"' EXIT
+          meson install -C build --destdir="$STAGE/root" >/dev/null
+          PCDIR="$(dirname "$(find "$STAGE/root" -name optics.pc | head -n 1)")"
+          LIBDIR="$(dirname "$PCDIR")"
+          INCDIR="$(dirname "$(find "$STAGE/root" -path '*/include/optics/optics.h' | head -n 1)")"
+          INCDIR="$(dirname "$INCDIR")"
+          export PKG_CONFIG_SYSROOT_DIR="$STAGE/root"
+          export PKG_CONFIG_PATH="$PCDIR"
+          pkg-config --validate optics optics-gfx optics-text optics-window optics-ui optics-app
+
+          cat > "$STAGE/c23_consumer.c" <<'EOF'
+          #include <assert.h>
+          #include <optics/optics.h>
+          int main(void) {
+            int maj = 0, min = 0, pat = 0;
+            optics_gfx_version(&maj, &min, &pat);
+            assert(maj == OPTICS_GFX_VERSION_MAJOR && min == OPTICS_GFX_VERSION_MINOR && pat == OPTICS_GFX_VERSION_PATCH);
+            optics_text_version(&maj, &min, &pat);
+            assert(maj == OPTICS_TEXT_VERSION_MAJOR && min == OPTICS_TEXT_VERSION_MINOR && pat == OPTICS_TEXT_VERSION_PATCH);
+            optics_window_version(&maj, &min, &pat);
+            assert(maj == OPTICS_WINDOW_VERSION_MAJOR && min == OPTICS_WINDOW_VERSION_MINOR && pat == OPTICS_WINDOW_VERSION_PATCH);
+            optics_ui_version(&maj, &min, &pat);
+            assert(maj == OPTICS_UI_VERSION_MAJOR && min == OPTICS_UI_VERSION_MINOR && pat == OPTICS_UI_VERSION_PATCH);
+            (void)optics_gfx_site_label(OPTICS_GFX_SITE_NONE);
+            optics_ui_spring s = optics_ui_spring_at(0.0f);
+            (void)optics_ui_spring_advance(&s, 1.0f, optics_ui_spring_snappy(), 1.0f / 60.0f, false);
+            return 0;
+          }
+          EOF
+          "$CC" -std=c23 -Wall -Wextra -Werror \
+            $(pkg-config --cflags --libs optics) \
+            -Wl,-rpath,"$LIBDIR" \
+            "$STAGE/c23_consumer.c" -o "$STAGE/c23_consumer"
+          "$STAGE/c23_consumer"
+
+          cat > "$STAGE/cpp23_consumer.cpp" <<'EOF'
+          #include <cassert>
+          #include <optics/optics.h>
+          int main() {
+            int maj = 0, min = 0, pat = 0;
+            optics_gfx_version(&maj, &min, &pat);
+            assert(maj == OPTICS_GFX_VERSION_MAJOR && min == OPTICS_GFX_VERSION_MINOR && pat == OPTICS_GFX_VERSION_PATCH);
+            optics_ui_version(&maj, &min, &pat);
+            assert(maj == OPTICS_UI_VERSION_MAJOR && min == OPTICS_UI_VERSION_MINOR && pat == OPTICS_UI_VERSION_PATCH);
+            (void)optics_gfx_site_label(OPTICS_GFX_SITE_NONE);
+            optics_gfx_rect r = {0.0f, 0.0f, 100.0f, 40.0f};
+            optics_gfx_geometry g = optics_gfx_geom_rrect(r, optics_gfx_corner_radii_uniform(8.0f), 0.6f);
+            assert(g.kind == OPTICS_GFX_GEOM_RRECT);
+            optics_ui_spring s = optics_ui_spring_at(0.0f);
+            assert(optics_ui_spring_advance(&s, 1.0f, optics_ui_spring_snappy(), 1.0f / 60.0f, true) == 1.0f);
+            return 0;
+          }
+          EOF
+          "$CXX" -std=c++23 -Wall -Wextra -Wno-missing-field-initializers -Wpedantic -Werror \
+            $(pkg-config --cflags --libs optics) \
+            -Wl,-rpath,"$LIBDIR" \
+            "$STAGE/cpp23_consumer.cpp" -o "$STAGE/cpp23_consumer"
+          "$STAGE/cpp23_consumer"
+
+          cat > "$STAGE/motion_standalone.c" <<'EOF'
+          #include <assert.h>
+          #include <optics/ui/motion.h>
+          int main(void) {
+            optics_ui_spring s = optics_ui_spring_at(0.0f);
+            assert(optics_ui_spring_advance(&s, 1.0f, optics_ui_spring_snappy(), 1.0f / 60.0f, true) == 1.0f);
+            return 0;
+          }
+          EOF
+          "$CC" -std=c23 -Wall -Wextra -Werror -I"$INCDIR" \
+            "$STAGE/motion_standalone.c" -lm -o "$STAGE/motion_standalone"
+          "$STAGE/motion_standalone"
+
   feature-matrix:
     name: feature matrix (${{ matrix.name }})
     runs-on: ubuntu-24.04
@@ -138,8 +215,6 @@ jobs:
         include:
           - name: no-ui
             flags: -Dtext=false
-          - name: no-motion
-            flags: -Dmotion=false
     env:
       DEBIAN_FRONTEND: noninteractive
       CC: clang-19

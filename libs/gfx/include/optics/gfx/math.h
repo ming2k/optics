@@ -79,12 +79,14 @@ typedef struct optics_gfx_corner_radii {
 } optics_gfx_corner_radii;
 
 static inline optics_gfx_corner_radii optics_gfx_corner_radii_uniform(float r) {
-    return (optics_gfx_corner_radii){r, r, r, r};
+    optics_gfx_corner_radii out = {r, r, r, r};
+    return out;
 }
 
 static inline optics_gfx_corner_radii optics_gfx_corner_radii_all(float tl, float tr, float br,
                                                                   float bl) {
-    return (optics_gfx_corner_radii){tl, tr, br, bl};
+    optics_gfx_corner_radii out = {tl, tr, br, bl};
+    return out;
 }
 
 /* CSS Backgrounds & Borders Level 3 / Skia proportional radius normalization:
@@ -118,7 +120,8 @@ static inline optics_gfx_rect optics_gfx_rect_union(optics_gfx_rect a, optics_gf
     float ay1 = a.y + a.h, by1 = b.y + b.h;
     float x1 = ax1 > bx1 ? ax1 : bx1;
     float y1 = ay1 > by1 ? ay1 : by1;
-    return (optics_gfx_rect){x0, y0, x1 - x0, y1 - y0};
+    optics_gfx_rect out = {x0, y0, x1 - x0, y1 - y0};
+    return out;
 }
 
 /* ================================================================== */

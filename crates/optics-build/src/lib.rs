@@ -631,9 +631,10 @@ fn resolve_linkage(
                 "{origin} asks for a {wanted} link of `{pkg_name}`, but {dep} \
                  already linked Optics {got}; one build must link every Optics \
                  module the same way.\n\
-                 Enable the `static` feature on the `optics` crate (it reaches \
-                 every module), or set OPTICS_STATIC=1 / OPTICS_DYNAMIC=1 for \
-                 the whole build."
+                 Enable the `static` feature on every top-level `optics-*` \
+                 dependency (or on `optics-app`, which forwards it to `window`, \
+                 `ui`, and `gfx`), or set OPTICS_STATIC=1 / OPTICS_DYNAMIC=1 \
+                 for the whole build."
             ));
         }
         (mode, _) => (mode, request.origin.clone().unwrap_or_default()),

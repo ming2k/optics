@@ -25,12 +25,14 @@ and embed the archives only when asked to.
 
 ```toml
 [dependencies]
-optics = { git = "https://github.com/ming2k/optics", features = ["static"] }
+optics-app = { git = "https://github.com/ming2k/optics", features = ["static"] }
 ```
 
-The `optics` facade forwards `static` to every module it enables, and each
-wrapper and `-sys` crate forwards it to its own Optics dependencies, so enabling
-it once is enough.
+Each wrapper and `-sys` crate forwards `static` to its own Optics dependencies,
+so enabling it on your top-level Optics dependency (for example `optics-app`,
+which covers `window`, `ui`, and `gfx`) is enough. If you depend on two
+unrelated native branches (such as `optics-window` and `optics-text`), enable
+`static` on both or set `OPTICS_STATIC=1`.
 
 ### Why there is no `dynamic` feature
 
@@ -163,7 +165,7 @@ pkg-config --static --libs optics-ui    # must list the private system deps
 | `Optics was asked to link ... dynamically (OPTICS_DYNAMIC), but no shared library was found` | The tree was configured `-Ddefault_library=static`, so `-l<stem>` would silently resolve to the archive | Rebuild with `=both` (or `=shared`), or unset `OPTICS_DYNAMIC` |
 | `OPTICS_STATIC and OPTICS_DYNAMIC request opposite Optics link modes` | Both switches are set (often one inherited from the shell) | Unset one of them |
 | `... statically (to match optics-gfx-sys, which linked Optics static), but no liboptics_<mod>.a was found` | Mixed tree: gfx is static-only, a dependent module is shared-only | Rebuild with `-Ddefault_library=both`, or set `OPTICS_DYNAMIC=1` |
-| `... asks for a static link of ..., but optics-gfx-sys already linked Optics dynamic` | `static` was enabled on one `-sys` crate but not on gfx | Enable `static` on the `optics` facade, or set `OPTICS_STATIC=1` |
+| `... asks for a static link of ..., but optics-gfx-sys already linked Optics dynamic` | `static` was enabled on one branch or `-sys` crate but not on gfx | Enable `static` on every top-level `optics-*` dependency (or `optics-app`), or set `OPTICS_STATIC=1` |
 | `undefined symbol: FcPatternBuild` / `wl_touch_interface` / `sd_bus_call_method_async` | `Requires.private` was dropped: the static link is missing the module's private dependencies | Confirm the dev packages are installed and that `pkg-config --static --libs <module>` lists them |
 | `linking ... statically needs ... the pkg-config --static probe failed` | A private dependency's `.pc` file is missing | Install that dependency's development package |
 | `liboptics_*.so.0.0.NN: cannot open shared object file` when the binary starts | The shared flavour was linked, and the loader cannot find it or finds a different patch release | See [Make the shared libraries loadable](use-optics-from-rust.md#5-make-the-shared-libraries-loadable), or enable `static` |

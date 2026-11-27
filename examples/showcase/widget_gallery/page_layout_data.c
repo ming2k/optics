@@ -64,7 +64,7 @@ void wg_page_layout_data(optics_ui *ui, const ds_palette *p, wg_app *app) {
         const char *sub;
     } metrics[3] = {
         {"FRAME ALLOCS", "0 bytes", "Steady-state arena"},
-        {"LIBRARIES", "9 modules", "One-way DAG"},
+        {"LIBRARIES", "5 libraries", "One-way DAG"},
         {"GPU API", "Vulkan 1.3", "Dynamic rendering"},
     };
     for (int i = 0; i < 3; i++) {
@@ -118,26 +118,11 @@ void wg_page_layout_data(optics_ui *ui, const ds_palette *p, wg_app *app) {
     ds_card_begin(ui, p, "Data Grid",
                   "Sortable headers, draggable column dividers, and striped rows.");
     static const char *const CELLS[5 * 4] = {
-        "gfx",
-        "liboptics_gfx",
-        "Vulkan 1.3",
-        "RHI, 2D canvas, compute",
-        "text",
-        "liboptics_text",
-        "gfx, HarfBuzz",
-        "Shaping, layout, glyph atlas",
-        "window",
-        "liboptics_window",
-        "gfx",
-        "Wayland / Win32 / Cocoa",
-        "ui",
-        "liboptics_ui",
-        "gfx, text, svg",
-        "Headless immediate-mode UI",
-        "app",
-        "liboptics_app",
-        "window, ui",
-        "Application shell",
+        "gfx",    "liboptics_gfx",    "Vulkan 1.3",    "RHI, 2D canvas, compute",
+        "text",   "liboptics_text",   "gfx, HarfBuzz", "Shaping, layout, glyph atlas",
+        "window", "liboptics_window", "gfx",           "Wayland / Win32 / Cocoa",
+        "ui",     "liboptics_ui",     "gfx, text",     "Headless UI, icons & motion",
+        "app",    "liboptics_app",    "window, ui",    "Application shell",
     };
     optics_ui_datagrid(ui, &(optics_ui_datagrid_opts){
                                .id = "wg_datagrid",

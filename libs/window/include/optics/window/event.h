@@ -124,88 +124,102 @@ typedef enum optics_window_event_flag : uint32_t {
 } optics_window_event_flag;
 
 /* ================================================================== */
-/*  The event                                                          */
+/*  Event payloads & tagged event                                     */
 /* ================================================================== */
 
+typedef struct optics_window_event_pointer {
+    float x, y; /* logical surface-local pixels */
+} optics_window_event_pointer;
+
+typedef struct optics_window_event_button {
+    float x, y;   /* logical surface-local pixels     */
+    int button;   /* OPTICS_WINDOW_BUTTON_*           */
+    bool pressed; /* true = down edge, false = up edge */
+} optics_window_event_button;
+
+typedef struct optics_window_event_scroll {
+    float dx, dy;    /* delta; units per `continuous` */
+    bool continuous; /* true = logical px (touchpad)  */
+                     /* false = wheel notches         */
+} optics_window_event_scroll;
+
+typedef struct optics_window_event_keyboard {
+    int key;       /* OPTICS_WINDOW_KEY_* or printable ASCII      */
+    bool pressed;  /* down edge / up edge                         */
+    bool repeat;   /* synthesised auto-repeat press               */
+    uint32_t mods; /* OPTICS_WINDOW_MOD_* level state at the edge */
+} optics_window_event_keyboard;
+
+typedef struct optics_window_event_modifiers {
+    uint32_t mods; /* OPTICS_WINDOW_MOD_* level state */
+} optics_window_event_modifiers;
+
+typedef struct optics_window_event_text {
+    const char *utf8; /* committed UTF-8, NUL-terminated */
+    size_t len;       /* byte length, excluding NUL      */
+} optics_window_event_text;
+
+typedef struct optics_window_event_preedit {
+    const char *utf8; /* preedit UTF-8, NUL-terminated */
+    size_t len;       /* byte length, excluding NUL    */
+    uint32_t cursor;  /* caret byte offset in utf8     */
+    uint32_t sel_lo;  /* active clause byte range      */
+    uint32_t sel_hi;
+} optics_window_event_preedit;
+
+typedef struct optics_window_event_ime_delete {
+    uint32_t before; /* bytes to delete before the caret */
+    uint32_t after;  /* bytes to delete after the caret  */
+} optics_window_event_ime_delete;
+
+typedef struct optics_window_event_tablet {
+    float x, y;           /* logical surface-local pixels         */
+    float pressure;       /* normalised 0..1                      */
+    float tilt_x, tilt_y; /* normalised -1..1                     */
+    bool eraser;          /* eraser end of the tool               */
+    bool barrel;          /* barrel button pressed                */
+    bool proximity;       /* tool in range (not necessarily down) */
+} optics_window_event_tablet;
+
+typedef struct optics_window_event_dnd {
+    float x, y;       /* logical surface-local pixels        */
+    const char *text; /* dropped text, or NULL               */
+    size_t len;
+    const char *mime; /* offered MIME type, or NULL          */
+    bool active;      /* enter/motion = true, leave = false  */
+} optics_window_event_dnd;
+
+typedef struct optics_window_event_resize {
+    uint32_t width, height; /* logical surface size */
+} optics_window_event_resize;
+
+typedef struct optics_window_event_scale {
+    float scale; /* device-pixel ratio */
+} optics_window_event_scale;
+
+typedef struct optics_window_event_focus {
+    bool focused; /* true = gained focus, false = lost */
+} optics_window_event_focus;
+
 typedef struct optics_window_event {
-    optics_window_event_type type; /* which union member is live             */
-    uint32_t flags;                /* optics_window_event_flag bits                   */
-    uint64_t sequence;             /* monotonic, stamped by window on emit     */
+    optics_window_event_type type; /* which union member is live           */
+    uint32_t flags;                /* optics_window_event_flag bits        */
+    uint64_t sequence;             /* monotonic, stamped by window on emit */
 
     union {
-        struct {
-            float x, y; /* logical surface-local pixels */
-        } pointer;
-
-        struct {
-            float x, y;   /* logical surface-local pixels     */
-            int button;   /* OPTICS_WINDOW_BUTTON_*            */
-            bool pressed; /* true = down edge, false = up edge  */
-        } button;
-
-        struct {
-            float dx, dy;    /* delta; units per `continuous`   */
-            bool continuous; /* true = logical px (touchpad)    */
-                             /* false = wheel notches           */
-        } scroll;
-
-        struct {
-            int key;       /* OPTICS_WINDOW_KEY_* or printable ASCII      */
-            bool pressed;  /* down edge / up edge                */
-            bool repeat;   /* synthesised auto-repeat press      */
-            uint32_t mods; /* OPTICS_WINDOW_MOD_* level state at the edge */
-        } keyboard;
-
-        struct {
-            uint32_t mods; /* OPTICS_WINDOW_MOD_* level state */
-        } modifiers;
-
-        struct {
-            const char *utf8; /* committed UTF-8, NUL-terminated */
-            size_t len;       /* byte length, excluding NUL      */
-        } text;
-
-        struct {
-            const char *utf8; /* preedit UTF-8, NUL-terminated   */
-            size_t len;       /* byte length, excluding NUL      */
-            uint32_t cursor;  /* caret byte offset in utf8       */
-            uint32_t sel_lo;  /* active clause byte range        */
-            uint32_t sel_hi;
-        } preedit;
-
-        struct {
-            uint32_t before; /* bytes to delete before the caret */
-            uint32_t after;  /* bytes to delete after the caret  */
-        } ime_delete;
-
-        struct {
-            float x, y;           /* logical surface-local pixels */
-            float pressure;       /* normalised 0..1             */
-            float tilt_x, tilt_y; /* normalised -1..1        */
-            bool eraser;          /* eraser end of the tool      */
-            bool barrel;          /* barrel button pressed       */
-            bool proximity;       /* tool in range (not necessarily down) */
-        } tablet;
-
-        struct {
-            float x, y;       /* logical surface-local pixels   */
-            const char *text; /* dropped text, or NULL          */
-            size_t len;
-            const char *mime; /* offered MIME type, or NULL     */
-            bool active;      /* enter/motion = true, leave = false */
-        } dnd;
-
-        struct {
-            uint32_t width, height; /* logical surface size */
-        } resize;
-
-        struct {
-            float scale; /* device-pixel ratio */
-        } scale;
-
-        struct {
-            bool focused; /* true = gained focus, false = lost */
-        } focus;
+        optics_window_event_pointer pointer;
+        optics_window_event_button button;
+        optics_window_event_scroll scroll;
+        optics_window_event_keyboard keyboard;
+        optics_window_event_modifiers modifiers;
+        optics_window_event_text text;
+        optics_window_event_preedit preedit;
+        optics_window_event_ime_delete ime_delete;
+        optics_window_event_tablet tablet;
+        optics_window_event_dnd dnd;
+        optics_window_event_resize resize;
+        optics_window_event_scale scale;
+        optics_window_event_focus focus;
 
         /* OPTICS_WINDOW_EVENT_NONE / OPTICS_WINDOW_EVENT_POINTER_LEAVE / OPTICS_WINDOW_EVENT_CLOSE
          * carry no payload. */

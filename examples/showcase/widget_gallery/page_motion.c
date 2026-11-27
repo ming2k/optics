@@ -1,5 +1,5 @@
 /*
- * widget_gallery/page_motion.c — Closed-form spring physics playground (<optics/motion.h>).
+ * widget_gallery/page_motion.c — Closed-form spring physics playground (<optics/ui/motion.h>).
  */
 
 #include "gallery.h"
@@ -10,16 +10,16 @@
 void wg_page_motion(optics_ui *ui, const ds_palette *p, wg_app *app) {
     ds_page_header(
         ui, p, "Motion",
-        "Closed-form analytic damped harmonic springs from header-only <optics/motion.h>.");
+        "Closed-form analytic damped harmonic springs from header-only <optics/ui/motion.h>.");
 
     /* Advance spring each frame */
-    const optics_motion_spring_params params = {
+    const optics_ui_spring_params params = {
         .stiffness = app->stiffness,
         .damping = app->damping,
     };
-    optics_motion_spring_advance(&app->spring, app->target, params, optics_ui_dt(ui),
-                                 app->reduced_motion);
-    const bool settled = optics_motion_spring_settled(&app->spring, app->target, 1e-3f, 1e-3f);
+    optics_ui_spring_advance(&app->spring, app->target, params, optics_ui_dt(ui),
+                             app->reduced_motion);
+    const bool settled = optics_ui_spring_settled(&app->spring, app->target, 1e-3f, 1e-3f);
     if (!settled) {
         optics_app_request_frame();
     }
@@ -40,9 +40,9 @@ void wg_page_motion(optics_ui *ui, const ds_palette *p, wg_app *app) {
                                             .item_count = 3,
                                             .selected_index = &app->spring_preset,
                                         })) {
-        optics_motion_spring_params pr = app->spring_preset == 0   ? optics_motion_spring_snappy()
-                                         : app->spring_preset == 1 ? optics_motion_spring_gentle()
-                                                                   : optics_motion_spring_bouncy();
+        optics_ui_spring_params pr = app->spring_preset == 0   ? optics_ui_spring_snappy()
+                                     : app->spring_preset == 1 ? optics_ui_spring_gentle()
+                                                               : optics_ui_spring_bouncy();
         app->stiffness = pr.stiffness;
         app->damping = pr.damping;
     }

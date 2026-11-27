@@ -21,9 +21,9 @@ lookup surfaces for this checkout.
 | `<optics/gfx/effect.h>`     | Yes              | Image-domain effects (blur, shadow). See [effect reference](effect.md). |
 | `<optics/text.h>`     | Iff `-Dtext=true`   | Sibling library: shaping, glyph atlas, text measure/draw.          |
 | `<optics/ui.h>` | Iff `OPTICS_HAVE_UI` | Immediate-mode UI, layout, widget and snapshot surface. |
+| `<optics/ui/motion.h>` | Iff `OPTICS_HAVE_UI` | Header-only closed-form spring, easing, and hysteresis vocabulary (included by `<optics/ui.h>`; standalone-includable). |
 | `<optics/window.h>` | Yes | Native window shell, event pump and desktop integration. |
 | `<optics/app.h>` | Iff `OPTICS_HAVE_APP` | Application shell joining `window` and `ui`. |
-| `<optics/motion.h>` | Iff `OPTICS_HAVE_MOTION` | Header-only closed-form spring and parametric easing vocabulary. |
 
 `<optics/optics.h>` exposes optional layers only when `optics.pc` supplies the
 matching `-DOPTICS_HAVE_<MODULE>=1` compile definition. Header presence on the
@@ -480,11 +480,10 @@ submit-and-end, nothing recorded is pending. Required reading for
 ## Library versioning
 
 Every library in the stack (`liboptics_gfx`, `liboptics_text`,
-`liboptics_ui`, `liboptics_window`, `liboptics_app`, and header-only
-`<optics/motion.h>`) releases as a unit and shares one version:
-`meson.project_version()`. Each library exposes the same four accessors under
-its own prefix (`optics_gfx_*`, `optics_ui_*`, `optics_window_*`,
-`optics_motion_*`, `optics_text_*`) — one versioning scheme, learn once, apply
+`liboptics_ui`, `liboptics_window`, and `liboptics_app`) releases as a unit
+and shares one version: `meson.project_version()`. Each library exposes the
+same four accessors under its own prefix (`optics_gfx_*`, `optics_ui_*`,
+`optics_window_*`, `optics_text_*`) — one versioning scheme, learn once, apply
 to every library the consumer links.
 
 | Macro / accessor                | Returns                                                     |
