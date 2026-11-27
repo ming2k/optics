@@ -13,7 +13,7 @@ pre-1.0 release may break source or binary compatibility, so the SONAME
 carries the full version and a mismatched binary fails to load instead of
 silently reading a different descriptor layout.
 
-## [Unreleased]
+## [0.0.90] - 2026-11-27
 
 ### Fixed
 - **`liboptics_ui`: growing the per-context icon registry no longer leaves uninitialised slots.** `optics_ui_icon_register` copied the old slots into the grown table but left the new tail as raw allocator memory. On a headless context (`device = NULL`, libc `malloc`), a later registration could skip a slot that read as occupied, and `optics_ui_release` freed that slot's garbage `cmds`/`runs` pointers (`free(): invalid pointer`, or a crash in a process that creates many contexts). The grown tail is now zeroed. Device-backed contexts were not affected, because `optics_gfx_device_alloc` zeroes. Introduced with the per-context registry in `0.0.88` (ADR-0174).

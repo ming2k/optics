@@ -18,8 +18,8 @@ int main(void) {
     /* 1. Verify Umbrella Facade Version Macros & Lockstep Invariants */
     static_assert(OPTICS_VERSION_MAJOR == 0, "Optics major version mismatch");
     static_assert(OPTICS_VERSION_MINOR == 0, "Optics minor version mismatch");
-    static_assert(OPTICS_VERSION_PATCH == 89, "Optics patch version mismatch");
-    static_assert(OPTICS_VERSION_NUMBER == 89, "Optics version number mismatch");
+    static_assert(OPTICS_VERSION_PATCH == 90, "Optics patch version mismatch");
+    static_assert(OPTICS_VERSION_NUMBER == 90, "Optics version number mismatch");
 
     static_assert(OPTICS_GFX_VERSION_MAJOR == OPTICS_VERSION_MAJOR, "gfx/Optics major mismatch");
     static_assert(OPTICS_GFX_VERSION_MINOR == OPTICS_VERSION_MINOR, "gfx/Optics minor mismatch");
