@@ -68,7 +68,7 @@ and mirrors the one-way dependency graph of `libs/`:
 
 ## Version Lockstep
 
-All crates share the workspace version (`0.0.90`) declared in the root
+All crates share the workspace version (`0.0.91`) declared in the root
 `Cargo.toml` and inherit internal versions through `[workspace.dependencies]`.
 `tools/check_versions.py` compares that version with `meson.build`, the umbrella
 header, and every library header; version drift or nested workspace layouts are
